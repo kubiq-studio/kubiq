@@ -95,6 +95,19 @@ fn may_write_definition(exists: bool, has_harness: bool) -> Result<()> {
 /// Merge back the MCP servers this definition's role tags (`coordinator`, `worker`, `doc`) imply,
 /// keeping what it already names and its order. The rule the tags exist for: a coordinator
 /// without the coordinator's servers is not a coordinator, whatever a checklist was left saying.
+/// Saved MCP ids with any pre-rename (`ubiq-*`) id mapped to its current one, duplicates dropped.
+/// Read-time only: the file on disk keeps what it says.
+fn canonical_mcps(saved: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(saved.len());
+    for name in saved {
+        let name = crate::mcp::canonical(&name).to_string();
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    out
+}
+
 fn apply_role_mcps(definition: &mut AgentDefinition) {
     let coordinator = definition.has_tag(TAG_COORDINATOR);
     let worker = definition.has_tag(TAG_WORKER);
@@ -730,7 +743,7 @@ impl Agents {
                     // "This definition mentioned nothing" and "this definition picked none" are the
                     // same row in a checklist, so the interface is told the empty list for both.
                     // The distinction still matters on disk — see [`save_definition`](Self::save_definition).
-                    mcps: record.defaults.mcps.unwrap_or_default(),
+                    mcps: canonical_mcps(record.defaults.mcps.unwrap_or_default()),
                     skills: record.defaults.skills.unwrap_or_default(),
                     mission_assistant: record.mission_assistant,
                     tags: record.tags,
@@ -806,6 +819,7 @@ impl Agents {
     fn definition_mcps(&self, id: &str, project: Option<ProjectId>) -> Option<Vec<String>> {
         self.definition_defaults(id, project)
             .and_then(|defaults| defaults.mcps)
+            .map(canonical_mcps)
     }
 
     /// The extra read-write folders a definition saved, with its `extends` chain folded in and
@@ -1453,7 +1467,7 @@ impl Agents {
         // an id in the catalog (`crate::catalog`), and is handed down with the definition's own.
         let mut injected: Vec<String> = Vec::new();
         let mut picked_catalog: Vec<String> = Vec::new();
-        for name in &options.mcps {
+        for name in canonical_mcps(options.mcps.clone()).iter() {
             if crate::mcp::knows(name) {
                 if !injected.contains(name) {
                     injected.push(name.clone());

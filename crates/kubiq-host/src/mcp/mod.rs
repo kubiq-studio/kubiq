@@ -86,7 +86,7 @@ pub use sql::SqlReach;
 #[cfg(not(feature = "db"))]
 pub enum SqlReach {}
 
-pub use catalogue::{catalogue, knows};
+pub use catalogue::{canonical, catalogue, knows};
 pub use registry::{AgentFacts, ProjectFacts, Registry};
 pub use remote::RemoteCalls;
 pub use server::{Serving, start};

@@ -1936,6 +1936,32 @@ pub const SERVERS: &[ServerSpec] = &[
     },
 ];
 
+/// The pre-rename (`ubiq`) slugs, still honoured where a saved definition or pick names one.
+/// Persisted files are never rewritten; the old id is mapped to the current one as it is read.
+const LEGACY_IDS: &[(&str, &str)] = &[
+    ("manage-ubiq-tasks", MANAGE_KUBIQ_TASKS),
+    ("ubiq-plan", KUBIQ_PLAN),
+    ("ubiq-doc", KUBIQ_DOC),
+    ("ubiq-mission", KUBIQ_MISSION),
+    ("ubiq-kb", KUBIQ_KB),
+    ("ubiq-help", KUBIQ_HELP),
+    ("ubiq-ask", KUBIQ_ASK),
+    ("ubiq-archify", KUBIQ_ARCHIFY),
+    ("ubiq-browser", KUBIQ_BROWSER),
+    ("ubiq-remote", KUBIQ_REMOTE),
+    ("ubiq-sql-read", KUBIQ_SQL_READ),
+    ("ubiq-sql-write", KUBIQ_SQL_WRITE),
+];
+
+/// The current slug for a saved one: a pre-rename id maps to its successor, anything else is
+/// returned as it came. Apply wherever a persisted MCP id is read, before it is compared or looked up.
+pub fn canonical(name: &str) -> &str {
+    LEGACY_IDS
+        .iter()
+        .find(|(old, _)| *old == name)
+        .map_or(name, |(_, new)| new)
+}
+
 /// The server a slug names, or `None` when this build offers none — which is a 404 on the wire and
 /// a dropped name at composition, never an error.
 pub fn server(name: &str) -> Option<&'static ServerSpec> {
@@ -1995,6 +2021,17 @@ impl ServerSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pre_rename_ids_resolve_to_their_successors() {
+        for (old, new) in LEGACY_IDS {
+            assert_eq!(canonical(old), *new);
+            assert!(knows(canonical(old)), "{old} -> {new} is not a server");
+        }
+        assert_eq!(canonical("ubiq-help"), KUBIQ_HELP);
+        assert_eq!(canonical("kubiq-help"), KUBIQ_HELP);
+        assert_eq!(canonical("some-catalog-id"), "some-catalog-id");
+    }
 
     #[test]
     fn every_built_in_schema_is_json() {
