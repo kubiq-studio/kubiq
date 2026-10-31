@@ -3,7 +3,7 @@ id: prod-overview
 title: Product overview
 kind: product
 status: current
-summary: What Ubiq is, who runs it, why an agent harness needs a real terminal rather than a chat box, and what the product deliberately refuses to be.
+summary: What Kubiq is, who runs it, why an agent harness needs a real terminal rather than a chat box, and what the product deliberately refuses to be.
 read_when: you are deciding whether something is in scope, or you have never seen this project before
 updated: 2026-10-25
 verified: 2026-10-25
@@ -12,9 +12,9 @@ review_cycle: quarterly
 
 # Product overview
 
-## What Ubiq is
+## What Kubiq is
 
-Ubiq is a **agentic workspace**: a desktop application that hosts several interactive AI agents for any purpose
+Kubiq is a **agentic workspace**: a desktop application that hosts several interactive AI agents for any purpose
 agents side by side, each in a real terminal pane, under one window and one set of controls.
 
 Think tmux, with the panes specialised for agent harnesses rather than shells. A developer opens a
@@ -34,23 +34,23 @@ crashing without taking its neighbours down.
 
 ## Why a pane is a terminal
 
-Every harness Ubiq hosts is a full-screen, interactive TUI. It takes over the alternate screen,
+Every harness Kubiq hosts is a full-screen, interactive TUI. It takes over the alternate screen,
 addresses the cursor absolutely, emits the full ANSI escape vocabulary, asks the terminal how big it
 is, redraws when that answer changes, and expects keystrokes back byte for byte — arrows, Ctrl and
 Alt chords, bracketed paste, mouse reports.
 
-The consequence shapes the whole product: **a pane is a terminal, not a text buffer.** Ubiq cannot
+The consequence shapes the whole product: **a pane is a terminal, not a text buffer.** Kubiq cannot
 render an agent's output as a scrolling log and get away with it, because the agent is not producing
 a log — it is driving a screen. So each pane owns a genuine terminal emulator, each harness runs
-under a genuine pseudo-terminal, and Ubiq's job is to shuttle bytes between the two without opinions
+under a genuine pseudo-terminal, and Kubiq's job is to shuttle bytes between the two without opinions
 about their content.
 
-This is also what separates Ubiq from a chat frontend. A chat frontend owns the conversation and
-calls a model. Ubiq hosts whichever harness the user chose, unchanged, whether as a terminal pane or
+This is also what separates Kubiq from a chat frontend. A chat frontend owns the conversation and
+calls a model. Kubiq hosts whichever harness the user chose, unchanged, whether as a terminal pane or
 as a chat panel over the harness's own conversation, and adds the multiplexing, the configuration,
 and the window around it.
 
-## What Ubiq adds on top of running the harnesses yourself
+## What Kubiq adds on top of running the harnesses yourself
 
 Four things a terminal and a shell do not give you:
 
@@ -63,11 +63,11 @@ attached to it. Closing the window does not lose the arrangement, and reopening 
 respawning everything by hand.
 
 **Composed runs.** An agent is launched with a specific set of skills, MCP servers, and an account —
-assembled per run, rather than inherited from whatever is installed globally on the machine. Ubiq
+assembled per run, rather than inherited from whatever is installed globally on the machine. Kubiq
 does not implement this itself; it embeds a library that does, so the same composition works from
 the terminal and from the window.
 
-**One place to configure them all.** Each harness invents its own config location and format. Ubiq
+**One place to configure them all.** Each harness invents its own config location and format. Kubiq
 presents one surface over the set.
 
 ## Scope
@@ -84,13 +84,13 @@ In scope, in the order the product cares about it:
 
 ## Non-goals
 
-- **Writing a terminal emulator or a VT parser.** Ubiq integrates one. Every hour spent on escape
+- **Writing a terminal emulator or a VT parser.** Kubiq integrates one. Every hour spent on escape
   sequence handling is an hour not spent on the product.
-- **Being a chat client.** Ubiq's agents are the harnesses, and it hosts them unchanged. It draws a
+- **Being a chat client.** Kubiq's agents are the harnesses, and it hosts them unchanged. It draws a
   harness's conversation in a chat panel, with a composer and permission prompts, but the harness owns
-  the conversation and talks to its model. The one model call Ubiq makes on its own is Assistance, a
+  the conversation and talks to its model. The one model call Kubiq makes on its own is Assistance, a
   helper behind a provider the user configures, never a replacement for a harness.
-- **Replacing the harnesses' own configuration.** Ubiq composes a run and leaves the user's real
+- **Replacing the harnesses' own configuration.** Kubiq composes a run and leaves the user's real
   config untouched.
 - **Being a secrets manager.** Accounts carry references to credentials, never the credential
   material.
@@ -98,7 +98,7 @@ In scope, in the order the product cares about it:
 
 ## The one constraint that outlives every feature
 
-Ubiq is built to be split. The part that owns processes and PTYs and the part that draws panes talk
+Kubiq is built to be split. The part that owns processes and PTYs and the part that draws panes talk
 to each other over a defined contract and nothing else — even though they share a process today.
 That discipline buys two futures at almost no present cost: a detached coordinator that keeps agents
 alive while the window is closed, and agents running on other machines entirely.

@@ -31,7 +31,7 @@ moved, hidden or resized like any other, as [panels](workbench-panels) explain.
 | **Stash changes** ![Stash changes](../img/ui/git-stash.png) | Shelves the uncommitted changes, untracked files included |
 | **Undo last commit** | Takes the last commit back into the staged list; refused on a first commit |
 | **Refresh** | Reads the repository again |
-| The count and status words | How many paths changed, or what Ubiq is waiting on: **Staging…**, **Committing…**, **Loading history…** |
+| The count and status words | How many paths changed, or what Kubiq is waiting on: **Staging…**, **Committing…**, **Loading history…** |
 
 ## What you can do here
 

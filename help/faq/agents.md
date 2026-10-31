@@ -9,7 +9,7 @@ related: [agents-starting, agents-chat]
 
 ## Why does closing a chat tab not stop my agent?
 
-A chat tab's **×** hides it, because the conversation belongs to Ubiq, not to the tab, and the agent keeps working while it is out of sight. To end it, open the conversation's three-dots menu and pick **Close**, which asks first because it deletes the transcript. See [Hide or close a tab](how-to-hide-or-close-a-tab).
+A chat tab's **×** hides it, because the conversation belongs to Kubiq, not to the tab, and the agent keeps working while it is out of sight. To end it, open the conversation's three-dots menu and pick **Close**, which asks first because it deletes the transcript. See [Hide or close a tab](how-to-hide-or-close-a-tab).
 
 ## How do I get back an agent whose tab I closed?
 
@@ -31,6 +31,6 @@ Yes. Choose a different mode for the agent from the picker beside **Send**, in t
 
 After the agent answers its first prompt, it takes a short title of its own if a provider is set up under **Settings**, then **Assistance**. A name you typed yourself is never overwritten. See [The agents columns and sidebar](agents-columns).
 
-## Does Ubiq choose the model for me?
+## Does Kubiq choose the model for me?
 
 No. Each harness brings its own models, and you choose among them for each agent, in the new agent dialog or beside **Send**. See [Harnesses](concepts-harnesses).

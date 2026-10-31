@@ -321,7 +321,7 @@ impl CodexBridge {
         let cwd = cwd.display().to_string();
         let (method, params) = match &open {
             ThreadOpen::Start => ("thread/start", json!({"cwd": cwd})),
-            // `excludeTurns`: the transcript is Ubiq's own record; the history is not replayed.
+            // `excludeTurns`: the transcript is Kubiq's own record; the history is not replayed.
             ThreadOpen::Resume(id) => (
                 "thread/resume",
                 json!({"threadId": id, "cwd": cwd, "excludeTurns": true}),
@@ -1064,7 +1064,7 @@ fn request_key(id: &Value) -> String {
 /// `danger-full-access` run never reaches here (`D209`).
 ///
 /// Returns the events to emit and, for a request nobody can answer, the response to write at
-/// once: a question Ubiq cannot draw gets an empty answer, and a request of a kind this bridge
+/// once: a question Kubiq cannot draw gets an empty answer, and a request of a kind this bridge
 /// does not serve (`item/tool/call`, `account/chatgptAuthTokens/refresh`, `attestation/generate`)
 /// gets a method-not-found error — so Codex never waits on silence.
 fn park_ask(wire: &Wire, ask: Ask) -> (Vec<AgentEvent>, Option<Value>) {

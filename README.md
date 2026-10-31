@@ -1,11 +1,11 @@
-# Ubiq
+# Kubiq
 
-An agentic workspace — tmux for AI coding agents. Ubiq hosts several interactive agent CLIs side by
+An agentic workspace — tmux for AI coding agents. Kubiq hosts several interactive agent CLIs side by
 side, each in a real terminal pane, under one window and one set of controls.
 
-Every harness Ubiq hosts is a full-screen terminal program: it takes over the alternate screen,
+Every harness Kubiq hosts is a full-screen terminal program: it takes over the alternate screen,
 addresses the cursor absolutely, and expects raw keystrokes back. So a pane is a genuine terminal
-and a harness runs under a genuine pseudo-terminal — Ubiq shuttles bytes between the two and adds
+and a harness runs under a genuine pseudo-terminal — Kubiq shuttles bytes between the two and adds
 the multiplexing, the configuration and the window around it.
 
 ## Supported agents
@@ -29,11 +29,11 @@ the multiplexing, the configuration and the window around it.
 ## Workspace layout
 
 ```
-ubiq/
+kubiq/
 ├── Cargo.toml            workspace manifest
 ├── Justfile              every command anyone runs
 ├── crates/
-│   ├── ubiq/             the desktop application
+│   ├── kubiq/             the desktop application
 │   └── agent-manager/    harness-management library, plus its `am` CLI
 ├── vendor/               third-party crates carried in-tree, kept close to upstream
 ├── _docs/                documentation — start at _docs/INDEX.md
@@ -53,7 +53,7 @@ Prerequisites: a recent Rust stable toolchain, [`just`](https://just.systems),
 libraries for GPUI.
 
 ```bash
-just dev      # run Ubiq
+just dev      # run Kubiq
 just verify   # check, clippy, test, docs-lint
 just          # list every recipe
 ```
@@ -73,26 +73,26 @@ Alpha, under active development.
 
 ## License
 
-Ubiq is licensed under the [Sustainable Use License](LICENSE) (fair-code, source-available).
+Kubiq is licensed under the [Sustainable Use License](LICENSE) (fair-code, source-available).
 `crates/agent-manager/` is a standalone library and is [MIT](crates/agent-manager/LICENSE).
 
-You may use and modify Ubiq for **personal use** or **internal business purposes** inside your
-organization. You may not host Ubiq (or a substantially similar product) as a paid service,
-white-label it, or sell a product whose value derives substantially from Ubiq — unless you have a
+You may use and modify Kubiq for **personal use** or **internal business purposes** inside your
+organization. You may not host Kubiq (or a substantially similar product) as a paid service,
+white-label it, or sell a product whose value derives substantially from Kubiq — unless you have a
 separate commercial agreement with the licensor.
 
 **Allowed**
 
 - Personal use on your own machines
-- Running Ubiq internally for your company's engineering team
-- Modifying Ubiq for your own internal needs
-- Paid consulting or support (setup, customization, workflows) for organizations using Ubiq
+- Running Kubiq internally for your company's engineering team
+- Modifying Kubiq for your own internal needs
+- Paid consulting or support (setup, customization, workflows) for organizations using Kubiq
   internally
 
 **Not allowed** (without a commercial license)
 
-- Charging users to access a hosted multiplexer built on Ubiq
-- Selling or distributing a rebranded Ubiq (or close substitute) as your product
+- Charging users to access a hosted multiplexer built on Kubiq
+- Selling or distributing a rebranded Kubiq (or close substitute) as your product
 
 Contributors are asked to sign the
 [Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md). For commercial hosting,

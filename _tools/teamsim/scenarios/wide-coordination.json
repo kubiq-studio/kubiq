@@ -1,5 +1,5 @@
 {
-  "format": "ubiq.teamsim/1",
+  "format": "kubiq.teamsim/1",
   "name": "wide-coordination",
   "note": "a lead over nine workers, four of them carrying delegates — the row that drags the canvas wide",
   "viewport": { "w": 1600, "h": 1000 },

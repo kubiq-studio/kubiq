@@ -1,15 +1,15 @@
 ---
 id: workbench-logs
 title: The log console
-summary: The Logs panel — reading what Ubiq has recorded about itself, filtered by part and by level.
+summary: The Logs panel — reading what Kubiq has recorded about itself, filtered by part and by level.
 keywords: [logs, console, debug, errors, verbose, warn, diagnostics, troubleshooting]
-context: [panel.ubiq.logs]
+context: [panel.kubiq.logs]
 order: 80
 status: current
 related: [workbench-panels, how-to-find-the-logs, troubleshooting, faq-troubleshooting]
 ---
 
-The Logs panel is where Ubiq writes down what it is doing: opening a pane, starting a harness,
+The Logs panel is where Kubiq writes down what it is doing: opening a pane, starting a harness,
 searching, talking to a database. Open it when something misbehaves and you want to see what the
 parts said at the time. It shows the most recent 5000 records, newest last, and says how many older
 ones fell off the end.
@@ -18,7 +18,7 @@ ones fell off the end.
 
 | Part | What it does |
 |---|---|
-| Subsystem picker | Shows one part of Ubiq, or **All**: **UI**, **Coordinator**, **PTY**, **Harness**, **MCP**, **Search**, **Database**, **Web** or **External** |
+| Subsystem picker | Shows one part of Kubiq, or **All**: **UI**, **Coordinator**, **PTY**, **Harness**, **MCP**, **Search**, **Database**, **Web** or **External** |
 | Level picker | Sets the quietest level shown: `TRACE`, `DEBUG`, `INFO`, `WARN` or `ERROR`; `WARN` shows warnings and errors. It starts at `DEBUG` |
 | Record count | `<n> records`, with `<n> dropped` once older records have been pushed out |
 | Arrow-down button | Follows the newest record as it arrives; lit while it is on |

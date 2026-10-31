@@ -3,15 +3,15 @@ id: inbox-dynamic-workspace
 title: Proposal — dynamic workspaces, a scriptable workbench
 kind: proposal
 status: proposal
-summary: A new rail mode whose centre is a dockable workbench built and driven by a TypeScript program on a persistent, host-side QuickJS runtime — docks holding A2UI surfaces, web panels, agent-written live documents (the magic whiteboard), a Playwright-style browser, terminals, chats, editors or database tabs; a capability-granted `ubiq.*` API over layout, menus, state, a local SQLite, files, processes, terminals, HTTP and WebSockets, a loopback server, schedules, model calls, database connections, secrets, connectors and agents; a two-way agent link through the host's MCP server; Run and Author modes on one live instance; a `space.toml` manifest with a settings and permissions panel; zip bundles, a manager, and a signed registry later; app-ly applications imported and run unchanged through a `window.shell` shim; and two dozen example spaces graded against the model.
-read_when: you are deciding how a user- or agent-authored tool runs inside Ubiq, what a script may reach, how a scripted panel is drawn in the dock, or how such a tool is packaged and shared
+summary: A new rail mode whose centre is a dockable workbench built and driven by a TypeScript program on a persistent, host-side QuickJS runtime — docks holding A2UI surfaces, web panels, agent-written live documents (the magic whiteboard), a Playwright-style browser, terminals, chats, editors or database tabs; a capability-granted `kubiq.*` API over layout, menus, state, a local SQLite, files, processes, terminals, HTTP and WebSockets, a loopback server, schedules, model calls, database connections, secrets, connectors and agents; a two-way agent link through the host's MCP server; Run and Author modes on one live instance; a `space.toml` manifest with a settings and permissions panel; zip bundles, a manager, and a signed registry later; app-ly applications imported and run unchanged through a `window.shell` shim; and two dozen example spaces graded against the model.
+read_when: you are deciding how a user- or agent-authored tool runs inside Kubiq, what a script may reach, how a scripted panel is drawn in the dock, or how such a tool is packaged and shared
 updated: 2026-10-13
 depends_on: [inbox-plugin-system, inbox-a2ui, inbox-web-panel, ref-a2ui-protocol, ref-a2ui-catalog, feat-workbench, feat-workbench-sink, feat-workbench-db, feat-connectors, tech-architecture, tech-transport, tech-decisions]
 ---
 
 # Proposal — dynamic workspaces, a scriptable workbench
 
-Every rail mode Ubiq has is compiled in. IDE, DB, Git, Agents, Teams, KB and Tasks are each a
+Every rail mode Kubiq has is compiled in. IDE, DB, Git, Agents, Teams, KB and Tasks are each a
 screen somebody wrote in Rust, and anything they do not cover is somebody else's application. The
 parts needed to close that gap are already in the tree, but they are not connected:
 
@@ -24,9 +24,9 @@ parts needed to close that gap are already in the tree, but they are not connect
 - a loopback MCP server the agents already reach (`D102`).
 
 This proposal connects them into one new capability. **A dynamic workspace is a small program,
-written in TypeScript, that builds its own workbench out of Ubiq's parts.** It decides what docks
+written in TypeScript, that builds its own workbench out of Kubiq's parts.** It decides what docks
 exist and what each one shows. It reacts to what the user does in them, and it reaches the host's
-features through a granted API. An agent can be wired to it in both directions. Ubiq can also edit
+features through a granted API. An agent can be wired to it in both directions. Kubiq can also edit
 one while it is running, and it can be packed into a zip and given to someone else.
 
 The inspirations are [MCP Apps](https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp)
@@ -45,12 +45,12 @@ in use. This document calls a dynamic workspace a **space**:
 |---|---|
 | **Space** | The authored thing: a manifest, a TypeScript entry point, and its UI and asset files |
 | **Space instance** | One running copy: a live runtime, its docks, its state and its data |
-| **Space bundle** | A space packed as one `.ubiqspace` zip |
+| **Space bundle** | A space packed as one `.kubiqspace` zip |
 | **Dock** (inside a space) | One tab the space's program placed in its workbench, holding one panel |
 | **Run / Author** | The two modes of one instance: using it, and editing it |
 
 The rail entry is **Spaces**. Choosing the word is the first decision this document asks for (§18).
-Alternatives considered were *app* (collides with `ubiq-app` and `AppState`), *tool* (collides with
+Alternatives considered were *app* (collides with `kubiq-app` and `AppState`), *tool* (collides with
 tool calls), *plugin* (that proposal is a narrower thing, see §14) and *canvas* (that is the Teams
 screen).
 
@@ -60,7 +60,7 @@ This is a PR review cockpit. It has a list of open pull requests on the left, a 
 an agent in the right dock and a terminal at the bottom:
 
 ```ts
-import { layout, ui, connectors, agents, term, state } from "ubiq";
+import { layout, ui, connectors, agents, term, state } from "kubiq";
 
 const gh = await connectors.get("github");                 // a reference, never a token
 const prs = await gh.fetch("/repos/{owner}/{repo}/pulls"); // the host attaches the credential
@@ -78,7 +78,7 @@ list.on("open", async ({ number }) => {
 });
 ```
 
-Each line uses a feature that already exists in Ubiq. What is new is that a forty-line script can
+Each line uses a feature that already exists in Kubiq. What is new is that a forty-line script can
 combine them. The same pattern covers a database dashboard, an incident runbook, a release manager,
 an API playground, an agent pipeline, or a small kanban kept in a local SQLite file (§15).
 
@@ -92,14 +92,14 @@ an API playground, an agent pipeline, or a small kanban kept in a local SQLite f
 This is the plugin proposal's model (`inbox-plugin-system`, `D97`–`D100`) with a workbench added.
 It keeps every architecture rule in `AGENTS.md`:
 
-- The UI and the host still talk only through `ubiq-proto` messages.
+- The UI and the host still talk only through `kubiq-proto` messages.
 - The coordinator still renders nothing.
 - A terminal dock is still a pane id and an opaque byte stream.
 - Credential material stays in the keychain.
 
 ## 3. Where the runtime lives — the host, not the interface
 
-The scratchpad runs QuickJS in the interface (`crates/ubiq/src/state/script.rs`). It is stateless
+The scratchpad runs QuickJS in the interface (`crates/kubiq/src/state/script.rs`). It is stateless
 by design: each run builds a fresh runtime, reads a fact snapshot and writes an intent log that
 nothing performs (`D129`). A space needs the opposite on every count:
 
@@ -107,30 +107,30 @@ nothing performs (`D129`). A space needs the opposite on every count:
 |---|---|
 | Files, processes, pseudo-terminals, SQLite, database sessions, the keychain, connectors | Next to them, in the host |
 | A long-lived program with timers, promises and subscriptions | Persistent, with an event loop |
-| To keep running when its window closes or the UI is remote (drone, `ubiq-proto` framing) | Independent of any window |
+| To keep running when its window closes or the UI is remote (drone, `kubiq-proto` framing) | Independent of any window |
 | An agent to call it while no window shows it | Reachable from the host's MCP server |
-| To run headless from a CLI (`ubiq space run …`) | Free of GPUI |
+| To run headless from a CLI (`kubiq space run …`) | Free of GPUI |
 
-**Proposal: a new crate, `crates/ubiq-space`, holds the runtime, and `crates/ubiq-host` hosts its
+**Proposal: a new crate, `crates/kubiq-space`, holds the runtime, and `crates/kubiq-host` hosts its
 instances.**
 
-- **`ubiq-space`** is a near-leaf. It depends on `ubiq-proto` for ids, and it carries `rquickjs`,
+- **`kubiq-space`** is a near-leaf. It depends on `kubiq-proto` for ids, and it carries `rquickjs`,
   `oxc`, `zip` and `rusqlite` behind a `runtime` feature. It owns:
   - the manifest schema and its validation;
   - bundle pack, unpack and hash verification;
   - the ES module loader (transpiling bundle-relative `.ts` and `.tsx` on load);
   - the event loop (timers, promises, host-call futures);
-  - the `ubiq.*` bindings, written against a `SpaceHost` trait.
+  - the `kubiq.*` bindings, written against a `SpaceHost` trait.
 
-  Because the bindings depend only on that trait, the crate never names `ubiq-host`. With
+  Because the bindings depend only on that trait, the crate never names `kubiq-host`. With
   `--no-default-features` it is just the manifest and wire types, which the interface needs for the
   settings and permissions panels.
-- **`ubiq-host/src/space/`** implements `SpaceHost`. Each instance runs on its own worker thread,
+- **`kubiq-host/src/space/`** implements `SpaceHost`. Each instance runs on its own worker thread,
   holding one `rquickjs::AsyncRuntime` with a single-threaded executor. A binding call becomes a
   request to the coordinator or to the relevant worker, and its reply resolves the promise. The
   coordinator's reader never waits on a script, and a script never waits on the UI.
 - **The scratchpad stays where it is.** It is a fixture page, and `D127`/`D129` remain its rules.
-  The oxc front end (`front::transpile`, `validate`) moves into `ubiq-space`, with no default
+  The oxc front end (`front::transpile`, `validate`) moves into `kubiq-space`, with no default
   features, so both share one transpiler.
 
 Limits come from `D127` and are made per instance. There is an interrupt handler for a synchronous
@@ -160,7 +160,7 @@ sent:
 |---|---|---|
 | `a2ui` | The existing A2UI renderer | Native, themed, no fetch (`D115`). Surfaces become keyed and incremental (§5) |
 | `web` | The embedded webview on the loopback origin | A generic `space` tenant serving the bundle's HTML (§6). On Linux the external-browser fallback applies |
-| `live` | The embedded webview, on a Ubiq-owned shell page | A page the runtime or an agent writes and patches in real time (§6.1) |
+| `live` | The embedded webview, on a Kubiq-owned shell page | A page the runtime or an agent writes and patches in real time (§6.1) |
 | `browser` | The embedded webview, or a screencast image for a host-driven Chromium | Navigates the open web within granted hosts, driven by script or agent (§6.2) |
 | `terminal` | `terminal::pane` | A real `PaneId` spawned by the host. Resize, focus and `TabClose` behave as everywhere else |
 | `chat` | The chat panel | A view onto a host-owned conversation the space started or attached to |
@@ -217,10 +217,10 @@ cannot fetch, navigate or introduce a colour. The renderer handles one `createSu
 
 In the script, a surface is an object whose data model is a JSON value:
 `surface.set("/prs/0/title", …)` sends an `updateDataModel` and `surface.render(tree)` sends an
-`updateComponents`. Definitions live in `ui/*.a2ui.json` files or are built in code. Ubiq's own
-catalog (`ubiq-catalog.json`) gains the components a workbench needs and the basic catalog lacks,
+`updateComponents`. Definitions live in `ui/*.a2ui.json` files or are built in code. Kubiq's own
+catalog (`kubiq-catalog.json`) gains the components a workbench needs and the basic catalog lacks,
 each of which goes through the catalog rules: `Table`, `Tree`, `CodeView`, `Chart`, `Badge`,
-`KeyValue` and `Markdown` (through `ubiq-md`).
+`KeyValue` and `Markdown` (through `kubiq-md`).
 
 This is also where `inbox-a2ui` lands. Its `render_ui` tool draws one surface inside a conversation,
 and a space's `space_render` tool (§8) draws one into a dock. Both use the same renderer. A2UI
@@ -242,7 +242,7 @@ serves the bundle's own HTML on the existing loopback origin under a generic **`
   - `space.on(event)` receives what the script emits to it;
   - `ui/initialize` returns the theme tokens and palette, so a page can match the window.
 
-  The frame vocabulary stays closed, and the page never receives `ubiq.*` itself. It reaches
+  The frame vocabulary stays closed, and the page never receives `kubiq.*` itself. It reaches
   whatever its script chooses to export, and that script is bound by its grant.
 - **Vendored libraries** ship inside the bundle, hash-listed like everything else. There is no CDN
   unless the CSP declares one.
@@ -251,7 +251,7 @@ serves the bundle's own HTML on the existing loopback origin under a generic **`
 
 A `web` dock may also host an **MCP App**: a `ui://` resource read from an MCP server the space
 connected to. The bridge then speaks MCP Apps' `ui/*` methods, proxying `tools/call` back to that
-server. Ubiq thereby becomes an MCP Apps host for no more than a second protocol on a bridge it
+server. Kubiq thereby becomes an MCP Apps host for no more than a second protocol on a bridge it
 already has (§14).
 
 ### 6.1 Live documents — the magic whiteboard
@@ -270,7 +270,7 @@ board.on("action", (e) => agent.prompt(`The user clicked ${e.name}: ${JSON.strin
 
 The mechanics:
 
-- **The shell.** The dock loads a small Ubiq-owned page, `live.html`, on the `space` tenant. It has
+- **The shell.** The dock loads a small Kubiq-owned page, `live.html`, on the `space` tenant. It has
   an empty `#root`, the theme tokens as CSS variables, and a patch applier. Content arrives as
   bridge frames — `Replace{html}`, `Patch{target, html, mode}`, `Style{css}`, `Script{js}`,
   `Assets{map}` — and `morph` uses a DOM-morphing pass (idiomorph, vendored) so a re-render keeps
@@ -281,7 +281,7 @@ The mechanics:
   touching what was drawn, and the script decides what reaches the agent.
 - **Real time, honestly.** Each `board_write` lands as soon as the tool call completes, so the
   board moves at the speed of the agent's tool calls. Finer than that — the page filling in while
-  the model is still typing the HTML — needs the harness to stream a tool call's arguments. Ubiq
+  the model is still typing the HTML — needs the harness to stream a tool call's arguments. Kubiq
   already sees `ToolCall`/`ToolCallUpdate` in the `ConvUpdate` stream, so where a harness emits
   partial input, the host feeds the partial
   `html` argument to the board as it grows — the same trick MCP Apps calls
@@ -298,7 +298,7 @@ The mechanics:
   default-deny for the network (`connect-src` is the bridge only, no remote images unless
   declared), and its bridge RPC is limited to `action` events — `space.call` is unavailable, so
   agent-written JavaScript can animate and compute inside the page but cannot reach a single
-  `ubiq.*` capability or exfiltrate anything. Whether `Script{js}` is allowed at all is a manifest
+  `kubiq.*` capability or exfiltrate anything. Whether `Script{js}` is allowed at all is a manifest
   switch, `[web] generated_scripts = true`, off in the template.
 - **Linux.** The live document works in the external-browser fallback unchanged, because the
   bridge's long-poll transport carries the same frames.
@@ -306,7 +306,7 @@ The mechanics:
 The whiteboard is a template space, not a built-in: about 150 lines of TypeScript plus the shell.
 Its variants come cheap — a *slide deck* (one live page per slide, an agent narrating), a *design
 review board* (an agent pins mock-ups, the user annotates with `data-action` stickies), a *teaching
-canvas* (an agent explains a codebase with diagrams generated by `ubiq-archify`'s SVG export), a
+canvas* (an agent explains a codebase with diagrams generated by `kubiq-archify`'s SVG export), a
 *report* that rebuilds itself whenever a query's result changes.
 
 ### 6.2 The browser dock — automation, Playwright-style
@@ -345,7 +345,7 @@ panel kind with a separate permission, so the risk is never inherited by acciden
   a remote UI the browsing happens on the UI's machine and its network, which the consent screen
   says.
 - **`cdp`** — a Chromium the host launches (the user's installed Chrome or Chromium, never a
-  download Ubiq performs silently) and drives over the DevTools protocol. It is Playwright's actual
+  download Kubiq performs silently) and drives over the DevTools protocol. It is Playwright's actual
   fidelity: trusted input, network interception, downloads, multiple tabs, headless by default. It
   runs on the host, so it works on Linux, with a remote UI, and with no window at all. To be watched,
   it streams `Page.startScreencast` frames into a dock that draws them as an image and forwards the
@@ -354,7 +354,7 @@ panel kind with a separate permission, so the risk is never inherited by acciden
   thread-based, which matches the host's worker threads). Choosing one is a spike, not a decision
   this document makes.
 
-**For agents**, the `ubiq-space` MCP server gains `browser_*` tools when the space grants them —
+**For agents**, the `kubiq-space` MCP server gains `browser_*` tools when the space grants them —
 `browser_snapshot`, `browser_click`, `browser_type`, `browser_navigate`, `browser_screenshot`,
 `browser_evaluate` — modelled on Playwright MCP's ref-based tools, so an agent that already knows
 Playwright MCP needs no new vocabulary. The space's script can also wrap them in higher-level tools
@@ -378,16 +378,16 @@ clicks.
 - **Secrets.** `page.fill(sel, secrets.ref("password"))` attaches the value at the last hop — inside
   the host for `cdp`, inside the interface for `webview` — so the script never holds it. This needs
   `browser.fill_secrets`, high risk.
-- **Downloads** land in `$data/downloads`; `file://` and `ubiq://` navigation is refused.
+- **Downloads** land in `$data/downloads`; `file://` and `kubiq://` navigation is refused.
 
 **The playground.** A *browser space* template opens a URL bar, the browser dock, a recorder (user
 actions turned into TypeScript `page.*` lines in an editor dock), a test runner whose results are an
 A2UI table, and an agent dock with the `browser_*` tools. That is a Playwright codegen and a test
 runner and an agent-driven browser in one space, and it is ordinary space code on top of §6.2.
 
-## 7. The `ubiq` API
+## 7. The `kubiq` API
 
-A space imports `ubiq` (an ES module, typed by a generated `ubiq.d.ts`). Each namespace is a
+A space imports `kubiq` (an ES module, typed by a generated `kubiq.d.ts`). Each namespace is a
 **permission** (§9), and an ungranted namespace is absent, not merely refused. Every call is
 asynchronous unless it is marked as synchronous below.
 
@@ -421,7 +421,7 @@ asynchronous unless it is marked as synchronous below.
 The runtime adds standard globals that rquickjs does not: `setTimeout`, `setInterval`,
 `queueMicrotask`, `TextEncoder`/`TextDecoder`, `URL`, `structuredClone`, and `fetch` as an alias for
 `http.fetch`. There is no npm at runtime. A dependency is vendored into the bundle as an ES module,
-or bundled at author time by whatever tool the author likes. Ubiq does not install one.
+or bundled at author time by whatever tool the author likes. Kubiq does not install one.
 
 ### 7.1 The state API
 
@@ -465,7 +465,7 @@ family lacks (`G208`).
 
 ### 8.2 An agent drives the space
 
-The host's loopback MCP server (`D102`) gains a **`ubiq-space` server**. It is attached
+The host's loopback MCP server (`D102`) gains a **`kubiq-space` server**. It is attached
 automatically to agents a space starts with `tools: ["space"]`, and the user can attach it to any
 other agent from the instance's agent menu. The agent's identity in the URL decides which instance
 it reaches. The server offers:
@@ -529,7 +529,7 @@ run is the same component, read-only on the manifest side and editable on the gr
 | Dev spaces | Any folder, registered in `<config root>/spaces/dev.toml`. Often a project, so the IDE edits it |
 | Instance registry | `<config root>/spaces/instances.toml`: open instances, owning window, mode, restored at start |
 | Instance data | `<config root>/spaces-data/<space-id>/<instance-id>/`: `state.json`, `*.sqlite`, `files/` |
-| Project-scoped instance data | `projects/<ulid>/spaces/<space-id>/<instance-id>/`, or `.ubiq/spaces/…` for a project-managed project |
+| Project-scoped instance data | `projects/<ulid>/spaces/<space-id>/<instance-id>/`, or `.kubiq/spaces/…` for a project-managed project |
 | Space-wide shared data | `…/<space-id>/_shared/` |
 | Grants | Host settings, keyed by space id (and project) |
 | Secrets | Keychain, a seventh namespace: `space/<space-id>/<name>` |
@@ -555,7 +555,7 @@ detaches it, and a `background = true` space keeps running with no docks at all 
   bundle are refused, and there is no `eval` of remote code because there is no network the grant
   did not allow.
 - Web docks get MCP Apps' model: a separate per-dock origin token, a default-deny CSP that only the
-  manifest can widen, and no `ubiq.*` in the page.
+  manifest can widen, and no `kubiq.*` in the page.
 - A2UI cannot fetch, navigate or perform (`D115`), and a function call in a payload is still only
   an intent, which the script decides whether to honour.
 - Agent calls obey the privilege rule (§8.2).
@@ -571,7 +571,7 @@ screen, signing (§13), and later an out-of-process runtime behind isol8's seam
 
 **Run** is the space as its author intended. Only its own docks are visible, it reads its bundle
 read-only, and it is reached from the Spaces rail, the palette, a pinned rail entry or a
-`ubiq://space/<id>` link.
+`kubiq://space/<id>` link.
 
 **Author** is the same live instance with an editing kit around it. A toggle (in the space strip,
 and `⌘⇧E`) switches modes without restarting anything:
@@ -615,7 +615,7 @@ unpacks into a dev folder with a bumped version and keeps the original immutable
 - database dashboard;
 - terminal runbook.
 
-Each template is a working space with a README, the `ubiq.d.ts` types and an `AGENTS.md` telling an
+Each template is a working space with a README, the `kubiq.d.ts` types and an `AGENTS.md` telling an
 authoring agent the API and the rules.
 
 ## 13. Bundles, the manager and the registry
@@ -623,7 +623,7 @@ authoring agent the API and the rules.
 **A bundle** is a zip with a fixed shape:
 
 ```
-my-space.ubiqspace
+my-space.kubiqspace
 ├─ space.toml          manifest: identity, instancing, permissions, contributions, csp
 ├─ src/main.ts         entry (the manifest names it)
 ├─ ui/*.a2ui.json      A2UI definitions
@@ -643,9 +643,9 @@ source, permissions granted, data size and running instances. Its actions are Op
 Update, Disable, Revoke grants, and Uninstall (keep or delete data).
 
 **The registry**, later, is a static signed index (JSON over HTTPS) of bundles with publisher ids,
-versions, declared permissions and hashes. Bundles are signed with minisign, which `ubiq-host`
+versions, declared permissions and hashes. Bundles are signed with minisign, which `kubiq-host`
 already verifies with (`minisign-verify`), and the index pins each publisher's key. The workflow is
-`ubiq space publish` and a browse-and-install page in the manager. Nothing in the bundle format
+`kubiq space publish` and a browse-and-install page in the manager. Nothing in the bundle format
 changes when the registry arrives, because a local bundle is already a registry entry without the
 index.
 
@@ -657,7 +657,7 @@ index.
 | `inbox-a2ui` | Same renderer. `render_ui` (in a conversation) and `space_render` (in a dock) are siblings. This proposal pays for `G250`/`G206` |
 | `inbox-web-panel` | The `space` tenant generalises a tenant from "a viewer for one file type" to "a bundle's page". The bridge gains the RPC channel |
 | `inbox-editions` / `D177`–`D184` | Editions contribute compiled-in modes, and spaces contribute runtime ones. Both register through the same `Registry<Spec>` |
-| `inbox-ui-id` | A space's docks and surfaces get `UiId`s under `ubiq.space.<id>.<dock>`, so help, personalisation and `space_inspect` can address them |
+| `inbox-ui-id` | A space's docks and surfaces get `UiId`s under `kubiq.space.<id>.<dock>`, so help, personalisation and `space_inspect` can address them |
 | Sink script scratchpad | Unchanged. Its rules (`D127`–`D129`) keep governing it. It may gain **Promote to space**, which writes its buffer as a new dev space |
 | Drone | Instances run on the host, so a space opened on a remote host runs there and its docks draw here |
 
@@ -681,19 +681,19 @@ that talks to a host object is exactly a web dock that talks to its script over 
 
 **The compatibility layer is a shim plus an adapter, not a second runtime:**
 
-- **`shell.js`** is an initialisation script Ubiq injects into the app's web dock. It defines
+- **`shell.js`** is an initialisation script Kubiq injects into the app's web dock. It defines
   `window.shell` with app-ly's exact names, signatures and result shapes. Every method becomes one
   bridge call. Promises reject with plain strings, `run` resolves on a non-zero exit, and BLOB
   columns come back as `null`, all as in app-ly. `shell.settings` is synchronous because its values
   are injected with the script.
-- **`ubiq:compat/app-ly`** is a built-in module shipped with Ubiq. It implements those bridge calls
-  on `ubiq.*`, so it is ordinary space code bound by the space's grant. The page still never sees
-  `ubiq.*`.
+- **`kubiq:compat/app-ly`** is a built-in module shipped with Kubiq. It implements those bridge calls
+  on `kubiq.*`, so it is ordinary space code bound by the space's grant. The page still never sees
+  `kubiq.*`.
 - **The imported space's `src/main.ts`** is one line that re-exports the adapter. Its manifest opens
   one centre dock showing `contents/`, and the app looks as it did, framed by a dock tab instead of
   a window.
 
-**Import.** `ubiq space import <folder>`, or dropping the folder onto Spaces, does five things:
+**Import.** `kubiq space import <folder>`, or dropping the folder onto Spaces, does five things:
 
 1. It reads `app.toml` and the `.env` beside it.
 2. It writes a `space.toml` next to them and the one-line `main.ts`, and leaves `contents/` and
@@ -720,7 +720,7 @@ to do the port.
 | `showDevMenu` | Author mode with the web inspector | No manifest key needed |
 | `keychainPrefix` | The `space/<id>/` keychain namespace | Entries are copied once at import, on request |
 | `[settings]`, `.env` | `[settings]`, `.env` | `.env` stays a local file and is **never** packed into a bundle; export warns |
-| `[[allowedCommands]]` | `[[permissions.proc.commands]]`, field for field | Ubiq adopts app-ly's allowlist schema as its own `proc` grant: `name`, `program`, anchored `args` regexes, `extraArgs`, `maxArgs`, `cwd`, `env`, `timeoutMs` |
+| `[[allowedCommands]]` | `[[permissions.proc.commands]]`, field for field | Kubiq adopts app-ly's allowlist schema as its own `proc` grant: `name`, `program`, anchored `args` regexes, `extraArgs`, `maxArgs`, `cwd`, `env`, `timeoutMs` |
 | `[ai]` | `[ai]` defaults for the `ai` namespace | `"default"` maps to the user's default provider (below) |
 | `[webdriver]` | `[webdriver]` on the space's own web dock | Below |
 
@@ -735,7 +735,7 @@ to do the port.
 | `dbQuery`, `dbExecute`, `dbClose` | `sqlite.open(name)` per db name | Same, including positional params and `{columns, rows}` |
 | `fetch`, `get`, `post` | `http.fetch` | Needs grant: app-ly allows any host. The importer scans `contents/` for literal origins and proposes them as the host list; `"*"` remains possible and is flagged |
 | `notify`, `log` | `notify`, the space's log | Same |
-| `openWindow`, `closeWindow`, `onWindowNavigated/Loaded/Closed`, `getWindowBody`, `evalWindow` | A browser dock with the `webview` backend (§6.2); `evalWindow("main")` evaluates in the app's own dock | Mapped. Child windows already have no `window.shell`, as browser docks have no `ubiq.*`. Hosts come from the grant |
+| `openWindow`, `closeWindow`, `onWindowNavigated/Loaded/Closed`, `getWindowBody`, `evalWindow` | A browser dock with the `webview` backend (§6.2); `evalWindow("main")` evaluates in the app's own dock | Mapped. Child windows already have no `window.shell`, as browser docks have no `kubiq.*`. Hosts come from the grant |
 | `authViaBrowser` | `serve` on an ephemeral loopback port plus `open` in the system browser | Same flow, same errors |
 | `secretSet`, `secretGet`, `secretDelete` | `secrets`; `secretGet` returns material, so it needs `secrets.reveal` | Needs high-risk grant. Porting to `secrets.ref` removes it |
 | `httpStart`, `onHttpRequest`, `httpRespond`, `httpStop` | `serve` on loopback | Same |
@@ -749,7 +749,7 @@ to do the port.
 **The three real differences:**
 
 - **AI.** app-ly runs Apple's on-device model, so `shell.ai` is free, offline and private, and it is
-  unavailable outside macOS 26 on Apple silicon. Ubiq's `ai` uses whatever provider the user
+  unavailable outside macOS 26 on Apple silicon. Kubiq's `ai` uses whatever provider the user
   configured, so the same app may now work on every platform but cost money and send text to a
   server. The consent screen names the provider. An `apple-on-device` provider in the assist family
   would restore the original behaviour on Macs that have it, and a local provider such as Ollama
@@ -770,7 +770,7 @@ to do the port.
 - **Agent tools.** Agents get `space_inspect` and the `browser_*` tools on the same dock, which is
   the agent-native route to the same control.
 - **CLI.** app-ly's headless commands (`info`, `ai`, `db`, `file`, `fetch`, `run`) are a
-  headless entry point the adapter ships: `ubiq space cli <id> db query main "select …"` behaves as
+  headless entry point the adapter ships: `kubiq space cli <id> db query main "select …"` behaves as
   `app-ly db query main "select …"`, exit codes included. As in app-ly, windows, the keychain and
   the local servers need the interface.
 - **Linux.** The app's own dock works through the external-browser fallback, and the bridge carries
@@ -829,10 +829,10 @@ The second half of the list is deliberately unexpected: goals nobody would build
 | 19 | Phone remote / second screen | `serve` on the LAN, a live page for the phone | Fits under a high-risk grant | `serve` beyond loopback is an open question in §18. With a per-session token and a QR code it is reasonable; without the grant it does not run |
 | 20 | Arduino / serial dashboard | serial port readings, charts | Fits under a high-risk grant | No serial API, by design. A `proc.spawn` of an allowlisted reader bridges it |
 | 21 | Real-time 2D game | canvas in a web dock, `state` high scores | Fits | A2UI cannot draw it, and need not: the webview runs at frame rate |
-| 22 | Nightly report while Ubiq is closed | `db`, `ai`, email through a connector | Fits after amendment | A space lives in the host process. The OS scheduler runs **`ubiq space run <id> --entry nightly`** headless, so a manifest may name extra entry points (`[entry] main`, `[entry.jobs] nightly`) |
+| 22 | Nightly report while Kubiq is closed | `db`, `ai`, email through a connector | Fits after amendment | A space lives in the host process. The OS scheduler runs **`kubiq space run <id> --entry nightly`** headless, so a manifest may name extra entry points (`[entry] main`, `[entry.jobs] nightly`) |
 | 23 | Team standup board shared live by colleagues | shared state, presence | Does not fit | Multi-user real-time sync is not a space's job. The workaround is a shared store the user already has: a Postgres through `db`, or a git repository through `git` |
-| 24 | Clipboard history / global launcher | OS-wide hotkey, clipboard watching, tray | Does not fit | Hooks outside Ubiq's window belong to the OS. A space reaches the clipboard only on a user action |
-| 25 | Any app-ly application, unchanged | its `contents/` page in a web dock, `shell.js` and the `ubiq:compat/app-ly` adapter | Fits after amendment | `serve.ws`, `ai.stream`, `ai` tools, `clipboard.read`, automation on web docks (§14.1) |
+| 24 | Clipboard history / global launcher | OS-wide hotkey, clipboard watching, tray | Does not fit | Hooks outside Kubiq's window belong to the OS. A space reaches the clipboard only on a user action |
+| 25 | Any app-ly application, unchanged | its `contents/` page in a web dock, `shell.js` and the `kubiq:compat/app-ly` adapter | Fits after amendment | `serve.ws`, `ai.stream`, `ai` tools, `clipboard.read`, automation on web docks (§14.1) |
 
 ### 15.1 Walkthrough — the tabletop game master
 
@@ -907,12 +907,12 @@ on web docks.
   coordinates.
 
 **Where the model stops, on purpose:** multi-user real-time collaboration, OS-wide automation,
-raw sockets and devices, and running while Ubiq itself is not. Each has a workaround through a
+raw sockets and devices, and running while Kubiq itself is not. Each has a workaround through a
 user-held store, `proc` or the headless CLI, and none of them is a reason to widen the runtime.
 
 ## 16. Wire changes
 
-A new **space family** in `crates/ubiq-proto/src/messages.rs`. Its ids are `SpaceId` (the
+A new **space family** in `crates/kubiq-proto/src/messages.rs`. Its ids are `SpaceId` (the
 manifest's reverse-DNS string), `SpaceInstanceId` (ULID) and `DockId` (a script-chosen string,
 unique within an instance). Instance messages route to the window that owns the instance, the way
 pane messages do, and catalogue messages reach every window.
@@ -930,13 +930,13 @@ variant owes a `capability()` classification.
 
 | Phase | What lands | Rough cost |
 |---|---|---|
-| 0 | Decisions (§18). `crates/ubiq-space` with manifest, module loader, oxc moved in, event loop, timers, `state`. `ubiq space run <folder>` headless with `console` and `state` only | 1–2 weeks |
+| 0 | Decisions (§18). `crates/kubiq-space` with manifest, module loader, oxc moved in, event loop, timers, `state`. `kubiq space run <folder>` headless with `console` and `state` only | 1–2 weeks |
 | 1 | `Message::capability()` and the grant store. Host instance worker. Space wire family. Spaces rail mode, `PanelKind::Space`, `layout`. A2UI keyed and incremental (`G250`/`G206`) with actions and two-way input. Commands and menus. Run mode for dev folders | 3–4 weeks |
 | 2 | Reused docks: `term`, `agents` with a chat dock, `fs`, `editor`, `db`. Then `sqlite`, `proc`, `http`, `secrets` with brokering, `connectors`. Consent screen and audit | 3 weeks |
-| 3 | Author mode: file tree, settings and permissions panels, console with REPL, hot reload, `ubiq.d.ts`, templates. `ubiq-space` MCP server with `space_*` and custom tools, `space_inspect` | 2–3 weeks |
+| 3 | Author mode: file tree, settings and permissions panels, console with REPL, hot reload, `kubiq.d.ts`, templates. `kubiq-space` MCP server with `space_*` and custom tools, `space_inspect` | 2–3 weeks |
 | 4 | Web docks: the `space` tenant, manifest CSP and media permissions, bridge RPC. Live documents and the whiteboard template, with partial tool input from the stream-json bridge. `serve`, `events`, `net`, `ai`, `schedule`, `proc.spawn`, `term.snapshot`, drop events | 2–3 weeks |
 | 5 | The browser dock: the Playwright-shaped API, the `webview` backend on macOS and Windows, then the `cdp` backend after a crate spike. `browser_*` MCP tools. The browser playground template | 3 weeks |
-| 6 | Bundles: export, import, verify, manager, fork-to-edit, upgrade consent. Background spaces (the plugin case). Headless entry points. app-ly import: `shell.js`, `ubiq:compat/app-ly`, the CLI and WebDriver compatibility, validated against app-ly's `example/` | 2–3 weeks |
+| 6 | Bundles: export, import, verify, manager, fork-to-edit, upgrade consent. Background spaces (the plugin case). Headless entry points. app-ly import: `shell.js`, `kubiq:compat/app-ly`, the CLI and WebDriver compatibility, validated against app-ly's `example/` | 2–3 weeks |
 | 7 | MCP Apps hosting and `mcp.connect` | 1–2 weeks |
 | 8 | Registry: signed index, publish, browse | Not proposed yet |
 | 9 | Out-of-process runtime behind isol8 | Not proposed yet |
@@ -958,7 +958,7 @@ Each of these would become a row in `tech/decisions.md` when accepted:
    two systems.
 5. **A2UI is the native panel and HTML is the escape hatch.** This amends the plugin proposal's
    `D100` ("never HTML") for spaces. A web dock is allowed because it is CSP-confined and gets no
-   `ubiq.*`, and A2UI stays the default.
+   `kubiq.*`, and A2UI stays the default.
 6. **The script owns the logical layout and the user's arrangement wins on restore.**
 7. **Secrets are references.** `reveal` is a separate high-risk permission, and connector tokens are
    never revealed.
@@ -983,7 +983,7 @@ What it leaves open, for `backlog.md` once accepted:
 - how a remote UI shows a `web` dock when the host is on another machine (the origin is the
   interface's, the bundle is the host's);
 - whether `agents.answer` should exist, or whether a permission prompt should always reach a human;
-- how much of `ubiq.d.ts` is generated from the capability table rather than written by hand;
+- how much of `kubiq.d.ts` is generated from the capability table rather than written by hand;
 - which crate drives the `cdp` backend, and whether Linux gets a `webview` backend when
   `gpui-wry`'s Unix path lands;
 - whether `term.snapshot` should work for a pane no window is drawing, which would need a terminal

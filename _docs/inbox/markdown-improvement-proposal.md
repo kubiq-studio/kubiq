@@ -50,14 +50,14 @@ Measured from the current rendering:
 ## 2. Why it cannot be fixed in place
 
 The preview is one `gpui_component::text::TextView` over the entire file
-([`markdown.rs:376`](../../crates/ubiq/src/ui/viewer/markdown.rs)). Its `scroll_offset` is
+([`markdown.rs:376`](../../crates/kubiq/src/ui/viewer/markdown.rs)). Its `scroll_offset` is
 `pub(super)`; it exposes no per-block layout, no heading id, no rendered-to-source mapping. Every
 defect below is that same missing fact wearing a different hat.
 
 | Symptom | Actual cause |
 |---|---|
-| Minimap marks sit at the wrong height | `structure_marks` computes `fraction` as **byte offset ÷ body length** ([`markdown.rs:767-783`](../../crates/ubiq/src/ui/viewer/markdown.rs)). A code block and a heading of equal byte length claim equal screen height. Nothing measures anything. |
-| Split scroll sync drifts | `sync_markdown_split_scroll` ([`viewer/mod.rs:482`](../../crates/ubiq/src/ui/viewer/mod.rs)) re-reads both sides' scroll fractions each frame and infers who moved by which moved further, remembering last frame in `md_split_scroll` ([`state/editor.rs:542`](../../crates/ubiq/src/state/editor.rs)). It is a proportional guess between two differently-shaped documents. |
+| Minimap marks sit at the wrong height | `structure_marks` computes `fraction` as **byte offset ÷ body length** ([`markdown.rs:767-783`](../../crates/kubiq/src/ui/viewer/markdown.rs)). A code block and a heading of equal byte length claim equal screen height. Nothing measures anything. |
+| Split scroll sync drifts | `sync_markdown_split_scroll` ([`viewer/mod.rs:482`](../../crates/kubiq/src/ui/viewer/mod.rs)) re-reads both sides' scroll fractions each frame and infers who moved by which moved further, remembering last frame in `md_split_scroll` ([`state/editor.rs:542`](../../crates/kubiq/src/state/editor.rs)). It is a proportional guess between two differently-shaped documents. |
 | `G138`, `G296` — anchors dead in preview | No heading id or block index to scroll to. Loci resolve against the *source* via `state/nav.rs::line_of_slug`, so a preview-only layout drops them. |
 | `G91` — preview does not scroll | The document grows to natural height inside an external `ScrollHandle`, which exists only because the component's own offset is unreachable (`markdown.rs:301-310`). |
 | Typography controls do nothing | One `TextViewStyle` for the whole document, so per-heading-level line height is unreachable and `MdReading::text_shade` never reaches the prose (`markdown.rs:190-217`). **Part III is blocked entirely on this row.** |
@@ -83,7 +83,7 @@ a sum-tree of measured heights. It gives us, for free, the three primitives the 
 - `scroll_to_reveal_item(ix)`, `splice(old_range, count)`, `remeasure_items(range)`.
 
 We write no text renderer. The block boundaries already exist: `walks()`
-([`markdown.rs:824`](../../crates/ubiq/src/ui/viewer/markdown.rs)) already walks root-level mdast
+([`markdown.rs:824`](../../crates/kubiq/src/ui/viewer/markdown.rs)) already walks root-level mdast
 children to build the minimap and navigator marks. Today those walks produce approximate fractions;
 under the block list they produce row identities and source ranges.
 
@@ -215,7 +215,7 @@ minimap either way.
 ## 10. Licensing note
 
 Zed's `markdown` crate is on disk at our pinned `gpui` revision and is the best prior art for the
-native phase. It is **GPL-3.0**. Ubiq Studio is proprietary. The design may be read and
+native phase. It is **GPL-3.0**. Kubiq Studio is proprietary. The design may be read and
 reimplemented — a flat `Vec<(Range<usize>, Event)>` event stream with a bidirectional pixel↔source
 index is an idea, and reconstructing it from `pulldown-cmark`'s own API is clean-room. The code may
 not be copied. Anyone working the native phase needs to know this before opening the file.

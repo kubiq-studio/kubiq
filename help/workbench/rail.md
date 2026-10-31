@@ -17,7 +17,7 @@ are looking at. Exactly one mode is active at a time, drawn in the accent colour
 
 | Part | What it does |
 |---|---|
-| The mark | The Ubiq logo above the rail, in the open project's colour; it tells you which project the window is on |
+| The mark | The Kubiq logo above the rail, in the open project's colour; it tells you which project the window is on |
 | **APP** modes | **Control** and **All Teams**; they answer for the whole window and work with no project open |
 | **PROJECT** modes | **IDE**, **DB**, **Git**, **Agents**, **Teams**, **KB** and **Tasks**; each needs a project, and says so until one is open |
 | Project badges | One badge per project in this window, at the foot of the rail; click one to switch to that project |

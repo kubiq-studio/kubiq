@@ -3,28 +3,28 @@ id: inbox-policy-registry
 title: Proposal — sandbox policy registry, selector and editor
 kind: proposal
 status: proposal
-summary: Every confined run gets the same policy because `compose_run` hardcodes an empty layer name — this proposes a Ubiq policy that is an unmodified isol8 layer, a local registry laid out exactly as isol8's own registry feature lays one out (Ubiq writing the index isol8 leaves to CI), a resolution chain from launch pick to definition to host default, a selector in the agent form, an editor with a form mode and a raw TOML mode over one buffer, a dry-run preview, and the path to isol8's online registries later.
-read_when: you are making two agents run under different sandbox policies, editing or adding an isol8 layer from Ubiq, or deciding how Ubiq consumes an isol8 registry
+summary: Every confined run gets the same policy because `compose_run` hardcodes an empty layer name — this proposes a Kubiq policy that is an unmodified isol8 layer, a local registry laid out exactly as isol8's own registry feature lays one out (Kubiq writing the index isol8 leaves to CI), a resolution chain from launch pick to definition to host default, a selector in the agent form, an editor with a form mode and a raw TOML mode over one buffer, a dry-run preview, and the path to isol8's online registries later.
+read_when: you are making two agents run under different sandbox policies, editing or adding an isol8 layer from Kubiq, or deciding how Kubiq consumes an isol8 registry
 updated: 2026-10-16
 depends_on: [inbox-isolation, inbox-isol8-upstream, tech-agent-manager, tech-architecture, tech-transport, tech-ui, feat-workbench, feat-workbench-agents, backlog]
 ---
 
 # Proposal — sandbox policy registry, selector and editor
 
-**Every confined agent runs under one policy, and nothing in Ubiq can name another.** The sequel to
+**Every confined agent runs under one policy, and nothing in Kubiq can name another.** The sequel to
 the isolation proposal: that one settled *whose home* a confined run gets; this one settles *what it
 may reach*, per agent.
 
-> A Ubiq policy is an isol8 layer, byte for byte. Ubiq adds a place to keep layers, a way to pick
+> A Kubiq policy is an isol8 layer, byte for byte. Kubiq adds a place to keep layers, a way to pick
 > one, and a screen to write one — never a schema of its own.
 
 ## 1. Where it stands
 
-`Agents::compose_run` in `crates/ubiq-host/src/agent.rs` overrides the resolved spec's isolation
+`Agents::compose_run` in `crates/kubiq-host/src/agent.rs` overrides the resolved spec's isolation
 with `Isolation::Sandboxed(String::new())` whenever the host's `isolate_agents` is on. The empty
 payload means `isolate::plan` in `crates/agent-manager/src/isolate.rs` adds no layer of its own: the
 run gets isol8's `base` and system-runtime layers, the fifteen `DEV_LAYERS`, whatever `agents/*`
-layer auto-selects on the harness executable, and the grants Ubiq computes (project folder, run
+layer auto-selects on the harness executable, and the grants Kubiq computes (project folder, run
 dir, `PATH` dirs, `HostSettings.extra_grants`, a launch's `AgentPicks.grants`).
 
 The mechanism for more already exists and is unused:
@@ -33,9 +33,9 @@ The mechanism for more already exists and is unused:
 |---|---|---|
 | `Isolation::Sandboxed(String)` | A non-empty payload is pushed onto `default_profiles` after `DEV_LAYERS` | `crates/agent-manager/src/spec.rs`, `isolate::plan` |
 | `ProfileIsolate` | `isolate = false \| "<layer>"` in a definition's `profile.toml`; resolved by the library | `crates/agent-manager/src/profile.rs`, `resolve.rs` |
-| `save_definition_replacing` | Keeps a hand-written `isolate` across a save from the form | `crates/ubiq-host/src/agent.rs` |
+| `save_definition_replacing` | Keeps a hand-written `isolate` across a save from the form | `crates/kubiq-host/src/agent.rs` |
 | `<root>/isol8/profiles` | Already a `profile_paths` entry for every run: a TOML dropped there is a selectable layer | `isolate::plan` |
-| `IsolateSettings.profile` | The library's own CLI default layer; Ubiq never reads it | `crates/agent-manager/src/settings.rs` |
+| `IsolateSettings.profile` | The library's own CLI default layer; Kubiq never reads it | `crates/agent-manager/src/settings.rs` |
 
 Then `compose_run` throws the resolved isolation away. The definition's `isolate` is resolved and
 overwritten; `AgentDefinition` on the wire has no field for it (`G89`); `AgentPicks` documents
@@ -66,13 +66,13 @@ silently ignored key.
 | `[[policies]]` | `Policy {filter, paths, macos, windows}` | Conditional blocks inside one layer | Folded by `filter::apply_policies` |
 
 Placeholders: `~` and `#HOME` expand against the *effective* home; `%VAR%` on Windows. A layer's id
-is its path relative to the profile root, extension dropped — `profiles/ubiq/review.toml` under a
-root is the layer `ubiq/review`. `LayerRegistry::load` reads builtins (74 embedded), then the user's
+is its path relative to the profile root, extension dropped — `profiles/kubiq/review.toml` under a
+root is the layer `kubiq/review`. `LayerRegistry::load` reads builtins (74 embedded), then the user's
 `~/.config/isol8/profiles` (`LayerSource::UserConfig`), then each `profile_paths` entry in order
 (`LayerSource::ProfilePath`); a later same-named layer replaces an earlier one.
 
 ```toml
-# ubiq/review — read the repo, write nothing outside the run dir
+# kubiq/review — read the repo, write nothing outside the run dir
 requires = ["integrations/git"]
 paths = [
   { path = "~/.npmrc", access = "none", match = "literal" },
@@ -105,36 +105,36 @@ isol8's `registry` feature (`refs/isol8/crates/isol8-registry/src/lib.rs`, desig
 `refs/isol8/_docs/registry.md`)
 already defines a registry: a directory with `registry.toml` (`RegistryManifest`, with a
 `TrustConfig`), a generated `index.json` (`RegistryIndex` of `IndexEntry`), and artifact files.
-`DirSource::open` reads one. The local Ubiq registry is that layout and nothing more:
+`DirSource::open` reads one. The local Kubiq registry is that layout and nothing more:
 
 ```text
 <config root>/isol8/registries/local/
   registry.toml          name = "local", [trust] level = "local"
-  index.json             regenerated by Ubiq on every save
-  profiles/ubiq/<name>.toml
+  index.json             regenerated by Kubiq on every save
+  profiles/kubiq/<name>.toml
 <config root>/projects/<project id>/isol8/registries/local/
   registry.toml          name = "project", [trust] level = "local"
   index.json
-  profiles/ubiq/<name>.toml
+  profiles/kubiq/<name>.toml
 ```
 
-- **The layer file is a plain `Profile`.** No Ubiq key inside it — `deny_unknown_fields` would
+- **The layer file is a plain `Profile`.** No Kubiq key inside it — `deny_unknown_fields` would
   reject one anyway, and the file must stay loadable by a bare `isol8 --profile-path`.
 - **Metadata lives in the index.** `IndexEntry` carries `id`, `kind = "profile"`, `os`, `file`,
   `summary`, `tags`, `requires` and `sha256`. That is the whole record: the id is the name shown, the
   summary is the description. Trust is per registry (`RegistryManifest.trust`), not per entry. There is
-  no `title` field and Ubiq adds none — `IndexEntry` is not `deny_unknown_fields`, so an extra key
+  no `title` field and Kubiq adds none — `IndexEntry` is not `deny_unknown_fields`, so an extra key
   would load, but isol8 would never write it back, and the index must round-trip through isol8's own
   tools.
-- **Ubiq is the index generator.** isol8 expects `index.json` to come out of a registry's CI. For the
-  local registry Ubiq is that CI: every save rewrites the index from the files, hashing each with
+- **Kubiq is the index generator.** isol8 expects `index.json` to come out of a registry's CI. For the
+  local registry Kubiq is that CI: every save rewrites the index from the files, hashing each with
   `DirSource::hash_file`. A hand edit is allowed; `ListPolicies` runs `verify_content_hashes` and
   regenerates on a mismatch, so the index is derived state and never the source of truth.
-- **The `ubiq/` namespace is a directory.** Because a layer id is the relative path, every Ubiq
-  policy is `ubiq/<name>` for free, never collides with a builtin (`base`, `toolchains/*`,
+- **The `kubiq/` namespace is a directory.** Because a layer id is the relative path, every Kubiq
+  policy is `kubiq/<name>` for free, never collides with a builtin (`base`, `toolchains/*`,
   `integrations/*`, `agents/*`, `apps/*`), and can never shadow one. The editor refuses an id outside
-  `ubiq/` — shadowing a builtin is the one thing a profile path permits and a registry editor must not.
-- **Project scope shadows global.** A project's `ubiq/review` replaces the global one inside that
+  `kubiq/` — shadowing a builtin is the one thing a profile path permits and a registry editor must not.
+- **Project scope shadows global.** A project's `kubiq/review` replaces the global one inside that
   project only — the precedent `ScopedProfileStore` sets for definitions and `OverlayRegistry` sets
   for the MCP and skill catalog. Removing a project's directory takes its policies with it.
 - **`<root>/isol8/profiles` stays** as the unindexed drop folder `plan` already loads; the registry
@@ -142,7 +142,7 @@ already defines a registry: a directory with `registry.toml` (`RegistryManifest`
 
 agent-manager's `_docs` has no policy-registry plan: its `registry` module is the MCP/skill catalog
 (`Registry`, `CatalogStore`, `FsRegistry`, `OverlayRegistry`). The registry design here is isol8's;
-the catalog is the Ubiq-side model for scoping and overlay only.
+the catalog is the Kubiq-side model for scoping and overlay only.
 
 ## 4. Logic
 
@@ -164,7 +164,7 @@ pub enum PolicyChoice {
     Default,
     /// Unconfined, for this run only.
     Off,
-    /// A layer id: `ubiq/review`, `agents/claude-code`, a registry's `vendor/x`.
+    /// A layer id: `kubiq/review`, `agents/claude-code`, a registry's `vendor/x`.
     Named(String),
 }
 ```
@@ -172,13 +172,13 @@ pub enum PolicyChoice {
 `compose_run` stops hardcoding the payload and asks one function, `Agents::policy_for`, which walks
 the table and returns an `Isolation`. Rank 2 is read from the library's resolved spec (it already
 honours `ProfileIsolate`), so the change is "stop overwriting it" plus ranks 1 and 3. The library's
-own `IsolateSettings.profile` stays the CLI's concern; Ubiq passes `Settings::default()` and keeps
+own `IsolateSettings.profile` stays the CLI's concern; Kubiq passes `Settings::default()` and keeps
 doing so.
 
 `HostSettings` gains `default_policy: Option<String>`; `HOST_SETTINGS_SCHEMA` goes from 23 to 24,
 `#[serde(default)]`, so an old file reads as "no default" and nothing changes for anyone who never
 opens the screen. The resolved id and the layer file's sha256 go on `ConversationRecord`
-(`crates/ubiq-host/src/conversation_record.rs`), so a revive after a restart reruns under the same
+(`crates/kubiq-host/src/conversation_record.rs`), so a revive after a restart reruns under the same
 policy and can say so when the file changed underneath — the same gap `G409` records for grants, and
 the same fix.
 
@@ -195,7 +195,7 @@ those two, and the host fills it in this order (later wins on a name, so later i
 3. the global local registry
 4. the project's local registry, when the run has a project
 
-Because every policy id is under `ubiq/` and online ids are checked at install, the order matters
+Because every policy id is under `kubiq/` and online ids are checked at install, the order matters
 only for project-over-global, which is exactly the shadowing wanted.
 
 Two of the format's properties from section 2 become rules here:
@@ -226,8 +226,8 @@ serde_json — and buys `DirSource`, `RegistryIndex`, `RegistryManifest`, `Trust
 | `validate(text, stack)` | See 4.4 |
 | `preview(...)` | See 4.4 |
 
-`ubiq-host` already has `write_atomic` (`crates/ubiq-host/src/atomic.rs`); the library writes its own
-files the way its profile store does. Ubiq never names a path inside the registry except its root,
+`kubiq-host` already has `write_atomic` (`crates/kubiq-host/src/atomic.rs`); the library writes its own
+files the way its profile store does. Kubiq never names a path inside the registry except its root,
 the same posture as the definitions directory.
 
 ### 4.4 Validation and preview
@@ -235,7 +235,7 @@ the same posture as the definitions directory.
 Validation, in order, each failure a `PolicyError` with the message isol8 produced:
 
 1. Parse as `isol8::profile::Profile` — serde names the bad key and the line.
-2. Id is `ubiq/<name>` with a name a file can carry.
+2. Id is `kubiq/<name>` with a name a file can carry.
 3. No `filter.executables`.
 4. Load a `LayerRegistry` over the would-be `profile_paths` with the draft in place, then
    `resolve_requires` on it — a missing layer or a cycle fails here.
@@ -292,7 +292,7 @@ today's policy and never sees the word "layer".
 
 `ui/new_agent.rs` `body` draws both the launch form and the definition form, so one row serves both:
 a `Picker` (`PickerStyle` of its sibling rows, through `picker_row`) labelled **Sandbox policy**,
-items grouped by `separators` — *Default (…)* naming what it resolves to, *Off*, then Ubiq
+items grouped by `separators` — *Default (…)* naming what it resolves to, *Off*, then Kubiq
 policies, then registry policies, then builtins worth picking (`agents/*` excluded: they auto-apply).
 Each item's `details` is the summary; a broken one is `disabled`. With `isolate_agents` off the row is
 disabled with the tooltip `policies_button` already uses.
@@ -305,7 +305,7 @@ means one thing on screen.
 ```text
  Agent       [ claude-code     v]   Account [ work      v]
  Model       [ sonnet          v]   Mode    [ default   v]
- Sandbox     [ ubiq/review     v]   Extra folders · 2
+ Sandbox     [ kubiq/review     v]   Extra folders · 2
 ```
 
 ### 5.2 The Policies list in Isolation settings
@@ -318,8 +318,8 @@ block drawn with `settings_split` — list left, detail right — the shape `age
 ```text
  Policies                                   [+ New]
  ┌──────────────────────┬──────────────────────────────────────┐
- │ ● ubiq/review  local │ ubiq/review              [Duplicate] │
- │ ● ubiq/web     proj  │ Read the repo, write nothing else.   │
+ │ ● kubiq/review  local │ kubiq/review              [Duplicate] │
+ │ ● kubiq/web     proj  │ Read the repo, write nothing else.   │
  │ ○ vendor/ci   comm.  │ requires  integrations/git           │
  │ ─ builtins ───────── │ [ Form | TOML | Preview ]            │
  │   base               │ ...                                  │
@@ -329,7 +329,7 @@ block drawn with `settings_split` — list left, detail right — the shape `age
 
 Rows carry a `status_dot` (ok, broken) and a `state_chip` for the source. Builtins, drop-ins and
 registry entries are read-only and offer **Duplicate to edit**, which is `ClonePolicy` into
-`ubiq/<name>`. Delete goes through `confirm_modal` with `danger: true`; a refusal is `error_banner`,
+`kubiq/<name>`. Delete goes through `confirm_modal` with `danger: true`; a refusal is `error_banner`,
 as for definitions. When the detail outgrows the pane it opens in `modal_sized`.
 
 ### 5.3 The editor: one buffer, two modes
@@ -359,15 +359,15 @@ denial; it explains nothing.
 
 ## 6. Online registries, later
 
-isol8's design, adopted unchanged; Ubiq adds a screen and a place to cache.
+isol8's design, adopted unchanged; Kubiq adds a screen and a place to cache.
 
 - **Order of backends.** `RegistrySpec::Path` (a folder or checkout the user names — works today),
-  then `RegistrySpec::Git` (`update_registry` clones into `<cache>/<name>/<sha>/`; Ubiq passes
+  then `RegistrySpec::Git` (`update_registry` clones into `<cache>/<name>/<sha>/`; Kubiq passes
   `<config root>/isol8/cache` as the cache root so nothing lands in `~/.cache/isol8`), then
   `RegistrySpec::Http` once isol8 implements it (`refs/isol8/_docs/inbox/evo-repo.md`: static tarball plus
   index, `registry:ns/id@version`).
-- **Declaration.** A `[registries.<name>]` table in Ubiq's own settings, parsed by
-  `parse_registry_spec`, not isol8's config file — Ubiq never reads `~/.config/isol8/isol8.toml`.
+- **Declaration.** A `[registries.<name>]` table in Kubiq's own settings, parsed by
+  `parse_registry_spec`, not isol8's config file — Kubiq never reads `~/.config/isol8/isol8.toml`.
 - **Pinning.** An `isol8.lock` (`Lockfile`, `LockRegistry`, `LockEntry`) under
   `<config root>/isol8/`. Runs read only the pinned cache through `open_offline`; nothing fetches at
   spawn. `verify_lock_against_disk` runs at list time.
@@ -379,7 +379,7 @@ isol8's design, adopted unchanged; Ubiq adds a screen and a place to cache.
 - **Trust.** `TrustLevel` per registry, from the manifest or the config override. No signing exists
   upstream; until it does, a git pin is the integrity guarantee and the UI says "pinned", never
   "verified".
-- **Editing.** Registry entries are read-only; **Duplicate to edit** copies one into `ubiq/`, and
+- **Editing.** Registry entries are read-only; **Duplicate to edit** copies one into `kubiq/`, and
   `requires` lets a local policy extend a registry one without copying it.
 
 ## 7. What isol8 owes upstream
@@ -403,7 +403,7 @@ Each stage ships alone and leaves the tree consistent.
    `HostSettings.default_policy` (schema 24), `AgentDefinition.policy` on the wire, and the
    **Sandbox policy** picker in the definition form over builtins and the drop-in folder. No editor.
 2. **The local registry.** `policy.rs`, the `registry` feature, the five messages, the Policies
-   list with the TOML mode and validation. The picker lists `ubiq/*`.
+   list with the TOML mode and validation. The picker lists `kubiq/*`.
 3. **Preview.** `PreviewPolicy` through `isolate::describe`, the Preview tab.
 4. **Form mode.** `PolicyDraft`, the `toml_edit` patch, the lossless flag.
 5. **Launch pick and provenance.** `AgentPicks.policy`, `StartConversation.policy`, the footer chip,
@@ -425,21 +425,21 @@ Each stage ships alone and leaves the tree consistent.
 | Isolation model | `crates/agent-manager/src/spec.rs`, `profile.rs`, `resolve.rs` | `Isolation`, `ProfileIsolate`, `ScopedProfileStore` |
 | Catalog precedent | `crates/agent-manager/src/registry/` | `Registry`, `CatalogStore`, `FsRegistry`, `OverlayRegistry` |
 | Dependency | `crates/agent-manager/Cargo.toml` | the `isol8` entry |
-| Host composition | `crates/ubiq-host/src/agent.rs` | `Agents`, `compose_run`, `isolate_options`, `set_isolate`, `save_definition_replacing` |
-| Revive record | `crates/ubiq-host/src/conversation_record.rs` | `ConversationRecord` |
-| Atomic write | `crates/ubiq-host/src/atomic.rs` | `write_atomic` |
-| Wire | `crates/ubiq-proto/src/messages.rs` | `AgentPicks`, `StartConversation`, `SpawnWorkspace`, `AgentDefinition`, the `*AgentDefinition*` family |
-| Host settings | `crates/ubiq-proto/src/settings.rs` | `HostSettings`, `HOST_SETTINGS_SCHEMA` |
-| Settings screen | `crates/ubiq/src/ui/settings.rs`, `app/settings.rs` | `isolation`, `agent_definitions`, `definition_form`, `error_banner`, `toggle_isolate_agents`, `remember_host_settings` |
-| Agent form | `crates/ubiq/src/ui/new_agent.rs`, `state/new_agent.rs` | `body`, `picker_row`, `policies_button`, `policies_modal`, `NewAgentForm` |
-| Kit | `crates/ubiq/src/ui/kit/` | `Picker`, `PickerStyle`, `MultiPicker`, `settings_split`, `setting_row`, `modal_sized`, `confirm_modal`, `tab_strip`, `check_box`, `removable_tag`, `state_chip`, `status_dot`, `choice_pill` |
-| TOML highlighting | `crates/ubiq/src/ui/editor.rs` | `highlighter_language` |
+| Host composition | `crates/kubiq-host/src/agent.rs` | `Agents`, `compose_run`, `isolate_options`, `set_isolate`, `save_definition_replacing` |
+| Revive record | `crates/kubiq-host/src/conversation_record.rs` | `ConversationRecord` |
+| Atomic write | `crates/kubiq-host/src/atomic.rs` | `write_atomic` |
+| Wire | `crates/kubiq-proto/src/messages.rs` | `AgentPicks`, `StartConversation`, `SpawnWorkspace`, `AgentDefinition`, the `*AgentDefinition*` family |
+| Host settings | `crates/kubiq-proto/src/settings.rs` | `HostSettings`, `HOST_SETTINGS_SCHEMA` |
+| Settings screen | `crates/kubiq/src/ui/settings.rs`, `app/settings.rs` | `isolation`, `agent_definitions`, `definition_form`, `error_banner`, `toggle_isolate_agents`, `remember_host_settings` |
+| Agent form | `crates/kubiq/src/ui/new_agent.rs`, `state/new_agent.rs` | `body`, `picker_row`, `policies_button`, `policies_modal`, `NewAgentForm` |
+| Kit | `crates/kubiq/src/ui/kit/` | `Picker`, `PickerStyle`, `MultiPicker`, `settings_split`, `setting_row`, `modal_sized`, `confirm_modal`, `tab_strip`, `check_box`, `removable_tag`, `state_chip`, `status_dot`, `choice_pill` |
+| TOML highlighting | `crates/kubiq/src/ui/editor.rs` | `highlighter_language` |
 
 ## 10. What this asks to be decided
 
 - **May a launch pick `Off` while the master switch is on?** Proposed: yes, visibly — the footer chip
   goes to the warning group. A user who can turn the switch off can already do this for every agent.
-- **May a Ubiq policy shadow a builtin?** Proposed: no; the `ubiq/` namespace makes it impossible,
+- **May a Kubiq policy shadow a builtin?** Proposed: no; the `kubiq/` namespace makes it impossible,
   and narrowing a builtin is done with a `none` grant in a policy that `requires` it.
 - **Should the definition form show builtins at all?** Proposed: only `apps/*` and the
   `integrations/*` not in `BROKEN_LAYERS`; the rest are already in every run or auto-apply.
@@ -447,8 +447,8 @@ Each stage ships alone and leaves the tree consistent.
   breaks the round-trip through isol8's tools.
 - **Does a changed policy file invalidate a revive?** Proposed: no; the revive runs under the current
   file and the chip's tooltip notes the sha changed.
-- **Should Ubiq load the user's `~/.config/isol8/profiles`?** isol8 always does, so a layer there
-  with an `executables` filter confines Ubiq runs today. Proposed: list those layers as a read-only
+- **Should Kubiq load the user's `~/.config/isol8/profiles`?** isol8 always does, so a layer there
+  with an `executables` filter confines Kubiq runs today. Proposed: list those layers as a read-only
   source with a warning on auto-selectable ones, and ask upstream for a switch (section 7).
 
 ## Related docs
@@ -456,7 +456,7 @@ Each stage ships alone and leaves the tree consistent.
 - [`./isolation-proposal.md`](./isolation-proposal.md) — the prequel: homes, the Isolation section,
   the footer chip.
 - [`./isol8-upstream.md`](./isol8-upstream.md) — where section 7's asks get their evidence.
-- [`../tech/agent-manager.md`](../tech/agent-manager.md) — the boundary: the library owns isol8, Ubiq
+- [`../tech/agent-manager.md`](../tech/agent-manager.md) — the boundary: the library owns isol8, Kubiq
   names no layer path.
 - [`../tech/architecture.md`](../tech/architecture.md) — why the UI holds text and never a file.
 - [`../tech/transport-contract.md`](../tech/transport-contract.md) — where the new messages land.

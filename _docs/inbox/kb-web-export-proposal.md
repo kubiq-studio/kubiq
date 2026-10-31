@@ -4,7 +4,7 @@ title: Proposal — KB mode and local web export
 kind: proposal
 status: proposal
 summary: Fills the empty KB rail with a per-project curation of marked docs, a native explorer/reader/assistant panel, and an on-demand local web server — one process, one port, projects and shares told apart by URL segment — that serves the curated knowledge base or the whole project as a read-only, searchable site.
-read_when: you are building the KB rail mode, or deciding whether and how Ubiq exposes a project over HTTP
+read_when: you are building the KB rail mode, or deciding whether and how Kubiq exposes a project over HTTP
 updated: 2026-09-03
 depends_on: [tech-architecture, tech-structure, tech-transport, feat-workbench, feat-chat, wip-indexing, inbox-omni]
 ---
@@ -13,11 +13,11 @@ depends_on: [tech-architecture, tech-structure, tech-transport, feat-workbench, 
 
 `refs/markdown-web` is the model this borrows from directly: a single Go binary pointed at a
 directory, serving it live over HTTP with a filesystem-mirrored URL scheme, a `notify`-driven
-live-reload, and no build step. It solves one project at a time. Ubiq's version has to solve one
+live-reload, and no build step. It solves one project at a time. Kubiq's version has to solve one
 process serving several — a user with three projects open should not get three ports — so the
 routing scheme borrows the shape and drops the one-directory-per-process assumption.
 
-`RailMode::Kb` already exists — `crates/ubiq/src/state/workbench.rs` gives it a label, "KB", a note,
+`RailMode::Kb` already exists — `crates/kubiq/src/state/workbench.rs` gives it a label, "KB", a note,
 "Notes and documents the agents can read," and a place in the `PROJECT` group — and draws as an empty
 page today through `dock/mod.rs`'s catch-all fallback. That emptiness is half of `G11`. This proposes
 what fills it, and a second capability that rides beside it because the rail is its natural home:
@@ -28,7 +28,7 @@ serving that same content, or the whole project, over the network.
 **Nothing marks a file or folder as knowledge base content.** No curation model, no store for one,
 exists anywhere in the tree.
 
-**Ubiq renders markdown natively, not to HTML.** `TextView::markdown` from `gpui-component` draws
+**Kubiq renders markdown natively, not to HTML.** `TextView::markdown` from `gpui-component` draws
 straight to the desktop canvas in three places today (`inbox-markdown`'s own accounting); there is no
 markdown-to-HTML pipeline in the codebase. A web export needs one, and inherits `inbox-markdown`'s
 frontmatter-stripping convention rather than reinventing it.
@@ -42,11 +42,11 @@ rather than introducing an async web framework for a read-only file server.
 ## 2. Two things, one rail
 
 **Knowledge base mode (native).** A per-project curation — folders and files marked "doc" — browsable
-and searchable inside Ubiq, three regions: left an explorer scoped to what is marked, titled from the
+and searchable inside Kubiq, three regions: left an explorer scoped to what is marked, titled from the
 symbol index's heading extraction ([`wip-indexing`](../wip/indexing.md) §4.3) where
 available; centre the same native markdown viewer `inbox-markdown` already establishes, not a second
 renderer; right an assistant — a `ConversationView`
-(`crates/ubiq/src/ui/conversation/mod.rs`) scoped to the knowledge base's content rather than the
+(`crates/kubiq/src/ui/conversation/mod.rs`) scoped to the knowledge base's content rather than the
 fixture it draws today. The assistant panel is designed here; it is not buildable until the chat
 transport family lands (`G10`, `feat-chat`), and this proposal says so rather than assuming it solved.
 
@@ -66,7 +66,7 @@ Marking a folder means everything under it, the same recursive shape a `.gitigno
 inverted.
 
 **Storage:** a new host-owned file, `kb.toml`, a sibling to `tasks.toml` and `view.toml` under
-`projects/<ulid>/`, behind the same store trait `crates/ubiq-host/src/store/` already gives those two
+`projects/<ulid>/`, behind the same store trait `crates/kubiq-host/src/store/` already gives those two
 — not the interface's `ui/` workarea, which `tech-structure` reserves for what the user would not
 miss, and a curation list is exactly what they would. It holds a set of project-relative paths and
 nothing else; a title is never stored redundantly, it is read at display time from `wip-indexing`'s
@@ -86,7 +86,7 @@ principle the main explorer already uses.
 
 **One process for the whole application, one port — never one per project, never one per export.**
 Started the first time any window activates an export, from any project; stopped when the last active
-export is deactivated, so an idle Ubiq holds no listening socket nobody asked for. Implementation is
+export is deactivated, so an idle Kubiq holds no listening socket nobody asked for. Implementation is
 `tiny_http`, reused from its existing precedent rather than adding an async framework for a read-only
 file server.
 
@@ -110,18 +110,18 @@ stacking two exports of one project under two slugs.
 - **Knowledge-base only** — the marked subset, the direct analogue of pointing `refs/markdown-web` at
   a curated folder.
 - **Full project** — everything the project's own ignore rules allow (never `target/`, never
-  `node_modules/`), with source files rendered using the same `tree-sitter` grammars Ubiq's editor
-  already highlights with, so a browsed source file's colours are the code Ubiq already knows, not a
+  `node_modules/`), with source files rendered using the same `tree-sitter` grammars Kubiq's editor
+  already highlights with, so a browsed source file's colours are the code Kubiq already knows, not a
   second highlighter learning the same languages again. Symbol definitions become link targets, per
   `wip-indexing` §4.3's stated ceiling — a definition is a destination, a use site is not yet.
 
-**Rendering:** `pulldown-cmark` becomes a direct dependency of `ubiq-host`. It is already in the
+**Rendering:** `pulldown-cmark` becomes a direct dependency of `kubiq-host`. It is already in the
 workspace's dependency graph — pulled in by the interface crate through `gpui-component`'s diagram
-renderer — so this is a new edge from `ubiq-host`, not a new crate for the workspace to audit.
+renderer — so this is a new edge from `kubiq-host`, not a new crate for the workspace to audit.
 
 **Search:** the export's search box is answered server-side by `wip-indexing`'s full-text index
 (§4.2 there), scoped to whatever the export covers — never a client-side JSON dump rebuilt per
-request the way `refs/markdown-web` does it, because Ubiq already keeps a persisted index and a JSON
+request the way `refs/markdown-web` does it, because Kubiq already keeps a persisted index and a JSON
 dump would duplicate it.
 
 **Live update:** one SSE endpoint per export, fed by `wip-indexing`'s `ProjectChanged` push — a

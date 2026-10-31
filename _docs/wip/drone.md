@@ -7,7 +7,7 @@ summary: The working note for the drone's tenth phase — the drone as a fifth M
 read_when: you are picking up the drone work — building phase 10, or closing one of the gaps the built phases left
 updated: 2026-10-29
 verified: 2026-10-29
-code_anchors: [crates/ubiq-host/src/mcp/server.rs, crates/ubiq-host/src/mcp/catalogue.rs, crates/ubiq-host/src/mcp/tools.rs, crates/ubiq-host/src/mcp/registry.rs, crates/ubiq-host/Cargo.toml, crates/ubiq-proto/src/carrier.rs, crates/ubiq-drone/src/lib.rs, crates/ubiq-proto/src/messages.rs]
+code_anchors: [crates/kubiq-host/src/mcp/server.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/tools.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-proto/src/carrier.rs, crates/kubiq-drone/src/lib.rs, crates/kubiq-proto/src/messages.rs]
 depends_on: [feat-drone, tech-transport, tech-architecture, inbox-drone-runtime]
 ---
 
@@ -25,13 +25,13 @@ most of.
 
 ## Phase 10 — the drone as a tool the agent can reach
 
-**The contract has moved on from the design below; the contract and the drone's half are built.** The drone answers `RemoteToolCall` (`crates/ubiq-drone/src/tools.rs`, on a thread per call, advertising `tools`): path safety from `files::path`, atomic writes, grep via the probed `rg`/`ag`/`grep`, `Run` through `sh -c` (pwsh, powershell, then `cmd /C` on Windows) with a process-group kill at the timeout. Roots are the catalogue's records by name; none is read-only yet, so `read_only` is always `false`. `D226`
+**The contract has moved on from the design below; the contract and the drone's half are built.** The drone answers `RemoteToolCall` (`crates/kubiq-drone/src/tools.rs`, on a thread per call, advertising `tools`): path safety from `files::path`, atomic writes, grep via the probed `rg`/`ag`/`grep`, `Run` through `sh -c` (pwsh, powershell, then `cmd /C` on Windows) with a process-group kill at the timeout. Roots are the catalogue's records by name; none is read-only yet, so `read_only` is always `false`. `D226`
 replaces the façade over the file family and the `RunCommand`/`CommandFinished` pair with one
 remote-tool family the window relays — `RemoteToolCall`/`RemoteToolResult` over a `RemoteOp`,
 capability `tools` — and `StartConversation.remote` binds an agent to a drone; a tunnel channel for
 forwarded ports runs beside the bus, not on it (`D227`). Both are in
 [`../tech/transport-contract.md`](../tech/transport-contract.md). The host's half is built too: the
-`ubiq-remote` server (`crates/ubiq-host/src/mcp/remote.rs`) and the coordinator's binding of
+`kubiq-remote` server (`crates/kubiq-host/src/mcp/remote.rs`) and the coordinator's binding of
 `StartConversation.remote`; the window's relay is too (`G461`, `G462`). A project a drone serves
 wholly, with no local folder, takes agents the same way: the window routes the start to the row's
 owner and binds it to the serving drone, and the host runs the harness in the project's
@@ -46,13 +46,13 @@ through MCP. A project served wholly by a drone, with no local folder beside it,
 and is not designed here.
 
 **It lands beside a catalogue that exists, not beside a second one.**
-`crates/ubiq-host/src/mcp/` is Ubiq's own MCP server — not agent-manager's `inproc-mcp`, which
-`crates/ubiq-host/Cargo.toml` takes `agent-manager` with `default-features = false` precisely to
+`crates/kubiq-host/src/mcp/` is Kubiq's own MCP server — not agent-manager's `inproc-mcp`, which
+`crates/kubiq-host/Cargo.toml` takes `agent-manager` with `default-features = false` precisely to
 leave off. One process-wide loopback listener in `mcp/server.rs`, a static table of servers and JSON
 schemas in `mcp/catalogue.rs`'s `SERVERS`, dispatch in `mcp/tools.rs`'s `call`, injected per agent
 as a plain `McpRef::Inline` HTTP server at `/mcps/<key>/<name>`, and offered per profile through the
 settings checklist `Message::Mcps` feeds. A drone server is one more `ServerSpec` beside `test`,
-`project-info`, `manage-ubiq-tasks`, `use-task` and `ubiq-kb`, and one more arm in `tools::call`'s
+`project-info`, `manage-kubiq-tasks`, `use-task` and `kubiq-kb`, and one more arm in `tools::call`'s
 match.
 
 **The drone MCP is a façade over the bus, not a new subsystem.** `D116` makes a drone an ordinary
@@ -99,7 +99,7 @@ reaching it, rather than letting the drone walk the rest of a tree whose matches
 thrown away.
 
 **The tool list is built per run from advertised capabilities** (`D139`).
-`crates/ubiq-drone/src/lib.rs`'s `capabilities()` argues this for the interface: naming a capability
+`crates/kubiq-drone/src/lib.rs`'s `capabilities()` argues this for the interface: naming a capability
 the drone would only refuse is worse than naming none, because an optimistic list puts something in
 front of a user — or, here, a model — that answers with a refusal every time. So no `drone_search`
 without the `search` capability and no `drone_shell` without `shell`. This is the first real reader
@@ -112,9 +112,9 @@ then the only attached drone, if there is exactly one; then the drone flagged de
 `AgentFacts` in `mcp/registry.rs` carries the project, so the first rule costs nothing beyond a
 lookup on hand.
 
-**Naming stays out of Ubiq's own vocabulary.** The tools are `drone_*`, a namespace nothing else in
+**Naming stays out of Kubiq's own vocabulary.** The tools are `drone_*`, a namespace nothing else in
 the catalogue will collide with, but every description is written in ordinary remote-machine
-language — "the remote machine", "its files" — and explains none of Ubiq's internals, because a
+language — "the remote machine", "its files" — and explains none of Kubiq's internals, because a
 model has no prior for the word "drone" and every prior for "a remote machine."
 
 **Safety has two gates and this phase adds neither a third nor a duplicate.** The harness's own
@@ -135,7 +135,7 @@ on write, but which is undecided (`G268`).
 The recipes are [`../tech/operations.md`](../tech/operations.md)'s — `just relay` for the lean host,
 `just drone-build` and the two manifest recipes for the cross build and its pins, `just host` and
 `just ui` for the crate-boundary guards, and `just verify` for the gate a change has to pass.
-`cargo test -p ubiq-drone` runs 33 tests: 14 unit, and integration tests over managed drones,
+`cargo test -p kubiq-drone` runs 33 tests: 14 unit, and integration tests over managed drones,
 detach, search, the handshake, a session and root ids.
 
 The order that keeps a note like this true: code, then the decision register and the backlog, then
@@ -145,11 +145,11 @@ than facts.
 **Four failures in this tree are pre-existing and are not yours.** Confirm against a clean tree
 before chasing any of them:
 
-- `crates/ubiq-proto/tests/work.rs` does not compile — `TaskRecord` is missing `key`/`kind`/`labels`
+- `crates/kubiq-proto/tests/work.rs` does not compile — `TaskRecord` is missing `key`/`kind`/`labels`
   and `UpdateTask` has no `shape`. Someone else's in-flight work; `AGENTS.md` says do not revert
   what you did not write.
 - `foundation-models` fails its build script under a sandbox: it shells to `swiftc`, which cannot
-  run. This breaks `cargo build -p ubiq-app`, `just check` and so `just verify`.
+  run. This breaks `cargo build -p kubiq-app`, `just check` and so `just verify`.
 - `browse::the_default_request_answers_with_a_real_absolute_path` fails with
   `Denied("Operation not permitted")` — a sandbox refusing to list the home directory.
 - `coordinator::opening_a_project_starts_its_filesystem_watch` times out after 20 seconds when run
@@ -176,7 +176,7 @@ before chasing any of them:
 - **Nothing verifies a `MESSAGE_SCHEMA` bump mechanically** (`G256`), and **the heartbeat breaks a
   peer built before it** (`G257`). Both untouched. The number stands at 1 and is right to: `runs_on`
   is additive and `#[serde(default)]`, so an old drone omitting it decodes as the local project
-  every such record meant, and `crates/ubiq-proto/src/wire.rs`'s own paragraph exempts exactly that
+  every such record meant, and `crates/kubiq-proto/src/wire.rs`'s own paragraph exempts exactly that
   case. Bumping would refuse every deployed drone for a change neither end can misread.
 - **`DiffProjectFile` is refused**, and the `git` capability it would sit behind is advertised by
   nothing: cross-compiling `git2` per triple is unstarted. `G264`.

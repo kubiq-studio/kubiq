@@ -38,10 +38,10 @@ Folders encode **kind of knowledge**. Frontmatter encodes **stability**. Never m
 |---|---|---|
 | `INDEX.md` | The map: catalogue, fact-ownership registry, reading paths | Every agent, first |
 | `backlog.md` | Every open question, known gap and deferred item, project-wide | Whoever plans next work |
-| `product/` | Why Ubiq exists, in user terms. **No code references.** | Product decisions |
+| `product/` | Why Kubiq exists, in user terms. **No code references.** | Product decisions |
 | `features/` | One document per user-visible capability: contract on top, implementation below | Building or changing a feature |
 | `tech/` | Cross-cutting models, rules, conventions and procedures | Any implementation task |
-| `references/` | Specifications of protocols Ubiq speaks but does not own | Wiring one of them |
+| `references/` | Specifications of protocols Kubiq speaks but does not own | Wiring one of them |
 | `design/` | Wireframes, prototypes and captured artifacts. **Assets, not documents** | Anyone building a screen |
 | `wip/` | The current task's working notes. Deleted when the task closes | The task in flight |
 | `inbox/` | Raw unprocessed input: transcripts, dumps, pasted drafts | Nobody yet — to be filed |
@@ -55,7 +55,7 @@ prototype is evidence, and editing it to satisfy a linter destroys what makes it
 
 The placement rule, which settles the product-versus-technical question without a third category:
 
-> **If deleting the capability from Ubiq would delete the document, it belongs in `features/`.
+> **If deleting the capability from Kubiq would delete the document, it belongs in `features/`.
 > If the document would survive, it belongs in `tech/`.**
 
 Applied:
@@ -144,7 +144,7 @@ half-lives, and different failure modes when stale.
 ### 4.3 Code in documents
 
 - Fenced code ≤ **15%** of a document's lines; each fence ≤ **20 lines**.
-- Beyond that, name the file and the symbol — `crates/ubiq/src/app/wire.rs`, `spawn_pane()` — and drop
+- Beyond that, name the file and the symbol — `crates/kubiq/src/app/wire.rs`, `spawn_pane()` — and drop
   the block.
 - **Never cite line numbers.** They rot within one commit. File plus symbol is stable and greppable.
 - Fences are for what cannot be pointed at: a message shape, a directory tree, a shell invocation.

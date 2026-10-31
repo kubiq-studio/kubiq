@@ -7,7 +7,7 @@ summary: Phase 2 of the web-panel proposal as built — the `_web/<app>/<token>/
 read_when: you are opening a web panel, adding a tenant to the bridge, or changing the `_web` routes or the session token
 updated: 2026-09-12
 verified: 2026-10-06
-code_anchors: [crates/ubiq/src/web_export/server.rs, crates/ubiq/src/web_export/routes.rs, crates/ubiq/src/web_export/bridge.rs, crates/ubiq/src/web_export/assets.rs, crates/ubiq/src/web_export/archive.rs, crates/ubiq/assets/web/bridge.js, crates/ubiq/build.rs]
+code_anchors: [crates/kubiq/src/web_export/server.rs, crates/kubiq/src/web_export/routes.rs, crates/kubiq/src/web_export/bridge.rs, crates/kubiq/src/web_export/assets.rs, crates/kubiq/src/web_export/archive.rs, crates/kubiq/assets/web/bridge.js, crates/kubiq/build.rs]
 depends_on: [tech-architecture, tech-structure, tech-decisions, feat-workbench]
 ---
 
@@ -15,7 +15,7 @@ depends_on: [tech-architecture, tech-structure, tech-decisions, feat-workbench]
 
 Phase 2 of [`../inbox/web-panel-proposal.md`](../inbox/web-panel-proposal.md): the origin, the
 token, the bridge and a demo tenant to drive them. It adds no crate dependency, no transport
-message and no host involvement — everything here is inside `crates/ubiq/src/web_export/`, the
+message and no host involvement — everything here is inside `crates/kubiq/src/web_export/`, the
 loopback server `D55` already put in the interface.
 
 ## The container is the external browser
@@ -26,8 +26,8 @@ built and is not spiked here. The shipped container is the one §4.2 names as it
 So only the external-browser row of §4.3's transport table has a Rust side.
 
 `bridge.js` is still written as the two-transport shim, because that is the whole point of it: it
-picks `window.ipc.postMessage` and `window.__ubiq_receive` when a `wry` container declares itself
-by injecting `window.__ubiq_ipc = true`, and falls back to `POST`/long-poll otherwise. The flag is
+picks `window.ipc.postMessage` and `window.__kubiq_receive` when a `wry` container declares itself
+by injecting `window.__kubiq_ipc = true`, and falls back to `POST`/long-poll otherwise. The flag is
 what decides, never the presence of `window.ipc`: `wry` defines that object in every page it loads
 whether or not the host registered a handler behind it, so a container that had not wired one took
 the first transport and every frame — `ready` included — vanished. A future embedded container needs no change to any
@@ -113,7 +113,7 @@ covers the tenant that needs it.
 
 ## The assets
 
-`crates/ubiq/assets/web/` holds `bridge.js` and one directory per tenant's chrome
+`crates/kubiq/assets/web/` holds `bridge.js` and one directory per tenant's chrome
 (`demo/index.html`, `demo/app.js`; later, `excalidraw/` and `drawio/`, each an `index.html` and an
 `app.js`), baked in the way the doc viewer's CSS and JS already are. `build.rs`'s `ASSETS` array now
 carries each asset's subdirectory rather than assuming one directory, and the gzipped release copy

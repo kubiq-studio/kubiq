@@ -5389,6 +5389,259 @@ dependencies = [
 ]
 
 [[package]]
+name = "kubiq"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "block2 0.6.2",
+ "chrono",
+ "flate2",
+ "flume 0.12.0",
+ "gpui-component",
+ "gpui-kit-assets",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "gpui-terminal",
+ "gpui-wry",
+ "ignore",
+ "image",
+ "keyring",
+ "kubiq-archify",
+ "kubiq-db",
+ "kubiq-draw",
+ "kubiq-md",
+ "kubiq-proto",
+ "kubiq-tunnel",
+ "lb-wry",
+ "lsp-types",
+ "markdown",
+ "md-5 0.11.0",
+ "merman",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-video",
+ "objc2-foundation 0.3.2",
+ "objc2-web-kit",
+ "oxc",
+ "parking_lot",
+ "percent-encoding",
+ "pulldown-cmark",
+ "quick-xml 0.42.0",
+ "raw-window-handle",
+ "regex",
+ "rquickjs",
+ "rustls",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "similar 3.2.0",
+ "tempfile",
+ "tiny_http",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-c",
+ "tree-sitter-c-sharp",
+ "tree-sitter-go",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-md",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-swift",
+ "tree-sitter-typescript",
+ "ureq 3.4.2",
+ "uuid",
+ "windows-capture",
+ "windows-sys 0.61.2",
+ "zed-scap",
+]
+
+[[package]]
+name = "kubiq-app"
+version = "0.1.0"
+dependencies = [
+ "agent-manager",
+ "anyhow",
+ "embed-resource",
+ "flume 0.12.0",
+ "gpui-component",
+ "gpui-kit-assets",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "kubiq",
+ "kubiq-host",
+ "kubiq-proto",
+ "percent-encoding",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "kubiq-archify"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "kurbo 0.13.1",
+ "regex",
+ "resvg 0.48.1",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
+name = "kubiq-db"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "mysql",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sqlparser",
+ "sqlx-core",
+ "sqlx-postgres",
+ "thiserror 2.0.21",
+ "tiberius",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "kubiq-draw"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "roxmltree 0.21.1",
+ "serde_json",
+]
+
+[[package]]
+name = "kubiq-drone"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "flume 0.12.0",
+ "ignore",
+ "kubiq-host",
+ "kubiq-proto",
+ "kubiq-tunnel",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "kubiq-host"
+version = "0.1.0"
+dependencies = [
+ "agent-manager",
+ "anyhow",
+ "argon2",
+ "base64 0.23.1",
+ "chacha20poly1305",
+ "chrono",
+ "directories",
+ "flate2",
+ "flume 0.12.0",
+ "foundation-models",
+ "git2",
+ "grep-matcher",
+ "grep-regex",
+ "grep-searcher",
+ "hostname",
+ "ignore",
+ "keyring",
+ "kubiq-archify",
+ "kubiq-db",
+ "kubiq-proto",
+ "kubiq-tunnel",
+ "memory-stats",
+ "minisign-verify",
+ "notify",
+ "notify-rust",
+ "num_cpus",
+ "portable-pty",
+ "rand 0.10.3",
+ "ring",
+ "rusqlite",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "similar 3.2.0",
+ "sysinfo 0.39.6",
+ "tantivy",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tiny_http",
+ "toml 1.1.8+spec-1.1.0",
+ "toon-format",
+ "tracing",
+ "trash",
+ "ureq 2.12.1",
+ "webpki-roots 1.0.9",
+ "winreg 0.56.0",
+ "x509-parser",
+ "zeroize",
+]
+
+[[package]]
+name = "kubiq-md"
+version = "0.1.0"
+dependencies = [
+ "pulldown-cmark",
+ "serde",
+]
+
+[[package]]
+name = "kubiq-proto"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "flume 0.12.0",
+ "kubiq-db",
+ "markdown",
+ "parking_lot",
+ "regex",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.11.0",
+ "similar 3.2.0",
+ "tempfile",
+ "toml 1.1.8+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "ulid",
+]
+
+[[package]]
+name = "kubiq-tunnel"
+version = "0.1.0"
+dependencies = [
+ "flume 0.12.0",
+ "httparse",
+ "kubiq-proto",
+ "parking_lot",
+ "rustls",
+ "rustls-native-certs",
+ "sha2 0.11.0",
+ "tracing",
+ "webpki-roots 1.0.9",
+]
+
+[[package]]
 name = "kuchikiki"
 version = "0.8.8-speedreader"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11932,259 +12185,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
-]
-
-[[package]]
-name = "ubiq"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "block2 0.6.2",
- "chrono",
- "flate2",
- "flume 0.12.0",
- "gpui-component",
- "gpui-kit-assets",
- "gpui-pre",
- "gpui-pre-platform",
- "gpui-terminal",
- "gpui-wry",
- "ignore",
- "image",
- "keyring",
- "lb-wry",
- "lsp-types",
- "markdown",
- "md-5 0.11.0",
- "merman",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-core-video",
- "objc2-foundation 0.3.2",
- "objc2-web-kit",
- "oxc",
- "parking_lot",
- "percent-encoding",
- "pulldown-cmark",
- "quick-xml 0.42.0",
- "raw-window-handle",
- "regex",
- "rquickjs",
- "rustls",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha1 0.11.0",
- "sha2 0.11.0",
- "similar 3.2.0",
- "tempfile",
- "tiny_http",
- "tracing",
- "tree-sitter",
- "tree-sitter-c",
- "tree-sitter-c-sharp",
- "tree-sitter-go",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-md",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-swift",
- "tree-sitter-typescript",
- "ubiq-archify",
- "ubiq-db",
- "ubiq-draw",
- "ubiq-md",
- "ubiq-proto",
- "ubiq-tunnel",
- "ureq 3.4.2",
- "uuid",
- "windows-capture",
- "windows-sys 0.61.2",
- "zed-scap",
-]
-
-[[package]]
-name = "ubiq-app"
-version = "0.1.0"
-dependencies = [
- "agent-manager",
- "anyhow",
- "embed-resource",
- "flume 0.12.0",
- "gpui-component",
- "gpui-kit-assets",
- "gpui-pre",
- "gpui-pre-platform",
- "percent-encoding",
- "tempfile",
- "tracing",
- "ubiq",
- "ubiq-host",
- "ubiq-proto",
-]
-
-[[package]]
-name = "ubiq-archify"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "kurbo 0.13.1",
- "regex",
- "resvg 0.48.1",
- "serde",
- "serde_json",
- "sha2 0.11.0",
-]
-
-[[package]]
-name = "ubiq-db"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "futures-util",
- "mysql",
- "rusqlite",
- "serde",
- "serde_json",
- "sqlparser",
- "sqlx-core",
- "sqlx-postgres",
- "thiserror 2.0.21",
- "tiberius",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "ubiq-draw"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "roxmltree 0.21.1",
- "serde_json",
-]
-
-[[package]]
-name = "ubiq-drone"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "flume 0.12.0",
- "ignore",
- "serde",
- "serde_json",
- "tempfile",
- "tracing",
- "ubiq-host",
- "ubiq-proto",
- "ubiq-tunnel",
-]
-
-[[package]]
-name = "ubiq-host"
-version = "0.1.0"
-dependencies = [
- "agent-manager",
- "anyhow",
- "argon2",
- "base64 0.23.1",
- "chacha20poly1305",
- "chrono",
- "directories",
- "flate2",
- "flume 0.12.0",
- "foundation-models",
- "git2",
- "grep-matcher",
- "grep-regex",
- "grep-searcher",
- "hostname",
- "ignore",
- "keyring",
- "memory-stats",
- "minisign-verify",
- "notify",
- "notify-rust",
- "num_cpus",
- "portable-pty",
- "rand 0.10.3",
- "ring",
- "rusqlite",
- "rustls",
- "rustls-native-certs",
- "rustls-pemfile",
- "semver",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "similar 3.2.0",
- "sysinfo 0.39.6",
- "tantivy",
- "tempfile",
- "thiserror 2.0.21",
- "tiny_http",
- "toml 1.1.8+spec-1.1.0",
- "toon-format",
- "tracing",
- "trash",
- "ubiq-archify",
- "ubiq-db",
- "ubiq-proto",
- "ubiq-tunnel",
- "ureq 2.12.1",
- "webpki-roots 1.0.9",
- "winreg 0.56.0",
- "x509-parser",
- "zeroize",
-]
-
-[[package]]
-name = "ubiq-md"
-version = "0.1.0"
-dependencies = [
- "pulldown-cmark",
- "serde",
-]
-
-[[package]]
-name = "ubiq-proto"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "flume 0.12.0",
- "markdown",
- "parking_lot",
- "regex",
- "rmp-serde",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2 0.11.0",
- "similar 3.2.0",
- "tempfile",
- "toml 1.1.8+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "ubiq-db",
- "ulid",
-]
-
-[[package]]
-name = "ubiq-tunnel"
-version = "0.1.0"
-dependencies = [
- "flume 0.12.0",
- "httparse",
- "parking_lot",
- "rustls",
- "rustls-native-certs",
- "sha2 0.11.0",
- "tracing",
- "ubiq-proto",
- "webpki-roots 1.0.9",
 ]
 
 [[package]]

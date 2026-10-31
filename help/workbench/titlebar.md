@@ -35,7 +35,7 @@ thing, and its narrow chevron lists the alternatives.
 | **Tools** ![Tools](../img/ui/titlebar-tools.png) | Base64, JWT, dates and timestamps, URL encoding, hashes, UUIDs, placeholder text and a text diff; its **Smart** page tells you which one a pasted value needs, and offers what is on the clipboard |
 | **Settings** ![Settings](../img/ui/titlebar-settings.png) | Accounts, agents, connections and the rest; its chevron, **More**, holds **Remote hosts**, **Connect to a remote host**, **Explore the project in browser**, **Capture this window**, **Help** and **Point at something…** |
 | Theme ![Light](../img/ui/titlebar-theme-light.png) ![Dark](../img/ui/titlebar-theme-dark.png) | Switches between the light and dark palettes |
-| **About Ubiq** ![About Ubiq](../img/ui/titlebar-about.png) | The version, updates and licences |
+| **About Kubiq** ![About Kubiq](../img/ui/titlebar-about.png) | The version, updates and licences |
 
 **New agent** and **New terminal** need an open project. The command field is one habit for three
 jobs: with nothing typed it offers where you were, and typed text offers matches. **⌘Enter** searches the
@@ -55,4 +55,4 @@ the explorer instead.
 - **Back** or **Forward** looks faint: there is nowhere to go in that direction.
 - **Capture this window** is missing from **More**: it is switched off under **Settings**.
 - A bell that flashes goes straight to its place when clicked; to open the list, wait for it to stop.
-- The title bar shows no repository button: the project has no remote Ubiq can link to.
+- The title bar shows no repository button: the project has no remote Kubiq can link to.

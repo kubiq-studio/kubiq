@@ -55,7 +55,7 @@ built and the crate should be deleted rather than carried.
 ## The kept-out list, one line each
 
 - **Git** — the terminal ships git, tig and lazygit; the multi-repo lane engine is the only part
-  Ubiq draws that they do not, and it is the least worth a port.
+  Kubiq draws that they do not, and it is the least worth a port.
 - **Teams, `[Teams]`** — a spatial canvas is the opposite of a monospace grid, and the positions are
   the window's own facts.
 - **Sink** — a bench for the window's own drawing.
@@ -75,7 +75,7 @@ The seed's rule stands: **share nothing on the first two phases; extract exactly
 third.** Phases 0–2 duplicate small state — a tree, a table, a query — and answer to the host for
 everything else, which the current transport already lets a second client do for the plan, quota,
 notification, knowledge-base, project and session families (§2 of the seed's account, verified in
-`transport-contract.md`). Phase 3 moves `crates/ubiq/src/state/conversation.rs` into a crate both
+`transport-contract.md`). Phase 3 moves `crates/kubiq/src/state/conversation.rs` into a crate both
 interfaces depend on — the move the analysis calls `G342` — and the window's tests come with it.
 Anything else is shared once a second consumer has proved the shape.
 

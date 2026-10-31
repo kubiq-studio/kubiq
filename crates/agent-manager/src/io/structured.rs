@@ -53,7 +53,7 @@ pub fn spawn_piped(launch: &Launch, cwd: &Path) -> Result<Child> {
     // nothing to show on one. Windows would give a console-subsystem child its own console window
     // anyway — a freestanding terminal flashing up beside the interface, or staying up for as long
     // as the harness runs — because the interface left its own console behind at boot
-    // (`ubiq_app::detach_console`) and a child with no console to inherit gets a new one. This says
+    // (`kubiq_app::detach_console`) and a child with no console to inherit gets a new one. This says
     // it plainly instead: create no console, and therefore no window.
     #[cfg(windows)]
     {

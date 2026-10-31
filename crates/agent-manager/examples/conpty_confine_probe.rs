@@ -9,7 +9,7 @@
 //!
 //! This probe is the evidence, and it is both halves of the mechanism: a confine
 //! run is this same binary invoked again under `CONFINE_ARG`, so the probe
-//! re-invokes itself the way `ubiq.exe` does. Two runs of the same payload: one
+//! re-invokes itself the way `kubiq.exe` does. Two runs of the same payload: one
 //! on this process's console, one inside a 100x30 ConPTY. The second is
 //! the claim — a confined child reporting `size=100x30, redirected=False` is on
 //! a real pseudoconsole at the size the host asked for.
@@ -33,7 +33,7 @@ const ROWS: u16 = 30;
 
 fn main() -> anyhow::Result<()> {
     // This example is both halves, which is the point: a confine run is the same
-    // binary invoked again, so the probe re-invokes itself exactly as `ubiq.exe`
+    // binary invoked again, so the probe re-invokes itself exactly as `kubiq.exe`
     // and `agent-manager.exe` do.
     if let Some(code) = confine_entrypoint() {
         std::process::exit(code);
@@ -168,7 +168,7 @@ fn input_round_trip(
     // Carriage return, not newline: a console submits a line on CR, and a probe
     // that sends only LF leaves `Read-Host` waiting forever — which reads exactly
     // like input the sandbox swallowed.
-    std::io::Write::write_all(&mut writer, b"ubiq-typed-this\r")?;
+    std::io::Write::write_all(&mut writer, b"kubiq-typed-this\r")?;
     std::io::Write::flush(&mut writer)?;
 
     // Bounded: a child that never sees the input blocks in `ReadLine` forever,
@@ -195,8 +195,8 @@ fn input_round_trip(
         None => println!("=== run C: still blocked in ReadLine after 10s, killed ==="),
     }
     println!(
-        "pass: run C echoes TYPED:ubiq-typed-this  —  {}",
-        if seen.contains("TYPED:ubiq-typed-this") {
+        "pass: run C echoes TYPED:kubiq-typed-this  —  {}",
+        if seen.contains("TYPED:kubiq-typed-this") {
             "PASS"
         } else {
             "FAIL: input never reached the confined child"

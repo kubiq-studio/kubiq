@@ -3,7 +3,7 @@ id: tasks-detail
 title: A task
 summary: The panel that opens when you select a card — its description, steps and the agents working on it.
 keywords: [task, card, detail, steps, mission, comments, prerequisites, plan, delete]
-context: [panel.ubiq.task]
+context: [panel.kubiq.task]
 order: 20
 status: current
 related: [tasks-overview, agents-starting, guides-tasks-board]
@@ -24,7 +24,7 @@ panel over the columns instead, and the right panel then says where it went.
 | **Shape** | How the agents on this task are arranged (direct, chain or coordinated), with a note on what the choice means, and a picker for the workspace session it belongs to |
 | **Description** | Markdown, with **Write** and preview, **Save** and **Cancel** |
 | **Sub-tasks** | The task's steps, each with its own state; add one in the field under the list |
-| **Comments** | What you and the agents have written, each marked `user`, `agent` or `ubiq`; add one in the field under the list |
+| **Comments** | What you and the agents have written, each marked `user`, `agent` or `kubiq`; add one in the field under the list |
 | **Open** | On the agent working the task: opens its conversation |
 | **Assign to an agent** / **Continue with an agent** | Starts an agent on the task, or carries on with the one that was working it, while the task is in backlog, ready or in progress |
 | **Complete** / **Feedback to an agent** | On a task in review: accepts it, or sends it back to an agent |

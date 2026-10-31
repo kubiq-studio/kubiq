@@ -1,0 +1,409 @@
+//! The contract's identifiers: one newtype per kind, over a ULID.
+//!
+//! Every id in the message set is one of these. They are newtypes rather than a shared alias
+//! because a pane ID and a session ID are both 128 bits and nothing but care would stop one being
+//! passed where the other belongs — the compiler does it here instead.
+//!
+//! A ULID rather than a UUID because it sorts by creation time, prints as 26 case-insensitive
+//! characters with no hyphens, and so gives a readable directory name and a stable ordering for
+//! free. It carries its own timestamp, which is a feature in a config directory and a fact worth
+//! knowing before ids travel to a host the user does not own.
+//!
+//! `gpui::WindowId` is not one of these. It is the framework's, and it stays as it is.
+
+use std::fmt;
+use std::str::FromStr;
+use std::sync::Mutex;
+use std::time::SystemTime;
+
+use serde::{Deserialize, Serialize};
+use ulid::{DecodeError, Ulid};
+
+/// The process's one generator.
+///
+/// Monotonic within a millisecond, which is most of why a ULID is worth having: two ids minted in
+/// the same millisecond by a bare `Ulid::new()` sort arbitrarily. Nothing here calls that.
+///
+/// Both constructors are `const`, so this needs no `OnceLock`. Contention is nil — every call site
+/// is on a control path, never on the byte stream.
+static IDS: Mutex<ulid::Generator> = Mutex::new(ulid::Generator::new());
+
+/// The next ULID, monotonic against the last.
+///
+/// A generator overflows when it has minted 2^80 ids inside one millisecond. The recovery is to
+/// step into the next millisecond, which is what the caller wants and cannot be an error here.
+fn mint() -> Ulid {
+    let mut generator = IDS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    generator
+        .generate()
+        .unwrap_or_else(|overflow| overflow.commit_overflow_random())
+}
+
+/// Declare one id kind. Every kind gets the same surface, so none of them grows its own.
+macro_rules! ulid_id {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        ///
+        /// Serialises as its 26-character canonical string.
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(Ulid);
+
+        impl $name {
+            /// Mint the next one. There is no `new()` and no `Default`: an id that was not minted
+            /// is a nil id that looks real.
+            pub fn generate() -> Self {
+                Self(mint())
+            }
+
+            /// When it was minted. A ULID carries its own timestamp.
+            pub fn created_at(self) -> SystemTime {
+                self.0.datetime()
+            }
+
+            /// The ULID underneath, for the few places that need one — a directory name, a sort.
+            pub fn as_ulid(self) -> Ulid {
+                self.0
+            }
+        }
+
+        /// The bare 26 characters, which is what a directory name and a log line want.
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fmt::Display::fmt(&self.0, f)
+            }
+        }
+
+        /// Named, so a debug line says which kind of id it is looking at.
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}({})", stringify!($name), self.0)
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = DecodeError;
+
+            fn from_str(text: &str) -> Result<Self, Self::Err> {
+                Ulid::from_str(text).map(Self)
+            }
+        }
+    };
+}
+
+ulid_id! {
+    /// One pane, and the byte stream it is. Every message in the pane family carries one.
+    PaneId
+}
+
+ulid_id! {
+    /// One session: a named grouping of panes with a folder. Kubiq's sense of the word, not the
+    /// harness library's resumable conversation.
+    SessionId
+}
+
+ulid_id! {
+    /// One running workspace, which is also one agent: the work family calls it
+    /// [`AgentId`](crate::work::AgentId), an alias of this.
+    ///
+    /// A workspace is its pane where the host started one, so [`WorkspaceInfo`] carries a
+    /// [`PaneId`] instead; the two ids come apart the day a workspace outlives its terminal.
+    ///
+    /// [`WorkspaceInfo`]: crate::messages::WorkspaceInfo
+    WorkspaceId
+}
+
+ulid_id! {
+    /// One task on the board, and one outline in the graph. Minted by the host and written down,
+    /// so it survives a restart — which is why it is a ULID and not a counter over a vector.
+    TaskId
+}
+
+ulid_id! {
+    /// One step of a task. A step is addressed by this rather than by its place in the list: two
+    /// clicks in one frame — a remove and a tick — would otherwise arrive as two indices into two
+    /// different lists, and the second would land on the wrong step.
+    StepId
+}
+
+ulid_id! {
+    /// One comment on a task. Addressed by this rather than by its place in the list, for the same
+    /// reason a step is: two edits in one frame must not land on the wrong line.
+    CommentId
+}
+
+ulid_id! {
+    /// One block of a plan's markdown — a heading, a paragraph, a fence, a list item. Minted by
+    /// the host when a block first appears in a saved plan and carried forward on every later save
+    /// by matching the parsed document against the previous one, so an annotation anchors to this
+    /// and never to a character offset, which any insertion above it would move
+    /// (`_docs/wip/planning-system.md`, decision 4).
+    ///
+    /// It is **not written into the markdown**: the plan body on disk stays plain markdown any
+    /// editor and any agent can rewrite, and the id-to-block index lives in the sidecar beside it.
+    BlockId
+}
+
+ulid_id! {
+    /// One annotation on a plan: a block, an optional quoted span inside it, and the thread of
+    /// comments hanging off it. Addressed by this rather than by its place in the list, for
+    /// [`CommentId`]'s reason.
+    AnnotationId
+}
+
+ulid_id! {
+    /// One project in the catalogue. Stable across rename, recolour and a move on disk — the path
+    /// is a uniqueness key, never the identity.
+    ProjectId
+}
+
+ulid_id! {
+    /// One search across a project. Minted by the interface so that batches arriving after the user
+    /// has moved on are discarded by id, the same discipline the generation counter buys for git.
+    SearchId
+}
+
+ulid_id! {
+    /// One connect flow, from `BeginConnect` to the single `ConnectCaptured` or `ConnectFailed`
+    /// that ends it. Minted by the interface, on [`SearchId`]'s discipline: a stage naming an id
+    /// the interface no longer holds is discarded rather than drawn, which is what keeps a modal
+    /// the user closed from being reopened by an answer still in flight.
+    ConnectId
+}
+
+ulid_id! {
+    /// One authenticated identity at a provider. Minted by the host when a flow succeeds, because
+    /// a connection exists only once its token is stored — an abandoned flow leaves no id behind.
+    /// Stable across a rename: the label is the user's, this is what everything else references.
+    ConnectionId
+}
+
+ulid_id! {
+    /// One OAuth application registration. Minted by the host when a registration is written,
+    /// because a registration exists only once it is on disk — a form the user abandoned leaves no
+    /// id behind. Stable across a rename and across a change of instance: the name and the URL are
+    /// the user's, this is what a connection and a stored client secret reference.
+    OauthAppId
+}
+
+impl OauthAppId {
+    /// The id an application registration written before ids existed is given.
+    ///
+    /// Derived from the record's own provider and origin rather than minted, and that is the whole
+    /// point: the host re-reads the settings file on every question it asks of it, so a minted fill
+    /// would answer a different id each time and nothing could reference one. FNV-1a over the seed,
+    /// spelled out here rather than taken from [`std::hash`], whose output is not promised to be
+    /// stable between compiler releases.
+    pub fn derived(seed: &str) -> Self {
+        const OFFSET: u128 = 0x6c62272e07bb014262b821756295c58d;
+        const PRIME: u128 = 0x0000000001000000000000000000013b;
+        let mut hash = OFFSET;
+        for byte in seed.as_bytes() {
+            hash ^= u128::from(*byte);
+            hash = hash.wrapping_mul(PRIME);
+        }
+        Self(Ulid::from(hash))
+    }
+}
+
+ulid_id! {
+    /// One clone operation, from `CloneRepo` to the single success or `CloneFailed` that ends it.
+    /// Minted by the interface, on [`ConnectId`]'s discipline: a stage naming an id the interface
+    /// no longer holds is discarded rather than drawn, so a clone the user cancelled cannot repaint
+    /// a progress bar with an answer still in flight.
+    CloneId
+}
+
+ulid_id! {
+    /// One repository or branch listing. Minted by the interface so an answer for a query the user
+    /// has typed past is discarded by id, the same discipline [`SearchId`] buys for search.
+    RepoQueryId
+}
+
+ulid_id! {
+    /// One configured API provider. Minted by the host when the record is written, because a
+    /// provider exists only once its key is filed — an abandoned dialog leaves no id behind, on
+    /// [`ConnectionId`]'s discipline. Stable across a rename and across an edit of its endpoint:
+    /// the name and the URL are the user's, this is what the assist setting and the stored key
+    /// reference.
+    AiProviderId
+}
+
+ulid_id! {
+    /// One suggestion, from the `Suggest` that asks for it to the single `Suggestion` or
+    /// `SuggestError` that ends it. Minted by the interface so a reply naming a suggestion it is
+    /// no longer holding is discarded by id, the same discipline [`SearchId`] buys for a search.
+    SuggestId
+}
+
+ulid_id! {
+    /// One notification in the bell's history. Minted by the host when the record is filed,
+    /// because a notification exists only once it is in the history — a request a mute rule
+    /// swallowed still gets one, since the badge counts it and a click has to name it.
+    NotificationId
+}
+
+ulid_id! {
+    /// One saved remote-host entry in the interface's settings. Minted UI-side when a
+    /// connection is first saved, stable across renames and address edits — the name and the
+    /// address are the user's, this is what the secret store and the live-connection table
+    /// reference.
+    HostSaveId
+}
+
+ulid_id! {
+    /// One runnable tool in the machine-wide settings or a project record. Minted UI-side when
+    /// the row is added, stable across a rename — the name is what the tab says, this is what
+    /// a run names.
+    ToolId
+}
+
+impl ToolId {
+    /// The id a tool the user never wrote gets: derived from a stable key (`just:build`) rather
+    /// than minted, so the same target is the same id on every run, build and host — which is
+    /// what lets a favourite persist by id.
+    ///
+    /// 128 bits from two FNV-1a 64 passes with different offset bases. Hand-rolled because
+    /// `std`'s `DefaultHasher` promises nothing across releases, and an id that changes with the
+    /// toolchain orphans every favourite. Not a ULID in the timestamp sense; it only has the shape.
+    pub fn derived(key: &str) -> Self {
+        fn fnv1a(offset: u64, bytes: &[u8]) -> u64 {
+            bytes.iter().fold(offset, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            })
+        }
+        let high = fnv1a(0xcbf2_9ce4_8422_2325, key.as_bytes());
+        let low = fnv1a(0x8422_2325_cbf2_9ce4, key.as_bytes());
+        Self(Ulid::from((u128::from(high) << 64) | u128::from(low)))
+    }
+}
+
+ulid_id! {
+    /// One SSH connection profile. Minted UI-side when the row is added, on [`HostSaveId`]'s
+    /// discipline and for the same reason: a profile rides `SetSettings` whole, so the half that
+    /// writes the record is the half that names it. Stable across a rename and across an edit of
+    /// the address — this is what the secret store's `ssh` namespace and a drone's carrier
+    /// reference.
+    SshProfileId
+}
+
+ulid_id! {
+    /// One feedback report, from the `SendFeedback` that carries it to the single receipt or
+    /// error that ends it. Minted by the interface on [`CloneId`]'s discipline: an answer naming
+    /// a report the interface is no longer holding is discarded rather than drawn over a modal
+    /// the user has closed.
+    FeedbackId
+}
+
+ulid_id! {
+    /// One source of a project's knowledge base. Minted UI-side when the row is added, on
+    /// [`ToolId`]'s discipline and for the same reason: the whole source list rides
+    /// `SetKbSources`, so the half that writes the list is the half that names its rows. Stable
+    /// across a rename and across a filter edit — this is what a KB listing, a KB read and a
+    /// fetched source's clone folder under the config root all reference.
+    KbSourceId
+}
+
+ulid_id! {
+    /// One binding of a project's board to a board somewhere else — a provider, a connection, a
+    /// container and the maps over it.
+    ///
+    /// Minted **host-side**, when a binding is first written, on [`ConnectionId`]'s discipline: a
+    /// binding exists only once it is on disk, and a setup form the user abandoned leaves no id
+    /// behind. One per project today (`R4`), and named anyway — the link table is keyed by this
+    /// from the first row, so a second board is a setup-surface change rather than a file
+    /// migration.
+    BindingId
+}
+
+ulid_id! {
+    /// One question the task-source setup surface asked the host — a container listing, a lane and
+    /// facet fetch, a filter Test, an item listing.
+    ///
+    /// Minted by the **interface**, [`RepoQueryId`]'s discipline exactly and for its reason: a
+    /// Test answered after the user has typed past the query that asked it must be discarded by
+    /// id, not drawn. A filter is edited by typing, so the stale-answer case is the ordinary one
+    /// rather than the exception.
+    TaskSrcQueryId
+}
+
+ulid_id! {
+    /// One question an agent asked the user, from the tool call that parked on it to the answer,
+    /// the refusal or the timeout that ends it. Minted **host-side**, by the MCP listener that
+    /// took the call — the half that holds the parked call is the half that names it — and it is
+    /// what the dialog, the transcript's entry and the answer coming back all reference. An
+    /// answer naming an ask the host no longer holds is discarded, [`FeedbackId`]'s discipline in
+    /// the other direction.
+    AskId
+}
+
+ulid_id! {
+    /// One launch the mission runner asked a window for, from the
+    /// [`crate::messages::Message::MissionLaunch`] that carries it to the
+    /// [`crate::messages::Message::MissionLaunched`] that answers it.
+    ///
+    /// Minted **host-side**, on [`AskId`]'s discipline and
+    /// for its reason: the half holding the request is the half that names it. The request, the
+    /// relay message and the answer coming back all reference it; an answer naming a launch the
+    /// host no longer holds is discarded.
+    SpawnId
+}
+
+ulid_id! {
+    /// One saved database connection of a project. Minted **host-side** on the first save, on
+    /// [`AiProviderId`]'s discipline: a connection exists only once it is on disk — an abandoned
+    /// form leaves no id behind. Stable across a rename and across an edit of the host or the file:
+    /// the name and the address are the user's, this is what a session, a stored password and a
+    /// tab's payload reference.
+    DbConnId
+}
+
+ulid_id! {
+    /// One database session — one table tab or one SQL tab, and the worker thread that holds its
+    /// connection. Minted by the **interface**, so a reply naming a tab the user has closed is
+    /// discarded by id rather than drawn, [`SearchId`]'s discipline.
+    DbSessionId
+}
+
+ulid_id! {
+    /// One run in a database session — a table page, a SQL run, a batch of edits. Minted by the
+    /// **interface** per run, [`SearchId`]'s discipline: a reply for a run the tab has moved past
+    /// is discarded by id, and it is the handle `DbCancel` stops a statement by.
+    DbQueryId
+}
+
+ulid_id! {
+    /// One connection Test, from `TestDbConnection` to the single `DbTested` that ends it. Minted
+    /// by the **interface**, [`ConnectId`]'s discipline: an answer for a form the user has closed
+    /// is discarded rather than drawn into the next one.
+    DbProbeId
+}
+
+ulid_id! {
+    /// One DBML export, from `DbExportDbml` to the single `DbDbmlReady` that answers it. Minted by
+    /// the **interface**, [`DbProbeId`]'s discipline: an answer nobody still waits for is dropped.
+    DbExportId
+}
+
+ulid_id! {
+    /// One browser command, from the `BrowserCommand` an agent's `kubiq-browser` tool call sent to
+    /// the `BrowserReply` that ends it. Minted **host-side**, by the MCP listener that parks the
+    /// call — [`AskId`]'s discipline: a reply naming a command the host no longer holds (a second
+    /// reply, or one after the timeout) is discarded.
+    BrowserReqId
+}
+
+ulid_id! {
+    /// One remote tool call, from the `RemoteToolCall` an agent's `kubiq-remote` tool call sent to
+    /// the `RemoteToolResult` that ends it. Minted **host-side**, by the MCP listener that parks the
+    /// call — [`BrowserReqId`]'s discipline: a result naming a call the host no longer holds is
+    /// discarded. The window and the drone only echo it.
+    RemoteCallId
+}
+
+ulid_id! {
+    /// One tunnelled TCP stream on a window ↔ drone tunnel channel (never the bus), from its
+    /// `TunnelFrame::Open` to the `TunnelFrame::Close` that ends it. Minted by the **window**, which accepted the local socket: every frame of the
+    /// stream names it, and a frame naming a stream the far end does not hold is dropped.
+    TunnelStreamId
+}

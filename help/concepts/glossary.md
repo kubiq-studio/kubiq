@@ -1,7 +1,7 @@
 ---
 id: glossary
 title: Glossary
-summary: Plain definitions of the words Ubiq uses for its parts — harness, agent, pane, panel, project, conversation and more.
+summary: Plain definitions of the words Kubiq uses for its parts — harness, agent, pane, panel, project, conversation and more.
 keywords: [terms, definitions, vocabulary, session, workspace, dock]
 order: 70
 status: current
@@ -39,7 +39,7 @@ See [Harnesses](concepts-harnesses).
 
 **Permission mode** — how much a harness may do without asking, named as the harness names it.
 
-**Project** — a folder Ubiq has opened, and everything it remembers about it. See [Projects](projects).
+**Project** — a folder Kubiq has opened, and everything it remembers about it. See [Projects](projects).
 
 **Rail** — the column of destinations on the left of the window. Each one, such as **IDE**, **Git**,
 **Agents** or **Tasks**, is a mode that fills the centre. See [Rail modes](workbench-modes).
@@ -52,7 +52,7 @@ See [Harnesses](concepts-harnesses).
 
 **Tab** — the handle of a panel.
 
-**Window** — the operating-system window Ubiq draws in.
+**Window** — the operating-system window Kubiq draws in.
 
-**Workspace session** — Ubiq's named grouping of agents with a home folder. See
+**Workspace session** — Kubiq's named grouping of agents with a home folder. See
 [Workspace sessions](sessions).

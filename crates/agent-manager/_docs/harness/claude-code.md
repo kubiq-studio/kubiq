@@ -400,7 +400,7 @@ plus `ANTHROPIC_API_KEY` is the supported pattern.
 
 None. `am` neither captures, copies nor roams this login: the harness keeps it in the account's
 own config home (`harness-homes/<account>/claude-code/`), signed in there by `am account login` or
-the first run, and refreshes it itself (`D194` in Ubiq's `_docs/tech/decisions.md`). `Claude::login_files`
+the first run, and refreshes it itself (`D194` in Kubiq's `_docs/tech/decisions.md`). `Claude::login_files`
 names `.credentials.json` under that home as what a login looks like there — though on macOS the
 login may be in the Keychain instead, so an absent file proves nothing.
 

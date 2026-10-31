@@ -1,0 +1,376 @@
+//! The window registry: a projection of the host's catalogue, and which window holds which project.
+//!
+//! This is the one piece of workbench state that is process-wide rather than per window. It has to
+//! be: a project is open in exactly one window at a time, so no window can answer "where is this
+//! project open?" from its own copy. Every window reads the same registry and redraws when it
+//! changes.
+//!
+//! **The catalogue is not here.** It belongs to the host, and what this holds is a projection of
+//! it, keyed by id and replaced wholesale or one snapshot at a time as the host says so. Because
+//! project messages are broadcast, every window applies the same snapshot and the projection is
+//! idempotent by construction.
+//!
+//! Two rules the whole feature rests on. **A project is open in at most one window** — opening it
+//! somewhere takes it from wherever it was. And **a window with no project open stays open**,
+//! showing what it has to offer instead: the picker, and "Add a project…". Kubiq never closes a
+//! window on the user's behalf, whatever the catalogue holds — closing one is the user's action,
+//! and the application ends with the last of them.
+
+use std::collections::BTreeMap;
+
+use gpui::{App, Global, WindowId};
+use kubiq_proto::ids::ProjectId;
+use kubiq_proto::projects::{ProjectHealth, ProjectSnapshot};
+
+/// One live window: the letter it is named by, and the projects open in it.
+#[derive(Clone, Debug)]
+pub struct WindowSlot {
+    pub id: WindowId,
+    /// `A`, `B`, `C`… — what the picker prints beside every project this window holds.
+    pub label: char,
+    /// The projects open in this window, in the order the picker lists them.
+    pub projects: Vec<ProjectId>,
+    /// Which of `projects` the window is currently pointed at.
+    pub active: usize,
+}
+
+impl WindowSlot {
+    pub fn active_project(&self) -> Option<ProjectId> {
+        self.projects.get(self.active).copied()
+    }
+
+    pub fn holds(&self, project: ProjectId) -> bool {
+        self.projects.contains(&project)
+    }
+}
+
+/// The picker's three groups, for one window.
+///
+/// The rows in `elsewhere` carry the window that holds them, because that row's two actions — go
+/// there, or take it from there — both need it.
+#[derive(Default)]
+pub struct ProjectGroups {
+    pub here: Vec<ProjectId>,
+    pub elsewhere: Vec<(ProjectId, char, WindowId)>,
+    pub history: Vec<ProjectId>,
+}
+
+#[derive(Default)]
+pub struct WindowRegistry {
+    /// The host's catalogue, as this process last heard it. A `BTreeMap` because a ULID sorts by
+    /// creation time, so iteration is the order projects were added, at no cost.
+    projects: BTreeMap<ProjectId, ProjectSnapshot>,
+    /// One slot per live window, in the order they were opened.
+    pub windows: Vec<WindowSlot>,
+}
+
+impl Global for WindowRegistry {}
+
+impl WindowRegistry {
+    /// Seed the registry, once, before the first window is opened.
+    pub fn install(cx: &mut App) {
+        if !cx.has_global::<Self>() {
+            cx.set_global(Self::default());
+        }
+    }
+
+    /// Read the registry. Every reader goes through here rather than through `default_global`,
+    /// which would notify the observers on a plain read and spin the frame.
+    pub fn read(cx: &App) -> &Self {
+        cx.global::<Self>()
+    }
+
+    /// Whether the host has told us about any project at all.
+    pub fn is_empty(&self) -> bool {
+        self.projects.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.projects.len()
+    }
+
+    /// How many windows are live. The letters only mean anything against this: one window has
+    /// nothing to be told apart from.
+    pub fn window_count(&self) -> usize {
+        self.windows.len()
+    }
+
+    /// The lowest letter no live window is using. Letters are reused once a window closes, so the
+    /// set of names stays as short as the set of windows.
+    pub fn next_label(&self) -> char {
+        ('A'..='Z')
+            .find(|c| self.windows.iter().all(|w| w.label != *c))
+            .unwrap_or('#')
+    }
+
+    pub fn slot(&self, id: WindowId) -> Option<&WindowSlot> {
+        self.windows.iter().find(|w| w.id == id)
+    }
+
+    /// The window a project is open in, if any.
+    pub fn holder(&self, project: ProjectId) -> Option<&WindowSlot> {
+        self.windows.iter().find(|w| w.holds(project))
+    }
+
+    pub fn project(&self, id: ProjectId) -> Option<&ProjectSnapshot> {
+        self.projects.get(&id)
+    }
+
+    /// Every project, in creation order.
+    pub fn all(&self) -> impl Iterator<Item = &ProjectSnapshot> {
+        self.projects.values()
+    }
+
+    /// The project a window should open on when it is given no choice: the one used most recently,
+    /// falling back to the most recently created.
+    pub fn most_recent(&self) -> Option<ProjectId> {
+        self.projects
+            .values()
+            .max_by_key(|p| (p.record.last_opened_at, p.record.created_at))
+            .map(|p| p.record.id)
+    }
+
+    // ── the projection ──────────────────────────────────────────────
+
+    /// Replace the whole catalogue, as `ProjectList` says it is.
+    ///
+    /// A window holding a project that no longer exists loses it and stays open on nothing, because
+    /// the catalogue arriving is not the user closing anything.
+    pub fn replace_all(&mut self, projects: Vec<ProjectSnapshot>) {
+        self.replace_all_except(projects, &[]);
+    }
+
+    /// Replace the catalogue, keeping the rows named in `keep`.
+    ///
+    /// A window attached to several hosts holds one catalogue for all of them, but each host's
+    /// `ProjectList` is the whole truth about that host alone — applied as a plain replacement it
+    /// would take away every project belonging to any *other* host, which is how attaching a
+    /// remote used to make the local machine's projects vanish. `keep` is what the caller knows
+    /// this answer has no opinion about; see `Bus::projects_not_on`.
+    ///
+    /// A kept row wins over an incoming one of the same id. That case is a drone announcing a
+    /// `runs_on` project's folder under the id the local catalogue already minted for it: the
+    /// local record is the row, the drone's is its liveness, and letting the answer overwrite
+    /// would replace the user's name, colour and origin with the drone's bare reading of the
+    /// folder. One row, and it is the local one — `Bus::row_owner`.
+    pub fn replace_all_except(&mut self, projects: Vec<ProjectSnapshot>, keep: &[ProjectId]) {
+        let mut kept: BTreeMap<ProjectId, ProjectSnapshot> = keep
+            .iter()
+            .filter_map(|id| self.projects.remove(id).map(|p| (*id, p)))
+            .collect();
+        for mut project in projects {
+            keep_far_mark(self.projects.get(&project.record.id), &mut project);
+            match kept.get_mut(&project.record.id) {
+                // A kept row this answer also names is a drone serving a local record: the
+                // record stays the local one, and the liveness is the drone's — which is what
+                // clears the "not attached" a previous drone left on it.
+                Some(row) => {
+                    row.health = project.health;
+                    row.open_panes = project.open_panes;
+                }
+                None => {
+                    kept.insert(project.record.id, project);
+                }
+            }
+        }
+        self.projects = kept;
+        let known: Vec<ProjectId> = self.projects.keys().copied().collect();
+        for slot in &mut self.windows {
+            slot.projects.retain(|id| known.contains(id));
+            slot.active = slot.active.min(slot.projects.len().saturating_sub(1));
+        }
+    }
+
+    /// Apply one snapshot, whether it is new or a change to one already held.
+    pub fn apply(&mut self, mut project: ProjectSnapshot) {
+        keep_far_mark(self.projects.get(&project.record.id), &mut project);
+        self.projects.insert(project.record.id, project);
+    }
+
+    /// A row nothing can read right now, with the sentence that says why.
+    ///
+    /// What a dropped drone leaves behind: the record stays, because a machine that is asleep is
+    /// not the user forgetting a project, and the health carries the drone's name so the picker
+    /// marks it rather than offering it. The same state an unplugged drive puts a local project
+    /// in, which is why it needs no vocabulary of its own.
+    pub fn mark_unreadable(&mut self, id: ProjectId, reason: String) {
+        if let Some(project) = self.projects.get_mut(&id) {
+            project.health = ProjectHealth::Unreadable(reason);
+            // The panes were the drone's and went with it.
+            project.open_panes = 0;
+        }
+    }
+
+    /// The host has forgotten a project. Every window that held it is left pointed at whatever else
+    /// it holds, or at nothing.
+    pub fn forget(&mut self, id: ProjectId) {
+        self.projects.remove(&id);
+        for slot in &mut self.windows {
+            remove(slot, id);
+        }
+    }
+
+    // ── which window holds what ─────────────────────────────────────
+
+    /// Add a window, optionally pointed at one project taken from whichever window held it.
+    ///
+    /// A project the catalogue does not hold is dropped rather than registered, so the window opens
+    /// on nothing instead of on an id nothing can answer for.
+    pub fn register(&mut self, id: WindowId, label: char, project: Option<ProjectId>) {
+        let project = project.filter(|p| self.projects.contains_key(p));
+        if let Some(project) = project {
+            self.release(project);
+        }
+        self.windows.push(WindowSlot {
+            id,
+            label,
+            projects: project.into_iter().collect(),
+            active: 0,
+        });
+    }
+
+    /// Drop a window's slot. Everything it held goes back to history.
+    pub fn unregister(&mut self, id: WindowId) {
+        self.windows.retain(|w| w.id != id);
+    }
+
+    /// Open a project in a window, taking it from any other.
+    ///
+    /// Answers whether it happened: a project the catalogue does not hold cannot be opened, and the
+    /// caller must not then tell the host that a window pointed at it.
+    pub fn open_in(&mut self, id: WindowId, project: ProjectId) -> bool {
+        if !self.projects.contains_key(&project) {
+            return false;
+        }
+        self.release(project);
+        match self.windows.iter_mut().find(|w| w.id == id) {
+            Some(slot) => {
+                slot.projects.push(project);
+                slot.active = slot.projects.len() - 1;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Point a window at a project it already holds.
+    pub fn activate(&mut self, id: WindowId, project: ProjectId) {
+        if let Some(slot) = self.windows.iter_mut().find(|w| w.id == id)
+            && let Some(at) = slot.projects.iter().position(|p| *p == project)
+        {
+            slot.active = at;
+        }
+    }
+
+    /// Close a project in a window. The window stays, pointed at whatever else it holds, or at
+    /// nothing.
+    pub fn close(&mut self, id: WindowId, project: ProjectId) {
+        if let Some(slot) = self.windows.iter_mut().find(|w| w.id == id) {
+            remove(slot, project);
+        }
+    }
+
+    /// The three groups one window's picker shows, filtered on name and path so a path fragment
+    /// finds a project too.
+    pub fn groups(&self, id: WindowId, filter: &str) -> ProjectGroups {
+        let needle = filter.trim().to_lowercase();
+        let matches = |project: ProjectId| {
+            self.projects
+                .get(&project)
+                .is_some_and(|snapshot| matches_needle(snapshot, &needle))
+        };
+
+        let mut groups = ProjectGroups::default();
+
+        if let Some(slot) = self.slot(id) {
+            groups.here = slot
+                .projects
+                .iter()
+                .copied()
+                .filter(|p| matches(*p))
+                .collect();
+        }
+
+        for slot in self.windows.iter().filter(|w| w.id != id) {
+            for project in slot.projects.iter().copied().filter(|p| matches(*p)) {
+                groups.elsewhere.push((project, slot.label, slot.id));
+            }
+        }
+        groups
+            .elsewhere
+            .sort_by_key(|(project, label, _)| (*label, *project));
+
+        // Most recently used first, and a project never opened last. With a real catalogue the
+        // order things were added is not the order anybody wants to see them in.
+        let mut history: Vec<&ProjectSnapshot> = self
+            .projects
+            .values()
+            .filter(|p| self.holder(p.record.id).is_none())
+            .filter(|p| matches(p.record.id))
+            .collect();
+        history.sort_by(|a, b| {
+            b.record
+                .last_opened_at
+                .cmp(&a.record.last_opened_at)
+                .then_with(|| b.record.created_at.cmp(&a.record.created_at))
+        });
+        groups.history = history.into_iter().map(|p| p.record.id).collect();
+
+        groups
+    }
+
+    /// Every project in the catalogue whose name or path holds `filter`, in creation order — the
+    /// "All projects" modal's whole list, unlike [`Self::groups`] which only ever answers for one
+    /// window and splits by where each project is open.
+    pub fn all_matching(&self, filter: &str) -> Vec<ProjectId> {
+        let needle = filter.trim().to_lowercase();
+        self.projects
+            .values()
+            .filter(|snapshot| matches_needle(snapshot, &needle))
+            .map(|snapshot| snapshot.record.id)
+            .collect()
+    }
+
+    /// Take a project out of whatever window holds it. A project is open in one window at a time,
+    /// so every open goes through here first.
+    fn release(&mut self, project: ProjectId) {
+        for slot in &mut self.windows {
+            remove(slot, project);
+        }
+    }
+}
+
+/// Whether a project's name or path holds a lowercase needle. An empty needle matches everything,
+/// which is what leaves an unfiltered picker or modal showing the whole list.
+fn matches_needle(snapshot: &ProjectSnapshot, needle: &str) -> bool {
+    needle.is_empty()
+        || snapshot.record.name.to_lowercase().contains(needle)
+        || snapshot.record.path.to_lowercase().contains(needle)
+}
+
+/// Keep the sentence a drone-served row was marked with when its *record's* owner answers.
+///
+/// The local host cannot see a far folder, so its snapshot of a `runs_on` row always reads healthy;
+/// letting that overwrite an `Unreadable` the drone's dial (or its absence) put there would hide the
+/// one thing the row has to say. Only a drone's own listing clears the mark — the kept-row path of
+/// [`WindowRegistry::replace_all_except`] — or an origin that changed, which is a new question.
+fn keep_far_mark(old: Option<&ProjectSnapshot>, incoming: &mut ProjectSnapshot) {
+    let Some(old) = old else { return };
+    if incoming.record.runs_on.is_some()
+        && incoming.record.runs_on == old.record.runs_on
+        && matches!(old.health, ProjectHealth::Unreadable(_))
+        && incoming.health == ProjectHealth::Ok
+    {
+        incoming.health = old.health.clone();
+        incoming.open_panes = old.open_panes;
+    }
+}
+
+/// Remove a project from one slot, keeping `active` on a project that still exists.
+fn remove(slot: &mut WindowSlot, project: ProjectId) {
+    let Some(at) = slot.projects.iter().position(|p| *p == project) else {
+        return;
+    };
+    slot.projects.remove(at);
+    slot.active = slot.active.min(slot.projects.len().saturating_sub(1));
+}

@@ -48,7 +48,7 @@ clipboard copy. The full map:
 | F1–F12 | Respective `\x1bOP`–`\x1b[24~` | Correct |
 
 **What this changes: nothing.** The audit confirms the input pipeline is complete. The only
-interception is the key handler callback (`view.rs:718-724`), which Ubiq does not currently set. The
+interception is the key handler callback (`view.rs:718-724`), which Kubiq does not currently set. The
 next section proposes setting one — for clipboard shortcuts — but all other keystrokes continue
 flowing through unchanged.
 
@@ -261,7 +261,7 @@ sequence. This is more complex and only necessary if the delay is noticeable.
 
 If bare Escape's delay is unacceptable, `Ctrl+Esc` is the fallback. It requires no delay (it is
 unambiguously a single chord), and the conflict with macOS's system shortcuts is unlikely in
-practice because Ubiq's window would have to be focused AND holding keyboard focus in a terminal
+practice because Kubiq's window would have to be focused AND holding keyboard focus in a terminal
 pane for the chord to fire — at which point the system shortcut has no window to act on.
 
 ### What defocus does to the UI
@@ -287,7 +287,7 @@ pointer cursor and underline, click opens the URL in the default browser or edit
 \e]8;;https://example.com\e\\click here\e]8;;\e\\
 ```
 
-alacritty_terminal 0.25.1 — the version Ubiq uses — **fully supports this**. The VTE parser
+alacritty_terminal 0.25.1 — the version Kubiq uses — **fully supports this**. The VTE parser
 processes OSC 8 and stores a `Hyperlink { id, uri }` on each `Cell` via `Cell::set_hyperlink()`.
 The data is already in the grid. The vendored renderer (`vendor/gpui-terminal/src/render.rs`)
 completely ignores it: it checks `Flags::UNDERLINE` but never reads `cell.hyperlink()`, so an
@@ -381,7 +381,7 @@ Two new tokens for the link styling:
 | `link_underline` | Colour of the undercurl on hoverable links | `accent` (the project's accent colour) |
 | `link_underline_hover` | Colour when the pointer is over the link | `accent` brightened by 15% |
 
-Both go in `crates/ubiq/src/theme.rs` and follow the token-not-colour rule (`D10`).
+Both go in `crates/kubiq/src/theme.rs` and follow the token-not-colour rule (`D10`).
 
 ## 7. Implementation order
 
@@ -405,9 +405,9 @@ renderer work and benefit from being together. Phase 5 is straightforward and in
 | `vendor/gpui-terminal/src/clipboard.rs` | Already complete — no changes needed |
 | `vendor/gpui-terminal/src/render.rs` | Selection highlight rendering pass; OSC 8 hyperlink visual styling (undercurl); URL regex detection and hit-test map |
 | `vendor/gpui-terminal/src/terminal.rs` | Expose selection methods as thin wrappers over `Term` |
-| `crates/ubiq/src/app/wire.rs` | Wire key handler, clipboard callbacks, and defocus logic at terminal creation (`open_pane`) |
-| `crates/ubiq/src/ui/terminal.rs` | No changes — the `TerminalView` handles everything internally |
-| `crates/ubiq/src/theme.rs` | Two new tokens: `link_underline`, `link_underline_hover` |
+| `crates/kubiq/src/app/wire.rs` | Wire key handler, clipboard callbacks, and defocus logic at terminal creation (`open_pane`) |
+| `crates/kubiq/src/ui/terminal.rs` | No changes — the `TerminalView` handles everything internally |
+| `crates/kubiq/src/theme.rs` | Two new tokens: `link_underline`, `link_underline_hover` |
 
 **No new crates.** `arboard` is already a dependency of `gpui-terminal`. **No new bus messages** —
 clipboard, file drops, and hyperlinks are local to the UI process.

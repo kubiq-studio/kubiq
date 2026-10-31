@@ -3,7 +3,7 @@ id: inbox-ui-id-inventory
 title: Proposal — the id inventory, and menus built from it
 kind: proposal
 status: proposal
-summary: The list the two identity designs both assume and neither supplies — every place in the interface a stable name could point at, what consumes the name, and where in the code to find the place. It reports that Ubiq already names places five times over in five disagreeing spellings, that four of those namespaces are exhaustive enums the inventory can be derived from rather than invented beside, and it argues one new use for the result — a menu declared as a list of ids rather than as three parallel lists matched by position, which is what makes submenus, extension rows and a pointable menu possible at all.
+summary: The list the two identity designs both assume and neither supplies — every place in the interface a stable name could point at, what consumes the name, and where in the code to find the place. It reports that Kubiq already names places five times over in five disagreeing spellings, that four of those namespaces are exhaustive enums the inventory can be derived from rather than invented beside, and it argues one new use for the result — a menu declared as a list of ids rather than as three parallel lists matched by position, which is what makes submenus, extension rows and a pointable menu possible at all.
 read_when: you are naming a screen area, deciding what an extension or a personalisation rule may anchor to, adding a menu or a menu row, or looking for the place a given control lives in the code
 updated: 2026-09-29
 depends_on: [wip-in-place-help, inbox-ui-id, inbox-ui-id-tooling, wip-help, inbox-plugin-system, inbox-personalisation, tech-ui, tech-components, feat-workbench]
@@ -23,7 +23,7 @@ sections and several hundred controls that nothing has named. This document is t
 what each name would point at, and where in the code the place is drawn — plus one finding and one
 proposal that fall out of assembling it.
 
-The finding: **the inventory does not have to be invented.** Ubiq already names places five times
+The finding: **the inventory does not have to be invented.** Kubiq already names places five times
 over, and four of those namespaces are closed enums with an `all()` beside them. §2 is the map
 between them.
 
@@ -50,27 +50,27 @@ An instance-kind is named once and drawn many times. The scheme has no way to sa
 (`G313`), so every such row is listed as one entry and the count is the user's data, never the
 catalogue's.
 
-**Not enumerated**: the 92 bare `.id("…")` literals under `crates/ubiq/src/ui/`, which exist to key
+**Not enumerated**: the 92 bare `.id("…")` literals under `crates/kubiq/src/ui/`, which exist to key
 GPUI's hover and scroll bookkeeping and are unique only among siblings. They are the denominator
 [`ui-id-tooling-proposal.md`](./ui-id-tooling-proposal.md) §7 proposes measuring coverage against,
 not a source of names.
 
-## 2. Ubiq already names places five times over
+## 2. Kubiq already names places five times over
 
 Five spellings for "which place", all in the tree today, none of them derived from another.
 
 | Namespace | Spelling | Scope | Stability | Where |
 |---|---|---|---|---|
-| GPUI element id | `"menu-row"`, `"tab-strip"` | one frame, siblings only | none | ~355 kebab strings across `crates/ubiq/src/ui/`, 92 of them bare `.id("…")` literals |
-| `UiId` | `rail.mode.tasks` | the product | published contract (`G312`: no alias yet) | `crates/ubiq/src/state/ui_id.rs`, `CATALOGUE` |
-| Help context key | `panel.ubiq.explorer`, `view.git`, `rail.ide` | the help ladder | a page's `context:` claims it exactly once | `crates/ubiq/src/app/help.rs`, `context_key()` |
-| Saved-layout panel name | `ubiq.explorer`, `ubiq.git.refs` | a persisted layout | **"it never changes"**, stated in the code | `crates/ubiq/src/state/dock.rs`, `PanelKind::name()` |
-| Link view slug | `ubiq://./git`, `…/chat` | a `ubiq://` destination | one spelling, three readers | `crates/ubiq/src/state/nav/text.rs`, `View::slug()` |
+| GPUI element id | `"menu-row"`, `"tab-strip"` | one frame, siblings only | none | ~355 kebab strings across `crates/kubiq/src/ui/`, 92 of them bare `.id("…")` literals |
+| `UiId` | `rail.mode.tasks` | the product | published contract (`G312`: no alias yet) | `crates/kubiq/src/state/ui_id.rs`, `CATALOGUE` |
+| Help context key | `panel.kubiq.explorer`, `view.git`, `rail.ide` | the help ladder | a page's `context:` claims it exactly once | `crates/kubiq/src/app/help.rs`, `context_key()` |
+| Saved-layout panel name | `kubiq.explorer`, `kubiq.git.refs` | a persisted layout | **"it never changes"**, stated in the code | `crates/kubiq/src/state/dock.rs`, `PanelKind::name()` |
+| Link view slug | `kubiq://./git`, `…/chat` | a `kubiq://` destination | one spelling, three readers | `crates/kubiq/src/state/nav/text.rs`, `View::slug()` |
 
 Two runtime registries sit beside them and are not names but are exhaustive lists of the same
 places: `MenuId` — every menu that can be open, one at a time — and `Layer` — every modal, dialog
-and overlay, in peel order. Both are in `crates/ubiq/src/state/workbench.rs` and
-`crates/ubiq/src/state/overlay.rs`.
+and overlay, in peel order. Both are in `crates/kubiq/src/state/workbench.rs` and
+`crates/kubiq/src/state/overlay.rs`.
 
 **What this buys the inventory.** Three of the five and both registries are closed Rust enums with
 an exhaustive `all()` or `match` beside them: `RailMode` (9), `View` (13), `PanelKind` (17),
@@ -82,7 +82,7 @@ hand: deriving a published name from a Rust variant means a refactor silently mo
 help page and a user's preference both point at.
 
 **What it costs.** Five namespaces that disagree is four chances to be wrong about the same place.
-`PanelKind::Explorer` is `ubiq.explorer` to a saved layout, `panel.ubiq.explorer` to a help page,
+`PanelKind::Explorer` is `kubiq.explorer` to a saved layout, `panel.kubiq.explorer` to a help page,
 `explorer` to a link only indirectly, and nothing at all to `UiId`. A reader asking "what is the
 explorer called" gets four answers. The inventory below picks one spelling per place and says which
 of the other four it has to agree with.
@@ -108,7 +108,7 @@ the button that reaches it. `conversation` is a root of its own rather than a br
 
 ## 4. The inventory
 
-**Paths below are relative to `crates/ubiq/src/`**, and a reference is a file plus the function or
+**Paths below are relative to `crates/kubiq/src/`**, and a reference is a file plus the function or
 type that draws the place. A row is a *proposal*: the thirty-four names in
 `state/ui_id.rs`'s `CATALOGUE` are the only ones that exist today, and every other row is a name
 that would have to be written down before anything could point at it.
@@ -146,9 +146,9 @@ The titlebar and the rail are the two areas `CATALOGUE` already covers; they are
 | `viewer.diff`, `viewer.diff.hunk`, `viewer.diff.line` | area, instance-kind | A change against its base | `ui/viewer/diff.rs`, `render`, `header`, `draw` |
 
 **The seventeen panel kinds are already named, elsewhere.** `PanelKind::name()` answers
-`ubiq.explorer`, `ubiq.git.refs`, `ubiq.kb.doc` and fourteen more, and its own comment says the name
+`kubiq.explorer`, `kubiq.git.refs`, `kubiq.kb.doc` and fourteen more, and its own comment says the name
 **never changes**, because a saved layout is rebuilt by looking it up. That is a published,
-stable-by-contract name for a place — the same thing a `UiId` is — reached by dropping the `ubiq.`
+stable-by-contract name for a place — the same thing a `UiId` is — reached by dropping the `kubiq.`
 prefix and keeping the rest: `explorer`, `git.refs`, `kb.doc`, `agents.explorer`, `help.panel`,
 `tasks.panel`, `chat`, `terminal`. **Wherever this inventory names a panel, it uses that spelling**,
 so the two namespaces agree by construction rather than by review. The exceptions are the three
@@ -448,11 +448,11 @@ falls out of §4 is mechanical:
 **The page half is built on one side of the wire only.** `_tools/helpbundle.py` reads a `targets:`
 list from a page's frontmatter, checks its shape and resolves each entry against the real catalogue
 scraped out of `state/ui_id.rs`, inverts it many-to-many, and writes `"targets"` into
-`catalog.json` beside `"context"` and `"redirects"`. `HelpCatalog` in `crates/ubiq-proto/src/help.rs`
+`catalog.json` beside `"context"` and `"redirects"`. `HelpCatalog` in `crates/kubiq-proto/src/help.rs`
 has fields for the other two and none for that one, so serde drops the map on the way in and
 nothing in the interface can read it. A page can therefore claim a target today, be validated for
 it, and never be reachable from it — which is why a click inside the targeting overlay still opens
-nothing (`G319`). Closing it is a `crates/ubiq-proto` change, which is precisely the cost
+nothing (`G319`). Closing it is a `crates/kubiq-proto` change, which is precisely the cost
 [`wip/in-place-help.md`](../wip/in-place-help.md) §2.5 hoped the binding would avoid.
 
 **What the other two consumers need that help does not** is stated in
@@ -478,7 +478,7 @@ Three parallel lists, matched by position.
    `pick_git_menu_action`, `pick_kb_action`, `pick_conversation_menu` and eight more.
 
 `kit::context_menu(id, at, items, on_pick: Fn(usize), on_dismiss)` in
-`crates/ubiq/src/ui/kit/menu.rs` is the mechanism, and `usize` is the whole contract between the
+`crates/kubiq/src/ui/kit/menu.rs` is the mechanism, and `usize` is the whole contract between the
 three. The tree knows the hazard and works around it in five separate places, each with a comment
 saying so:
 

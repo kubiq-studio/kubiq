@@ -3,11 +3,11 @@ id: feat-drone
 title: Drones
 kind: feature
 status: current
-summary: One small executable Ubiq places on a machine it is not running on, serving that machine's terminal, files, search and machine facts over a single duplex byte stream — attached as an ordinary host over an SSH exec channel, with three lifetimes, a per-project origin, and a hash-pinned binary the interface uploads when the remote `PATH` has none.
-read_when: you are changing how Ubiq reaches a machine it is not running on — the drone binary, its handshake, its lifetime, its deployment, or the SSH profiles and surfaces behind it
+summary: One small executable Kubiq places on a machine it is not running on, serving that machine's terminal, files, search and machine facts over a single duplex byte stream — attached as an ordinary host over an SSH exec channel, with three lifetimes, a per-project origin, and a hash-pinned binary the interface uploads when the remote `PATH` has none.
+read_when: you are changing how Kubiq reaches a machine it is not running on — the drone binary, its handshake, its lifetime, its deployment, or the SSH profiles and surfaces behind it
 updated: 2026-10-29
 verified: 2026-10-29
-code_anchors: [crates/ubiq-drone/src/main.rs, crates/ubiq-drone/src/lib.rs, crates/ubiq-drone/src/relay.rs, crates/ubiq-drone/src/socket.rs, crates/ubiq-drone/src/held.rs, crates/ubiq-drone/src/linger.rs, crates/ubiq-drone/src/state.rs, crates/ubiq-drone/src/search.rs, crates/ubiq-drone/src/scrollback.rs, crates/ubiq-drone/src/tunnel.rs, crates/ubiq/src/app/tunnels.rs, crates/ubiq/src/ui/tunnels.rs, crates/ubiq-host/src/carrier.rs, crates/ubiq-proto/src/carrier.rs, crates/ubiq-proto/src/drone/mod.rs, crates/ubiq-proto/src/drone/manifest.rs, crates/ubiq-proto/src/settings.rs, crates/ubiq-proto/src/ssh.rs, crates/ubiq-proto/src/projects.rs, crates/ubiq-host/src/settings.rs, crates/ubiq/src/app/ssh_connect.rs, crates/ubiq/src/app/unix_connect.rs, crates/ubiq/src/app/remote_connect.rs, crates/ubiq/src/app/hosts.rs, crates/ubiq/src/app/projects.rs, crates/ubiq/src/ui/remote_connect.rs, crates/ubiq/src/ui/settings.rs, crates/ubiq/src/ui/sink/project.rs, crates/ubiq/src/app/host_browse.rs, crates/ubiq/src/ext/origin.rs, crates/ubiq-host/src/store/file.rs, crates/ubiq-app/src/lib.rs, _tools/drone.py]
+code_anchors: [crates/kubiq-drone/src/main.rs, crates/kubiq-drone/src/lib.rs, crates/kubiq-drone/src/relay.rs, crates/kubiq-drone/src/socket.rs, crates/kubiq-drone/src/held.rs, crates/kubiq-drone/src/linger.rs, crates/kubiq-drone/src/state.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-drone/src/scrollback.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq/src/ui/tunnels.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-proto/src/drone/mod.rs, crates/kubiq-proto/src/drone/manifest.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/ssh.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-host/src/settings.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/app/unix_connect.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/ui/remote_connect.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/ext/origin.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-app/src/lib.rs, _tools/drone.py]
 depends_on: [tech-architecture, tech-transport, tech-structure, wip-drone]
 review_cycle: monthly
 ---
@@ -16,14 +16,14 @@ review_cycle: monthly
 
 ## Purpose
 
-A **drone** is one small executable Ubiq places where it is not running, serving that machine's
+A **drone** is one small executable Kubiq places where it is not running, serving that machine's
 terminal, files, search and machine facts over a single duplex byte stream. A user picks an SSH
 profile and a folder, and gets panes, a file tree, an editor and a content search against the far
 machine inside the same window as everything local. Nothing durable is written to the far machine
 beyond the binary itself and a socket, and no credential material crosses to it.
 
 The crate is built twice from one source. The **relay** build — the one the tree has — carries no
-harness knowledge at all: it links the lean core of `crates/ubiq-host` and serves pseudo-terminals,
+harness knowledge at all: it links the lean core of `crates/kubiq-host` and serves pseudo-terminals,
 files, browse, search and host facts. A **runtime** build, which would link `agent-manager` to
 compose and confine harness runs inside WSL or a container, has no design; it stays with the working
 note in [`../wip/drone.md`](../wip/drone.md).
@@ -32,12 +32,12 @@ note in [`../wip/drone.md`](../wip/drone.md).
 
 **A drone attaches as an ordinary host on the multi-host bus** (`D116`), not as a proxy the local
 coordinator routes through and not as a new message family. The interface reaches it exactly as it
-reaches a `ubiq --serve` host, so host routing, the Hosts menu, project listing and disconnect carry
+reaches a `kubiq --serve` host, so host routing, the Hosts menu, project listing and disconnect carry
 it unchanged. The local coordinator never learns that a drone exists.
 
-**A drone is reached over the SSH exec channel's own stdio.** The bus needs no forwarded port: Ubiq
+**A drone is reached over the SSH exec channel's own stdio.** The bus needs no forwarded port: Kubiq
 spawns the system `ssh` with piped stdio and speaks the framed protocol over those
-pipes. Ubiq never parses `ssh` output for structure — what comes back is an exit code and bytes.
+pipes. Kubiq never parses `ssh` output for structure — what comes back is an exit code and bytes.
 
 ### The handshake
 
@@ -46,7 +46,7 @@ a message-schema number and a capability set, and waits for a `DroneReady` on th
 before the hub, the relay thread or the pump exists. A refusal is logged to standard error and exits
 non-zero having spawned no pseudo-terminal and touched nothing on the far machine.
 
-**The schema number is what an old drone and a new Ubiq disagree about.** It covers exactly the
+**The schema number is what an old drone and a new Kubiq disagree about.** It covers exactly the
 messages a drone speaks: the pane family, the file family, the host browse family, the read half of
 the project family, `ListShells` and `HostInfo`. A mismatch is answered with a refusal carrying a
 sentence the connect modal shows verbatim, and both sides close cleanly.
@@ -88,14 +88,14 @@ list still names and whose authentication still takes a secret, then reads each 
 deleted, or switched to agent authentication, leaves no material filed under an id nothing names.
 
 **The secret reaches `ssh` without passing through the interface** (`D125`). `SSH_ASKPASS` points at
-Ubiq's own binary, and the child's environment carries a profile id and a config root — references,
+Kubiq's own binary, and the child's environment carries a profile id and a config root — references,
 never material. The helper mode opens the host's store itself and writes the secret on its own
 standard output, where OpenSSH reads an askpass answer from. The whole path is keychain to helper
 stdout to `ssh`: never `argv`, never a file, never the bus, never the drawing process. The helper
 answers only a prompt that says `password` or `passphrase`; any other (a host-key `yes/no`) gets
 no answer and a non-zero exit.
 
-**Every `ssh`/`scp` Ubiq spawns hardens the link the same way** (`ubiq_proto::ssh`):
+**Every `ssh`/`scp` Kubiq spawns hardens the link the same way** (`kubiq_proto::ssh`):
 `StrictHostKeyChecking=accept-new` (trust on first use through `~/.ssh/known_hosts`; a changed key
 is refused) and `ServerAliveInterval=15` / `ServerAliveCountMax=3`. A refused key reaches the
 connect modal as its own sentence (`ssh-keygen -R`), and the reconnect loop stops on it instead of
@@ -118,7 +118,7 @@ permissions are the whole of the access control, since no port is forwarded. A m
 The socket path derives from a hash of the canonicalised roots, so two windows cannot start rival
 drones for one project, and its containing directory is forced to `0700` before the bind.
 
-**The linger is the drone's own timer,** because the whole point is that Ubiq may be gone. It is
+**The linger is the drone's own timer,** because the whole point is that Kubiq may be gone. It is
 re-asserted on each attach over one line the attaching process writes before the handshake — the
 drone's two halves talking over a socket only they can open — and a thirty-second startup grace
 covers a zero linger expiring in the gap before the first client arrives. On expiry the drone kills
@@ -193,7 +193,7 @@ folder and pane requests are dropped rather than sent to the local host, which w
 path on the wrong machine. The window sends it once per attach and per (re-)pin, and skips it when
 the project is already served there. A refusal of it lands on the project's row, not the banner.
 
-**An upload is keyed by drone version and message schema** (`~/.cache/ubiq/drone/<version>-schema<n>/`),
+**An upload is keyed by drone version and message schema** (`~/.cache/kubiq/drone/<version>-schema<n>/`),
 and a saved drone path under that cache with another key is ignored, so a binary this build would
 refuse is never relaunched. A drone still running from an older schema is refused at the handshake
 with "the drone is older: replace its binary…", which a project's row says with the host's name. A
@@ -280,7 +280,7 @@ the window sends `StartConversation` and `ReviveConversation` to the row's owner
 (`Bus::resolve`), and the new-agent form binds `remote` to the saved remote serving the project
 whatever its own *Run against remote* says. The host runs it in
 `<config>/projects/<id>/local/remote/<label>/` — the project has no folder here — with
-`ubiq-remote` injected and the remote instructions appended; a start in such a project with no
+`kubiq-remote` injected and the remote instructions appended; a start in such a project with no
 `remote` is refused. A revive is bound the same way (`ReviveConversation.remote`), and a mission's
 launch too; a restore that finds the drone not yet attached holds its revives until the drone's
 `ProjectList` serves the project (`revive_deferred`). The conversation's follow-ups route to the
@@ -313,7 +313,7 @@ same path on the wrong machine; there is no reply to refuse with, so the tree re
 - **The Drones settings section** lists, per saved SSH-carrier host, what is running there — roots,
   uptime, pane count, version and linger — with a per-host Refresh, a per-host Check, and a per-drone
   Stop behind a danger confirm, since stopping kills every pane the drone holds. Version skew is
-  flagged on the row rather than hidden: a managed drone outlives the Ubiq that deployed it, and the
+  flagged on the row rather than hidden: a managed drone outlives the Kubiq that deployed it, and the
   one remedy is stop, redeploy, reattach. **A drone is never hot-swapped under live panes.**
   Under each host sits its **Tunnels** block: a summary and, while attached, a line per enabled
   tunnel (local port → target, linked or waiting, connections, bytes, last error), and *Edit
@@ -321,9 +321,9 @@ same path on the wrong machine; there is no reply to refuse with, so the tree re
   TCP (local port → host:port) or HTTP (local port → remote URL, *Rewrite Host header* with an
   optional value, *Rewrite host in contents* with its content types, *Skip certificate check* for
   `https`). Saving writes `SavedRemoteHost.tunnels` and relinks an attached host. The forwarding
-  itself is a second `ssh` exec, `ubiq-drone --tunnel`
+  itself is a second `ssh` exec, `kubiq-drone --tunnel`
   ([`../tech/transport-contract.md`](../tech/transport-contract.md), *The tunnel channel*).
-  Below the SSH hosts, a **Served hosts** block lists every saved socket host (`ubiq --serve`) with
+  Below the SSH hosts, a **Served hosts** block lists every saved socket host (`kubiq --serve`) with
   the same Tunnels block; there the forwarding is a second TCP/TLS connection upgraded on
   `/tunnel` with the saved token and pinned key, dialling only the served machine's loopback unless
   it was started with `--tunnel-allow`.
@@ -346,7 +346,7 @@ Every message a drone speaks is an existing one, and
   no dispatch ever sees (`D117`). The pumps at each end read, write and swallow them there. They are
   ordinary frames rather than a preamble because the stream is length-prefixed MessagePack, and a
   second encoding would need its own ceiling, truncation rule and decode errors.
-- **`MESSAGE_SCHEMA`**, a `u32` beside the frame ceiling in `crates/ubiq-proto/src/wire.rs`.
+- **`MESSAGE_SCHEMA`**, a `u32` beside the frame ceiling in `crates/kubiq-proto/src/wire.rs`.
 - **`ProjectRecord.runs_on`**, an optional `DroneOrigin`, carried on an update as a three-state
   `DroneChange` because an `Option<Option<_>>` cannot cross the wire, and on `AddProject` for a far
   folder. Its `profile` and its `via` (`OriginVia`, a contributed carrier's kind and target) are
@@ -356,7 +356,7 @@ Every message a drone speaks is an existing one, and
   `via` origin is written at **version 2**, because a build from before `via` could not parse it and
   would set the whole file aside — a version it does not know it leaves alone instead. Both load.
 - **`SavedRemoteHost.carrier`**, its `DronePreset` and its remembered `drone_path`, in
-  `crates/ubiq-proto/src/settings.rs` beside `SshProfile` and its authentication choice.
+  `crates/kubiq-proto/src/settings.rs` beside `SshProfile` and its authentication choice.
 - **The search family**, answered by a drone exactly as the local worker answers it.
 - **`HostInfo`**, which the relay greets each attaching client with.
 
@@ -366,7 +366,7 @@ The crate and its feature split are [`../tech/project-structure.md`](../tech/pro
 the lean host build and the multi-host bus are
 [`../tech/architecture.md`](../tech/architecture.md)'s.
 
-**On the far machine.** `crates/ubiq-drone/src/main.rs` hand-rolls its argv; `relay.rs` is the run
+**On the far machine.** `crates/kubiq-drone/src/main.rs` hand-rolls its argv; `relay.rs` is the run
 loop that stands in for the coordinator at a fraction of its surface — the pty map with its owners
 and focus, a file worker, a machine-facts sampler and a catalogue held as a plain vector — seeded
 from `--root`, grown by `ServeProject` (`Relay::serve`), never written down. Standard output is flushed on every write, because a
@@ -380,28 +380,28 @@ the state file with its list-and-prune, `search.rs` the one-shot execs, `scrollb
 which needs a sink that outlives a link, so a private hub with one client held for the life of the
 process sits between the pty and the ring. `lib.rs` holds `capabilities()` and `probe_line()`.
 
-**The session pump exists twice and its rules once.** `ubiq_host::carrier::pump()` and
-`spawn_pump()` in `crates/ubiq/src/app/remote_connect.rs` are two threads, because `crates/ubiq`
-does not depend on `crates/ubiq-host` and `just ui` enforces it. Duplicating the thread shape is
+**The session pump exists twice and its rules once.** `kubiq_host::carrier::pump()` and
+`spawn_pump()` in `crates/kubiq/src/app/remote_connect.rs` are two threads, because `crates/kubiq`
+does not depend on `crates/kubiq-host` and `just ui` enforces it. Duplicating the thread shape is
 inherent to that boundary; duplicating the *rules* would let the two ends drift about how long
 silence may last, so the handshake helpers and the heartbeat state machine sit in
-`crates/ubiq-proto/src/carrier.rs` and both pumps call them. A carrier supplies one thing beyond its
+`crates/kubiq-proto/src/carrier.rs` and both pumps call them. A carrier supplies one thing beyond its
 two halves — a closer that makes a **blocked** read on the other half return, since dropping a write
 handle does not, and without it the host never sees the peer go and never reaps the panes.
 
-**On the interface's side.** `crates/ubiq/src/app/ssh_connect.rs` owns every reach of a far machine:
+**On the interface's side.** `crates/kubiq/src/app/ssh_connect.rs` owns every reach of a far machine:
 `dial_ssh()` and `dial_ssh_reporting()`, `ensure_drone()` and its reporting twin, `check_host()`,
 `list_drones()` and `stop_drone()`. All of them build their argv through one builder —
-`crates/ubiq-proto/src/ssh.rs`, shared with the host's database tunnel — and run off the
+`crates/kubiq-proto/src/ssh.rs`, shared with the host's database tunnel — and run off the
 main thread. The child, its pipes, its stderr drain and a watchdog live in that module, and nothing
-below it sees a descriptor. `crates/ubiq-proto/src/drone/` holds the manifest, the `uname` map and
+below it sees a descriptor. `crates/kubiq-proto/src/drone/` holds the manifest, the `uname` map and
 the verifier — in the protocol crate rather than the host's, because the interface shells to `ssh`
 itself and cannot name the host crate; the host re-exports it under the old name.
 
-`Bus::row_owner()` in `crates/ubiq/src/app/hosts.rs` is the duplicate-row rule, read by project
+`Bus::row_owner()` in `crates/kubiq/src/app/hosts.rs` is the duplicate-row rule, read by project
 listing, wholesale replacement and host drop alike; `disconnect_host()` reads the rows a lost host
 served before dropping it, and marks each survivor unreadable.
-`AppState::ensure_drone()` in `crates/ubiq/src/app/projects.rs` is the launch-or-adopt path for a
+`AppState::ensure_drone()` in `crates/kubiq/src/app/projects.rs` is the launch-or-adopt path for a
 project with an origin; `origin_host()` in `remote_connect.rs` finds an attached host on the
 origin's machine, `serve_on()` sends the serve request, and `attach_remote()` calls
 `serve_pinned()` for every pinned project on the machine it just attached. `project_pinned_to()` is how the reconnect loop and the connect modal
@@ -410,8 +410,8 @@ SSH carrier re-runs the dial with the saved profile, root and preset — cheap a
 because the launch line adopts. Only the **Attached** preset has nothing to reattach to.
 
 **A drone already listening on this machine is a third carrier.** `RemoteCarrier::Unix { path,
-preset }` names a Unix socket — `ubiq-drone --listen`'s, say — and
-`crates/ubiq/src/app/unix_connect.rs` connects it, runs the same `ubiq_proto::carrier::welcome`
+preset }` names a Unix socket — `kubiq-drone --listen`'s, say — and
+`crates/kubiq/src/app/unix_connect.rs` connects it, runs the same `kubiq_proto::carrier::welcome`
 handshake under a ten-second read deadline, and hands the two halves to `start_drone_session()` in
 `remote_connect.rs`, the one function an `ssh` dial also ends in. Nothing is spawned or deployed, so
 a path that does not answer fails with the connect error or "not a drone". Reconnect redials the
@@ -419,10 +419,10 @@ path on the socket host's backoff. The modal shows the path read-only: such an e
 programmatically, never typed. On a platform without Unix sockets the variant still loads and
 dialling it fails with a sentence.
 
-The askpass helper mode lives in `crates/ubiq-app/src/lib.rs`, the one crate that names both halves.
-The drawing sits in `crates/ubiq/src/ui/remote_connect.rs` (the carrier pill and the per-step note),
-`crates/ubiq/src/ui/settings.rs` (the SSH profiles and Drones sections) and
-`crates/ubiq/src/ui/sink/project.rs` with its state in `crates/ubiq/src/state/sink.rs` (the Remote
+The askpass helper mode lives in `crates/kubiq-app/src/lib.rs`, the one crate that names both halves.
+The drawing sits in `crates/kubiq/src/ui/remote_connect.rs` (the carrier pill and the per-step note),
+`crates/kubiq/src/ui/settings.rs` (the SSH profiles and Drones sections) and
+`crates/kubiq/src/ui/sink/project.rs` with its state in `crates/kubiq/src/state/sink.rs` (the Remote
 panel). `_tools/drone.py` generates and verifies the manifest.
 
 ## Failure

@@ -1,0 +1,511 @@
+//! What version control is on the wire: a project's repository as the host has observed it,
+//! and the writes the Git screen asks the host to make.
+//!
+//! A repository is a fact about a project, discovered by the host. The interface holds no
+//! repository identity of its own, and no absolute path crosses — a repository root above the
+//! project, or a prefix inside one, is a relative string. That is the file family's rule extended
+//! to the family that would most naturally break it.
+//!
+//! **Not a repository is an ordinary answer**, not a failure: [`crate::messages::Message::GitOverview`]
+//! carries `overview: None`, and the interface draws no branch and no badges. [`GitError`] is for
+//! a repository that exists and could not be read, and for a write that was refused.
+//!
+//! Nothing here touches disk. The `git2` types stay in the host and are converted at the worker's
+//! edge.
+
+use serde::{Deserialize, Serialize};
+
+/// How far ahead or behind is walked. Past it the number is this, and the interface draws `99+`.
+pub const AHEAD_BEHIND_CAP: u32 = 99;
+
+/// How many changed paths one working-tree map may carry. Past it the map is `truncated`.
+pub const MAX_WORKING_TREE: usize = 2_000;
+
+/// What `HEAD` is pointing at.
+///
+/// A fresh `git init` has a branch name and no commit. Drawing that as detached would be wrong.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitHead {
+    Branch(String),
+    Detached { short_id: String },
+    Unborn(String),
+}
+
+/// An in-progress operation on the repository, when there is one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitOperation {
+    Merge,
+    Rebase,
+    RebaseInteractive,
+    CherryPick,
+    Revert,
+    Bisect,
+    ApplyMailbox,
+}
+
+/// Working-tree totals for the project's scope. Absent on the overview until a walk has run, and
+/// absent on a bare or unborn repository rather than zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitCounts {
+    pub staged: u32,
+    pub modified: u32,
+    pub untracked: u32,
+    pub conflicted: u32,
+}
+
+/// What the status bar and the titlebar read. Everything here comes from refs and a handful of
+/// files in the git directory, except `counts`, which arrive with the working-tree walk.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoOverview {
+    /// The project's prefix inside the repository. Empty when the project *is* the root.
+    pub scoped_to: String,
+    pub head: GitHead,
+    /// The remote-tracking ref the branch is configured against. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    /// Commits ahead of `upstream`. Absent, not zero, when there is no upstream. Capped at
+    /// [`AHEAD_BEHIND_CAP`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<GitOperation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counts: Option<GitCounts>,
+    pub is_bare: bool,
+    /// Bumped when a refresh starts. The interface discards a reply older than what it holds.
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remotes: Vec<GitRemote>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub submodules: Vec<GitSubmodule>,
+}
+
+/// A named URL on the repository. **Not a submodule**: a submodule is a different repository,
+/// pinned at a commit, with remotes of its own. The overview carries both lists and flattens
+/// neither into the other.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitRemote {
+    pub name: String,
+    pub url: String,
+    /// The one a fetch would use when none is named.
+    pub is_default: bool,
+}
+
+/// How much of a submodule is actually here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitSubmoduleState {
+    /// Named in `.gitmodules`, never checked out. Not walked into.
+    Uninitialised,
+    Clean,
+    Dirty,
+}
+
+/// A repository below the project, pinned by the outer one. Listed, never merged: it contributes
+/// nothing to the outer project's counts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitSubmodule {
+    pub name: String,
+    /// Project-relative, forward-slashed. A submodule outside the project's scope is omitted.
+    pub rel_path: String,
+    pub url: String,
+    pub state: GitSubmoduleState,
+}
+
+/// How many repositories inside the project one walk may find. Past it the rest are not looked at.
+pub const MAX_NESTED_REPOS: usize = 32;
+
+/// A repository whose working tree is *inside* the project: a submodule the outer repository pins,
+/// or an independent tree it knows only as one untracked folder.
+///
+/// The project's own repository is [`RepoOverview`] and is never a member of this list. A nested
+/// repository the project manages is **walked and merged** — its paths join the one
+/// project-relative map, so the explorer draws a real badge on a file inside it — while
+/// [`GitSubmodule`] stays what it was, the outer repository's own account of what it pins. The two
+/// lists overlap by design: the same folder is a pin on one and a repository on the other.
+///
+/// Every repository the walk found is listed, managed or not, because the project settings offer
+/// the choice and cannot offer what nothing names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitNested {
+    /// The repository's working-tree root, project-relative and forward-slashed. Never empty.
+    pub rel_path: String,
+    pub head: GitHead,
+    /// The outer repository pins this one as a submodule.
+    pub submodule: bool,
+    /// Absent, not zero, when the walk could not read the repository — and always absent for one
+    /// that is not managed, which is not opened at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counts: Option<GitCounts>,
+    /// Commits the current branch holds that its upstream does not, capped at
+    /// [`AHEAD_BEHIND_CAP`]. Absent with no upstream, a detached HEAD, or an unread repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u32>,
+    /// Commits the upstream holds that the current branch does not. Absent like `ahead`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u32>,
+    /// The project takes this repository on: it is walked, it colours the explorer, and its
+    /// changes show on the Git screen. `false` is a repository found and named and nothing more.
+    ///
+    /// Set from [`crate::projects::ProjectRecord::managed_repos`], which is the user's answer and
+    /// the only place it is kept.
+    #[serde(default)]
+    pub managed: bool,
+}
+
+/// How one side of a path differs: the index against HEAD, or the worktree against the index.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitPathChange {
+    Added,
+    Modified,
+    Deleted,
+    Renamed {
+        from: String,
+    },
+    TypeChange,
+    /// Only valid on the worktree side.
+    Untracked,
+}
+
+/// One path that has something to say. A row not in the map is clean, once a map has arrived.
+///
+/// The pair is the model. The interface's single [`GitMark`] is a projection of it, stated once so
+/// two windows cannot disagree.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitEntry {
+    /// Project-relative, forward-slashed, on the same discipline as the file family.
+    pub rel_path: String,
+    /// How the index differs from HEAD.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<GitPathChange>,
+    /// How the worktree differs from the index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<GitPathChange>,
+    /// The path has unmerged stages. Overrides both sides for display.
+    pub conflicted: bool,
+    /// Set on collapsed ignored directory entries, when the host emits them.
+    pub ignored: bool,
+}
+
+impl GitEntry {
+    /// The single status the explorer draws. Stated here so the host's directory rollup and the
+    /// interface's row cannot disagree.
+    ///
+    /// Conflicted, else worktree untracked, else a worktree change, else an index change, else
+    /// ignored. A file both staged and modified draws as modified: the unstaged edit is the newer
+    /// fact.
+    pub fn mark(&self) -> Option<GitMark> {
+        if self.conflicted {
+            return Some(GitMark::Conflict);
+        }
+        match &self.worktree {
+            Some(GitPathChange::Untracked) => return Some(GitMark::Untracked),
+            Some(_) => return Some(GitMark::Modified),
+            None => {}
+        }
+        if self.index.is_some() {
+            return Some(GitMark::Staged);
+        }
+        if self.ignored {
+            return Some(GitMark::Ignored);
+        }
+        None
+    }
+}
+
+/// The explorer's one badge, a projection of [`GitEntry`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitMark {
+    Modified,
+    Untracked,
+    Conflict,
+    Staged,
+    Ignored,
+}
+
+impl GitMark {
+    /// Severity for a directory rollup. Conflict is worst; ignored is least.
+    pub fn rank(self) -> u8 {
+        match self {
+            GitMark::Ignored => 1,
+            GitMark::Staged => 2,
+            GitMark::Untracked => 3,
+            GitMark::Modified => 4,
+            GitMark::Conflict => 5,
+        }
+    }
+}
+
+/// A folder's badge, rolled up by the host from the changed paths under it. The explorer expands
+/// one level at a time and cannot derive this from children it has not asked for.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitRollup {
+    pub rel_path: String,
+    pub mark: GitMark,
+}
+
+/// How many commits one page may carry. A request for more is clamped, not refused.
+pub const MAX_LOG_PAGE: u32 = 200;
+
+/// Who and when. The committer is carried beside the author because they differ after a rebase,
+/// and the difference is the point.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitWho {
+    pub name: String,
+    pub email: String,
+    /// Seconds since the epoch.
+    pub time: i64,
+    /// Minutes east of UTC. The interface prints the commit's own clock, not the reader's.
+    pub offset: i32,
+}
+
+/// One commit in a page of history.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitCommit {
+    pub id: String,
+    /// The abbreviation the repository's own config would use.
+    pub short_id: String,
+    /// The first line of the message. The body is fetched per commit, never per page.
+    pub summary: String,
+    pub author: GitWho,
+    pub committer: GitWho,
+    /// Parent commit ids, full form. Empty only for a root commit; two or more is a merge.
+    /// Identity rather than a count, because a lane algorithm matches a child to the lane its
+    /// parent occupies, and a count cannot say which lane that is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parents: Vec<String>,
+    /// Which lane this commit draws in. Computed host-side, on the same reasoning as the
+    /// working-tree rollups: two windows must not lay out the same history differently.
+    pub lane: usize,
+    /// Lanes this commit merges from, for the merge lines drawn behind it. Empty for a
+    /// single-parent commit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub merges: Vec<usize>,
+    /// Branch and tag names pointing at this commit, for the decorations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<String>,
+    /// The author is the repository's configured identity. The host answers it because it is the
+    /// host that can read `user.email`; the interface reads no config.
+    pub mine: bool,
+}
+
+/// Which sidebar section a ref belongs in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitRefKind {
+    Local,
+    Remote,
+    Tag,
+    Stash,
+}
+
+/// One row of the ref list. Submodules are not here — they are on [`RepoOverview`], because a
+/// submodule is a repository and not a ref.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitRef {
+    /// Shorthand: `main`, `origin/main`, `v0.3.0`, `stash@{0}`.
+    pub name: String,
+    pub kind: GitRefKind,
+    /// The commit it points at, abbreviated.
+    pub target: String,
+    /// This is what HEAD points at. At most one row answers true.
+    pub current: bool,
+    /// Only when the request asked for tracking. Absent, never zero, when there is no upstream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u32>,
+}
+
+/// What went wrong reading a repository that exists.
+///
+/// An enum rather than a sentence, on the same reasoning that shaped [`crate::files::FileError`]:
+/// `NotFound` means stop asking, `Corrupt` means say so and offer nothing, `Denied` means mark it,
+/// `Interrupted` means a newer answer is on its way.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "reason")]
+pub enum GitError {
+    NotFound,
+    Corrupt,
+    Denied,
+    Interrupted,
+    Failed(String),
+}
+
+/// One mutation of a project's repository. The Git screen is what sends these; the agents in the
+/// panes remain writers of their own. The git worker serialises the two rather than preventing
+/// the collision (`D122`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitWriteOp {
+    /// Put this project-relative path in the index. An untracked file becomes tracked; a modified
+    /// file's worktree content is staged.
+    Stage { rel_path: String },
+    /// Take this project-relative path out of the index. A newly-added file becomes untracked
+    /// again; a tracked file keeps its `HEAD` version in the index.
+    Unstage { rel_path: String },
+    /// Create a commit from the index. `amend` replaces `HEAD` rather than adding a commit.
+    Commit { message: String, amend: bool },
+    /// Fetch every remote.
+    FetchAll,
+    /// Fetch the current branch's upstream and fast-forward `HEAD` to it.
+    Pull,
+    /// Push the current branch to its upstream, or to the default remote under the same name.
+    Push,
+    /// Put every project-relative change in the index — modified, untracked, and deletions.
+    StageAll,
+    /// Restore the index to HEAD for every path in the project's scope.
+    UnstageAll,
+    /// Create a branch at `HEAD` and check it out.
+    CreateBranch { name: String },
+    /// Stash the uncommitted changes, untracked files included, under the default message.
+    Stash,
+    /// Soft-reset `HEAD` to its first parent: the last commit's changes return to the index.
+    /// Refused on a root commit or an unborn branch.
+    UndoCommit,
+    /// Check out a ref or commit. `force` discards local changes that would be overwritten.
+    Checkout { rev: String, force: bool },
+    /// Merge a ref into the current branch.
+    Merge { rev: String },
+    /// Delete a local branch or a tag, named as the refs panel spells it. `force` deletes an
+    /// unmerged branch.
+    DeleteRef { name: String, force: bool },
+    /// Restore one project-relative path to its HEAD content, dropping both worktree and index
+    /// changes. An untracked file is removed.
+    Discard { rel_path: String },
+    /// Restore one project-relative path to its content at `rev`, leaving it as an uncommitted
+    /// worktree change.
+    RestoreFile { rel_path: String, rev: String },
+    /// Apply a commit's changes on top of HEAD as a new commit.
+    CherryPick { sha: String },
+    /// Create a commit that undoes `sha`.
+    RevertCommit { sha: String },
+    /// Move HEAD to `sha`.
+    Reset { sha: String, mode: GitResetMode },
+}
+
+/// How far `Reset` moves `HEAD`: whether the index and the worktree follow it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GitResetMode {
+    Soft,
+    Mixed,
+    Hard,
+}
+
+/// One path that differs between two revs. The Git screen's range comparison lists these.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitChangedPath {
+    /// Project-relative, forward-slashed, on the same discipline as the file family.
+    pub rel_path: String,
+    pub change: GitPathChange,
+}
+
+impl std::fmt::Display for GitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GitError::NotFound => write!(f, "the repository is gone"),
+            GitError::Corrupt => write!(f, "the repository is corrupt"),
+            GitError::Denied => write!(f, "the repository could not be read"),
+            GitError::Interrupted => write!(f, "a newer answer is on its way"),
+            GitError::Failed(reason) => write!(f, "{reason}"),
+        }
+    }
+}
+
+/// The page a browser would open for a remote URL, or `None` when the URL is not one this
+/// recognises.
+///
+/// Every provider but Azure DevOps puts the repository at `https://<host>/<path>`, so the shape is
+/// one rule and one exception: strip the scheme, the credentials and the `.git`, then move an
+/// Azure path into the `_git` form its web interface uses. Deliberately not a URL parser — a
+/// remote that is a local path, a single-segment path, or anything carrying a query is simply not
+/// a page, and says so with `None`.
+pub fn web_url(remote: &str) -> Option<String> {
+    let text = remote.trim();
+    let (authority, path) = if let Some(rest) = text.strip_prefix("git@") {
+        rest.split_once(':')?
+    } else {
+        let rest = ["https://", "http://", "ssh://", "git://"]
+            .iter()
+            .find_map(|scheme| text.strip_prefix(scheme))?;
+        rest.split_once('/')?
+    };
+
+    // `user:token@host:port` — neither half belongs in a link.
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = host
+        .rsplit_once(':')
+        .filter(|(_, port)| port.chars().all(|c| c.is_ascii_digit()))
+        .map_or(host, |(h, _)| h)
+        .to_ascii_lowercase();
+    let path = path.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path).trim_matches('/');
+    if !host.contains('.') || path.is_empty() || path.contains(['?', '#', ' ']) {
+        return None;
+    }
+
+    if host.ends_with("dev.azure.com") {
+        // ssh gives `v3/org/project/repo`, https gives `org/project/_git/repo`. One form on the
+        // way out.
+        let path = path.strip_prefix("v3/").unwrap_or(path);
+        if path.contains("/_git/") {
+            return Some(format!("https://dev.azure.com/{path}"));
+        }
+        let (project, repo) = path.rsplit_once('/')?;
+        if !project.contains('/') {
+            return None;
+        }
+        return Some(format!("https://dev.azure.com/{project}/_git/{repo}"));
+    }
+
+    // Anything shorter than `owner/name` is a host, not a repository.
+    if !path.contains('/') {
+        return None;
+    }
+    Some(format!("https://{host}/{path}"))
+}
+
+#[cfg(test)]
+mod web_url_tests {
+    use super::web_url;
+
+    #[test]
+    fn known_remotes_become_pages() {
+        for (remote, page) in [
+            (
+                "git@github.com:mdnmdn/kubiq.git",
+                "https://github.com/kubiq-studio/kubiq",
+            ),
+            (
+                "https://github.com/kubiq-studio/kubiq.git",
+                "https://github.com/kubiq-studio/kubiq",
+            ),
+            (
+                "ssh://git@gitlab.com:2222/group/sub/proj.git",
+                "https://gitlab.com/group/sub/proj",
+            ),
+            (
+                "git@ssh.dev.azure.com:v3/realeitesorg/it.grma.HelpdeskAI/communication-platform-backend",
+                "https://dev.azure.com/realeitesorg/it.grma.HelpdeskAI/_git/communication-platform-backend",
+            ),
+            (
+                "https://xxxxxx@dev.azure.com/realeitesorg/it.grma.HelpdeskAI/_git/communication-platform-backend",
+                "https://dev.azure.com/realeitesorg/it.grma.HelpdeskAI/_git/communication-platform-backend",
+            ),
+        ] {
+            assert_eq!(web_url(remote).as_deref(), Some(page), "{remote}");
+        }
+    }
+
+    #[test]
+    fn everything_else_is_not_a_page() {
+        for remote in [
+            "/srv/repos/kubiq.git",
+            "../sibling",
+            "https://github.com/",
+            "git@github.com:kubiq",
+            "https://github.com/a/b?tab=readme",
+        ] {
+            assert_eq!(web_url(remote), None, "{remote}");
+        }
+    }
+}

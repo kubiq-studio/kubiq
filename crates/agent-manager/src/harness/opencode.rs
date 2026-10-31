@@ -115,7 +115,7 @@ impl Harness for Opencode {
         cmd.args(["models", "--verbose"]);
         cmd.current_dir(super::shared::probe_cwd());
         // Both `opencode` probes above are headless: nothing reads a window, and the app has
-        // already freed its own console (`ubiq_app::detach_console`), so a console-subsystem child
+        // already freed its own console (`kubiq_app::detach_console`), so a console-subsystem child
         // would otherwise flash one.
         #[cfg(windows)]
         super::shared::no_window(&mut cmd);

@@ -1,4 +1,4 @@
-# Ubiq — Screen 1: Projects / Launcher
+# Kubiq — Screen 1: Projects / Launcher
 # Manage projects, add a new project, and select the agent to run.
 # Left: always-visible sidebar (Add session, sessions list, Settings).
 # Center: grid of existing project cards.  Right: "New Project" form with agent picker.
@@ -41,7 +41,7 @@ elements:
   - ellipse: { id: tl_r, at: [40, 34], size: [12, 12], bg: "#fa5252", stroke: "#fa5252" }
   - ellipse: { id: tl_y, at: [58, 34], size: [12, 12], bg: "#fab005", stroke: "#fab005" }
   - ellipse: { id: tl_g, at: [76, 34], size: [12, 12], bg: "#40c057", stroke: "#40c057" }
-  - text: "● Ubiq   —   Projects"
+  - text: "● Kubiq   —   Projects"
     id: wintitle
     at: [600, 31]
     fontSize: 13
@@ -55,7 +55,7 @@ elements:
     bg: "#1a1b26"
     stroke: "#1a1b26"
     roundness: true
-  - text: "◆ Ubiq"
+  - text: "◆ Kubiq"
     id: brand
     at: [64, 92]
     fontSize: 20
@@ -180,13 +180,13 @@ elements:
 
   # --- card 2
   - rect: { id: c2, at: [638, 150], size: [318, 150], bg: "#ffffff", stroke: "#dee2e6", roundness: true }
-  - text: "ubiq"
+  - text: "kubiq"
     id: c2n
     at: [658, 168]
     fontSize: 16
     align: left
     stroke: "#212529"
-  - text: "~/works/projects/ubiq"
+  - text: "~/works/projects/kubiq"
     id: c2p
     at: [658, 194]
     fontSize: 12

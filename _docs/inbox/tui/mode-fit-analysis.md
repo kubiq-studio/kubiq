@@ -27,7 +27,7 @@ one bites:
 1. **Text-shaped.** The screen is tables, lists, prose or forms. A grid of cells is a rendering
    model, not a limitation, for anything that is already text; it is a rewrite for anything drawn.
 2. **No superior terminal incumbent.** Where the user's terminal already ships a strictly better
-   answer — a CLI, tig, lazygit, `less`, `rg` — Ubiq should not compete.
+   answer — a CLI, tig, lazygit, `less`, `rg` — Kubiq should not compete.
 3. **Keyboard-steerable.** Every gesture the doc names — hover, drag, right-click, double-click,
    wheel — must become a key or a leader-prefixed chord. A screen whose meaning half lives in hover
    does not survive.
@@ -54,7 +54,7 @@ about anything no screen — window or terminal — draws.
 Both pages — the five host readings and the usage meter — are a polled table: `ListStats` is the one
 thing the interface asks the host for, on a two-second loop, and the doc's own rule is no bar and no
 percentage anywhere on the page. There is no gesture beyond a tab strip. `top` is the incumbent and
-it is not a substitute — this is Ubiq's own readings, from Ubiq's own coordinator. The most literal
+it is not a substitute — this is Kubiq's own readings, from Kubiq's own coordinator. The most literal
 phase-0 screen the proposal could draw, and nothing in the current tree weakens the seed's claim.
 
 - **Include:** the two-page tab strip and both pages whole — the five readings as a label/value
@@ -83,7 +83,7 @@ page on day one, as the window's did.
 
 The explorer tree with its filter and its git-letter badges, the file picker and project search are
 the most terminal-native shapes in the product — the ranger/nnn/fzf idiom exactly. The text viewer
-with syntax colour is `less` plus a highlighter, which is a solved field Ubiq merely joins. What does
+with syntax colour is `less` plus a highlighter, which is a solved field Kubiq merely joins. What does
 not travel is the rest of the viewer family: Markdown and Mermaid previews, images, Excalidraw
 scenes, the web-panel bridge — every viewer that is not monospace text — and editing, in the first
 cut. The seed drew exactly this line and the current tree does not move it; the IDE feature doc adds
@@ -104,8 +104,8 @@ The screen is refs, paged history with painted lanes, the three change lists and
 tables and prose, and `git log --graph` already paints lanes in ASCII. The gesture list is long
 (right-click on path, commit, branch; cmd-click to compare) and every one of them is a key in the
 incumbents. This is the strongest confirm of the seed's drop: the terminal the TUI runs in *already
-ships* git, tig and lazygit, and all three are better than what Ubiq would draw in eighty columns.
-The one thing Ubiq draws that the incumbents do not — the multi-repository lane engine, lanes across
+ships* git, tig and lazygit, and all three are better than what Kubiq would draw in eighty columns.
+The one thing Kubiq draws that the incumbents do not — the multi-repository lane engine, lanes across
 every repository inside a project — is precisely the part not worth a terminal port. Keep Git out.
 
 - **Include:** nothing. Not one screen of the mode travels.

@@ -495,7 +495,7 @@ impl OsSecretStore {
 
 /// Every PowerShell call here is a headless decrypt/encrypt of one blob, never something a user is
 /// meant to see — and the app that starts it has already freed its own console
-/// (`ubiq_app::detach_console`), so a console-subsystem child like `powershell.exe` would otherwise
+/// (`kubiq_app::detach_console`), so a console-subsystem child like `powershell.exe` would otherwise
 /// pop a fresh console window on screen for the instant it takes to run.
 #[cfg(target_os = "windows")]
 fn no_window(cmd: &mut std::process::Command) {

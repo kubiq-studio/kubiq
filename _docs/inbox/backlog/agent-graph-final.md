@@ -11,15 +11,15 @@ depends_on: [feat-sessions, feat-workbench, feat-chat, tech-transport, tech-agen
 
 # Proposal — the agent graph
 
-Ubiq today is a multiplexer: panes side by side, each an independent harness, related only by
+Kubiq today is a multiplexer: panes side by side, each an independent harness, related only by
 sharing a window. This proposes the layer above — several agents working one goal, knowing about
 each other, reporting what they are doing, drawn as a graph instead of a row. It is the settled
 version of [`graph-harness-ideas.md`](../completed/graph-harness-ideas.md), and it replaces the two drafts
 that expanded those notes; every fork they left open is closed here, and §15 lists the closures.
 
-**The line, stated once:** Ubiq hosts orchestration; it does not perform it. The one exception is
+**The line, stated once:** Kubiq hosts orchestration; it does not perform it. The one exception is
 the pipeline sequencer in §5, and only because it needs no model to decide anything. Everything
-else — who to spawn, what to delegate, when a thing is done — is an agent's call, and Ubiq's job is
+else — who to spawn, what to delegate, when a thing is done — is an agent's call, and Kubiq's job is
 to make it visible, addressable and stoppable.
 
 ## 1. The vocabulary, before anything else
@@ -28,7 +28,7 @@ The whole design is a nesting, and a nesting whose levels share a name cannot be
 
 | Level | What it is | Owns |
 |---|---|---|
-| **Project** | A repository Ubiq remembers. A window is opened on one | The catalogue record, the config root |
+| **Project** | A repository Kubiq remembers. A window is opened on one | The catalogue record, the config root |
 | **Workspace** | A working area: one folder, one branch, one worktree, optionally a goal | A directory, a git ref, its tasks |
 | **Task** | A unit of intent inside a workspace — a goal, a shape, a state | Its agents, its subtasks, its artifacts |
 | **Agent** | One running harness with an identity | A conversation, a pane, a working directory |
@@ -38,7 +38,7 @@ The compass for all five: **a workspace is a place; an agent is a who; a task is
 is one; a role is a what-for; and the library's session is a conversation.** The graph is the
 who's, grouped by the place and the why, coloured by what each is doing.
 
-**Two of those names are a rename, and this proposal takes it.** Today Ubiq says *session* for the
+**Two of those names are a rename, and this proposal takes it.** Today Kubiq says *session* for the
 working area and *workspace* for one running agent. Both words move:
 
 | Today | After |
@@ -46,11 +46,11 @@ working area and *workspace* for one running agent. Both words move:
 | session — a named grouping with a folder | **workspace** |
 | workspace — one running agent | **agent** |
 
-The reasons, stated once. *Session* is spent twice — Ubiq's grouping and the harness library's
+The reasons, stated once. *Session* is spent twice — Kubiq's grouping and the harness library's
 resumable conversation — which is why `AGENTS.md` carries a rule whose entire content is that a
 document using the word must say which, and why [`../backlog.md`](../../backlog.md) Q4 exists; a
 vocabulary that needs a disambiguation rule has already failed. *Workspace* is the word a user
-reaches for unprompted — a folder you work in — and the only thing blocking it is Ubiq spending it
+reaches for unprompted — a folder you work in — and the only thing blocking it is Kubiq spending it
 on the running agent, whose honest name is *agent*: the glossary's own definition, "one running
 instance of one agent inside a session", is a definition of an agent with extra words. After the
 rename, *session* means only the library's resumable conversation, and the `AGENTS.md` rule is
@@ -71,7 +71,7 @@ concept. **Agent** is today's workspace: one harness, one directory, one termina
 **role** are new, and they are the entire addition.
 
 The collision this resolves has one more piece: which of the library's sessions maps onto which of
-Ubiq's records. **The library's session belongs to the agent.** One agent is one resumable
+Kubiq's records. **The library's session belongs to the agent.** One agent is one resumable
 conversation, so resuming a task is a fan-out over its agents, not a lookup.
 
 ```
@@ -92,10 +92,10 @@ works on, absent meaning whatever the folder is already on; **`state`**, `Draft`
 accepted and `Open` after (§7); and derived, whether the folder is a linked **worktree** the host
 created or one that was already there.
 
-**A workspace is a worktree when it needs to be, and Ubiq never converts one silently.** Creating
+**A workspace is a worktree when it needs to be, and Kubiq never converts one silently.** Creating
 one offers three placements: the project's own folder, an existing folder, or a new linked worktree
 on a new branch — the third is what makes parallel workspaces safe. Removing a workspace never
-removes a worktree Ubiq did not create. The UI never runs `git`; the worktree is the host's move.
+removes a worktree Kubiq did not create. The UI never runs `git`; the worktree is the host's move.
 
 **A workspace without a task is first-class, not a degenerate state.** Opening one and coding with
 agents — no brief, no board row — is today's product with a name on the place, and it must stay one
@@ -110,21 +110,21 @@ says what that costs — it is the hazard this design does not remove.
 
 This is the load-bearing distinction, and every screen decision follows from it.
 
-**A hosted agent is one Ubiq spawned.** It has a pane, a pseudo-terminal, a harness the user
-picked, an identity Ubiq injected, and an MCP surface Ubiq exposes. Ubiq can watch it, type into
+**A hosted agent is one Kubiq spawned.** It has a pane, a pseudo-terminal, a harness the user
+picked, an identity Kubiq injected, and an MCP surface Kubiq exposes. Kubiq can watch it, type into
 it, resize it, message it and kill it. Everything in the existing contract already applies.
 
 **A reported agent is a harness's own subagent** — Claude Code's task tool and its kin. It runs
-*inside* the parent's process. It has no pseudo-terminal, no pane, no process Ubiq can see, and no
-MCP connection of its own. Ubiq knows it exists only because the parent said so, in a hook or a
+*inside* the parent's process. It has no pseudo-terminal, no pane, no process Kubiq can see, and no
+MCP connection of its own. Kubiq knows it exists only because the parent said so, in a hook or a
 tool event.
 
 | | Hosted | Reported |
 |---|---|---|
-| Spawned by | Ubiq, through the harness library | The parent harness, internally |
+| Spawned by | Kubiq, through the harness library | The parent harness, internally |
 | Pane | A terminal pane | None — a transcript pane at most |
 | Input | Keystrokes, prompts, messages | None. It cannot be addressed |
-| Harness | Any Ubiq supports, independent of the parent's | Always the parent's |
+| Harness | Any Kubiq supports, independent of the parent's | Always the parent's |
 | Activity | Observed on four channels (§4) | Whatever the parent reported, when it reported it |
 | Ending | An exit code from the coordinator | The parent saying so, or silence |
 
@@ -137,9 +137,9 @@ implementer" is two hosted agents with a delegation edge.
 
 **Reported agents are drawn, never inferred.** A node appears when the parent reports it and is
 finalised when the parent reports it finished. A parent that dies mid-flight leaves its reported
-children in `Unknown`, never in `Ended` — Ubiq did not watch them and must not claim it did.
+children in `Unknown`, never in `Ended` — Kubiq did not watch them and must not claim it did.
 
-## 4. How Ubiq knows what an agent is doing
+## 4. How Kubiq knows what an agent is doing
 
 A node should say *queued, thinking, running a tool, waiting for input, ended, error*. The
 architecture forbids the obvious route: terminal bytes are opaque, and inferring "idle" from a lull
@@ -148,10 +148,10 @@ channels, and **each value names the channel it came from** — they are not equ
 
 | # | Channel | Knows | Trust |
 |---|---|---|---|
-| 1 | **Process** — the coordinator's own supervision | Started, alive, exited with a code, stream closed | Ground truth. Ubiq owns the child |
+| 1 | **Process** — the coordinator's own supervision | Started, alive, exited with a code, stream closed | Ground truth. Kubiq owns the child |
 | 2 | **Hooks** — injected by the harness library into the run's config | A tool is about to run, a tool finished, the harness stopped, the harness wants the user | Fires whether the model cooperates or not |
 | 3 | **Structured events** — `AgentEvent` from the library's `IoBridge` | Thinking, assistant text, tool call and result, approval request, token usage, result | Complete, and mutually exclusive with a terminal (see below) |
-| 4 | **Self-report** — the agent calling Ubiq's own MCP tool | Its own account of what it is doing and why | Cooperative. An agent that stops calling it goes quiet, not idle |
+| 4 | **Self-report** — the agent calling Kubiq's own MCP tool | Its own account of what it is doing and why | Cooperative. An agent that stops calling it goes quiet, not idle |
 
 **The mutual exclusion is the constraint that shapes everything.** The library's structured mode
 *replaces the tty* — a run is either passthrough on a pseudo-terminal or driven over the harness's
@@ -164,13 +164,13 @@ in a terminal pane has channels 1, 2 and 4 only. That is a per-agent choice, and
   shape for a crew member nobody watches keystroke by keystroke, and the only faithful token count.
 
 **Hooks are the rung that matters most**: the only non-cooperative source of tool-level detail, and
-the library already injects them per harness. A `PreToolUse` hook posting the tool name to Ubiq's
+the library already injects them per harness. A `PreToolUse` hook posting the tool name to Kubiq's
 loopback endpoint turns `Tool { name }` from a claim into an observation. Which harnesses expose
 which hook points is the library's fact, and a harness with none degrades to channels 1 and 4 —
 and the node says which channel it is on, rather than inventing "thinking" from silence.
 
 **Staleness is rendered, not stored.** Every activity carries `observed_at`; a node whose last
-observation is old draws faint, and one silent past a threshold reads `Unknown`. Ubiq never
+observation is old draws faint, and one silent past a threshold reads `Unknown`. Kubiq never
 promotes silence to `Idle` — "it finished" and "it stopped telling us" is the distinction the user
 most needs.
 
@@ -186,7 +186,7 @@ saying it waits on another agent, a lock or a human, and it is what makes a stal
 a glance. `AwaitingInput` is the state that earns the whole graph: it is the node the user should
 click.
 
-## 5. The three shapes, and the one Ubiq performs
+## 5. The three shapes, and the one Kubiq performs
 
 Three ways of starting work are three shapes of task. They are topologies of one graph, not three
 products.
@@ -197,7 +197,7 @@ products.
 | **Pipeline** | The task's declared stage list | One at a time, in order | The last stage passes, or a stage fails |
 | **Crew** | A coordinator agent | Several, concurrent, each with a role | The coordinator reports done |
 
-**Pipeline is the shape Ubiq owns.** A stage list is a state machine — start stage *n*, wait for
+**Pipeline is the shape Kubiq owns.** A stage list is a state machine — start stage *n*, wait for
 its agent to finish, hand its result to stage *n+1* — and running it in the host needs no model,
 costs no tokens, and cannot hallucinate a step. That is why it is worth having as a distinct shape
 rather than as "a crew whose coordinator was told to go in order". A pipeline is sequential on
@@ -209,7 +209,7 @@ stage inherits the previous one's context window — a pipeline exists to spend 
 step.
 
 **Crew is the shape an agent owns.** The coordinator is an ordinary hosted agent with a role that
-permits spawning, and it spawns and messages its members through the MCP surface in §8. Ubiq
+permits spawning, and it spawns and messages its members through the MCP surface in §8. Kubiq
 supervises: it enforces the budgets, draws the graph, and can stop the whole task. It does not
 second-guess the coordinator's plan, and it has no opinion about what a good crew looks like. The
 coordinator is not the PM: the PM *starts* tasks and picks shapes; a coordinator *runs* one, and a
@@ -261,7 +261,7 @@ the PM is simply the role with everything on:
 | `mcps`, `skills`, `model`, `harness` | Bindings handed to the run spec |
 
 A role is a **binding**, in the sense
-[`config-persistence-proposal.md`](../config-persistence-proposal.md) uses: Ubiq stores the choice,
+[`config-persistence-proposal.md`](../config-persistence-proposal.md) uses: Kubiq stores the choice,
 the harness library owns what the choice refers to. A role names skills and MCP ids; it never
 contains one.
 
@@ -311,14 +311,14 @@ this scoped this way" has an answer and that conversation is it.
 
 ## 8. Identity, and the surface agents reach each other by
 
-[`../backlog.md`](../../backlog.md) G7 says the MCP surface Ubiq exposes to hosted agents is a module
+[`../backlog.md`](../../backlog.md) G7 says the MCP surface Kubiq exposes to hosted agents is a module
 header and what it offers is undecided. This is the answer, and it is the mechanism the whole idea
-runs on: `crates/ubiq-host/src/mcp_server.rs`, hosted through the library's `inproc-mcp` feature
+runs on: `crates/kubiq-host/src/mcp_server.rs`, hosted through the library's `inproc-mcp` feature
 and injected into every hosted run as an ordinary remote MCP server.
 
 **Identity is injected, not discovered.** Every hosted run is composed with an identity brief: the
 agent's name and role, its workspace and that workspace's brief, its task, its parent, the names
-and roles of its siblings, and how to reach them. It is Ubiq-generated text handed to the run spec
+and roles of its siblings, and how to reach them. It is Kubiq-generated text handed to the run spec
 through the library's instructions path — the one `--instructions` uses — so no new mechanism is
 needed and harness-specific placement stays the library's problem. Identity is not flavour text: if
 two agents are both "Claude" and neither knows its name, `agents.send` has nothing to address. The
@@ -353,7 +353,7 @@ preference.** A harness is a turn loop driven by a prompt; there is no way to ha
 message mid-turn except by writing to its input, which corrupts the conversation it is having. So
 delivery is: the sender's `agents.send` returns immediately; the message sits in the recipient's
 inbox; the recipient collects it by calling `agents.inbox`, which its identity brief tells it to do
-between steps. For a recipient that has gone idle, Ubiq may additionally *nudge* — write a short
+between steps. For a recipient that has gone idle, Kubiq may additionally *nudge* — write a short
 prompt naming the waiting messages — and it does that **only on an idle transition**, never into a
 running turn. An agent that never checks its inbox is a role-prompt problem, and the graph shows it
 as an undrained inbox count on the node, which is the diagnosis.
@@ -386,10 +386,10 @@ and a stage that needs to consult another checkout reads those files, which requ
 workspace. Work that must *write* two workspaces is two tasks, and the PM working across
 workspaces — creating and following tasks in several — is exactly how that is expressed.
 
-**Two registers, one screen, one authority.** Tasks and subtasks Ubiq created are Ubiq's record;
-the todo list a harness keeps in its own head is the harness's, and Ubiq mirrors what an agent
+**Two registers, one screen, one authority.** Tasks and subtasks Kubiq created are Kubiq's record;
+the todo list a harness keeps in its own head is the harness's, and Kubiq mirrors what an agent
 reports through `task.subtask` without pretending to own it. A mirrored subtask is marked reported
-and disappears with its agent — reconciling the two would make Ubiq wrong about both.
+and disappears with its agent — reconciling the two would make Kubiq wrong about both.
 
 **Tasks mode is that register, and the Tasks drawer is the same register docked.** Tasks mode is a
 list per workspace, grouped by state, each row expanding to its subtasks, agents and artifacts,
@@ -496,7 +496,7 @@ account, budget consumed, tools run, and the actions — open its chat, open its
 it, stop it. Hosted or reported is stated in the chrome, never left to be deduced from a missing
 button.
 
-**Opening several chats at once is a pane, not a window.** Ubiq already arranges rectangles with
+**Opening several chats at once is a pane, not a window.** Kubiq already arranges rectangles with
 exactly one focused: the pane layout, whose split and grid modes exist as an enum and are not drawn
 (G6). So a pane gains a **kind** — `Terminal`, backed by an emulator, or `Transcript`, backed by an
 agent's event history — and nothing else about panes changes: one agent one pane, exactly one
@@ -508,7 +508,7 @@ since a pane names an agent and the agent names its parent; and it gives
 [`../features/chat.md`](../../features/chat.md) something real behind it — G10.
 
 The chat is a projection of structured events, never a parse of the terminal — D2 stands. This
-costs the overview's non-goal one clause: Ubiq still does not call a model or own a conversation;
+costs the overview's non-goal one clause: Kubiq still does not call a model or own a conversation;
 it *does* render a conversation the host extracted from a run, because otherwise the graph has
 nowhere to open.
 
@@ -520,7 +520,7 @@ Multi-agent work fails in ways single-agent work does not, and most of them are 
 |---|---|
 | A crew's coordinator exits mid-task | Its children keep running and are marked orphaned. Nothing is killed on the user's behalf |
 | A hosted agent's harness dies | `Ended` with its code. Its pane stays showing its last screen. Its task goes `Blocked`, not `Failed` |
-| A reported agent's parent dies | The child is finalised `Unknown`. Ubiq never watched it and does not claim it did |
+| A reported agent's parent dies | The child is finalised `Unknown`. Kubiq never watched it and does not claim it did |
 | An agent stops reporting | The node goes faint, then `Unknown`. Never `Idle` |
 | An agent messages one that has ended | The send returns a tool error naming the state. Messages are never silently dropped |
 | An agent never drains its inbox | The node shows the count. No nudge is written into a running turn |
@@ -541,7 +541,7 @@ stage leaves its artifacts, an orphaned crew runs until someone says otherwise.
 
 ## 13. Cost, and the stop button
 
-A crew is the first thing in Ubiq that can spend real money while the user is looking away.
+A crew is the first thing in Kubiq that can spend real money while the user is looking away.
 
 **A budget is per task, and it is three numbers**: agents, wall clock, tokens. Structured runs
 report usage exactly through `AgentEvent::Usage`; terminal runs report what hooks or self-report
@@ -627,7 +627,7 @@ transcript pane, not the graph.
 | 1 | **The rename, and identity on what already runs** | session → workspace, workspace → agent, across contract, code and docs; `name`, `role`, `parent_id`, `task_id`, `origin` on the agent record; `goal` and `git_ref` on the workspace |
 | 2 | **The graph** | Agents mode, `RequestGraph`/`GraphSnapshot`, node, inspector, delegation edges. Activity is process liveness, and already worth looking at |
 | 3 | **Activity from hooks** | Channel 2 through the harness library; the activity record with its source and `observed_at`; staleness as a rendering |
-| 4 | **The MCP surface** | `crates/ubiq-host/src/mcp_server.rs` on `inproc-mcp`: identity brief, `agents.list`, `status.set`, `agents.send`, `agents.inbox`. Closes G7 |
+| 4 | **The MCP surface** | `crates/kubiq-host/src/mcp_server.rs` on `inproc-mcp`: identity brief, `agents.list`, `status.set`, `agents.send`, `agents.inbox`. Closes G7 |
 | 5 | **Transcript panes** | The pane kind, the split and grid modes G6 leaves undrawn, several chats at once — G10 |
 | 6 | **The analyst and the brief** | The intake role, the four-part brief, the `Draft` gate, the skip path |
 | 7 | **Tasks** | The record, Tasks mode and the drawer, `Solo` and `Pipeline`, the stage sequencer, the artifact handoff, budgets |
@@ -642,9 +642,9 @@ wired in — G1 and G21 — because injecting an MCP surface needs a composed ru
 
 ## 17. What this asks to be decided
 
-- Ubiq hosts orchestration and does not perform it, with exactly one exception: the pipeline stage
+- Kubiq hosts orchestration and does not perform it, with exactly one exception: the pipeline stage
   sequencer, which needs no model.
-- Ubiq's `session` is renamed to **workspace** and its `workspace` to **agent**; `session` means
+- Kubiq's `session` is renamed to **workspace** and its `workspace` to **agent**; `session` means
   only the library's resumable conversation, the `AGENTS.md` rule that disambiguates the two is
   deleted, and the `feat-sessions` document rename is filed as a librarian move.
 - A workspace grows a goal, a git ref and a `Draft`/`Open` state, and is the isolation boundary. A
@@ -658,7 +658,7 @@ wired in — G1 and G21 — because injecting an MCP surface needs a composed ru
 - The harness library's session belongs to the agent, not to the workspace — which settles Q4.
 - Cross-agent messaging is a mailbox with pull delivery, plus a nudge that only lands on an idle
   transition.
-- The MCP surface in §8 is what Ubiq exposes to hosted agents — which settles G7 — and
+- The MCP surface in §8 is what Kubiq exposes to hosted agents — which settles G7 — and
   `agents.spawn` is a host verb: an agent asks, the host spawns, the UI decides where the pane
   opens — which is Q6's other half.
 - A PM is a role with a wide tool policy, sitting on the project's main worktree, and a project
@@ -674,7 +674,7 @@ wired in — G1 and G21 — because injecting an MCP surface needs a composed ru
   is accepted — and a brief may also be taken without a task, as context for hand-driven work.
   Skipping the analyst is one click.
 - The analyst may read anything and spawn nothing. It proposes a shape; it never starts one.
-- The overview's "not a chat client" non-goal is reworded: Ubiq does not call a model; it does
+- The overview's "not a chat client" non-goal is reworded: Kubiq does not call a model; it does
   render a conversation the host extracted from a run.
 
 Backlog rows this opens: what a bounded transport does with a crew's event volume; whether a

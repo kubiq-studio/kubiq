@@ -3,7 +3,7 @@
 The teams graph's block positioning, rendered as PNGs an agent can look at, so the arrangements can
 be iterated on without building the app.
 
-`algos.py` is a port of `crates/ubiq/src/state/layout.rs` — the same constants, the same function
+`algos.py` is a port of `crates/kubiq/src/state/layout.rs` — the same constants, the same function
 names, the same arithmetic — plus `adaptive`, the incremental arrangement this spike exists to work
 out. `--selftest` runs the Rust file's own tests, ported, and is the evidence a picture can be
 trusted to show what the app does.

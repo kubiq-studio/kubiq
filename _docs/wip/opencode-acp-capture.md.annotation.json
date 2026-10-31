@@ -19,7 +19,7 @@
     {
       "id": "01M394P3Z1566WC72A2GDE04PQ",
       "kind": "paragraph",
-      "text": "Everything below was captured from a real `opencode acp` session on 2026-09-12 — opencode\n**1.18.28**, the ubiq-agent session `ses_f63e56491ffePLNaX3yhGLaZ61`, agent id\n`01M2E1J73WAHT2GBBHJBVYB5XN` — over most of a two-turn task. The frames are the ubiq bus stream\n(session/update notifications mapped onto `ConvUpdate`), with the original wire JSON preserved on\nevery frame, in `_data/opencode-acp-2.jsonl` (21,388 lines). Counts below are exact."
+      "text": "Everything below was captured from a real `opencode acp` session on 2026-09-12 — opencode\n**1.18.28**, the kubiq-agent session `ses_f63e56491ffePLNaX3yhGLaZ61`, agent id\n`01M2E1J73WAHT2GBBHJBVYB5XN` — over most of a two-turn task. The frames are the kubiq bus stream\n(session/update notifications mapped onto `ConvUpdate`), with the original wire JSON preserved on\nevery frame, in `_data/opencode-acp-2.jsonl` (21,388 lines). Counts below are exact."
     },
     {
       "id": "01M394P3Z1566WC72A2GDE04PR",
@@ -69,7 +69,7 @@
     {
       "id": "01M394P3Z1566WC72A2GDE04Q1",
       "kind": "paragraph",
-      "text": "**patch frame** — `sessionUpdate: \"tool_call_update\"`, `title: <the human operation>` — e.g.\n  `\"Scaffold ubiq-pro workspace\"` — and `rawInput: {\"description\": <operation>, \"subagent_type\":\n  \"general\", \"prompt\": <the delegate's brief>}`."
+      "text": "**patch frame** — `sessionUpdate: \"tool_call_update\"`, `title: <the human operation>` — e.g.\n  `\"Scaffold kubiq-pro workspace\"` — and `rawInput: {\"description\": <operation>, \"subagent_type\":\n  \"general\", \"prompt\": <the delegate's brief>}`."
     },
     {
       "id": "01M394P3Z1566WC72A2GDE04Q2",
@@ -149,7 +149,7 @@
     {
       "id": "01M394P3Z1566WC72A2GDE04QH",
       "kind": "paragraph",
-      "text": "The interface renders the spawned-agent count and the todo count in one shared bar above the\nfooter: `activity_bar` in `crates/ubiq/src/ui/conversation/mod.rs` draws a chip per reading, one\npanel at a time, and is shared by both the agents column and the chat tab through\n`conversation::render`. Tests cover the echo, the structured read, the text fallback, the\nno-todos pass-through, and the subagent panel's layout."
+      "text": "The interface renders the spawned-agent count and the todo count in one shared bar above the\nfooter: `activity_bar` in `crates/kubiq/src/ui/conversation/mod.rs` draws a chip per reading, one\npanel at a time, and is shared by both the agents column and the chat tab through\n`conversation::render`. Tests cover the echo, the structured read, the text fallback, the\nno-todos pass-through, and the subagent panel's layout."
     },
     {
       "id": "01M394P3Z1566WC72A2GDE04QJ",

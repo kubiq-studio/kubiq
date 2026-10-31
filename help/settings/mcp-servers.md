@@ -9,7 +9,7 @@ related: [settings, agents-definitions, settings-skills, settings-connectors]
 ---
 
 An MCP server is a tool provider a harness can call: a program the harness starts, or a URL it
-connects to. This section is the list Ubiq knows about; an [agent definition](agents-definitions) or
+connects to. This section is the list Kubiq knows about; an [agent definition](agents-definitions) or
 the [new agent dialog](agents-new-agent) ticks the servers an agent should be given. It is not a
 [connector](settings-connectors), which is you signed in at a code host.
 
@@ -46,5 +46,5 @@ server there with the same id as an application one takes its place.
   with **Add MCP server**.
 - **The server is listed but an agent does not have it.** Ticking is separate from listing; tick it
   for that agent.
-- **A red banner sits above the list.** Ubiq reports why the last change was refused; correct it and
+- **A red banner sits above the list.** Kubiq reports why the last change was refused; correct it and
   try again.

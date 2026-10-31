@@ -3,7 +3,7 @@ id: inbox-mission
 title: Proposal — the mission as a first-class entity
 kind: proposal
 status: proposal
-summary: Simplified since the original text below — a mission is a parent task plus subtasks plus a deterministic runner, with no coordinator, mission record, journal, agent kinds or second MCP server (the superseded decisions are marked, the built model is stated right after the intro). Original, partly superseded text — promote today's mission — a task carrying `Level::Mission`, its plan, its children and the new-mission dialog — into an entity with a lifecycle of its own. Four phases (requirements, refining, in progress, completed) with user-gated transitions, a mission record beside the task keyed by the same `TaskId`, a fast-overview side panel and a full view (modal or document tab) with the WBS, open missions in the side docks' `+` menu, a New mission entry in the Teams `+` chevron, a Missions section in the Agents sidebar, a fence with a drag handle on both Teams canvases, spawn and attach of coordinator and worker agents, a document set beyond the plan, a journal, a `ubiq-mission` / `use-mission` MCP pair, task prerequisites with a derived "not ready" mark so the planner can lay out a WBS, and two execution modes — manual, or auto with a mission scheduler that feeds ready tasks to agents at a set parallelism with label affinity. The mission detail colours tasks by work state, waiting-on-prerequisites apart from blocked, and the Tasks board gains a searchable per-mission filter. Everything that exists — the task record, parent/child, attachments and references, the plan store and annotations, `ubiq-plan`, `NewMissionForm`, `WorkAgent::task` — is reused rather than replaced. Every fork is a numbered decision with a recommendation and a cost.
+summary: Simplified since the original text below — a mission is a parent task plus subtasks plus a deterministic runner, with no coordinator, mission record, journal, agent kinds or second MCP server (the superseded decisions are marked, the built model is stated right after the intro). Original, partly superseded text — promote today's mission — a task carrying `Level::Mission`, its plan, its children and the new-mission dialog — into an entity with a lifecycle of its own. Four phases (requirements, refining, in progress, completed) with user-gated transitions, a mission record beside the task keyed by the same `TaskId`, a fast-overview side panel and a full view (modal or document tab) with the WBS, open missions in the side docks' `+` menu, a New mission entry in the Teams `+` chevron, a Missions section in the Agents sidebar, a fence with a drag handle on both Teams canvases, spawn and attach of coordinator and worker agents, a document set beyond the plan, a journal, a `kubiq-mission` / `use-mission` MCP pair, task prerequisites with a derived "not ready" mark so the planner can lay out a WBS, and two execution modes — manual, or auto with a mission scheduler that feeds ready tasks to agents at a set parallelism with label affinity. The mission detail colours tasks by work state, waiting-on-prerequisites apart from blocked, and the Tasks board gains a searchable per-mission filter. Everything that exists — the task record, parent/child, attachments and references, the plan store and annotations, `kubiq-plan`, `NewMissionForm`, `WorkAgent::task` — is reused rather than replaced. Every fork is a numbered decision with a recommendation and a cost.
 read_when: you are working on missions, the mission panel, the mission fence on the Teams graph, mission phases, or the mission MCP servers
 updated: 2026-10-12
 depends_on: [feat-workbench-tasks, feat-workbench-teams, feat-workbench-agents, feat-chat, feat-workbench, tech-transport, tech-decisions, wip-planning-system, inbox-hitl-dialogs, inbox-graph-layout, inbox-agent-graph-final]
@@ -24,7 +24,7 @@ What stays open is §13.
 **Posture: reuse the mission that exists.** The planning flow (T-56–T-62, T-94) already ships most of
 the parts: a mission is a `TaskRecord` with `level: Some(Level::Mission)`; it may have children at
 depth one; it carries a markdown plan with block-anchored annotation threads and per-line
-provenance; the `ubiq-plan` MCP server reads and writes that plan; `NewMissionForm` creates the
+provenance; the `kubiq-plan` MCP server reads and writes that plan; `NewMissionForm` creates the
 card and launches an assistant profile in one act. This proposal adds what a *tracked, long-running
 piece of work* needs on top of those parts — a phase, a roster, documents, a journal, a surface of
 its own and a tool surface for its agents. It adds no parallel task model, no second plan store and
@@ -64,13 +64,13 @@ plan's first revision by the host. `features/workbench-tasks.md` owns the behavi
 
 | Already there | Where | Reused as |
 |---|---|---|
-| `Level::Mission` on `TaskRecord` | `ubiq-proto/src/work.rs` | the mission's anchor task, and its identity |
+| `Level::Mission` on `TaskRecord` | `kubiq-proto/src/work.rs` | the mission's anchor task, and its identity |
 | `description`, `attachments` (path or `kb:`), `references` | `TaskRecord` | the brief, its attachments, its linked tasks |
 | `parent` at depth one, orphan on delete | `Work::parent_refusal`, `orphan_children` | the mission's tasks |
 | `steps`, `comments` with host-stamped author | `TaskRecord` | the anchor's own checklist and a discussion |
 | Plan at `plans/<TaskId>.md`, annotations, provenance, `PlanConflict` | `store/plan.rs`, `plan/`, `D157`–`D161` | the mission's plan, unchanged |
-| `DocumentHandle` keyed family | `ubiq-proto/src/plan.rs` | extended with one arm for mission documents |
-| `ubiq-plan`, `manage-ubiq-tasks`, `use-task`, `ubiq-ask` | `ubiq-host/src/mcp/` | composed with, not duplicated |
+| `DocumentHandle` keyed family | `kubiq-proto/src/plan.rs` | extended with one arm for mission documents |
+| `kubiq-plan`, `manage-kubiq-tasks`, `use-task`, `kubiq-ask` | `kubiq-host/src/mcp/` | composed with, not duplicated |
 | `NewMissionForm`, `ProfileInfo::mission_assistant` | `state/new_mission.rs`, `app/new_mission.rs` | the new-mission dialog, widened |
 | `WorkAgent::task`, `WorkAgent::parent`, `AssignAgent`, `SendToAgent` | `work.rs`, work family | the roster, derived |
 | Task containers, delegate ring fences, project fences | `state::layout::fence`, `TeamsView` | the mission fence, one level up |
@@ -80,7 +80,7 @@ What is missing: a **phase** (a mission shares the generic seven-value `Status`)
 distinct from "whichever profile the dialog launched", **documents** beyond the one plan, a record of
 **what happened** (the contract has no variant for an agent reporting progress —
 `transport-contract.md`), a **surface** (a mission is a card plus a modal), a place in **Agents** and
-**Teams**, a way for an agent to **spawn** another Ubiq-level agent (`StartConversation` is UI-only
+**Teams**, a way for an agent to **spawn** another Kubiq-level agent (`StartConversation` is UI-only
 and no MCP reach can issue it), and a **tool surface scoped to one mission**.
 
 ## 2. The shape
@@ -89,7 +89,7 @@ and no MCP reach can issue it), and a **tool surface scoped to one mission**.
 TaskRecord (level = Mission)          ← unchanged; the board's card, the identity (TaskId)
  ├─ description / attachments / references   → the brief
  ├─ children (parent = this)                  → the mission's tasks
- └─ plans/<TaskId>.md + .annotations.json     → the plan (ubiq-plan, unchanged)
+ └─ plans/<TaskId>.md + .annotations.json     → the plan (kubiq-plan, unchanged)
 
 MissionRecord  missions/<TaskId>/mission.toml  ← new; keyed by the same TaskId
  ├─ phase, phase history
@@ -112,7 +112,7 @@ Roster  = agents whose WorkAgent::task is the mission or one of its children   �
   board affordance keeps working; `DocumentHandle::Plan` needs no change.
 - (b) A new `MissionId`, with `MissionRecord::task: Option<TaskId>`. Lets a mission exist with no
   card. Costs a second id space, a link table to keep consistent in both directions, a migration of
-  every plan, and a rewrite of `ubiq-plan`'s addressing — against the brief to reuse.
+  every plan, and a rewrite of `kubiq-plan`'s addressing — against the brief to reuse.
 
 **Cost of (a):** "tracked independently" means an independent *record, lifecycle and surface*, not an
 independent id; a mission can never exist without a card on the board. Demoting the task
@@ -135,7 +135,7 @@ what the user exports or what an agent writes there as work.
 ### M3 — Existing missions, promotion and demotion
 
 - **Recommended:** a mission record is created lazily — the first time a `Level::Mission` task is
-  opened in the mission panel, listed, or touched by `ubiq-mission` — with the phase inferred:
+  opened in the mission panel, listed, or touched by `kubiq-mission` — with the phase inferred:
   `Done` → Completed, `Abandoned` → Abandoned, a plan exists → Refining, else Requirements. No
   migration pass. Promoting a task on the panel's Level control creates the record the same lazy
   way. Demoting a mission whose record has a non-empty roster or journal is refused with a sentence;
@@ -198,7 +198,7 @@ the rule a session group's left bar already follows.
   `attachments` (project path or `kb:`), linked tasks = the task's `references`. The dialog (§5)
   writes them with messages that exist (`UpdateTask`, `SetTaskField`), exactly as
   `start_new_mission()` already composes. Nothing new crosses the bus for the brief.
-- Pasted pictures go to `.ubiq/pasted/` via `WriteProjectFile` and are attached as ordinary files —
+- Pasted pictures go to `.kubiq/pasted/` via `WriteProjectFile` and are attached as ordinary files —
   the chat composer's path. Pasted text longer than a threshold becomes a mission document
   (`docs/pasted-<n>.md`) and is attached, instead of bloating the description.
 
@@ -209,12 +209,12 @@ the rule a session group's left bar already follows.
   a document (`D161`), the arm inherits annotations, provenance, the conflict rule and the native
   editor surface for free; the host only resolves one more path. Typical documents: requirements
   (the Q&A the assistant distils), decisions, notes, research, review reports.
-- Agents write them through `ubiq-mission` (M16); the user through the panel. Export uses the plan's
+- Agents write them through `kubiq-mission` (M16); the user through the panel. Export uses the plan's
   one-shot `ExportPlan` path.
 
 ### M9 — The plan stays where it is
 
-`plans/<TaskId>.md` and `ubiq-plan` are unchanged; the panel lists the plan first among the documents
+`plans/<TaskId>.md` and `kubiq-plan` are unchanged; the panel lists the plan first among the documents
 and opens it on the existing plan surface. A mission may be *started from a plan* (§5): the chosen
 markdown (project file, KB document, or paste) is copied in as the first plan revision, stamped
 `Human`, and the mission starts in Refining.
@@ -234,7 +234,7 @@ side docks' `+` menu (§6.3), not only the board.
 | `require plan` | reminder sentence | kept, and now the switch for the Refining → In progress gate (M5) |
 | Assistant | mission-assistant profiles | **coordinator**: the same picker, plus "attach a running agent" |
 | Plan | — | optional: none / project file / KB document / paste → starts in Refining |
-| Start | creates + launches | unchanged sequence + `CreateMission` (M17), briefing mentions `ubiq-mission` |
+| Start | creates + launches | unchanged sequence + `CreateMission` (M17), briefing mentions `kubiq-mission` |
 
 ### M10 — Coordinator and assistant are one role
 
@@ -397,7 +397,7 @@ children), **or it was spawned by an agent that is in the mission**.
 - The mission record adds *role* (coordinator vs worker) and a history of who has been in it.
 - `AgentFacts` gains `mission: Option<TaskId>`, filled at launch (from the assignment or the spawner)
   and updated on `AssignAgent`, so
-  `ubiq-mission` resolves "which mission am I in" from the URL identity (`D102`) with no argument.
+  `kubiq-mission` resolves "which mission am I in" from the URL identity (`D102`) with no argument.
 - Harness-native subagents (Claude Code's `Task` tool) stay what they are (`D47`): read off the
   stream, drawn as delegate rings inside the fence, counted in the mission's spend, not rostered.
 
@@ -420,7 +420,7 @@ The user spawns from the panel: the window composes `StartConversation` exactly 
 form does, with the mission's `project_id`/`session_id`, the mission's MCP servers ticked, and an
 opening prompt from a briefing template; then `AssignAgent` onto the mission (or onto a child task).
 
-An agent spawns through `ubiq-mission::spawn_agent`. `StartConversation` is UI-only and the window
+An agent spawns through `kubiq-mission::spawn_agent`. `StartConversation` is UI-only and the window
 mints the `AgentId`; that rule is kept:
 
 **Settled: the host relays, the window launches — and the window is where the kind of agent is
@@ -442,7 +442,7 @@ chosen.**
   profile resolution for no gain; the project is open in its window whenever its agents run.
 
 Today's instruction to the coordinator — "create tasks and invoke subagents to process them" — keeps
-working unchanged in the first stages (harness subagents); Ubiq-level workers are the later stage
+working unchanged in the first stages (harness subagents); Kubiq-level workers are the later stage
 (§12, S5), and the scheduler that hands tasks to them is §11 (S6) — which is where "this will
 change" lands.
 
@@ -509,19 +509,19 @@ change" lands.
 
 ### M16 — Two servers, the `manage` / `use` split the task servers already have
 
-**Superseded.** One `ubiq-mission` server for the planner and final reviewer, trimmed to the brief, documents, `create_mission_task(s)` and `request_phase`; no `use-mission`, `spawn_agent`, `message_agent` or `read_feedback`; workers report through `use-task`, whose `submit_review` carries a reviewer's verdict.
+**Superseded.** One `kubiq-mission` server for the planner and final reviewer, trimmed to the brief, documents, `create_mission_task(s)` and `request_phase`; no `use-mission`, `spawn_agent`, `message_agent` or `read_feedback`; workers report through `use-task`, whose `submit_review` carries a reviewer's verdict.
 
-`ubiq-mission` for the coordinator, `use-mission` for workers. Both resolve the mission from the
+`kubiq-mission` for the coordinator, `use-mission` for workers. Both resolve the mission from the
 calling agent's `AgentFacts::mission` (M11); a call from an agent outside a mission answers with a
-sentence, not an error. Neither duplicates `ubiq-plan` (plan and annotations) or the task servers —
-the coordinator's launch ticks `ubiq-mission`, `ubiq-plan`, `manage-ubiq-tasks`, `ubiq-ask`; a
-worker's ticks `use-mission`, `use-task`, `ubiq-ask`.
+sentence, not an error. Neither duplicates `kubiq-plan` (plan and annotations) or the task servers —
+the coordinator's launch ticks `kubiq-mission`, `kubiq-plan`, `manage-kubiq-tasks`, `kubiq-ask`; a
+worker's ticks `use-mission`, `use-task`, `kubiq-ask`.
 
-| Tool | `ubiq-mission` | `use-mission` | What it does |
+| Tool | `kubiq-mission` | `use-mission` | What it does |
 |---|:-:|:-:|---|
 | `mission_overview` | ✓ | ✓ | phase, brief, roster, task counts, documents, pending items, last journal events |
 | `read_brief` | ✓ | ✓ | description, attachments (paths / `kb:`), linked tasks' titles and keys |
-| `list_documents` / `read_document` | ✓ | ✓ | `docs/*.md` (plan is `ubiq-plan::read_plan`) |
+| `list_documents` / `read_document` | ✓ | ✓ | `docs/*.md` (plan is `kubiq-plan::read_plan`) |
 | `write_document` | ✓ | — | create / replace a document, `expected_revision` like `write_plan`, stamped `Agent` |
 | `create_mission_task` | ✓ | — | a child of the mission, with todos, optionally for a role; thin over `Work` |
 | `report_progress` | ✓ | ✓ | a journal line, optionally against a task; drawn on the panel and the card note |
@@ -532,7 +532,7 @@ worker's ticks `use-mission`, `use-task`, `ubiq-ask`.
 | `message_agent` | ✓ | — | a prompt to a roster member, over `SendToAgent` (queued if working) |
 | `read_feedback` | ✓ | — | user feedback since the last read (also delivered as prompts) |
 
-Asking the user stays `ubiq-ask::ask_user_question`; long waits move to the arm-and-fire mode of
+Asking the user stays `kubiq-ask::ask_user_question`; long waits move to the arm-and-fire mode of
 `inbox/hitl-registered-dialogs.md` once it lands — a mission's In-progress phase is exactly the
 long-running case that proposal is for. A pending ask from a roster member shows in the panel's
 *Needs you*.
@@ -607,11 +607,11 @@ The coordinator, in Refining or at the start of In progress, turns the plan into
 the mission, each with prerequisites and **labels chosen for affinity** (M24) and, optionally, a
 suggested agent kind. The tools are the task tools that exist, widened:
 
-- `ubiq-mission::create_mission_task` takes `prerequisites` (ids or keys, including tasks created
+- `kubiq-mission::create_mission_task` takes `prerequisites` (ids or keys, including tasks created
   earlier in the same batch), `labels` and `kind`; a batch form, `create_mission_tasks`, creates a
   whole breakdown in one call and resolves in-batch references, so the planner does not have to
   thread ids through a dozen calls.
-- `manage-ubiq-tasks::create_task` / `update_task` take `prerequisites`; `get_task` and
+- `manage-kubiq-tasks::create_task` / `update_task` take `prerequisites`; `get_task` and
   `search_tasks` (on both task servers) return `ready` and `waiting_on`; `search_tasks` gains a
   `ready_only` filter.
 - The coordinator's briefing tells it to tag by affinity (area, component, skill) and to keep tasks
@@ -687,7 +687,7 @@ bloated one), `max_attempts`, default kind.
 - Mission family: `SetMissionField` gains execution mode, parallelism, `on_finish`,
   `max_tasks_per_agent`, `max_attempts`, default kind; agent kinds gain labels. The journal gains
   the scheduler's events.
-- `ubiq-mission`: `create_mission_task(s)` with prerequisites, labels, kind; `mission_overview`
+- `kubiq-mission`: `create_mission_task(s)` with prerequisites, labels, kind; `mission_overview`
   reports the mode, the pool, the slots and who holds what. `use-mission`: `mission_overview` tells a
   worker its current task.
 
@@ -754,11 +754,11 @@ Each stage ships on its own and leaves the tree coherent.
 | **S0 — prerequisites** (independent, can ship first) | `TaskRecord::prerequisites`, `TaskField::Prerequisites`, cycle refusal, derived readiness, the board's *waits on* chip and **Ready only** filter, the task panel's Prerequisites / Blocks lists, `ready` / `waiting_on` / `ready_only` on both task servers (M19, M20) | `References`' field, picker and chip list |
 | **S1 — record and panel** | `MissionStore`, lazy records and phase inference (M3), mission family on the wire, the side panel (§6.1) with the progress bar in work-state colours (M26) and the roster derived from `WorkAgent::task`; the full view (§6.2) with Overview, Tasks, Agents, Plan & docs and Activity; board "Open mission" and the mission filter picker (M27); the side docks' `+` Missions list (§6.3) | task record, plan store, task panel pieces |
 | **S2 — phases and dialog** | phase transitions and gates (M4, M5), `Status` derivation, widened new-mission dialog (attachments, references, plan seed, attach running coordinator), *Needs you* section | `NewMissionForm`, `start_new_mission()`, task attachment and reference pickers |
-| **S3 — MCP core, documents, journal** | `ubiq-mission` / `use-mission` without spawn, `DocumentHandle::MissionDoc`, journal and `report_progress`, `AgentFacts::mission` | `ubiq-plan`'s handle pattern, `D120`, `D161` |
+| **S3 — MCP core, documents, journal** | `kubiq-mission` / `use-mission` without spawn, `DocumentHandle::MissionDoc`, journal and `report_progress`, `AgentFacts::mission` | `kubiq-plan`'s handle pattern, `D120`, `D161` |
 | **S4 — Agents and Teams** | Missions section in the sidebar (M14), the Teams `+` / chevron split button with New mission, the fence and its handle on both canvases, drop-to-attach, Missions filter | `state::layout::fence`, task containers, hexagon mark |
 | **S5 — spawning and feedback** | spawn / attach / replace coordinator from the panel, `spawn_agent` relay with agent kinds and spawn policy, `message_agent`, feedback delivery; arm-and-fire asks once that proposal lands | New agent form composition, `SendToAgent`, message queue |
 | **S6 — WBS and auto mode** | `create_mission_tasks` batch, the full view's WBS and Settings tabs, execution modes, the mission scheduler with affinity, `on_finish`, attempts and its journal lines (M21–M25) | S5's spawn relay and agent kinds, `AssignAgent`, `SendToAgent`, `use-task::change_state` |
-| **S7 — later** | Ubiq-level workers as the default instead of harness subagents; arrangements laying missions out as frames (with the layout proposal) | — |
+| **S7 — later** | Kubiq-level workers as the default instead of harness subagents; arrangements laying missions out as frames (with the layout proposal) | — |
 
 ## 13. Open for discussion
 

@@ -1,0 +1,1244 @@
+//! The tasks board's logic, without a frame.
+//!
+//! Everything the board decides — which cards a column draws, what the filter field and the
+//! session pills leave on screen, where a dragged card lands, what a card's meter and pulse read,
+//! which columns and cards are shut — is arithmetic over the same projection the graph reads, so
+//! it is tested the way the graph is: on the state alone, seeded the way the host would have
+//! filled it.
+//!
+//! The records are the host's and arrive through `WorkProjection`; `BoardState` is the view over
+//! them and takes the projection as the first argument of every reader. What a drop and a `New
+//! task` *ask for* is asserted here; what they *do* to a record is asserted in
+//! `crates/kubiq-host/tests/work.rs`, because on this side it would be asserting a mock. Ids are
+//! minted rather than written down, and the fixture binds each one to a name.
+//!
+//! A column is asserted by the ids in it and never by where it is drawn. The board has no
+//! geometry of its own: a card's place is its status, and its status is the task's.
+
+use kubiq::state::board::{BoardState, Field};
+use kubiq::state::work::{WorkProjection, fraction};
+use kubiq_proto::ids::{SessionId, TaskId};
+use kubiq_proto::work::{
+    Activity, AgentId, Bucket, Label, Level, Priority, Shape, Status, Step, StepState, TaskRecord,
+    WorkAgent, WorkSession,
+};
+
+fn session(id: SessionId, name: &str) -> WorkSession {
+    WorkSession {
+        id,
+        name: name.to_string(),
+        branch: "main".to_string(),
+        worktree: false,
+    }
+}
+
+fn agent(
+    id: AgentId,
+    session: SessionId,
+    task: Option<TaskId>,
+    name: &str,
+    activity: Activity,
+) -> WorkAgent {
+    WorkAgent {
+        id,
+        session,
+        task,
+        parent: None,
+        name: name.to_string(),
+        summary: None,
+        title: None,
+        definition: None,
+        activity,
+        branch: "main".to_string(),
+        tokens: 10_000.0,
+        harness: "Claude Code".to_string(),
+        account: "work".to_string(),
+        model: "Opus 4.6".to_string(),
+        context_pct: 5,
+        persistent: false,
+        accept_all: false,
+        restorable: false,
+        debug_dump: None,
+        run_dir: None,
+        config_dir: None,
+        thread: Vec::new(),
+    }
+}
+
+fn task(
+    id: TaskId,
+    title: &str,
+    session: Option<SessionId>,
+    status: Status,
+    steps: &[StepState],
+) -> TaskRecord {
+    TaskRecord {
+        id,
+        session,
+        status,
+        priority: Priority::Normal,
+        // Every optional fact is absent, the way the host mints one: a task named in a hurry makes
+        // no claim about its shape, its kind or what tracker it came from.
+        shape: None,
+        kind: None,
+        level: None,
+        parent: None,
+        references: Vec::new(),
+        prerequisites: Vec::new(),
+        attachments: Vec::new(),
+        complexity: None,
+        key: None,
+        link: None,
+        assigned_to: None,
+        labels: Vec::new(),
+        colour: None,
+        title: title.to_string(),
+        description: String::new(),
+        steps: steps
+            .iter()
+            .enumerate()
+            .map(|(ix, state)| {
+                let mut step = Step::new(format!("step-{ix}"));
+                step.state = *state;
+                step
+            })
+            .collect(),
+        comments: Vec::new(),
+        approve: false,
+        review_of: None,
+        worker: None,
+        auto_fails: 0,
+        mission: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    }
+}
+
+/// A record the host has sent again, changed. Replacing on id is the whole of how anything in the
+/// work changes — nothing on this side edits a record in place.
+fn edit_task(work: &mut WorkProjection, id: TaskId, edit: impl FnOnce(&mut TaskRecord)) {
+    let mut task = work.task(id).expect("the fixture has that task").clone();
+    edit(&mut task);
+    work.apply_task(task);
+}
+
+fn edit_agent(work: &mut WorkProjection, id: AgentId, edit: impl FnOnce(&mut WorkAgent)) {
+    let mut agent = work.agent(id).expect("the fixture has that agent").clone();
+    edit(&mut agent);
+    work.apply_agent(agent);
+}
+
+fn pulse(work: &WorkProjection, id: TaskId) -> Bucket {
+    work.pulse(work.task(id).expect("the fixture has that task"))
+}
+
+fn now(work: &WorkProjection, id: TaskId) -> Option<AgentId> {
+    work.now(work.task(id).expect("the fixture has that task"))
+        .map(|agent| agent.id)
+}
+
+/// `app.rs`'s `TaskChanged` arm, without the frame: the mark comes off whatever column the answer
+/// reports, and then the record is applied.
+fn task_changed(board: &mut BoardState, work: &mut WorkProjection, task: TaskRecord) {
+    if board.is_moving(task.id) {
+        board.moving = None;
+    }
+    work.apply_task(task);
+}
+
+/// `app.rs`'s `TaskCreated` arm, without the frame.
+fn task_created(board: &mut BoardState, work: &mut WorkProjection, task: TaskRecord) {
+    let id = task.id;
+    work.apply_task(task);
+    if board.awaiting_new {
+        board.awaiting_new = false;
+        board.select(id);
+    }
+}
+
+fn ids(tasks: &[&TaskRecord]) -> Vec<TaskId> {
+    tasks.iter().map(|t| t.id).collect()
+}
+
+/// One project's work, with a name for every id in it.
+struct Fixture {
+    work: WorkProjection,
+    cold: SessionId,
+    resize: SessionId,
+    writer: AgentId,
+    waiter: AgentId,
+    stopped: AgentId,
+    shrinker: AgentId,
+    cache: TaskId,
+    parser: TaskId,
+    pane: TaskId,
+    unstarted: TaskId,
+}
+
+/// Two sessions and four tasks: two in one session, one in the other, and one nobody has started.
+/// The titles say something, because the filter matches what the card prints.
+fn seeded() -> Fixture {
+    let cold = SessionId::generate();
+    let resize = SessionId::generate();
+    let writer = AgentId::generate();
+    let waiter = AgentId::generate();
+    let stopped = AgentId::generate();
+    let shrinker = AgentId::generate();
+    let cache = TaskId::generate();
+    let parser = TaskId::generate();
+    let pane = TaskId::generate();
+    let unstarted = TaskId::generate();
+
+    let mut work = WorkProjection::empty();
+    work.replace_all(
+        vec![session(cold, "cold-start"), session(resize, "resize")],
+        vec![
+            agent(writer, cold, Some(cache), "writer", Activity::Writing),
+            agent(waiter, cold, Some(cache), "waiter", Activity::NeedsYou),
+            agent(stopped, cold, Some(parser), "stopped", Activity::Ended),
+            agent(shrinker, resize, Some(pane), "shrinker", Activity::Writing),
+        ],
+        vec![
+            task(
+                cache,
+                "warm the cache",
+                Some(cold),
+                Status::InProgress,
+                &[StepState::Done, StepState::Idle],
+            ),
+            task(
+                parser,
+                "drop the parser",
+                Some(cold),
+                Status::Backlog,
+                &[StepState::Done],
+            ),
+            task(
+                pane,
+                "shrink the pane",
+                Some(resize),
+                Status::InProgress,
+                &[StepState::Failed],
+            ),
+            task(
+                unstarted,
+                "nobody has started this",
+                None,
+                Status::Backlog,
+                &[],
+            ),
+        ],
+    );
+
+    Fixture {
+        work,
+        cold,
+        resize,
+        writer,
+        waiter,
+        stopped,
+        shrinker,
+        cache,
+        parser,
+        pane,
+        unstarted,
+    }
+}
+
+#[test]
+fn a_column_draws_only_the_tasks_that_are_in_it() {
+    let f = seeded();
+    let board = BoardState::default();
+
+    assert_eq!(
+        ids(&board.column(&f.work, Status::Backlog)),
+        vec![f.parser, f.unstarted]
+    );
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache, f.pane]
+    );
+    assert!(board.column(&f.work, Status::Done).is_empty());
+}
+
+#[test]
+fn the_session_pill_leaves_out_every_other_session_and_the_unstarted() {
+    let f = seeded();
+    let mut board = BoardState::default();
+    board.session = Some(f.cold);
+    assert_eq!(
+        ids(&board.column(&f.work, Status::Backlog)),
+        vec![f.parser],
+        "the task nobody has started belongs to no session"
+    );
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache]
+    );
+
+    board.session = Some(f.resize);
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.pane]
+    );
+    assert!(board.column(&f.work, Status::Backlog).is_empty());
+
+    // No pill is every session, including the one that has none.
+    board.session = None;
+    assert_eq!(
+        ids(&board.column(&f.work, Status::Backlog)),
+        vec![f.parser, f.unstarted]
+    );
+}
+
+#[test]
+fn the_filter_matches_the_title_and_the_session_name_in_either_case() {
+    let f = seeded();
+    let mut board = BoardState::default();
+    board.filter = "CACHE".to_string();
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache]
+    );
+
+    // Nothing in the third task says "resize" except the session it names.
+    board.filter = "  resize ".to_string();
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.pane]
+    );
+    assert!(board.column(&f.work, Status::Backlog).is_empty());
+
+    board.filter = "Shrink".to_string();
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.pane]
+    );
+
+    board.filter = "nothing says this".to_string();
+    assert!(board.column(&f.work, Status::Backlog).is_empty());
+
+    // The two filters are read together, not in turn.
+    board.filter = "the".to_string();
+    board.session = Some(f.cold);
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache]
+    );
+}
+
+/// The plain filter is a search over the whole task rather than over what the card prints, and the
+/// notes are where the word somebody remembers usually is: a user who wrote `eviction policy` into
+/// a task finds it by typing `eviction`, with no memory of which field they put it in.
+#[test]
+fn the_filter_searches_the_description() {
+    let mut f = seeded();
+    edit_task(&mut f.work, f.cache, |task| {
+        task.description = "the eviction policy needs a rethink".to_string();
+    });
+    let mut board = BoardState::default();
+    board.filter = "Eviction".to_string();
+
+    assert!(board.matches(&f.work, f.work.task(f.cache).unwrap()));
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache],
+        "and only the task whose notes say it"
+    );
+}
+
+/// A needle that names a field searches that field and nothing else. A tracker id is a thing to
+/// look up exactly: `UBQ-4` written into somebody's notes is not the card called `UBQ-4`.
+#[test]
+fn a_key_or_a_hash_narrows_the_search_to_one_field() {
+    let mut f = seeded();
+    edit_task(&mut f.work, f.cache, |task| {
+        task.key = Some("UBQ-41".to_string());
+        task.labels = vec![Label::new("flaky".to_string(), 2)];
+    });
+    edit_task(&mut f.work, f.pane, |task| {
+        task.description = "blocked on UBQ-41, and it is flaky".to_string();
+    });
+    // The plain form finds both, because it reads the whole task.
+    let mut board = BoardState::default();
+    board.filter = "ubq-41".to_string();
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache, f.pane]
+    );
+
+    board.filter = "key:ubq-4".to_string();
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache],
+        "only the task whose key says it"
+    );
+
+    board.filter = "#FLAK".to_string();
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache],
+        "only the task carrying the label"
+    );
+
+    // A prefix with nothing after it is somebody halfway through typing, not a request for an
+    // empty board.
+    board.filter = "key:".to_string();
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache, f.pane]
+    );
+
+    board.filter = "key:nothing".to_string();
+    assert!(board.column(&f.work, Status::InProgress).is_empty());
+}
+
+/// A lit label pill narrows on top of everything else, and two lit pills narrow further: a card has
+/// to carry every one of them. The text and the pills are read together, not in turn.
+#[test]
+fn a_label_pill_ands_with_the_text_and_with_the_other_pills() {
+    let mut f = seeded();
+    edit_task(&mut f.work, f.cache, |task| {
+        task.labels = vec![Label::new("flaky".to_string(), 2)];
+    });
+    edit_task(&mut f.work, f.pane, |task| {
+        task.labels = vec![
+            Label::new("flaky".to_string(), 2),
+            Label::new("urgent".to_string(), 0),
+        ];
+    });
+    let mut board = BoardState::default();
+    assert!(!board.filtering(), "an untouched board hides nothing");
+
+    board.toggle_label("flaky");
+    assert!(board.is_label_on("flaky"));
+    assert!(board.filtering());
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache, f.pane]
+    );
+
+    // A second pill is a narrower question, not a wider one.
+    board.toggle_label("urgent");
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.pane]
+    );
+
+    // And the text narrows the survivors again.
+    board.filter = "cache".to_string();
+    assert!(board.column(&f.work, Status::InProgress).is_empty());
+
+    board.toggle_label("urgent");
+    assert!(!board.is_label_on("urgent"));
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache]
+    );
+
+    board.clear_filters();
+    assert!(!board.filtering());
+    assert!(board.filter.is_empty());
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache, f.pane]
+    );
+}
+
+/// M20: a task waits on whatever prerequisite is not yet `InReview` or `Done`. `pane` waits on
+/// `parser`, still `Backlog`, so `pane` is not ready and `Ready only` drops it from its column and
+/// from the counts, ANDed with the other filters the same way a label pill is.
+#[test]
+fn ready_only_narrows_to_tasks_whose_prerequisites_are_done() {
+    let mut f = seeded();
+    edit_task(&mut f.work, f.pane, |task| {
+        task.prerequisites = vec![f.parser];
+    });
+    let mut board = BoardState::default();
+    assert!(!board.filtering(), "an untouched board hides nothing");
+
+    let pane_waits = f
+        .work
+        .task(f.pane)
+        .expect("the fixture has pane")
+        .waiting_on(&f.work.tasks);
+    assert_eq!(pane_waits, vec![f.parser]);
+    assert!(!f.work.task(f.pane).unwrap().ready(&f.work.tasks));
+    assert!(f.work.task(f.cache).unwrap().ready(&f.work.tasks));
+
+    board.toggle_ready_only();
+    assert!(board.ready_only);
+    assert!(board.filtering());
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache]
+    );
+    assert_eq!(
+        board
+            .counts(&f.work)
+            .into_iter()
+            .find(|(status, _)| *status == Status::InProgress)
+            .map(|(_, count)| count),
+        Some(1)
+    );
+
+    // Finishing the prerequisite clears the wait without touching the tick.
+    edit_task(&mut f.work, f.parser, |task| {
+        task.status = Status::Done;
+    });
+    assert!(f.work.task(f.pane).unwrap().ready(&f.work.tasks));
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache, f.pane]
+    );
+
+    board.clear_filters();
+    assert!(!board.ready_only, "the reset clears Ready only too");
+}
+
+/// M27: the mission filter shows only the mission's own anchor card and its children, stacks
+/// (ANDs) with the text field, the labels and `Ready only` exactly as they stack with each other,
+/// and the reset that clears the other filters clears this one too.
+#[test]
+fn the_mission_filter_narrows_to_the_anchor_and_its_children_and_ands_with_the_rest() {
+    let mut f = seeded();
+    // `cache` becomes the mission; `parser` is its child. `pane` and `unstarted` belong to
+    // neither, even though `pane` shares `cache`'s column and `parser`'s text.
+    edit_task(&mut f.work, f.cache, |task| {
+        task.level = Some(Level::Mission);
+    });
+    edit_task(&mut f.work, f.parser, |task| {
+        task.parent = Some(f.cache);
+    });
+
+    let mut board = BoardState::default();
+    assert!(board.mission.is_none(), "no mission is narrowed by default");
+    assert!(!board.filtering());
+
+    board.set_mission(Some(f.cache));
+    assert!(board.filtering());
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache],
+        "pane shares the column but is not the mission or its child"
+    );
+    assert_eq!(
+        ids(&board.column(&f.work, Status::Backlog)),
+        vec![f.parser],
+        "parser is the mission's child; unstarted is neither"
+    );
+
+    // ANDs with the text field: a query that matches a task outside the mission still narrows to
+    // nothing, because the mission filter has already excluded it.
+    board.filter = "pane".to_string();
+    assert!(board.column(&f.work, Status::InProgress).is_empty());
+    board.filter.clear();
+
+    // ANDs with a label pill: lighting a label neither the mission nor its child carries empties
+    // the column even though the mission filter alone would have shown it.
+    edit_task(&mut f.work, f.pane, |task| {
+        task.labels = vec![Label::new("urgent".to_string(), 0)];
+    });
+    board.toggle_label("urgent");
+    assert!(board.column(&f.work, Status::InProgress).is_empty());
+    board.toggle_label("urgent");
+
+    // ANDs with `Ready only`: parser is not ready once it waits on a prerequisite still open.
+    edit_task(&mut f.work, f.parser, |task| {
+        task.prerequisites = vec![f.pane];
+    });
+    board.toggle_ready_only();
+    assert!(board.column(&f.work, Status::Backlog).is_empty());
+    board.toggle_ready_only();
+    assert_eq!(ids(&board.column(&f.work, Status::Backlog)), vec![f.parser]);
+
+    // The status-bar counts follow the same narrowing, through `column`.
+    assert_eq!(
+        board
+            .counts(&f.work)
+            .into_iter()
+            .find(|(status, _)| *status == Status::InProgress)
+            .map(|(_, count)| count),
+        Some(1)
+    );
+
+    board.clear_filters();
+    assert!(board.mission.is_none(), "the reset clears the mission too");
+    assert!(!board.filtering());
+}
+
+/// A demoted or deleted mission clears the board's own filter rather than leaving it narrowed to
+/// a task that is no longer a mission.
+#[test]
+fn clearing_the_filter_only_touches_the_mission_it_names() {
+    let mut board = BoardState::default();
+    let mission = TaskId::generate();
+    let other = TaskId::generate();
+
+    board.set_mission(Some(mission));
+    board.clear_mission_if(other);
+    assert_eq!(
+        board.mission,
+        Some(mission),
+        "a different task's demotion or deletion leaves the filter alone"
+    );
+
+    board.clear_mission_if(mission);
+    assert!(board.mission.is_none());
+}
+
+/// A prerequisite picker never offers the task itself, nor one that would close a cycle in the
+/// project's prerequisite DAG — `pane` already waits on `parser`, so offering `parser` a
+/// prerequisite of `pane` would make one.
+#[test]
+fn eligible_prerequisites_refuses_the_task_itself_and_a_cycle() {
+    let mut f = seeded();
+    edit_task(&mut f.work, f.pane, |task| {
+        task.prerequisites = vec![f.parser];
+    });
+
+    let pane = f.work.task(f.pane).expect("the fixture has pane").clone();
+    let eligible = ids(&f.work.eligible_prerequisites(&pane));
+    assert!(
+        !eligible.contains(&f.pane),
+        "a task is never its own prerequisite"
+    );
+    assert!(
+        eligible.contains(&f.cache),
+        "an unrelated task stays offered"
+    );
+
+    let parser = f
+        .work
+        .task(f.parser)
+        .expect("the fixture has parser")
+        .clone();
+    let parser_eligible = ids(&f.work.eligible_prerequisites(&parser));
+    assert!(
+        !parser_eligible.contains(&f.pane),
+        "parser already waited on by pane cannot also wait on pane"
+    );
+}
+
+/// There is no label registry: the set of labels that exist is what the tasks say. The same name in
+/// two colours is one label — the first colour seen wins — and the row is ordered by how much of
+/// the board carries each, so the label somebody is about to reach for is at the front and the row
+/// does not reshuffle when the counts tie.
+#[test]
+fn the_label_row_deduplicates_and_leads_with_the_most_used() {
+    let mut f = seeded();
+    assert!(f.work.labels().is_empty(), "nothing carries a label yet");
+
+    edit_task(&mut f.work, f.cache, |task| {
+        task.labels = vec![Label::new("flaky".to_string(), 2)];
+    });
+    edit_task(&mut f.work, f.pane, |task| {
+        task.labels = vec![
+            Label::new("urgent".to_string(), 0),
+            // The same name in another colour, which is the same label.
+            Label::new("flaky".to_string(), 7),
+        ];
+    });
+    edit_task(&mut f.work, f.parser, |task| {
+        task.labels = vec![Label::new("api".to_string(), 1)];
+    });
+
+    assert_eq!(
+        f.work.labels(),
+        vec![
+            Label::new("flaky".to_string(), 2),
+            Label::new("api".to_string(), 1),
+            Label::new("urgent".to_string(), 0),
+        ],
+        "twice-used first, then the tied pair by name, and the first colour seen wins"
+    );
+}
+
+/// A projection that appended on a re-send would draw the same card twice, which is the classic
+/// duplicate-card bug: every apply replaces on id, so the same record twice is the same projection.
+#[test]
+fn applying_a_task_twice_leaves_one_card() {
+    let mut f = seeded();
+    let board = BoardState::default();
+    let before = f.work.tasks.len();
+
+    let held = f.work.task(f.cache).unwrap().clone();
+    assert!(
+        !f.work.apply_task(held.clone()),
+        "a record already held is not new"
+    );
+    assert!(!f.work.apply_task(held.clone()));
+    assert_eq!(f.work.tasks.len(), before);
+    assert_eq!(
+        ids(&board.column(&f.work, Status::InProgress)),
+        vec![f.cache, f.pane],
+        "and it is still in the one column, once"
+    );
+
+    // The later record wins, in the place the first one held.
+    let mut moved = held;
+    moved.status = Status::Done;
+    assert!(!f.work.apply_task(moved));
+    assert_eq!(f.work.tasks.len(), before);
+    assert_eq!(f.work.task(f.cache).unwrap().status, Status::Done);
+    assert_eq!(ids(&board.column(&f.work, Status::Done)), vec![f.cache]);
+
+    // A record nobody has heard of is the new one.
+    let fresh = TaskId::generate();
+    assert!(f.work.apply_task(task(
+        fresh,
+        "just arrived",
+        Some(f.cold),
+        Status::Backlog,
+        &[]
+    )));
+    assert_eq!(f.work.tasks.len(), before + 1);
+}
+
+/// A whole list that no longer names a task is a task that has gone, and a panel pointed at one
+/// that has gone reports on nothing rather than on the card that took its place.
+#[test]
+fn a_task_the_next_list_leaves_out_is_gone_and_the_panel_says_nothing() {
+    let mut f = seeded();
+    let mut board = BoardState::default();
+    board.select(f.parser);
+    assert_eq!(board.open_task(&f.work).map(|t| t.id), Some(f.parser));
+
+    let kept: Vec<TaskRecord> = f
+        .work
+        .tasks
+        .iter()
+        .filter(|t| t.id != f.parser)
+        .cloned()
+        .collect();
+    let sessions = f.work.sessions.clone();
+    let agents = f.work.agents.clone();
+    f.work.replace_all(sessions, agents, kept);
+
+    assert!(f.work.task(f.parser).is_none());
+    assert!(
+        board
+            .column(&f.work, Status::Backlog)
+            .iter()
+            .all(|t| t.id != f.parser)
+    );
+    assert_eq!(board.selected, Some(f.parser), "the selection is untouched");
+    assert!(
+        board.open_task(&f.work).is_none(),
+        "a panel pointed at a task that has gone reports on nothing"
+    );
+}
+
+/// The card says it is on its way until the host answers, and the mark comes off whatever column
+/// the answer reports — the old one included. A refusal that left the card where it was must not
+/// leave it saying it is still moving.
+#[test]
+fn a_mark_for_a_move_comes_off_even_when_the_host_refuses_it() {
+    let mut f = seeded();
+    let mut board = BoardState::default();
+
+    board.start_carry(f.cache);
+    assert!(board.carry_over(Status::Done, None));
+    let (id, status, before) = board.end_carry().expect("the card landed in a column");
+    assert_eq!((id, status, before), (f.cache, Status::Done, None));
+
+    board.moving = Some((id, status));
+    assert!(board.is_moving(f.cache));
+    assert!(!board.is_moving(f.pane), "only the card that was dropped");
+
+    // The answer reports the column it was already in: the host refused the move.
+    let refused = f.work.task(f.cache).unwrap().clone();
+    assert_eq!(refused.status, Status::InProgress);
+    task_changed(&mut board, &mut f.work, refused);
+
+    assert!(!board.is_moving(f.cache), "the mark cannot stick");
+    assert_eq!(board.moving, None);
+    assert_eq!(f.work.task(f.cache).unwrap().status, Status::InProgress);
+}
+
+/// A `New task` cannot select what it asked for, because the id is the host's to mint — so the task
+/// that arrives is the one to select. Exactly once: the next task to arrive is somebody else's and
+/// must not move a selection the user has since made.
+#[test]
+fn pressing_new_task_twice_leaves_one_draft_and_makes_no_card() {
+    // The card this whole form exists for: `New task`, a click elsewhere, `New task` again used to
+    // leave two empty rows on the board. Nothing is sent until the draft has something in it.
+    let mut board = BoardState::default();
+
+    assert!(board.start_draft(), "the first press opens the form");
+    assert!(board.draft);
+    assert!(
+        !board.draft_ready(),
+        "an empty form is not a card, so Create does nothing"
+    );
+
+    board.form.title = "resize path".to_string();
+    assert!(
+        !board.start_draft(),
+        "the second press returns to the form rather than opening a second one"
+    );
+    assert_eq!(
+        board.form.title, "resize path",
+        "and what was typed between the two presses survives"
+    );
+    assert!(board.draft_ready(), "a title is enough to make the card");
+
+    // A description on its own is enough as well — the title is what assistance is for.
+    board.form.title = "   ".to_string();
+    assert!(!board.draft_ready());
+    board.form.description = "the pane resizes before the harness hears about it".to_string();
+    assert!(board.draft_ready());
+
+    board.stop_draft();
+    assert!(!board.draft);
+}
+
+#[test]
+fn a_draft_holds_the_panel_and_is_never_refilled_from_a_record() {
+    // Two rules at once: the panel has one slot, and a refill on the frame after a keystroke would
+    // wipe what is being typed into a form that has no record behind it.
+    let f = seeded();
+    let mut board = BoardState::default();
+    board.select(f.cache);
+    assert!(board.open_task(&f.work).is_some());
+
+    board.start_draft();
+    assert!(
+        board.open_task(&f.work).is_none(),
+        "the draft is what the panel is showing"
+    );
+    assert!(
+        !board.needs_fill(None),
+        "and nothing refills the fields under it"
+    );
+
+    board.stop_draft();
+    assert!(board.open_task(&f.work).is_some(), "the task comes back");
+    assert!(board.needs_fill(None), "and the fields are filled from it");
+}
+
+#[test]
+fn awaiting_a_new_task_selects_the_one_that_arrives_once() {
+    let mut f = seeded();
+    let mut board = BoardState::default();
+    board.awaiting_new = true;
+
+    let first = TaskId::generate();
+    task_created(
+        &mut board,
+        &mut f.work,
+        task(first, "look at the resize path", None, Status::Backlog, &[]),
+    );
+    assert_eq!(board.selected, Some(first));
+    assert!(board.show_detail, "and the panel is open on it");
+    assert!(!board.awaiting_new, "nothing is being waited for now");
+
+    let second = TaskId::generate();
+    task_created(
+        &mut board,
+        &mut f.work,
+        task(second, "and another", Some(f.cold), Status::Backlog, &[]),
+    );
+    assert_eq!(
+        board.selected,
+        Some(first),
+        "a task nobody asked for does not take the selection"
+    );
+}
+
+#[test]
+fn a_failed_step_blocks_the_task_and_the_card_reads_as_an_error() {
+    let mut f = seeded();
+    assert!(f.work.task(f.pane).unwrap().blocked());
+    assert_eq!(
+        f.work.agent(f.shrinker).unwrap().activity,
+        Activity::Writing
+    );
+    assert_eq!(
+        pulse(&f.work, f.pane),
+        Bucket::Error,
+        "the step failed even though the agent on it is writing"
+    );
+
+    // Nothing else is blocked, and the step coming back done clears it.
+    assert!(!f.work.task(f.cache).unwrap().blocked());
+    edit_task(&mut f.work, f.pane, |task| {
+        task.steps[0].state = StepState::Done;
+    });
+    assert!(!f.work.task(f.pane).unwrap().blocked());
+}
+
+#[test]
+fn a_pulse_is_the_worst_thing_happening_in_the_task() {
+    let mut f = seeded();
+
+    // Waiting beats running: one member is writing, the other needs the user.
+    assert_eq!(pulse(&f.work, f.cache), Bucket::Waiting);
+
+    // Running beats ended, once nothing is waiting.
+    edit_agent(&mut f.work, f.waiter, |agent| {
+        agent.activity = Activity::Writing;
+    });
+    assert_eq!(pulse(&f.work, f.cache), Bucket::Running);
+
+    // Everything finished, and a ticked step is not a running one.
+    assert_eq!(pulse(&f.work, f.parser), Bucket::Ended);
+
+    // A step alone is enough: no member of that task is waiting, but a step of it is.
+    edit_task(&mut f.work, f.parser, |task| {
+        task.steps[0].state = StepState::NeedsYou;
+    });
+    assert_eq!(pulse(&f.work, f.parser), Bucket::Waiting);
+}
+
+#[test]
+fn a_task_speaks_through_whoever_is_holding_it() {
+    let mut f = seeded();
+
+    assert_eq!(now(&f.work, f.cache), Some(f.writer));
+
+    // The first member that has not ended, not simply the first.
+    edit_agent(&mut f.work, f.writer, |agent| {
+        agent.activity = Activity::Ended;
+    });
+    assert_eq!(now(&f.work, f.cache), Some(f.waiter));
+
+    // Everybody has ended, so the task still answers rather than going silent.
+    assert_eq!(now(&f.work, f.parser), Some(f.stopped));
+
+    // A task with nobody on it has nobody to speak through.
+    assert_eq!(now(&f.work, f.unstarted), None);
+}
+
+#[test]
+fn a_coordinated_task_speaks_through_its_coordinator() {
+    let mut f = seeded();
+    let worker = AgentId::generate();
+    edit_task(&mut f.work, f.cache, |task| {
+        task.shape = Some(Shape::Coordinated)
+    });
+    f.work.apply_agent(agent(
+        worker,
+        f.cold,
+        Some(f.cache),
+        "worker",
+        Activity::Writing,
+    ));
+    edit_agent(&mut f.work, f.waiter, |agent| agent.parent = Some(f.writer));
+    edit_agent(&mut f.work, worker, |agent| agent.parent = Some(f.writer));
+    // The coordinator answers even though it is not the first member still going.
+    edit_agent(&mut f.work, f.writer, |agent| {
+        agent.activity = Activity::Ended;
+    });
+
+    assert_eq!(now(&f.work, f.cache), Some(f.writer));
+
+    // With nobody spawned by anybody there is no coordinator, so it falls back to who is holding
+    // it — which is the same answer every other shape gives.
+    edit_agent(&mut f.work, f.waiter, |agent| agent.parent = None);
+    edit_agent(&mut f.work, worker, |agent| agent.parent = None);
+    assert_eq!(now(&f.work, f.cache), Some(f.waiter));
+}
+
+/// A task with no steps answers zero, which is not the same claim as "none of them done" — it has
+/// nothing to be a fraction of. A caller that would be saying the second thing checks `steps` first
+/// and draws no meter at all.
+#[test]
+fn the_meter_reads_the_steps_and_a_task_with_none_has_nothing_to_be_a_fraction_of() {
+    let mut f = seeded();
+    assert_eq!(f.work.task(f.cache).unwrap().done(), 1);
+    assert_eq!(fraction(f.work.task(f.cache).unwrap()), 0.5);
+
+    edit_task(&mut f.work, f.cache, |task| {
+        task.steps[1].state = StepState::Done;
+    });
+    assert_eq!(f.work.task(f.cache).unwrap().done(), 2);
+    assert_eq!(fraction(f.work.task(f.cache).unwrap()), 1.0);
+
+    assert!(f.work.task(f.unstarted).unwrap().steps.is_empty());
+    assert_eq!(fraction(f.work.task(f.unstarted).unwrap()), 0.0);
+}
+
+#[test]
+fn dragging_a_card_answers_the_column_it_landed_in_and_the_card_it_landed_in_front_of() {
+    let f = seeded();
+    let mut board = BoardState::default();
+
+    assert!(
+        !board.carry_over(Status::Ready, None),
+        "nothing is being carried yet"
+    );
+
+    board.start_carry(f.parser);
+    assert!(board.carry_over(Status::Ready, None));
+    assert!(
+        !board.carry_over(Status::Ready, None),
+        "a drag across one column does not ask for a frame per pixel"
+    );
+    assert!(board.carry_over(Status::Done, None));
+    assert_eq!(board.end_carry(), Some((f.parser, Status::Done, None)));
+    assert!(board.carry.is_none());
+
+    // The anchor is the card a drop would land in front of, and `None` is the end of the column.
+    board.start_carry(f.parser);
+    assert!(board.carry_over(Status::InProgress, Some(f.pane)));
+    assert_eq!(
+        board.end_carry(),
+        Some((f.parser, Status::InProgress, Some(f.pane)))
+    );
+
+    // Let go over no column at all, and nothing is asked for.
+    board.start_carry(f.parser);
+    assert_eq!(board.end_carry(), None);
+    assert!(board.carry.is_none());
+
+    assert_eq!(board.end_carry(), None, "nothing was being carried");
+}
+
+/// A drag past several cards inside one column never changes the column, and a redraw keyed off
+/// that alone would leave the gap drawn where the pointer used to be. The anchor is half the
+/// answer, so either half changing is a frame.
+#[test]
+fn moving_past_a_card_inside_one_column_still_asks_for_a_frame() {
+    let f = seeded();
+    let mut board = BoardState::default();
+    board.start_carry(f.parser);
+
+    assert!(board.carry_over(Status::InProgress, None));
+    assert!(
+        board.carry_over(Status::InProgress, Some(f.pane)),
+        "the column is the same, the card it would land in front of is not"
+    );
+    assert!(!board.carry_over(Status::InProgress, Some(f.pane)));
+    assert!(board.carry_over(Status::InProgress, Some(f.cache)));
+    assert!(
+        board.carry_over(Status::InProgress, None),
+        "and past the last card it is the end of the column again"
+    );
+}
+
+#[test]
+fn shutting_a_column_and_folding_a_card_undo_themselves() {
+    let f = seeded();
+    let mut board = BoardState::default();
+
+    assert!(!board.is_shut(Status::Done));
+    board.set_column(Status::Done, true);
+    assert!(board.is_shut(Status::Done));
+    assert!(
+        !board.is_shut(Status::Backlog),
+        "only the one that was shut"
+    );
+    board.set_column(Status::Done, false);
+    assert!(!board.is_shut(Status::Done));
+    assert!(board.shut.is_empty());
+    assert!(
+        board.is_held_open(Status::Done),
+        "and reopening it is a thing the board remembers, so a lane that shuts itself when \
+         empty can be looked into"
+    );
+
+    assert!(!board.is_folded(f.pane));
+    board.toggle_fold(f.pane);
+    assert!(board.is_folded(f.pane));
+    assert!(!board.is_folded(f.cache));
+    board.toggle_fold(f.pane);
+    assert!(!board.is_folded(f.pane));
+    assert!(board.folded.is_empty());
+}
+
+#[test]
+fn the_popup_toggle_changes_where_the_task_is_drawn_and_nothing_else() {
+    let f = seeded();
+    let mut board = BoardState::default();
+    board.select(f.pane);
+
+    assert!(!board.popup);
+    board.toggle_popup();
+    assert!(board.popup);
+    // Neither what is open nor what is being typed moves with it.
+    assert_eq!(board.selected, Some(f.pane));
+    board.edit(Field::Description);
+    board.toggle_popup();
+    assert!(!board.popup);
+    assert!(board.is_editing(Field::Description));
+}
+
+#[test]
+fn the_status_bar_counts_only_the_cards_the_filters_leave_on_screen() {
+    let f = seeded();
+    let mut board = BoardState::default();
+
+    assert_eq!(
+        board.counts(&f.work),
+        vec![
+            (Status::Backlog, 2),
+            (Status::Ready, 0),
+            (Status::Blocked, 0),
+            (Status::InProgress, 2),
+            (Status::InReview, 0),
+            (Status::Done, 0),
+            (Status::Abandoned, 0),
+        ]
+    );
+    assert_eq!(board.steps(&f.work), (2, 4));
+    assert_eq!(board.blocked(&f.work), 1);
+
+    // A shut column still counts: it is a strip, not an absence.
+    board.set_column(Status::Backlog, true);
+    assert_eq!(board.counts(&f.work)[0], (Status::Backlog, 2));
+
+    board.session = Some(f.cold);
+    assert_eq!(
+        board.counts(&f.work),
+        vec![
+            (Status::Backlog, 1),
+            (Status::Ready, 0),
+            (Status::Blocked, 0),
+            (Status::InProgress, 1),
+            (Status::InReview, 0),
+            (Status::Done, 0),
+            (Status::Abandoned, 0),
+        ]
+    );
+    assert_eq!(board.steps(&f.work), (2, 3));
+    assert_eq!(
+        board.blocked(&f.work),
+        0,
+        "the blocked card is in the other session"
+    );
+
+    board.session = None;
+    board.filter = "cache".to_string();
+    assert_eq!(board.steps(&f.work), (1, 2));
+    assert_eq!(board.blocked(&f.work), 0);
+}
+
+#[test]
+fn picking_a_card_opens_the_panel_and_a_shut_panel_reports_nothing() {
+    let f = seeded();
+    let mut board = BoardState::default();
+
+    assert!(
+        board.open_task(&f.work).is_none(),
+        "nothing is selected yet"
+    );
+
+    board.show_detail = false;
+    board.select(f.pane);
+    assert_eq!(board.selected, Some(f.pane));
+    assert!(
+        board.show_detail,
+        "a selection nothing reports on is not a selection"
+    );
+    assert_eq!(board.open_task(&f.work).map(|t| t.id), Some(f.pane));
+
+    board.show_detail = false;
+    assert!(board.open_task(&f.work).is_none());
+
+    board.show_detail = true;
+    board.selected = Some(TaskId::generate());
+    assert!(board.open_task(&f.work).is_none(), "no such task");
+}
+
+/// Entering a column names the column, not a place in it. A later card in the same column is
+/// allowed to name the gap; a drag-move on the column itself must not wipe that gap back to the
+/// end, which is how every drop used to land at the bottom of the lane.
+#[test]
+fn entering_a_column_does_not_clear_the_gap_a_card_already_named() {
+    let f = seeded();
+    let mut board = BoardState::default();
+    board.start_carry(f.parser);
+
+    assert!(board.carry_over_column(Status::InProgress));
+    assert_eq!(board.carry.unwrap().before, None);
+    assert!(board.carry_over(Status::InProgress, Some(f.pane)));
+    assert!(!board.carry_over_column(Status::InProgress));
+    assert_eq!(
+        board.carry.unwrap().before,
+        Some(f.pane),
+        "still the gap the card named"
+    );
+
+    assert!(board.carry_over_column(Status::Done));
+    assert_eq!(
+        board.carry.unwrap().before,
+        None,
+        "a new column starts at the end of itself"
+    );
+}
+
+#[test]
+fn placing_a_card_splices_it_in_front_of_the_named_neighbour() {
+    let mut f = seeded();
+    let backlog: Vec<TaskId> = f
+        .work
+        .tasks
+        .iter()
+        .filter(|t| t.status == Status::Backlog)
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(backlog, vec![f.parser, f.unstarted]);
+
+    f.work.place(f.unstarted, Status::Backlog, Some(f.parser));
+    let backlog: Vec<TaskId> = f
+        .work
+        .tasks
+        .iter()
+        .filter(|t| t.status == Status::Backlog)
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(backlog, vec![f.unstarted, f.parser]);
+
+    f.work
+        .place(f.unstarted, Status::Backlog, Some(f.unstarted));
+    let backlog: Vec<TaskId> = f
+        .work
+        .tasks
+        .iter()
+        .filter(|t| t.status == Status::Backlog)
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(
+        backlog,
+        vec![f.unstarted, f.parser],
+        "a drop onto itself stays put rather than falling to the end"
+    );
+}
+
+fn info(id: &str, name: &str, enabled: bool) -> kubiq_proto::work::BoardInfo {
+    kubiq_proto::work::BoardInfo {
+        id: kubiq_proto::work::BoardId(id.to_string()),
+        name: name.to_string(),
+        enabled,
+        task_count: 0,
+    }
+}
+
+#[test]
+fn board_tabs_follow_the_list_and_fall_back_to_the_default_board() {
+    use kubiq_proto::work::BoardId;
+    let mut board = BoardState::default();
+    board.boards.apply(vec![
+        info("", "Default", true),
+        info("ideas", "Ideas", true),
+        info("later", "Later", false),
+    ]);
+    let tabs: Vec<_> = board.boards.tabs().iter().map(|b| b.name.clone()).collect();
+    assert_eq!(tabs, ["Default", "Ideas"], "a disabled board has no tab");
+    assert!(
+        board.boards.work().is_none(),
+        "the default board is the project's own work"
+    );
+
+    board.switch_board(BoardId("ideas".to_string()));
+    assert!(board.boards.work().is_some());
+
+    // Disabling the board on screen sends the view home.
+    let moved = board.boards.apply(vec![
+        info("", "Default", true),
+        info("ideas", "Ideas", false),
+    ]);
+    assert!(moved);
+    assert!(board.boards.active.is_default());
+}

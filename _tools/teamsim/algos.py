@@ -1,6 +1,6 @@
 """The block-positioning algorithms of the teams graph, ported from Rust, plus `adaptive`.
 
-The first part is a port of `crates/ubiq/src/state/layout.rs`: the same constants, the same
+The first part is a port of `crates/kubiq/src/state/layout.rs`: the same constants, the same
 function names, the same arithmetic. Nothing there is an improvement on the Rust — where the two
 disagree the port is wrong and is what gets fixed, because the point of the port is that a rendered
 PNG can be trusted to show what the app does.
@@ -155,7 +155,7 @@ class Scenario:
     source: Optional[Path] = None
 
 
-FORMAT = "ubiq.teamsim/1"
+FORMAT = "kubiq.teamsim/1"
 
 
 def _point(raw) -> Point:

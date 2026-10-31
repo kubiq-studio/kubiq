@@ -16,7 +16,7 @@ use crate::registry::{
 };
 use crate::source::{LinkMode, Source};
 
-/// A catalog an embedder can write to. [`FsRegistry`] implements it; Ubiq uses one `FsRegistry`
+/// A catalog an embedder can write to. [`FsRegistry`] implements it; Kubiq uses one `FsRegistry`
 /// per layer but may supply its own impl (database, remote service) — that is the override point.
 pub trait CatalogStore: Registry {
     /// Reference the skill folder at `path` in place (`[[skill]]`). Validates `SKILL.md`; the id

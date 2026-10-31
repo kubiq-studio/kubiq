@@ -1,22 +1,22 @@
 ---
 id: inbox-harness-quota
-title: Problem — Ubiq never says how much of the plan is left
+title: Problem — Kubiq never says how much of the plan is left
 kind: proposal
 status: proposal
-summary: Ubiq records what the agents spent and never says what remains; the one quota fact it receives (Claude's `RateLimitUpdate`) arrives per conversation, is stored per conversation, and is drawn nowhere but an overage tooltip. This proposes an account-level quota fact shaped as a list of gauges rather than a union of every provider's fields, a per-harness prober in agent-manager reusing the credential path accounts already own, a five-minute poll over accounts with a live agent, one popup drawn once and opened from two places, and a threshold alert through the bell.
+summary: Kubiq records what the agents spent and never says what remains; the one quota fact it receives (Claude's `RateLimitUpdate`) arrives per conversation, is stored per conversation, and is drawn nowhere but an overage tooltip. This proposes an account-level quota fact shaped as a list of gauges rather than a union of every provider's fields, a per-harness prober in agent-manager reusing the credential path accounts already own, a five-minute poll over accounts with a live agent, one popup drawn once and opened from two places, and a threshold alert through the bell.
 read_when: you are adding a usage-limit readout, probing a provider for quota, adding a periodic host job, or asking why the 5h percentage is not on screen
 updated: 2026-09-09
 depends_on: [tech-agent-manager, tech-transport, feat-stats, feat-notifications, feat-chat]
 ---
 
-# Problem — Ubiq never says how much of the plan is left
+# Problem — Kubiq never says how much of the plan is left
 
-Ubiq keeps a careful record of what has been spent. `usage.db` accumulates tokens per hour, per
-project, per harness, per account (`crates/ubiq-host/src/store/usage.rs`), and the Control screen's
+Kubiq keeps a careful record of what has been spent. `usage.db` accumulates tokens per hour, per
+project, per harness, per account (`crates/kubiq-host/src/store/usage.rs`), and the Control screen's
 AI page draws it. Every one of those numbers is about the past.
 
 What the user actually wants to know before starting a long agent run is the other direction: **how
-much of this week's allowance is left, and when does the window reset.** No screen in Ubiq answers
+much of this week's allowance is left, and when does the window reset.** No screen in Kubiq answers
 it, and for four of the five harnesses no part of the tree even asks.
 
 ## 1. What already exists, and why it is not the feature
@@ -27,8 +27,8 @@ One quota fact does reach the interface today, from Claude only:
 |---|---|---|
 | `RateLimitWindow { utilization_pct, resets_at }` | `crates/agent-manager/src/io/model.rs:622` | The provider's own window reading |
 | `AgentEvent::RateLimitUpdate { five_hour, seven_day, status, overage_status, overage_reason }` | `io/model.rs:809` | Pushed by Claude's NDJSON bridge from its `rate_limit_event` (`io/jsonl.rs`) |
-| `ConvUpdate::RateLimit(RateLimitRecord)` | `crates/ubiq-proto/src/conversation.rs:389` | Mapped by `ubiq-host/src/conversation.rs:688` |
-| `Conversation::rate_limit` | `crates/ubiq/src/state/conversation.rs:219` | Held per conversation |
+| `ConvUpdate::RateLimit(RateLimitRecord)` | `crates/kubiq-proto/src/conversation.rs:389` | Mapped by `kubiq-host/src/conversation.rs:688` |
+| `Conversation::rate_limit` | `crates/kubiq/src/state/conversation.rs:219` | Held per conversation |
 
 Three properties of that path are why it is not the feature, and each one is a design constraint on
 what replaces it rather than a bug to fix:
@@ -40,7 +40,7 @@ what replaces it rather than a bug to fix:
 2. **It is push-only, and only Claude pushes.** `io/codex.rs:950` fills none of the accounting
    contract, and `io/opencode.rs:36` and `io/copilot.rs:39` say outright that they never will from
    the stream they read. Nothing anywhere can *ask*.
-3. **The percentage was taken off the screen deliberately.** `crates/ubiq/src/ui/conversation/mod.rs:1796`
+3. **The percentage was taken off the screen deliberately.** `crates/kubiq/src/ui/conversation/mod.rs:1796`
    says so in a comment: the `5h N%` readout was removed and only `overage_status` survives, in the
    account chip's tooltip. A proposal that puts a bare percentage back in the header is re-proposing
    something already rejected. **The readout comes back as a thing the user opens, not as a number
@@ -49,7 +49,7 @@ what replaces it rather than a bug to fix:
 Two more facts about the ground: the host has **no ticker** — the run loop's 500 ms `recv_timeout`
 exists to flush preference debounce (`coordinator.rs:56`), and the only poll loop in the tree is
 `nap(job, interval)` inside one connector's own worker thread (`connectors/flow.rs:129`). And both
-`agent-manager` and `ubiq-host` already depend on `ureq`, so an HTTPS probe needs no new dependency.
+`agent-manager` and `kubiq-host` already depend on `ureq`, so an HTTPS probe needs no new dependency.
 
 ## 2. What each harness can actually be asked
 
@@ -68,7 +68,7 @@ five have nothing to offer.
 
 Two consequences worth stating before any code is written. **Claude is the only harness pollable in
 the background** — token from the keychain, one HTTPS call, no process. **Codex is the only one
-where an existing Ubiq mechanism already fits**: `CodexBridge::request` (`io/codex.rs:257`) is a
+where an existing Kubiq mechanism already fits**: `CodexBridge::request` (`io/codex.rs:257`) is a
 JSON-RPC request/response side channel with id correlation, so `account/rateLimits/read` is one more
 `self.request(...)` and no new plumbing. And **three harnesses will answer "not said" forever**,
 which the design has to treat as a first-class answer rather than as a failure.
@@ -129,7 +129,7 @@ is more of that. Two additions, both following conventions the trait already has
   (arrives on the stream, as Claude's does today), `Probe` (can be asked with no process) or
   `Bridge` (can be asked over a running structured bridge). The host reads this to decide whether
   to offer the menu entry at all — the same way `AgentTypeInfo.chat` is derived from
-  `io_support().structured` (`ubiq-host/src/agent.rs:284`).
+  `io_support().structured` (`kubiq-host/src/agent.rs:284`).
 - **`Harness::quota(&self, account: &Account) -> Result<QuotaSnapshot>`**, defaulting to an
   `Err("does not report usage limits")`, exactly as `structured_bridge` (`harness/mod.rs:801`) and
   `discover_models` do.
@@ -216,7 +216,7 @@ and a manual refresh.
 
 ## 8. The alert
 
-The bell, not a toast — Ubiq has no toast and this does not introduce one.
+The bell, not a toast — Kubiq has no toast and this does not introduce one.
 
 `Family::Agents`, `actor` = the account, `category` = `"quota"`. That addressing matters more than
 it looks: mute rules match on the origin (`features/notifications.md`), so the user can silence
@@ -237,7 +237,7 @@ mattered is off too. The notification carries a link to the account's settings r
 4. **No meter without a denominator the provider stated** (`features/stats.md`).
 5. **The percentage does not return to the chat header.** It lives behind a menu entry
    (`ui/conversation/mod.rs:1796`).
-6. **Ubiq names no provider endpoint.** The URL, the beta header and the keychain service are
+6. **Kubiq names no provider endpoint.** The URL, the beta header and the keychain service are
    agent-manager's, like every other harness fact.
 7. **An unofficial endpoint is treated as best-effort.** A 429 or a schema change degrades to "not
    read", never to a wrong number and never to a broken panel.
@@ -252,7 +252,7 @@ mattered is off too. The notification carries a link to the account's settings r
 | 4 | Codex via `account/rateLimits/read` on a live bridge | The second harness that can answer |
 
 Phase 1 is worth landing alone: it is the only phase with no external dependency, and it turns a
-fact Ubiq already receives and discards into something on screen.
+fact Kubiq already receives and discards into something on screen.
 
 ## 11. To file
 
@@ -261,7 +261,7 @@ fact Ubiq already receives and discards into something on screen.
 - A `Dnn` for **the poll is scoped to accounts with a live agent**, and why the interval is five
   minutes.
 - `Gnn` rows for the three harnesses that report nothing (Copilot, opencode, Gemini), each naming
-  the upstream gap rather than an Ubiq omission — the same shape as `G161`, which already records
+  the upstream gap rather than a Kubiq omission — the same shape as `G161`, which already records
   that Codex, Copilot and opencode report no usage at all.
 - A `Gnn` for the Anthropic usage endpoint being unofficial and rate-limited.
 - Open question: **whether the panel should show spend beside quota.** `usage.db` has the account's

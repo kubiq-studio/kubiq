@@ -1,0 +1,973 @@
+//! What the work is on the wire: a task as it is written down, and the sessions and agents doing it.
+//!
+//! The split between the three types here is the durability story, and the naming carries it.
+//! [`TaskRecord`] is written down — every field of it survives a restart, and `tasks.toml` holds
+//! exactly what crosses the bus. [`WorkSession`] and [`WorkAgent`] are not: they are per-request
+//! payloads, like a [`crate::files::DirEntry`], with no store behind them and no relation to a
+//! record.
+//!
+//! There is no snapshot type. [`crate::projects::ProjectSnapshot`] exists because a project's
+//! health and its pane count can only be known at the moment they are asked for and must never be
+//! believed at the next boot. Nothing on a task is like that: everything the two screens over the
+//! work draw is either on the record or derivable from the sessions and agents the same reply
+//! carries, so a derived field on the wire would be a second copy of what the interface already
+//! holds.
+//!
+//! The words a state answers to live on the state. `label()`, `note()`, `all()` and `bucket()` are
+//! here rather than in the interface because the host needs them too — it seeds the columns, it
+//! writes a `Status` down, and it classifies its own agents. A `&'static str` is not drawing, and
+//! `crates/kubiq/src/theme.rs` keeps its monopoly on colour untouched: which token a state reads in
+//! is still the interface's alone.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::ids::{CommentId, SessionId, StepId, TaskId, WorkspaceId};
+use crate::mission::{MissionSettings, RunEvent, satisfies};
+
+/// One agent, which is one workspace: a single running harness with one terminal.
+///
+/// An alias rather than a kind of its own, because [`WorkspaceId`] was declared for exactly this
+/// and the two are one thing until a workspace outlives its pane. Being the same type means no
+/// shadowing is possible, and the name says which scale the reader is at.
+pub type AgentId = WorkspaceId;
+
+/// What an agent is doing right now. The badge on its card, and what the filter buckets sort on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Activity {
+    Thinking,
+    Writing,
+    Tools,
+    NeedsYou,
+    Ended,
+    Failed,
+}
+
+impl Activity {
+    pub fn label(self) -> &'static str {
+        match self {
+            Activity::Thinking => "Thinking",
+            Activity::Writing => "Writing",
+            Activity::Tools => "Tools",
+            Activity::NeedsYou => "Needs you",
+            Activity::Ended => "Ended",
+            Activity::Failed => "Error",
+        }
+    }
+
+    /// Which filter pill covers this activity. Three ways of working are one bucket, because the
+    /// question the filter answers is "is it moving", not "what is it doing".
+    pub fn bucket(self) -> Bucket {
+        match self {
+            Activity::Thinking | Activity::Writing | Activity::Tools => Bucket::Running,
+            Activity::NeedsYou => Bucket::Waiting,
+            Activity::Ended => Bucket::Ended,
+            Activity::Failed => Bucket::Error,
+        }
+    }
+}
+
+/// The four coarse states the toolbar filters on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Bucket {
+    Running,
+    Waiting,
+    Ended,
+    Error,
+}
+
+impl Bucket {
+    pub fn label(self) -> &'static str {
+        match self {
+            Bucket::Running => "running",
+            Bucket::Waiting => "waiting",
+            Bucket::Ended => "ended",
+            Bucket::Error => "error",
+        }
+    }
+
+    pub fn all() -> [Bucket; 4] {
+        [
+            Bucket::Running,
+            Bucket::Waiting,
+            Bucket::Ended,
+            Bucket::Error,
+        ]
+    }
+}
+
+/// How the agents on a task are arranged. The shape is a fact about the task, printed on its
+/// container, because it is what tells the user whether the cards inside it run in order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Shape {
+    /// One agent, asked directly.
+    Direct,
+    /// A hand-off: each agent starts where the last one stopped.
+    Chain,
+    /// A coordinator splitting the work across workers that run at once.
+    Coordinated,
+}
+
+impl Shape {
+    pub fn label(self) -> &'static str {
+        match self {
+            Shape::Direct => "DIRECT",
+            Shape::Chain => "CHAIN",
+            Shape::Coordinated => "COORDINATED",
+        }
+    }
+
+    /// The shape in a sentence, for the panel that has room for one. The word alone says how the
+    /// agents are arranged only to somebody who already knows.
+    pub fn note(self) -> &'static str {
+        match self {
+            Shape::Direct => "one agent, asked directly",
+            Shape::Chain => "each agent starts where the last one stopped",
+            Shape::Coordinated => "a lead spawns and coordinates workers",
+        }
+    }
+
+    pub fn all() -> [Shape; 3] {
+        [Shape::Direct, Shape::Chain, Shape::Coordinated]
+    }
+}
+
+/// What kind of work a task is. Optional, like every other tag on a record: a board where every
+/// card is classified says no more than one where none is, and the user who wants the distinction
+/// is the one who should be asked for it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Kind {
+    Bug,
+    Feature,
+    Chore,
+    Docs,
+}
+
+impl Kind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Bug => "bug",
+            Kind::Feature => "feature",
+            Kind::Chore => "chore",
+            Kind::Docs => "docs",
+        }
+    }
+
+    pub fn all() -> [Kind; 4] {
+        [Kind::Bug, Kind::Feature, Kind::Chore, Kind::Docs]
+    }
+}
+
+/// How hard a task is judged to be. Optional, like [`Kind`] and for the same reason: an estimate
+/// nobody has made is not `Medium`, it is nothing, and a board where every card carries a guess
+/// says no more than one where none does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Complexity {
+    Low,
+    Medium,
+    High,
+}
+
+impl Complexity {
+    pub fn label(self) -> &'static str {
+        match self {
+            Complexity::Low => "low",
+            Complexity::Medium => "medium",
+            Complexity::High => "high",
+        }
+    }
+
+    pub fn all() -> [Complexity; 3] {
+        [Complexity::Low, Complexity::Medium, Complexity::High]
+    }
+}
+
+/// What level a task sits at, as distinct from [`Kind`] — [`Kind`] answers *what sort of work*,
+/// this answers *what level*. Optional, like `kind`: `None` is an ordinary task, which is what
+/// every task is until somebody says otherwise.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Level {
+    /// A task allowed to have children and to carry a plan. The board draws it, filters by it and
+    /// offers a different creation path to it. The word shown for it is display text — see
+    /// [`crate::settings::HostSettings::mission_term`] — and nothing here reads it.
+    Mission,
+}
+
+impl Level {
+    pub fn all() -> [Level; 1] {
+        [Level::Mission]
+    }
+}
+
+/// One colour label on a task, named by the user.
+///
+/// The colour is an index into the interface's own swatches, exactly as
+/// [`crate::projects::ProjectRecord::colour`] is, and for the same reason: no colour crosses the
+/// bus, so `crates/kubiq/src/theme.rs` keeps its monopoly on what a swatch actually is. A label is
+/// the name and the index together rather than a reference into a registry, because a label is
+/// short, is edited as a whole and has nothing to be garbage-collected against.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Label {
+    pub name: String,
+    #[serde(default)]
+    pub colour: usize,
+}
+
+impl Label {
+    pub fn new(name: String, colour: usize) -> Self {
+        Self { name, colour }
+    }
+}
+
+/// Which column of the board a task sits in. The order is the order the board draws them in, and
+/// the order work moves along: a task only ever changes column, never what it is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Status {
+    Backlog,
+    Ready,
+    Blocked,
+    InProgress,
+    InReview,
+    Done,
+    Abandoned,
+}
+
+impl Status {
+    pub fn label(self) -> &'static str {
+        match self {
+            Status::Backlog => "backlog",
+            Status::Ready => "ready",
+            Status::Blocked => "blocked",
+            Status::InProgress => "in progress",
+            Status::InReview => "in review",
+            Status::Done => "done",
+            Status::Abandoned => "abandoned",
+        }
+    }
+
+    pub fn all() -> [Status; 7] {
+        [
+            Status::Backlog,
+            Status::Ready,
+            Status::Blocked,
+            Status::InProgress,
+            Status::InReview,
+            Status::Done,
+            Status::Abandoned,
+        ]
+    }
+}
+
+/// How much a task matters. `Normal` is the absence of a claim rather than a middle value, which
+/// is why it has no word: a board where every card shouts says nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Priority {
+    Low,
+    Normal,
+    High,
+}
+
+impl Priority {
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            Priority::Low => Some("low"),
+            Priority::Normal => None,
+            Priority::High => Some("high"),
+        }
+    }
+
+    pub fn all() -> [Priority; 3] {
+        [Priority::Low, Priority::Normal, Priority::High]
+    }
+}
+
+/// Where one step has got to. The checkbox reads `Done`; every other variant is a reason it is not
+/// ticked, and each is a state its owner can actually be in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum StepState {
+    Idle,
+    Working,
+    NeedsYou,
+    Failed,
+    Done,
+}
+
+impl StepState {
+    pub fn label(self) -> &'static str {
+        match self {
+            StepState::Idle => "idle",
+            StepState::Working => "working",
+            StepState::NeedsYou => "needs you",
+            StepState::Failed => "error",
+            StepState::Done => "done",
+        }
+    }
+
+    /// Which bucket a step reads in, so a step takes the same four colours as everything else on
+    /// the screen rather than a palette of its own.
+    pub fn bucket(self) -> Bucket {
+        match self {
+            StepState::Idle | StepState::Done => Bucket::Ended,
+            StepState::Working => Bucket::Running,
+            StepState::NeedsYou => Bucket::Waiting,
+            StepState::Failed => Bucket::Error,
+        }
+    }
+}
+
+/// One step of a task, and which agent has it.
+///
+/// A step carries an id rather than being addressed by its place in the list. Two clicks in one
+/// frame — a remove and a tick — would otherwise arrive as two indices into two different lists,
+/// and the second would land on the wrong step.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Step {
+    pub id: StepId,
+    pub title: String,
+    pub state: StepState,
+    /// The agent holding it. Durable, so an owner naming no live agent draws as unowned rather
+    /// than being written out of the record — the same posture as a project whose folder moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<AgentId>,
+}
+
+impl Step {
+    /// A sub-task nobody has picked up: named, unowned and not started, which is everything known
+    /// at the moment it is named.
+    pub fn new(title: String) -> Self {
+        Self {
+            id: StepId::generate(),
+            title,
+            state: StepState::Idle,
+            owner: None,
+        }
+    }
+
+    pub fn done(&self) -> bool {
+        self.state == StepState::Done
+    }
+
+    /// Tick and untick. Unticking lands on `Idle` rather than on whatever the step was before:
+    /// nothing here can know what its owner would go back to doing.
+    pub fn toggle(&mut self) {
+        self.state = if self.done() {
+            StepState::Idle
+        } else {
+            StepState::Done
+        };
+    }
+}
+
+/// Who wrote a comment on a task. Not a field the writer sets: the host stamps it from the path
+/// the line arrived on (`D121`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CommentAuthor {
+    /// Typed in the task panel.
+    User,
+    /// Posted by a hosted agent through an MCP tool.
+    Agent,
+    /// Written by the mission runner itself — see [`Comment::event`].
+    Kubiq,
+}
+
+impl CommentAuthor {
+    pub fn label(self) -> &'static str {
+        match self {
+            CommentAuthor::User => "user",
+            CommentAuthor::Agent => "agent",
+            CommentAuthor::Kubiq => "kubiq",
+        }
+    }
+}
+
+/// One comment on a task. Durable, in the order it was added.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: CommentId,
+    pub author: CommentAuthor,
+    pub text: String,
+    pub created_at: DateTime<Utc>,
+    /// Who the comment is *for*, when it is for someone in particular. Absent on every comment
+    /// written before addressing existed, and on every comment that is simply said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Addressee>,
+    /// When the text was last changed after it was written. Absent on a comment nobody edited,
+    /// and on every comment written before editing existed. Only an annotation thread's
+    /// user-authored comments can be edited (`Message::EditAnnotationComment`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at: Option<DateTime<Utc>>,
+    /// What the mission runner recorded, when this comment is its log line rather than somebody's
+    /// words. The text is the prose that goes with it (feedback, findings, a reason).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<RunEvent>,
+}
+
+/// Who a comment is addressed to. The comment is still on the thread for everyone; this is what
+/// the host acts on, delivering it as a prompt to an agent.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Addressee {
+    Agent,
+}
+
+impl Comment {
+    pub fn new(author: CommentAuthor, text: String, now: DateTime<Utc>) -> Self {
+        Self::addressed(author, text, now, None)
+    }
+
+    /// A comment with an addressee.
+    pub fn addressed(
+        author: CommentAuthor,
+        text: String,
+        now: DateTime<Utc>,
+        to: Option<Addressee>,
+    ) -> Self {
+        Self {
+            id: CommentId::generate(),
+            author,
+            text,
+            created_at: now,
+            to,
+            edited_at: None,
+            event: None,
+        }
+    }
+
+    /// The runner's log line: authored [`CommentAuthor::Kubiq`], carrying a [`RunEvent`].
+    pub fn event(text: String, event: RunEvent, now: DateTime<Utc>) -> Self {
+        let mut comment = Self::new(CommentAuthor::Kubiq, text, now);
+        comment.event = Some(event);
+        comment
+    }
+}
+
+/// One thing hung on a task: **a reference, never the content**.
+///
+/// The difference from a conversation's attachment is the whole reason this type exists. A chat's
+/// attachment never crosses the bus — it is interface state, folded into the prompt as `@path` at
+/// send time and gone with the draft. A task's attachment is *stored*: it lives on the record, it
+/// survives a restart, and an agent that never saw the interface reads it back out of
+/// `tasks.toml`. So it has to be a wire type, and it has to hold something an agent can resolve on
+/// its own — which a byte blob in the tasks file would not be, and which is why nothing here is
+/// content.
+///
+/// [`Self::target`] is one of two things, told apart by the `kb:` prefix and nothing else:
+///
+/// - a **project-relative path**, `docs/spec.md` or `.kubiq/pasted/2026-…png`, resolved against the
+///   task's own project the same way a harness resolves an `@path`;
+/// - a **knowledge-base address**, `kb:{source}:{path}`, which is the key space
+///   `crates/kubiq/src/state/kb.rs` already serialises a KB tab under. The host stores it and never
+///   parses or fetches it, the same discipline [`TaskRecord::link`] follows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attachment {
+    /// What it points at — see the type's own doc for the two forms.
+    pub target: String,
+    /// What to call it, where anybody said. `None` is the usual case: the interface draws the last
+    /// segment of [`Self::target`], which is the file's name and is what the user recognises.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// What every knowledge-base target starts with, the one thing that tells the two forms apart.
+const KB_TARGET_PREFIX: &str = "kb:";
+
+impl Attachment {
+    /// An attachment with no label, which is how every one the picker and the paste make arrives.
+    pub fn new(target: impl Into<String>) -> Self {
+        Self {
+            target: target.into(),
+            label: None,
+        }
+    }
+
+    /// Whether this points into the knowledge base rather than at a file in the project.
+    pub fn is_kb(&self) -> bool {
+        self.target.starts_with(KB_TARGET_PREFIX)
+    }
+
+    /// The source and the path inside it, for a knowledge-base target; `None` for a project path.
+    ///
+    /// Split on the *first* colon after the prefix: a source id never holds one and a path may.
+    pub fn kb_address(&self) -> Option<(&str, &str)> {
+        self.target
+            .strip_prefix(KB_TARGET_PREFIX)
+            .and_then(|rest| rest.split_once(':'))
+    }
+
+    /// What to call it on screen: the label where there is one, the last segment of the target
+    /// otherwise.
+    pub fn name(&self) -> &str {
+        if let Some(label) = self.label.as_deref().filter(|label| !label.is_empty()) {
+            return label;
+        }
+        let tail = match self.kb_address() {
+            Some((_, path)) => path,
+            None => self.target.as_str(),
+        };
+        tail.rsplit('/').next().unwrap_or(tail)
+    }
+}
+
+/// A task as it is written down. Everything here survives a restart.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskRecord {
+    pub id: TaskId,
+    /// The session doing the work. `None` is a task nobody has started — the board says so, and
+    /// the graph has nothing to draw for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionId>,
+    pub status: Status,
+    pub priority: Priority,
+    /// How the agents on it are arranged, where anybody has said. `None` — the default — is a task
+    /// nobody has shaped, which is most of them: a shape is a claim about how the work will be
+    /// done, and a task named in a hurry makes no such claim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Shape>,
+    /// What kind of work it is, where anybody has said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<Kind>,
+    /// What level this task sits at — a different axis from [`Self::kind`]. `None` is an ordinary
+    /// task, which is what every task written before this field existed already means.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<Level>,
+    /// The task this one is a child of. One writer per fact: the parent carries no list of its
+    /// children, which is derived on read by scanning for this field instead.
+    ///
+    /// Depth is capped at one — a task that has a parent may not itself be a parent, and only a
+    /// task carrying a [`Self::level`] may be a parent at all — which the host enforces when a
+    /// parent is set (`crates/kubiq-host/src/work/mod.rs`) and is what removes any cycle check.
+    /// A parent id naming no task in the project is dropped on read, the same as an unknown label
+    /// would be.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<TaskId>,
+    /// Other tasks this one references — symmetric and untyped, drawn as a chip list that
+    /// navigates to the other card. No cycle rule and no deletion semantics beyond dropping a
+    /// dangling id on read, the same as [`Self::parent`].
+    #[serde(default, rename = "reference", skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<TaskId>,
+    /// Other tasks this one waits on — typed and directed, unlike [`Self::references`]: a
+    /// prerequisite is not `InReview` or `Done` yet makes this task **not ready** (M20's derived
+    /// readiness, see [`Self::waiting_on`]). The host refuses a write naming a task in another
+    /// project, the task itself, or one that would close a cycle
+    /// (`crates/kubiq-host/src/work/mod.rs`). The reverse list — what a task **blocks** — is
+    /// derived, never stored. A dangling id is dropped on read, the same as [`Self::references`].
+    #[serde(
+        default,
+        rename = "prerequisite",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub prerequisites: Vec<TaskId>,
+    /// The files and knowledge-base documents hung on this task, in the order they were added.
+    ///
+    /// Stored, unlike a conversation's attachments, which never cross the bus at all — see
+    /// [`Attachment`] for why that difference is the point of the type.
+    #[serde(default, rename = "attachment", skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
+    /// How hard it is judged to be, where anybody has said. `None` is a task nobody has sized.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<Complexity>,
+    /// Who has it — a name an agent writes down and reads back, not a reference into any registry.
+    /// Free text because the people and agents working a board are not a set Kubiq knows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assigned_to: Option<String>,
+    /// The user's own id for this task — `UBQ-123`, `#4711`, whatever their tracker calls it. Held
+    /// beside [`Self::id`] rather than instead of it: the ULID is Kubiq's and is never shown, and
+    /// this is the one a human says out loud.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// One URL to the issue this task stands for, in Azure DevOps, Jira, GitHub or anywhere else.
+    ///
+    /// A string the host stores and never parses or fetches, the same discipline
+    /// [`Self::description`] follows. Which tracker it belongs to is read off the host by the
+    /// interface, for a glyph and nothing more — nothing here is configured and nothing is
+    /// synchronised.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+    /// The colour labels on it, in the order they were added.
+    #[serde(default, rename = "label", skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<Label>,
+    /// Optional swatch that paints the card's left edge. An index into the interface's project
+    /// swatches, the same as [`Label::colour`]: no colour crosses the bus. `None` is a card with
+    /// no colour of its own, which reads in the pulse of whatever is happening in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<usize>,
+    pub title: String,
+    /// Markdown, which the host stores and never parses — the same discipline that keeps terminal
+    /// bytes uninterpreted. Which of it is a heading is the interface's decision.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, rename = "step", skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<Step>,
+    #[serde(default, rename = "comment", skip_serializing_if = "Vec::is_empty")]
+    pub comments: Vec<Comment>,
+    /// Whether this task waits for the user's confirmation in review before it counts as finished.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approve: bool,
+    /// The task this one reviews. A dangling id is dropped on read, like [`Self::parent`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_of: Option<TaskId>,
+    /// **The liveness marker**: the agent the mission runner last launched on this task.
+    /// Host-written only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker: Option<AgentId>,
+    /// Consecutive agent-review failures against this (reviewed) task. Host-written only.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub auto_fails: u8,
+    /// The mission's settings. Only on a [`Level::Mission`] parent; `None` there reads as
+    /// [`MissionSettings::legacy`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mission: Option<MissionSettings>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+fn is_zero(n: &u8) -> bool {
+    *n == 0
+}
+
+impl TaskRecord {
+    /// A task nobody has started, as the board asks for one: in the backlog, unprioritised,
+    /// unshaped, unlabelled and with no steps, because that is everything known at the moment it is
+    /// named. Every optional fact is absent rather than defaulted — a shape nobody chose is not
+    /// `Direct`, it is nothing.
+    pub fn new(title: String, session: Option<SessionId>, now: DateTime<Utc>) -> Self {
+        Self {
+            id: TaskId::generate(),
+            session,
+            status: Status::Backlog,
+            priority: Priority::Normal,
+            shape: None,
+            kind: None,
+            level: None,
+            parent: None,
+            references: Vec::new(),
+            prerequisites: Vec::new(),
+            attachments: Vec::new(),
+            complexity: None,
+            assigned_to: None,
+            key: None,
+            link: None,
+            labels: Vec::new(),
+            colour: None,
+            title,
+            description: String::new(),
+            steps: Vec::new(),
+            comments: Vec::new(),
+            approve: false,
+            review_of: None,
+            worker: None,
+            auto_fails: 0,
+            mission: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn done(&self) -> usize {
+        self.steps.iter().filter(|s| s.done()).count()
+    }
+
+    /// A task nobody can finish without the user: a step failed under whoever had it.
+    pub fn blocked(&self) -> bool {
+        self.steps.iter().any(|s| s.state == StepState::Failed)
+    }
+
+    pub fn step(&self, id: StepId) -> Option<&Step> {
+        self.steps.iter().find(|s| s.id == id)
+    }
+
+    pub fn step_mut(&mut self, id: StepId) -> Option<&mut Step> {
+        self.steps.iter_mut().find(|s| s.id == id)
+    }
+
+    /// This task's prerequisites that do not [`satisfies`] it — `Done`, `Abandoned`, or `InReview`
+    /// without a pending approval (or the very task this one reviews). Empty means the task is
+    /// **ready**; [`Self::ready`] is that check spelled out. Nothing here is stored and nothing
+    /// crosses the bus: both `crates/kubiq-host` (the mission runner, MCP) and `crates/kubiq` (the
+    /// board's *waits on N* chip, the task panel) call this one implementation rather than each
+    /// computing their own.
+    ///
+    /// This is **not** [`Status::Blocked`] — that stays what a person or an agent says; a card can
+    /// be both. `tasks` is the project's whole loaded list; a prerequisite naming nothing in it
+    /// (already dropped by `sanitize_relations` on read, but checked here too) does not count
+    /// against readiness.
+    pub fn waiting_on(&self, tasks: &[TaskRecord]) -> Vec<TaskId> {
+        self.prerequisites
+            .iter()
+            .filter(|id| {
+                !tasks.iter().any(|t| t.id == **id && satisfies(t, self))
+            })
+            .copied()
+            .collect()
+    }
+
+    /// Whether every prerequisite is `InReview` or `Done` — see [`Self::waiting_on`].
+    pub fn ready(&self, tasks: &[TaskRecord]) -> bool {
+        self.waiting_on(tasks).is_empty()
+    }
+}
+
+/// A session as the two screens over the work draw it: a named piece of work and the branch it is
+/// on.
+///
+/// The session family's [`crate::messages::Message`] set names the same concept from the process
+/// side, where a session is a home folder and a set of panes. The two merge when that family is
+/// built; until then this is the half the graph and the board need, and it is not written down.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkSession {
+    pub id: SessionId,
+    pub name: String,
+    pub branch: String,
+    /// Whether the session works in a worktree of its own rather than in the project's folder.
+    pub worktree: bool,
+}
+
+/// Who said a line in an agent's thread.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Speaker {
+    You,
+    Agent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Turn {
+    pub from: Speaker,
+    pub text: String,
+}
+
+/// One agent, as the graph draws it.
+///
+/// Not [`crate::messages::WorkspaceInfo`], which says what the host *started* — a command, a
+/// geometry, whether the process is alive. This says what the agent is *doing*, and only one of
+/// the two is a mock.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkAgent {
+    pub id: AgentId,
+    pub session: SessionId,
+    /// The task whose container the card sits in. `None` is an agent nobody has given work to.
+    pub task: Option<TaskId>,
+    /// Who spawned it. The connector is drawn from the parent's card to this one.
+    pub parent: Option<AgentId>,
+    /// The handle: the mechanical, unique-in-project name the host mints at start (`claude`,
+    /// `claude 2`). **Never overwritten** — a rename, a generated title and a harness title all
+    /// land on [`Self::title`] instead, so this stays the one stable thing to search and tell two
+    /// agents apart by.
+    pub name: String,
+    /// What the agent is called now, once anything has named it: the user's rename, the naming
+    /// pass's generated title, or the harness's own (ACP `session_info_update`). Written by the
+    /// host on the live record, so every later `AgentChanged` carries it. `None` is an agent
+    /// nothing has named yet.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The saved agent definition this agent was started from, by its id — which is also its
+    /// display name. `None` is a start with no definition picked.
+    #[serde(default)]
+    pub definition: Option<String>,
+    /// The five-word reading of what this conversation is about, where one has been written by
+    /// the host's naming pass, beside [`Self::title`]. Drawn as the tooltip on whichever surface
+    /// prints the agent's name, so a row stays one line and still says what it is.
+    ///
+    /// `None` is the ordinary state: a conversation nobody has named automatically, a build with
+    /// no provider configured, and every agent that is a mock.
+    #[serde(default)]
+    pub summary: Option<String>,
+    pub activity: Activity,
+    pub branch: String,
+    pub tokens: f32,
+    pub harness: String,
+    /// The identity this agent runs as, empty when it resolved none and fell back to the
+    /// user's own home. An account id — never a credential, per the account family's rule.
+    ///
+    /// Reported rather than requested: it is what the run actually resolved to, so a
+    /// conversation cannot claim an account it is not using. Fixed for the agent's life,
+    /// because a turn already taken was taken as somebody.
+    pub account: String,
+    pub model: String,
+    pub context_pct: u8,
+    /// Whether the user marked this conversation as one to keep — it outlives the window, comes
+    /// back after a restart, and no retention timer collects it.
+    ///
+    /// On the record rather than in a store of its own because every surface that draws an agent
+    /// draws this glyph: the sidebar row, the card, the chat tab. A separate lookup would mean
+    /// each of them holding a second thing and keeping it in step with the first.
+    #[serde(default)]
+    pub persistent: bool,
+    /// Whether every permission this conversation's harness asks for is answered `allow` by the
+    /// host, without the ask ever reaching a window.
+    ///
+    /// Kubiq's own override, not the harness's permission mode: the harness keeps whatever mode it
+    /// was launched in and goes on asking, and this is the answer it gets. Mirrored here beside
+    /// [`WorkAgent::persistent`] for the same reason — the menu that flips it is drawn from the
+    /// record, on every surface that draws an agent.
+    #[serde(default)]
+    pub accept_all: bool,
+    /// Whether this conversation can be brought back after Kubiq stops: its harness loads a past
+    /// session by id (ACP `loadSession`), so a chat tab left open on it is remembered and reopened
+    /// at the next start — on its own when [`crate::settings::HostSettings::restore_conversations`]
+    /// says so, on request otherwise. Set by the host, which is the only side that knows what the
+    /// harness said it can do; `false` until a handshake on that harness has been seen.
+    #[serde(default)]
+    pub restorable: bool,
+    /// Where this conversation's traffic goes, while anyone has asked for it. `None` — the normal
+    /// case — is a conversation nobody asked to capture.
+    ///
+    /// A path rather than a flag, because a capture the user cannot find is a capture that did not
+    /// happen: the host names the file and the window shows the name. Nothing in the interface
+    /// opens it; it is a string to read and copy. `Some` is also what the menu row reads as "this
+    /// is being captured", so a conversation with no live harness carries the name its next launch
+    /// writes to rather than nothing at all.
+    #[serde(default)]
+    pub debug_dump: Option<String>,
+    /// Where this conversation's run lives on the host's disk — the directory Kubiq provisioned
+    /// for it, and the one ending the conversation removes with everything in it.
+    ///
+    /// Settled when the conversation is registered, because the directory is named after the
+    /// agent's own id and so is known before any harness has run. `None` is a record from a host
+    /// that does not report one, a mock among them.
+    #[serde(default)]
+    pub run_dir: Option<String>,
+    /// The configuration directory the harness was actually launched against, as
+    /// `agent-manager` resolved it for this run.
+    ///
+    /// **Reported, never requested.** Kubiq still names no harness configuration path: the rule is
+    /// about who *decides* one, and this is the host repeating the library's answer so a window
+    /// can offer to open the folder without knowing what is in it or what it is called.
+    ///
+    /// `None` until a harness has been composed — a conversation registered and never prompted has
+    /// nothing to report — and `None` for a harness whose configuration could not be resolved at
+    /// all, which a window draws as a dead control rather than an empty one.
+    #[serde(default)]
+    pub config_dir: Option<String>,
+    /// What has been said to and by this agent. Nothing answers it, which is what the thread says
+    /// in as many words: a fabricated reply is the one thing a screen with no live agent must not
+    /// draw.
+    pub thread: Vec<Turn>,
+}
+
+impl WorkAgent {
+    /// The title when anything has named the agent, else its handle — the one name a surface
+    /// with room for a single string (an MCP `whoami`, a roster row) reports.
+    pub fn title_or_handle(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// Which of a project's task boards a list is (`T-360`).
+///
+/// A slug, minted by the host from the name the user gave the board. **The default board is the
+/// empty slug**, [`BoardId::DEFAULT`]: it is the project's `tasks.toml` and everything that existed
+/// before named boards did — missions, the MCP task tools, agent assignment, plans and task sync
+/// all live on it and only on it. A named board is a plain list of tasks in a file of its own.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct BoardId(pub String);
+
+impl BoardId {
+    /// The project's own board — `tasks.toml`.
+    pub const DEFAULT: BoardId = BoardId(String::new());
+
+    pub fn is_default(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether this is a named board's slug as [`Self::from_name`] makes one — non-empty, `a-z`,
+    /// `0-9` and inner `-` only. What a registry read from disk is checked against, since an id
+    /// becomes a directory name.
+    pub fn is_slug(&self) -> bool {
+        !self.is_default() && Self::from_name(&self.0) == *self
+    }
+
+    /// The slug a board named `name` gets: ASCII letters and digits lowercased, every other run of
+    /// characters one `-`, at most 40 long, and `board` when nothing is left. Never empty, so a
+    /// named board can never be mistaken for the default one.
+    pub fn from_name(name: &str) -> BoardId {
+        let mut slug = String::new();
+        for c in name.chars() {
+            if c.is_ascii_alphanumeric() {
+                slug.push(c.to_ascii_lowercase());
+            } else if !slug.is_empty() && !slug.ends_with('-') {
+                slug.push('-');
+            }
+            if slug.len() >= 40 {
+                break;
+            }
+        }
+        let slug = slug.trim_end_matches('-');
+        BoardId(if slug.is_empty() {
+            "board".to_string()
+        } else {
+            slug.to_string()
+        })
+    }
+}
+
+impl std::fmt::Display for BoardId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_default() {
+            f.write_str("default")
+        } else {
+            f.write_str(&self.0)
+        }
+    }
+}
+
+/// One board as the settings page and the board's tabs draw it. The default board is always the
+/// first of a [`crate::messages::Message::Boards`] list, always enabled.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoardInfo {
+    pub id: BoardId,
+    pub name: String,
+    pub enabled: bool,
+    /// Live tasks on the board — the archive is not counted.
+    pub task_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_task_written_before_the_mission_fields_reads_with_them_empty() {
+        let now = Utc::now();
+        let mut written = TaskRecord::new("old".into(), None, now);
+        written.description = "kept".into();
+        let text = toml::to_string(&written).unwrap();
+        for field in ["approve", "review_of", "worker", "auto_fails", "mission"] {
+            assert!(!text.contains(field), "{field} must be skipped when empty");
+        }
+        let read: TaskRecord = toml::from_str(&text).unwrap();
+        assert_eq!(read, written);
+        assert!(!read.approve);
+        assert_eq!(read.review_of, None);
+        assert_eq!(read.worker, None);
+        assert_eq!(read.auto_fails, 0);
+        assert_eq!(read.mission, None);
+    }
+
+    #[test]
+    fn readiness_uses_the_shared_rule() {
+        let now = Utc::now();
+        let mut prereq = TaskRecord::new("p".into(), None, now);
+        prereq.status = Status::InReview;
+        prereq.approve = true;
+        let mut dependent = TaskRecord::new("d".into(), None, now);
+        dependent.prerequisites = vec![prereq.id];
+        let all = vec![prereq.clone(), dependent.clone()];
+        assert_eq!(dependent.waiting_on(&all), vec![prereq.id]);
+        dependent.review_of = Some(prereq.id);
+        assert!(dependent.ready(&all));
+    }
+
+    #[test]
+    fn the_runner_comment_carries_its_event() {
+        let c = Comment::event("why".into(), RunEvent::Confirmed, Utc::now());
+        assert_eq!(c.author, CommentAuthor::Kubiq);
+        assert_eq!(CommentAuthor::Kubiq.label(), "kubiq");
+        assert_eq!(c.event, Some(RunEvent::Confirmed));
+    }
+}

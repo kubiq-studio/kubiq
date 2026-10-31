@@ -1,0 +1,4559 @@
+//! The transport contract: the only vocabulary the UI and the coordinator share.
+//!
+//! One tagged enum, serialisable by construction, so the same values that travel an in-process
+//! channel today can be framed onto a socket tomorrow. Nothing here holds a handle, a descriptor
+//! or a borrowed byte — see `_docs/tech/transport-contract.md`, which owns the message set.
+//!
+//! Terminal bytes are opaque on both sides: neither half parses them, and a chunk is whatever one
+//! read returned.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::ask::{AskClosed, AskOutcome, AskQuestion};
+use crate::assist::{
+    AiModelList, AiProviderDraft, AiProviderInfo, AssistLimits, AssistReason, SuggestSubject,
+};
+use crate::browser::{BrowserCmd, BrowserHistoryEntry};
+use crate::catalog::{
+    CatalogMcp, RegistryMcpInfo, RemoteSkillInfo, SkillAdd, SkillInfo, SkillSourceInfo,
+};
+use crate::connectors::{AuthKind, CertInfo, ConnectError, ConnectStage, Connection, ProviderId};
+use crate::conversation::{ConfigChoice, ConvUpdate, StopReason};
+use crate::feedback::{
+    FeedbackError, FeedbackOffer, FeedbackReceipt, FeedbackReport, FeedbackSettings,
+    FeedbackSettingsChange, FeedbackTestResult,
+};
+use crate::update::{ChannelRelease, UpdateSettings, UpdateStatus};
+use crate::files::{
+    DiffBase, DirListing, EntryKind, FileContents, FileDiff, FileError, FileVersion, HostDirEntry,
+    HostPathError, ImportMode, PathOp, RelatedFile,
+};
+use crate::git::{
+    self, GitChangedPath, GitCommit, GitEntry, GitNested, GitRef, GitRollup, RepoOverview,
+};
+use crate::db::{
+    ConnectionConfig, DbAgentSettings, DbConnState, DbConnection, DbEditFailure, DbEditor, DbFailure, DbKeystore, DbListing,
+    DbNode, DbOutcome, DbPage, DbRun, DbRunOptions, RowEdit, SecretEdit, StructureScope, TableRef,
+};
+use crate::help::HelpCatalog;
+use crate::ids::{
+    AiProviderId, AnnotationId, AskId, BlockId, BrowserReqId, CloneId, CommentId, ConnectId, ConnectionId, DbConnId,
+    DbExportId, DbProbeId, DbQueryId, DbSessionId, KbSourceId, NotificationId, OauthAppId, PaneId, ProjectId, RepoQueryId, SearchId, SessionId, SpawnId,
+    RemoteCallId, SshProfileId, StepId, SuggestId, TaskId, TaskSrcQueryId, ToolId,
+};
+use crate::kb::{KbSource, KbSourceState, KbSourceStatus};
+use crate::mcp::McpInfo;
+use crate::mission::{
+    HistoryEntry, LaunchOutcome, LaunchRequest, MissionAction, MissionField, MissionSnapshot,
+    MissionTaskAction, NewMission,
+};
+use crate::notifications::{
+    Level, MuteFor, MuteScope, Notification, NotificationRequest, Notifications,
+};
+use crate::plan::{
+    Annotation, AnnotationMark, BlockHighlight, DocBinding, DocDelivery, DocThreadRef,
+    DocumentHandle, HighlightColour, PlanBlock, PlanChangeStats, PlanChangedRegion, PlanRevision,
+    SaveOrigin,
+};
+use crate::projects::{
+    DroneChange, DroneOrigin, IndexChange, LanePref, MissionTermChange, ProjectSnapshot, Scope,
+    StorageMode,
+};
+use crate::quota::{QuotaSnapshot, QuotaSource};
+use crate::remote_tools::{RemoteOp, RemoteOutput};
+use crate::repos::{CloneError, CloneRequest, CloneStage, RemoteRepo, RepoSource};
+use crate::search::{self, Batch, Query, Source};
+use crate::settings::SettingsLayer;
+use crate::stats::HostStats;
+use crate::tasksrc::{
+    Binding, DriftSide, Facets, ProviderInfo, RemoteContainer, RemoteItem, RemoteItemId,
+    RemoteLane, SyncScope, SyncState, TaskLink,
+};
+use crate::tools::{ListedTool, ToolDef};
+use crate::work::{
+    Addressee, AgentId, BoardId, BoardInfo, Complexity, Kind, Label, Priority, Shape, Status,
+    TaskRecord, WorkAgent, WorkSession,
+};
+
+/// Everything either half may say. The variant name travels in `type`, the body in `payload`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "payload")]
+pub enum Message {
+    // ── Pane family: coordinator → UI ───────────────────────────────
+    /// Raw pseudo-terminal output, chunked as it was read.
+    TerminalOutput {
+        pane_id: PaneId,
+        // A bare `Vec<u8>` encodes as one msgpack int per byte under rmp-serde, which would make
+        // the terminal hot path slower than JSON; `serde_bytes` encodes it as a single `bin`
+        // blob instead. Does not change the JSON form: serde_json renders a byte-marked slice
+        // the same way it renders a plain one, a number array, so the bus tape and JSON tests
+        // are unaffected.
+        #[serde(with = "serde_bytes")]
+        bytes: Vec<u8>,
+    },
+    /// The harness ended. The UI closes the pane.
+    PaneExited {
+        pane_id: PaneId,
+        code: i32,
+    },
+    /// Something went wrong for one pane, and only that pane.
+    PaneError {
+        pane_id: PaneId,
+        error: String,
+    },
+
+    // ── Pane family: UI → coordinator ───────────────────────────────
+    /// Raw keystrokes from the focused pane. Effects come back as [`Message::TerminalOutput`].
+    TerminalInput {
+        pane_id: PaneId,
+        // See the comment on `TerminalOutput::bytes`: same reasoning, same fix.
+        #[serde(with = "serde_bytes")]
+        bytes: Vec<u8>,
+    },
+    /// New geometry in cells. The coordinator sets the pseudo-terminal size and the kernel
+    /// signals the harness.
+    TerminalResize {
+        pane_id: PaneId,
+        cols: u16,
+        rows: u16,
+    },
+    /// Exactly one pane holds focus.
+    Focus {
+        pane_id: PaneId,
+    },
+
+    // ── Session family ──────────────────────────────────────────────
+    /// Start a workspace, and with it the pane that shows it.
+    ///
+    /// The harness starts in the project's folder, or in `rel_path` below it. `agent_type` falls
+    /// back to the session's default when absent. A spawn into a project whose folder is missing,
+    /// is not a directory or cannot be read is refused with [`Message::ProjectError`] before a
+    /// pseudo-terminal exists, rather than becoming a failed spawn.
+    SpawnWorkspace {
+        session_id: SessionId,
+        /// Which project the pane runs in. Not optional: the project's folder is the only thing a
+        /// pane's working directory can be, so the interface draws no pane without one.
+        project_id: ProjectId,
+        /// Where in the project to start. Absent is its root.
+        rel_path: Option<String>,
+        agent_type: Option<String>,
+        args: Vec<String>,
+        /// What this start chose beyond the harness and the folder, when `agent_type` names one.
+        /// Ignored for a shell, which has no account, no definition and no modes.
+        ///
+        /// `Default::default()` is a pane that names nothing and lets the library resolve
+        /// everything — which is what the new-pane menu and every shell row send.
+        #[serde(default)]
+        picks: AgentPicks,
+    },
+    /// The answer to [`Message::SpawnWorkspace`], carrying the pane the UI now draws.
+    WorkspaceSpawned {
+        workspace: WorkspaceInfo,
+    },
+    /// The user closed the pane: the harness is killed and reaped.
+    CloseWorkspace {
+        pane_id: PaneId,
+    },
+    /// Stop the process in this pane without closing it: the host kills the child, the reaper's
+    /// [`Message::PaneExited`] follows, and the pane stays or closes the way its `wait_on_exit` /
+    /// `wait_on_error` says.
+    StopPane {
+        pane_id: PaneId,
+    },
+    /// Run a configured tool in this project's folder: a pane running the tool's command with
+    /// its arguments and environment, titled with the tool's name. Answered with
+    /// [`Message::WorkspaceSpawned`], or [`Message::ToolError`] when the tool is unknown, not
+    /// for this platform, or has nothing to run.
+    RunTool {
+        session_id: SessionId,
+        project_id: ProjectId,
+        scope: Scope,
+        id: ToolId,
+    },
+    /// A tool run was refused before a pane existed. The interface was never told of a pane,
+    /// so this is a log line rather than a tab to close — the same standing a refused spawn's
+    /// [`Message::PaneError`] has.
+    ToolError {
+        project_id: Option<ProjectId>,
+        error: String,
+    },
+    /// The runnable tools for the new-pane menu: this machine's, and one project's.
+    /// Answered with [`Message::ToolsListed`].
+    ListTools {
+        project_id: Option<ProjectId>,
+    },
+    /// What can be run here. `system` is the machine-wide list, `project` the project's own;
+    /// the new-pane menu offers the applicable rows of both. `applicable` is the answering
+    /// host's own platform per tool — a remote host's answer names what runs *there*, which
+    /// the interface cannot know, so the host stamps it.
+    ///
+    /// `project` also carries the project's discovered targets ([`ToolOrigin::Discovered`]),
+    /// answered from the host's scan cache; a stale cache is re-scanned in the background and
+    /// this is sent again when the list changed. They are never part of `ProjectRecord::tools`.
+    ///
+    /// [`ToolOrigin::Discovered`]: crate::tools::ToolOrigin::Discovered
+    ToolsListed {
+        system: Vec<ListedTool>,
+        project: Vec<ListedTool>,
+    },
+
+    /// What the host is, said once to each window as it attaches. The interface cannot read disk,
+    /// so this is the only way it learns its own config root is not the usual one.
+    /// Machine facts ride along so a remote-hosts panel can name OS, triplet, resources and
+    /// hostname without a second round trip; all are best-effort (`None` = unavailable).
+    HostInfo {
+        config_root: String,
+        is_default: bool,
+        #[serde(default)]
+        hostname: Option<String>,
+        #[serde(default)]
+        os: Option<String>,
+        #[serde(default)]
+        arch: Option<String>,
+        #[serde(default)]
+        triplet: Option<String>,
+        #[serde(default)]
+        cpu_count: Option<u64>,
+        #[serde(default)]
+        mem_total_bytes: Option<u64>,
+        /// The directory this host reserves for the interface's own files — the one that belongs
+        /// to no project.
+        ///
+        /// The mirror of [`crate::projects::ProjectSnapshot::workarea`], and the same contract:
+        /// the host reserves the name and creates it, **it never reads inside**, nothing in there
+        /// is the project's, and everything in there is disposable — deleting it loses a cache and
+        /// nothing else.
+        ///
+        /// What makes it *shared* is that it is a property of the host rather than of any project,
+        /// so a vendor bundle wanted by five projects is one copy on disk instead of five.
+        ///
+        /// An absolute path, told rather than composed. The interface never builds it out of
+        /// `config_root` itself — using what it was handed is what makes a host on another machine
+        /// a change of value rather than a change of code. `None` means this host would not name
+        /// one, which is an interface with no disk cache and not an interface that fails.
+        #[serde(default)]
+        shared_workarea: Option<String>,
+    },
+
+    /// Which shells this machine actually has. Answered with [`Message::ShellList`].
+    ///
+    /// The interface may not look for itself — a program on disk is exactly the kind of local fact
+    /// it is not allowed to read — so the new-pane menu asks. It asks again each time it opens
+    /// rather than caching the answer, so a shell installed after the window did is offered.
+    ListShells,
+    /// The shells the host found, in the order the menu offers them.
+    ShellList {
+        shells: Vec<ShellInfo>,
+    },
+
+    /// What this Kubiq is doing right now, and what its agents have spent. Answered with
+    /// [`Message::Stats`].
+    ///
+    /// Asked on a timer while the Control screen is open, and at no other time. It is the one
+    /// thing the interface polls for, because it is the one thing with no event behind it:
+    /// memory and uptime change when nothing happens, so there is nothing for the host to push.
+    ListStats,
+    /// One reading of the host, for the window that asked. Never broadcast — two windows watching
+    /// the screen take their own samples.
+    Stats {
+        stats: HostStats,
+    },
+
+    /// Which agent harnesses can be started here. Answered with [`Message::AgentTypes`].
+    ///
+    /// Asked for the same reason as [`Message::ListShells`]: whether a harness is installed is a
+    /// local fact, and the interface reads none. The answer is the harness library's list, not a
+    /// table Kubiq keeps, so a harness the library learns about is offered without a change here.
+    ListAgentTypes,
+    /// The agent types the host can start, in the order the menu offers them.
+    AgentTypes {
+        agent_types: Vec<AgentTypeInfo>,
+    },
+    /// Try `command` as the way to start `agent_type` on this machine, without saving it.
+    /// Answered with [`Message::AgentCommandChecked`].
+    ///
+    /// The one question the interface asks about a binary, and it asks it because the user is
+    /// typing the answer: a command line that resolves to nothing is a spawn failure a pane
+    /// would report minutes later. The host runs it, once, and says what happened.
+    CheckAgentCommand {
+        agent_type: String,
+        command: String,
+    },
+    /// What that command did: whether it ran, and one line saying what was found or what failed.
+    AgentCommandChecked {
+        agent_type: String,
+        ok: bool,
+        detail: String,
+    },
+    /// Refresh the public ACP agent registry and classify every agent in it against this
+    /// machine, using the user's login-shell `PATH`. Answered with [`Message::AcpRegistryChecked`]
+    /// to the asker only. Runs on a thread of its own: it is a network call and a shell spawn.
+    CheckAcpRegistry,
+    /// What the registry check found: one row per registry agent Kubiq could drive, in registry
+    /// order. `note` says why the list is a cached copy, or why there is no list at all.
+    AcpRegistryChecked {
+        agents: Vec<AcpRegistryAgent>,
+        note: Option<String>,
+    },
+    /// Install the adapter package registry agent `id` needs (`npm install -g` / `uv tool
+    /// install`), or download a [`AcpRegistryStatus::Downloadable`] agent's binary. Answered with [`Message::AcpAdapterInstalled`], then a fresh
+    /// [`Message::AcpRegistryChecked`].
+    ///
+    /// `allow_unverified` is the user's confirmation of a download whose archive has no published
+    /// checksum; the host re-reads the entry at install time and refuses such a download without it.
+    InstallAcpAdapter {
+        id: String,
+        #[serde(default)]
+        allow_unverified: bool,
+    },
+    /// What the install did: whether it succeeded, and the tail of its output.
+    AcpAdapterInstalled {
+        id: String,
+        ok: bool,
+        detail: String,
+    },
+    /// Which models — and which reasoning levels for each — `agent_type` will answer for, asked
+    /// before anything is started. Answered with [`Message::HarnessCatalogue`].
+    ///
+    /// The probe shells out and the answer is cached on the harness binary's own version string,
+    /// so this is cheap after the first ask and slow exactly once.
+    ListHarnessCatalogue {
+        agent_type: String,
+        /// Already the cache key's identity leg, though the probe is per harness today.
+        account: Option<String>,
+    },
+    /// The catalogue that answers it, plus what this harness was last actually launched with —
+    /// a preselection, never a promise: a model gone since simply preselects nothing.
+    HarnessCatalogue {
+        agent_type: String,
+        account: Option<String>,
+        models: Vec<CatalogueModel>,
+        /// Empty means no model flag was ever passed — the same convention the host's own
+        /// `chosen_model` uses.
+        last_model: String,
+        last_thinking: String,
+    },
+    /// What `agent_type`'s ACP agent said it can do, asked by any surface that wants to show it.
+    /// Answered with [`Message::AcpCapabilities`].
+    ///
+    /// **This is a read, never a probe.** The record exists only because a conversation on this
+    /// harness completed an ACP handshake at some point — the host keeps the answer, and asking
+    /// here starts nothing and spawns nothing. Meaningless for a harness whose
+    /// [`AgentTypeInfo::acp`] is false, which is answered with `None` rather than refused.
+    ListAcpCapabilities {
+        agent_type: String,
+    },
+    /// The record that answers it. `None` means no ACP handshake on this harness has been seen —
+    /// either it does not speak ACP, or nothing has conversed with it yet. A surface says which by
+    /// reading [`AgentTypeInfo::acp`]; the host does not repeat the distinction here.
+    AcpCapabilities {
+        agent_type: String,
+        capabilities: Option<crate::acp::AcpCapabilitiesRecord>,
+    },
+
+    // ── Account family: the identities a harness runs as ─────────────
+    /// Which accounts exist. Answered with [`Message::Accounts`].
+    ListAccounts,
+    /// The accounts the host holds. References only — an id. No credential, no path, and
+    /// nothing that could be pasted into a terminal.
+    Accounts {
+        accounts: Vec<AccountInfo>,
+    },
+    /// Sign an account's config home in (`D194`): the harness's own login, unmodified, runs in
+    /// a pane of its own straight into the one home every run as that account reads, and the
+    /// harness keeps and refreshes it there. Nothing is captured. An account that does not
+    /// exist yet is written when the login ends cleanly, so this is also how one is made.
+    /// Only for a harness whose [`AgentTypeInfo::shares_home`] is true. Answered with
+    /// [`Message::HarnessLoginStarted`], or [`Message::HarnessLoginFailed`] when there was
+    /// nothing to start.
+    BeginHarnessLogin {
+        agent_type: String,
+        /// The account whose home to sign in. Never empty — the home is keyed by it.
+        account: String,
+    },
+    /// The login is running in this pane. The pane carries bytes and takes keystrokes like
+    /// any other, and it belongs to no project — closing it abandons the login.
+    HarnessLoginStarted {
+        pane_id: PaneId,
+        agent_type: String,
+        cols: u16,
+        rows: u16,
+    },
+    /// A sign-in into an account's home exited cleanly: the login is in that home, where the
+    /// harness keeps and refreshes it, and every run as that account reads it. The account
+    /// exists from this moment on, so [`Message::Accounts`] follows.
+    HarnessHomeSignedIn {
+        agent_type: String,
+        account: String,
+    },
+    /// The sign-in did not finish, and why: it was abandoned, the harness exited with an error,
+    /// or it could not be started at all. Not an error in Kubiq — the ordinary outcome of a flow
+    /// the user closed. No account is written.
+    HarnessLoginFailed {
+        agent_type: String,
+        account: String,
+        error: String,
+    },
+    /// A URL the running login printed. The host scans the login pane's own output for
+    /// one and forwards it so the interface can offer it as a button; the bytes still
+    /// reach the pane unchanged, so the user reads the harness's real output either way.
+    ///
+    /// Sent zero or more times between [`Message::HarnessLoginStarted`] and the login's
+    /// end, and never for an ordinary pane. A URL already sent for this login is not
+    /// sent again.
+    HarnessLoginLink {
+        pane_id: PaneId,
+        url: String,
+    },
+    /// Sign an account's config home in **by device code**, with no pane: the host asks the
+    /// harness for a page and a one-time code, and the person signs in there from any browser.
+    /// Only for a harness whose [`AgentTypeInfo::device_login`] is true. Answered with
+    /// [`Message::HarnessDeviceCode`], then [`Message::HarnessHomeSignedIn`] or
+    /// [`Message::HarnessLoginFailed`] — the same two outcomes a pane sign-in ends on.
+    BeginDeviceLogin {
+        agent_type: String,
+        /// The account whose home to sign in. Never empty — the home is keyed by it.
+        account: String,
+    },
+    /// The page to open and the code to type there, for a [`Message::BeginDeviceLogin`] under
+    /// way. The host is waiting on the harness for the outcome.
+    HarnessDeviceCode {
+        agent_type: String,
+        account: String,
+        verification_url: String,
+        user_code: String,
+    },
+    /// Whether `account`'s home holds a usable login for `agent_type`. Answered with
+    /// [`Message::HarnessLoginStatus`], always — a login that is absent is an answer, not an
+    /// error.
+    ///
+    /// The host reads the expiry the login states about itself, in place, in the home the
+    /// harness owns; it copies nothing and writes nothing (`G380`, `G382`).
+    CheckHarnessLogin {
+        agent_type: String,
+        account: String,
+    },
+    /// The answer to [`Message::CheckHarnessLogin`].
+    HarnessLoginStatus {
+        agent_type: String,
+        account: String,
+        status: LoginStatus,
+    },
+    /// Sign one harness out of an account, leaving the identity and its other harnesses
+    /// alone: that harness's home for this account is removed, and with it the login the
+    /// harness kept there. The account survives with a shorter
+    /// [`AccountInfo::logged_in`]. Answered with [`Message::Accounts`], or
+    /// [`Message::AccountError`].
+    DeleteHarnessLogin {
+        agent_type: String,
+        account: String,
+    },
+    /// Rename an account — the identity, and so every harness home keyed by it, which moves
+    /// with the name and keeps its login. Answered with [`Message::Accounts`], or
+    /// [`Message::AccountError`] when the new name is taken, empty, or not a name a
+    /// file can carry.
+    RenameAccount {
+        account: String,
+        new_account: String,
+    },
+    /// Delete an account and every harness home under it. It is gone from disk afterwards,
+    /// which is why the word in the interface is "Delete" and not "Forget" — unlike a project,
+    /// there is nothing left behind to come back to. Answered with [`Message::Accounts`], or
+    /// [`Message::AccountError`].
+    DeleteAccount {
+        account: String,
+    },
+    /// An account or a definition could not be saved, renamed or deleted. A
+    /// human-readable sentence, never a credential and never a path.
+    AccountError {
+        error: String,
+    },
+
+    // ── Quota family: how much of an account's plan is left ──────────
+    // Keyed by account and harness, never by conversation: a window belongs to an identity, so
+    // two agents signed in as the same account read the same one and an account with nothing
+    // running still has one. What was *spent* is the stats family's question and lives in a
+    // database; what is *left* is re-derivable by asking again, so it is a cache the host holds
+    // in memory and never writes down.
+    /// Ask how much of `account`'s plan is left under `harness`. Answered with
+    /// [`Message::QuotaRead`], to the asking client alone.
+    ///
+    /// `fresh` asks the provider again rather than answering from the host's cache — what a
+    /// manual refresh sends. A cached answer is the default because the endpoint behind it is
+    /// unofficial and rate-limits.
+    QueryQuota {
+        account: String,
+        harness: String,
+        #[serde(default)]
+        fresh: bool,
+    },
+    /// What that account has left, or why it could not be said.
+    ///
+    /// Both fields are `Option` and exactly one is set: a `snapshot` with no gauges is a
+    /// provider that answered and named no limit, which is a different fact from an `error`, and
+    /// both differ again from a stale reading — which is what [`QuotaSnapshot::as_of`] is for.
+    /// The error is a sentence the user reads, never a code and never a credential.
+    QuotaRead {
+        account: String,
+        harness: String,
+        snapshot: Option<QuotaSnapshot>,
+        error: Option<String>,
+    },
+    /// A cached snapshot changed, said without being asked.
+    ///
+    /// Broadcast on the precedent of [`Message::ProjectFilesChanged`]: every window showing that
+    /// account is looking at the same fact, so a reading a running agent pushed reaches all of
+    /// them rather than only the window whose pane it arrived on.
+    QuotaChanged {
+        account: String,
+        harness: String,
+        snapshot: QuotaSnapshot,
+    },
+
+    // ── Feedback family: what the user says about Kubiq itself ───────
+    // The only family whose destination is outside the user's own world — not their harness, not
+    // their repository host. Which service a build reports to is compiled in as a default, and the
+    // user may override the URL and the key at run time; the host re-broadcasts the offer after
+    // every change, so the send button follows without a restart.
+    /// Ask whether this build can send feedback, and where to. Answered with
+    /// [`Message::FeedbackOffered`], to the asking client alone.
+    QueryFeedback,
+    /// Whether a destination is configured, and which. The interface draws its send button
+    /// disabled while this says `enabled: false`. Also broadcast to every client after a
+    /// [`Message::SetFeedbackSettings`].
+    FeedbackOffered {
+        offer: FeedbackOffer,
+    },
+    /// Send one report outward. Answered exactly once with [`Message::FeedbackSent`] or
+    /// [`Message::FeedbackFailed`], to the sending client alone.
+    ///
+    /// The screenshot rides inside the report, as PNG bytes: the interface photographed its own
+    /// window, and on a remote host there is no path that would mean anything here.
+    SendFeedback {
+        report: Box<FeedbackReport>,
+    },
+    /// It landed, with whatever the destination called it.
+    FeedbackSent {
+        receipt: FeedbackReceipt,
+    },
+    /// It did not. A sentence the user reads, never a key and never a raw body.
+    FeedbackFailed {
+        failure: FeedbackError,
+    },
+    /// Ask how the destination resolves: the effective URL and where it comes from, and whether a
+    /// key is set — never the key. Answered with [`Message::FeedbackSettingsChanged`], to the
+    /// asking client alone.
+    QueryFeedbackSettings,
+    /// Set or clear the URL and key overrides. The URL is kept in the host settings file, the key
+    /// in the OS keychain. Answered with [`Message::FeedbackSettingsChanged`] and
+    /// [`Message::FeedbackOffered`], both to every client.
+    SetFeedbackSettings {
+        change: FeedbackSettingsChange,
+    },
+    /// The destination's settings as they now resolve. Carries no key material.
+    FeedbackSettingsChanged {
+        settings: FeedbackSettings,
+    },
+    /// Check the effective URL and key against the service's test endpoint, creating nothing.
+    /// Answered with [`Message::FeedbackTested`], to the asking client alone.
+    TestFeedback,
+    /// What the test found.
+    FeedbackTested {
+        result: FeedbackTestResult,
+    },
+
+    // ── Update family: Kubiq updating itself ─────────────────────────
+    // Host-level, no pane, no project. The feed is compiled in; the host checks, downloads,
+    // verifies and applies, and every state change is broadcast so each window agrees.
+    /// Ask where the updater is. Answered with [`Message::UpdateState`], to the asking client alone.
+    QueryUpdates,
+    /// Look for an update now. Progress is broadcast as [`Message::UpdateState`].
+    CheckForUpdates,
+    /// Persist the user's update choices. Re-broadcast as [`Message::UpdateState`].
+    SaveUpdateSettings {
+        settings: UpdateSettings,
+    },
+    /// Download and verify the available update. Broadcasts `Downloading`, then `Ready` or `Failed`.
+    DownloadUpdate,
+    /// Start the detached helper that waits for this process to exit and installs the downloaded
+    /// update; with `relaunch` it starts the new app afterwards. The host broadcasts `Applying`;
+    /// quitting is the interface's to do ("Restart now"). `relaunch: false` is "install when I quit".
+    ApplyUpdate {
+        relaunch: bool,
+    },
+    /// The updater's whole state. Answers [`Message::QueryUpdates`] and is broadcast on every change.
+    UpdateState {
+        status: UpdateStatus,
+        settings: UpdateSettings,
+        current_version: String,
+    },
+    /// Ask what every channel currently offers. Answered with [`Message::Releases`], to the asking
+    /// client alone. Reads the same signed feed a check does, and changes nothing.
+    QueryReleases,
+    /// One entry per [`UpdateChannel::ALL`](crate::update::UpdateChannel::ALL), in that order.
+    Releases {
+        channels: Vec<ChannelRelease>,
+    },
+
+    // ── AgentDefinition family: the saved setups a conversation starts from ──
+    /// Which definitions exist. Answered with [`Message::AgentDefinitions`].
+    ListAgentDefinitions,
+    /// The definitions the host holds. A definition names an account, a model and a mode — every
+    /// field a reference, the same rule as [`Message::Accounts`].
+    ///
+    /// Both scopes ride in one list: the global definitions and every project's own, each saying
+    /// which it is through [`AgentDefinition::project`]. One message rather than a per-project ask
+    /// because the interface already holds every project, and a scope is a field to filter on.
+    AgentDefinitions {
+        definitions: Vec<AgentDefinition>,
+    },
+    /// Write a definition, creating it when its id names none. Answered with
+    /// [`Message::AgentDefinitions`], or [`Message::AccountError`] when the id is empty or not a
+    /// name a directory can carry — definitions are stored beside accounts and fail the same
+    /// way, which is why they share the error rather than minting a second one.
+    ///
+    /// [`AgentDefinition::project`] says which root it is written into: absent is the global one,
+    /// present is that project's own, and the two are separate namespaces — the same name in
+    /// both is a project definition shadowing a global one inside that project only.
+    ///
+    /// A *global* definition has deliberately no delete: it is a saved setup, and a stale one
+    /// costs a row in a list. A project's own are deleted one by one with
+    /// [`Message::DeleteAgentDefinition`], and all together with the project, by the directory
+    /// they live in going with it.
+    ///
+    /// `replaces` is the id the definition was opened under when it is being **renamed**: the host
+    /// moves that definition (its whole directory) to `definition.id` and rewrites the record,
+    /// instead of leaving the old one beside a new copy. It is refused with
+    /// [`Message::AccountError`] when `replaces` names none, or when `definition.id` is already
+    /// taken by a different definition. `None`, or equal to the id, is the plain write above.
+    SaveAgentDefinition {
+        definition: AgentDefinition,
+        replaces: Option<String>,
+    },
+    /// Copy a definition under a new name, in the scope it already lives in. Answered with
+    /// [`Message::AgentDefinitions`], or [`Message::AccountError`] when `id` names none, when
+    /// `new_id` is empty or not a name a directory can carry, or when `new_id` is already taken
+    /// in that scope — a clone never overwrites, because the thing it would overwrite is the
+    /// user's own saved setup.
+    ///
+    /// A clone is a host operation rather than "read one and save it back" so the copy is
+    /// exactly what the record holds, including fields no screen shows.
+    CloneAgentDefinition {
+        /// The definition to copy, by [`AgentDefinition::id`], as `project`'s scope resolves it:
+        /// a project's own first, then the global one — so cloning a global into a project is
+        /// this message with `project` set.
+        id: String,
+        /// The name the copy takes.
+        new_id: String,
+        /// Which scope the copy is written into: absent is the global root, present is that
+        /// project's own. A global clone reads the global root only.
+        project: Option<ProjectId>,
+    },
+    /// Delete one definition. `project` says which root, as in [`Message::SaveAgentDefinition`]:
+    /// absent is the global one, present is that project's own, and the two never touch each
+    /// other. Answered with [`Message::AgentDefinitions`], or [`Message::AccountError`] when
+    /// that root holds no definition of that id.
+    DeleteAgentDefinition {
+        id: String,
+        project: Option<ProjectId>,
+    },
+    /// Which MCP servers this build offers to inject into a harness. Answered with
+    /// [`Message::Mcps`].
+    ListMcps,
+    /// The MCP servers Kubiq itself can start, each with the tools it answers. A definition's
+    /// [`AgentDefinition::mcps`] and a bare start's own pick both name one of these by
+    /// [`McpInfo::name`]; this is where the settings panel and the start form get the slugs and
+    /// the descriptions to offer.
+    Mcps {
+        servers: Vec<McpInfo>,
+    },
+
+    // ── Skills and MCP catalog: UI → host ───────────────────────────
+    /// The skills and MCP servers one catalog layer holds. Answered with [`Message::Catalog`] for
+    /// that layer, to the asker.
+    ///
+    /// `scope` is `None` for the application's own layer and `Some` for that project's; the
+    /// project layer shadows the application's by id at launch, which is the interface's business
+    /// to draw and not a merge the host does here.
+    ListCatalog {
+        scope: Option<ProjectId>,
+    },
+    /// Add a skill to a layer: link a folder, register a folder to scan, or install one from a
+    /// source. Answered with [`Message::Catalog`] to everyone, or [`Message::CatalogError`] to the
+    /// asker. An install fetches over the network and answers when it is done.
+    AddSkill {
+        scope: Option<ProjectId>,
+        from: SkillAdd,
+    },
+    /// Take a skill out of a layer: an installed copy is deleted, a linked folder is unlinked. A
+    /// skill found by scanning a folder is refused with [`Message::CatalogError`] — see
+    /// [`Message::RemoveSkillFolder`]. Answered with [`Message::Catalog`] to everyone.
+    RemoveSkill {
+        scope: Option<ProjectId>,
+        id: String,
+    },
+    /// Stop scanning a folder for skills. `path` is one of [`Message::Catalog::skill_folders`].
+    /// Answered with [`Message::Catalog`] to everyone.
+    RemoveSkillFolder {
+        scope: Option<ProjectId>,
+        path: String,
+    },
+    /// Replace the list of places skills are searched for. Application-wide only — a project
+    /// layer has no sources of its own. Answered with [`Message::Catalog`] for the application's
+    /// layer, to everyone.
+    SaveSkillSources {
+        sources: Vec<SkillSourceInfo>,
+    },
+    /// Look for skills in the configured sources. `source` narrows it to one
+    /// [`SkillSourceInfo::id`]; an empty `query` lists everything. Answered with
+    /// [`Message::SkillSearchResults`] — a source that fails is a line in `problems`, not an
+    /// error.
+    SearchSkills {
+        query: String,
+        source: Option<String>,
+    },
+    /// Write one MCP server into a layer, creating it when its id names none. `previous_id` is
+    /// the id it was listed under when this is a rename, so the old entry goes with it. Answered
+    /// with [`Message::Catalog`] to everyone, or [`Message::CatalogError`] when the id is empty,
+    /// not a name a file can carry, or one of the built-in servers' slugs.
+    SaveCatalogMcp {
+        scope: Option<ProjectId>,
+        // Boxed: a `CatalogMcp` is wider than the terminal chunks the enum is sized for.
+        mcp: Box<CatalogMcp>,
+        previous_id: Option<String>,
+    },
+    /// Delete one MCP server from a layer. Answered with [`Message::Catalog`] to everyone.
+    RemoveCatalogMcp {
+        scope: Option<ProjectId>,
+        id: String,
+    },
+    /// Read the MCP configuration a user pasted, in any of the shapes harnesses write theirs in.
+    /// Nothing is stored. Answered with [`Message::McpConfigParsed`].
+    ParseMcpConfig {
+        text: String,
+    },
+    /// Search the public MCP registry. `cursor` continues a previous
+    /// [`Message::McpRegistryResults::next_cursor`]. Answered with [`Message::McpRegistryResults`].
+    SearchMcpRegistry {
+        query: String,
+        cursor: Option<String>,
+    },
+
+    // ── Skills and MCP catalog: host → UI ───────────────────────────
+    /// One layer of the catalog, whole. Sent to the asker on [`Message::ListCatalog`] and to
+    /// everyone after any change to that layer, so every window agrees.
+    ///
+    /// Only the layer `scope` names — never the two merged. `sources` is empty for a project
+    /// layer.
+    Catalog {
+        scope: Option<ProjectId>,
+        skills: Vec<SkillInfo>,
+        mcps: Vec<CatalogMcp>,
+        /// The folders the layer scans, as the host spells them.
+        skill_folders: Vec<String>,
+        sources: Vec<SkillSourceInfo>,
+    },
+    /// What a [`Message::SearchSkills`] found.
+    SkillSearchResults {
+        query: String,
+        results: Vec<RemoteSkillInfo>,
+        /// One line per source that could not be read.
+        problems: Vec<String>,
+    },
+    /// What a [`Message::ParseMcpConfig`] read: the servers, with ids taken from the pasted keys
+    /// (empty when the paste was a single bare server), or why it could not.
+    McpConfigParsed {
+        servers: Vec<CatalogMcp>,
+        error: Option<String>,
+    },
+    /// What a [`Message::SearchMcpRegistry`] found.
+    McpRegistryResults {
+        query: String,
+        servers: Vec<RegistryMcpInfo>,
+        next_cursor: Option<String>,
+        error: Option<String>,
+    },
+    /// A catalog request the host refused or could not carry out, to the asker.
+    CatalogError {
+        error: String,
+    },
+
+    // ── Connector family: the identities an external *service* runs as ──
+    /// Which connections exist. Answered with [`Message::Connections`].
+    ///
+    /// The list also rides [`Message::Settings`], since the records live in the host settings
+    /// blob; this exists for the refresh-after-a-flow case rather than as the primary path.
+    ListConnections,
+    /// The connections the host holds. References only — no token, and nothing that could be
+    /// pasted into a terminal.
+    Connections {
+        connections: Vec<ConnectionInfo>,
+        /// The providers this build ships a registered application for.
+        ///
+        /// Rides here rather than in a message of its own because it is read at the same moment
+        /// the list is — the connect flow offers a "Default" only where the build can honour one,
+        /// and whether it can is a compile-time fact of the *host* that the interface must not
+        /// guess. An empty list means every browser flow needs a registration.
+        #[serde(default)]
+        bundled: Vec<ProviderId>,
+    },
+    /// Start authenticating against `provider`, in a flow of its own.
+    ///
+    /// `connect_id` is minted by the interface, so a stage arriving after the user has closed the
+    /// modal is discarded by id. `instance` is required for a self-hosted provider and absent for
+    /// a public cloud; `client_id` names an application registered on that instance, which is the
+    /// normal case for a browser flow anywhere but a provider's own cloud.
+    ///
+    /// This mints a flow, not a connection: a connection exists only once a token is stored, so an
+    /// abandoned flow leaves nothing behind. There is deliberately no `AddConnection`.
+    BeginConnect {
+        connect_id: ConnectId,
+        provider: ProviderId,
+        instance: Option<String>,
+        label: String,
+        auth: AuthKind,
+        client_id: Option<String>,
+        /// The registration to authenticate as, when the user picked one. Written onto the
+        /// connection, so a later probe or refresh uses the same application.
+        #[serde(default)]
+        oauth_app: Option<OauthAppId>,
+    },
+    /// How far the flow named by `connect_id` has got. Any number of these, then exactly one of
+    /// [`Message::ConnectCaptured`] or [`Message::ConnectFailed`].
+    ConnectPending {
+        connect_id: ConnectId,
+        stage: ConnectStage,
+    },
+    /// The flow succeeded: the token is stored and the connection exists. [`Message::Connections`]
+    /// follows with the new list.
+    ConnectCaptured {
+        connect_id: ConnectId,
+        connection: ConnectionInfo,
+    },
+    /// The flow ended with nothing stored.
+    ConnectFailed {
+        connect_id: ConnectId,
+        error: ConnectError,
+    },
+    /// Abandon a flow. Drops the loopback listener or the poll; no record, no token.
+    CancelConnect {
+        connect_id: ConnectId,
+    },
+    /// Answer a [`ConnectStage::NeedSecret`] — a pasted access token.
+    ///
+    /// One of the two variants that carry material, and it carries it in a [`Secret`], which is the
+    /// rule rather than the exception: material crosses only in a `Secret`, and a `Secret` never
+    /// prints itself. Every alternative is worse for a desktop application — a temporary file is a
+    /// plaintext file, and an environment-variable reference asks the user to restart.
+    SubmitConnectSecret {
+        connect_id: ConnectId,
+        secret: Secret,
+    },
+    /// Rename a connection. The label is the user's; the id is what everything else references, so
+    /// nothing else changes. Answered with [`Message::Connections`] or [`Message::ConnectorError`].
+    RenameConnection {
+        connection: ConnectionId,
+        label: String,
+    },
+    /// Delete a connection and its token, together.
+    ///
+    /// It does not touch the pinned certificate, which belongs to the instance and may be why
+    /// another connection still works — [`Message::ForgetCertificate`] is that operation. There is
+    /// no "sign out but keep the name": unlike a harness account, which is a home directory that
+    /// survives its login, a connection with no token is nothing.
+    DeleteConnection {
+        connection: ConnectionId,
+    },
+    /// Ask what a connection's token says about itself.
+    ///
+    /// `probe: false` reads the stored expiry and calls nobody — the path that runs on every
+    /// render. `probe: true` is the "Check" button: a live handshake, run as a flow of its own
+    /// because a network call must never happen on the thread that carries keystrokes, and so the
+    /// one place an existing connection's certificate can be confirmed or replaced.
+    CheckConnection {
+        connection: ConnectionId,
+        probe: bool,
+    },
+    /// The answer to [`Message::CheckConnection`]. `Valid` means "not expired", not "will work":
+    /// a revoked token still reads `Valid` until something uses it.
+    ConnectionStatus {
+        connection: ConnectionId,
+        status: LoginStatus,
+    },
+    /// A flow stopped on a certificate that did not validate, and is waiting.
+    ///
+    /// The host never pins on its own, never pins a fingerprint the interface did not send back,
+    /// and never continues an unconfirmed handshake to see if it works.
+    ConfirmCertificate {
+        connect_id: ConnectId,
+        /// The server vouched for, and what the pin is keyed by.
+        origin: String,
+        cert: CertInfo,
+    },
+    /// Vouch for the certificate [`Message::ConfirmCertificate`] offered, and resume.
+    ///
+    /// `sha256` must be the fingerprint the host offered; anything else is a
+    /// [`Message::ConnectorError`] and the flow stays stopped. That is what makes the confirmation
+    /// meaningful rather than a formality the interface can click through on the user's behalf,
+    /// and why the payload is a fingerprint rather than a boolean.
+    ///
+    /// The pin is keyed by `origin` and so is instance-wide: two connections to one server find
+    /// the same row, and a pin outlives the flow that created it.
+    TrustCertificate {
+        connect_id: ConnectId,
+        origin: String,
+        sha256: String,
+    },
+    /// Drop a pinned certificate. After it, the next request to that origin validates normally.
+    /// Answered with [`Message::Settings`] or [`Message::ConnectorError`].
+    ForgetCertificate {
+        origin: String,
+    },
+    /// Create or rewrite one named OAuth application registration.
+    ///
+    /// `id: None` creates and the host mints one; `Some` rewrites that registration in place. One
+    /// variant for both because it is one form either way, and because a registration the user
+    /// renamed is the registration their connections already reference.
+    ///
+    /// The registrations live in the host-owned part of the settings blob, so this is the only way
+    /// to write one: what the interface sends for that part of a `SetSettings` is discarded. A
+    /// blank name or a blank client id is a [`Message::ConnectorError`]; success is
+    /// [`Message::Settings`], since the blob every window draws from has changed.
+    SaveOauthApp {
+        id: Option<OauthAppId>,
+        provider: ProviderId,
+        name: String,
+        /// The instance it is registered on, as [`crate::connectors::origin`] normalises it.
+        /// `None` is the provider's own cloud.
+        origin: Option<String>,
+        client_id: String,
+    },
+    /// Delete a registration, and the client secret filed under it.
+    ///
+    /// Connections made under it keep working: they hold their own client id, and the id they name
+    /// simply matches nothing any more.
+    DeleteOauthApp {
+        id: OauthAppId,
+    },
+    /// Store the client *secret* of one registration.
+    ///
+    /// The second variant that carries material, under the same rule as
+    /// [`Message::SubmitConnectSecret`]. The client *id* is public and rides the settings blob like
+    /// any other setting, which is why only the secret has a variant of its own.
+    SetAppSecret {
+        app: OauthAppId,
+        secret: Secret,
+    },
+    /// Forget a stored client secret. Its own variant rather than an empty [`Secret`], because
+    /// clearing a credential should not look like setting one.
+    ClearAppSecret {
+        app: OauthAppId,
+    },
+    /// Something in the connector family went wrong, outside any one flow.
+    ConnectorError {
+        error: String,
+    },
+
+    // ── Repository family: UI → host ────────────────────────────────
+    /// List the repositories a connection can see. `query` is the provider's own search text;
+    /// `None` asks for what it offers unprompted, which is what an empty field shows. Answered
+    /// with [`Message::Repos`] or [`Message::RepoError`].
+    ListRepos {
+        query_id: RepoQueryId,
+        connection: ConnectionId,
+        query: Option<String>,
+    },
+    /// List one repository's branches, so a clone can offer something other than the default.
+    /// Answered with [`Message::RepoBranches`] or [`Message::RepoError`].
+    ListRepoBranches {
+        query_id: RepoQueryId,
+        source: RepoSource,
+    },
+    /// Clone a repository and take the result into the catalogue.
+    ///
+    /// There is deliberately no clone-success message: a finished clone is a registered project,
+    /// so [`Message::ProjectAdded`] is the success signal and the interface has one place to learn
+    /// a project exists rather than two.
+    CloneRepo {
+        request: CloneRequest,
+    },
+    /// Stop a clone in flight. A partial destination is the host's to clean up; the interface
+    /// hears nothing further about this id.
+    CancelClone {
+        clone_id: CloneId,
+    },
+
+    // ── Repository family: host → UI ────────────────────────────────
+    /// The answer to [`Message::ListRepos`].
+    Repos {
+        query_id: RepoQueryId,
+        repos: Vec<RemoteRepo>,
+        /// The listing hit its page ceiling. It matters because it is what stops the interface
+        /// saying "no such repository": an empty local filter over a truncated list is not proof.
+        truncated: bool,
+    },
+    /// The answer to [`Message::ListRepoBranches`]. `default` is the branch a clone takes when the
+    /// user picks none.
+    RepoBranches {
+        query_id: RepoQueryId,
+        branches: Vec<String>,
+        default: Option<String>,
+    },
+    /// A listing failed. It carries [`CloneError`] rather than a kind of its own, because the
+    /// reasons are the same ones and the sentence the interface writes is the same sentence.
+    RepoError {
+        query_id: RepoQueryId,
+        error: CloneError,
+    },
+    /// How far a clone has got. One per change of stage.
+    ClonePending {
+        clone_id: CloneId,
+        stage: CloneStage,
+    },
+    /// The clone ended without a project. Nothing was registered.
+    CloneFailed {
+        clone_id: CloneId,
+        error: CloneError,
+    },
+
+    // ── Task-source family: UI → host ───────────────────────────────
+    //
+    // A family of its own rather than a corner of `work` or of `connector`, because this names a
+    // connection *and* a project *and* a piece of remote work, and neither of those two does.
+    // It follows the repository family's shape: the asker mints a query id, every reply carries it
+    // back, and a reply naming an id the interface no longer holds is discarded rather than drawn.
+    //
+    // **No variant carries a pane id**, so `pane_id_of` is untouched.
+    /// What providers this build has, with each one's capabilities and its **declared
+    /// configuration schema** (`R6`). The schema is what the interface's one renderer draws, and
+    /// this is the only way it reaches the interface at all — a second edition's provider compiles
+    /// into the host half. Answered with [`Message::TaskProviders`].
+    ListTaskProviders {
+        query_id: TaskSrcQueryId,
+    },
+    /// The boards, projects or repositories this connection can reach, for the picker that binds
+    /// one. Answered with [`Message::RemoteContainers`] or [`Message::TaskSourceError`].
+    ListRemoteContainers {
+        query_id: TaskSrcQueryId,
+        provider: String,
+        connection: ConnectionId,
+    },
+    /// The bound container's lanes **and** every facet its declared `Choice`/`MultiChoice` fields
+    /// draw from, in one ask, because the provider answers both off one container description.
+    /// Answered with [`Message::RemoteLanes`] or [`Message::TaskSourceError`].
+    ListRemoteLanes {
+        query_id: TaskSrcQueryId,
+        binding: Box<Binding>,
+    },
+    /// **Run the filter and say how many came back** (`R7`). Read-only, and emphatically not a
+    /// syntax check: where a provider has a query language its own server validates it and returns
+    /// a usable error, and a second grammar in this tree would be a language nobody owns. Answered
+    /// with [`Message::TaskSourceTest`] or [`Message::TaskSourceError`].
+    TestTaskSource {
+        query_id: TaskSrcQueryId,
+        binding: Box<Binding>,
+    },
+    /// What this project is bound to, if anything. Answered with [`Message::TaskSource`].
+    GetTaskSource {
+        project_id: ProjectId,
+    },
+    /// Write the binding this project is configured with. `None` unbinds — which removes the
+    /// binding and the link rows and **no task**: nothing the layer does ever deletes anything
+    /// (`R9`). Answered with [`Message::TaskSource`] or [`Message::TaskSourceError`].
+    SetTaskSource {
+        project_id: ProjectId,
+        binding: Option<Box<Binding>>,
+    },
+    /// Everything the filter currently offers, for the import dialog to pick from. Answered with
+    /// [`Message::RemoteItems`] or [`Message::TaskSourceError`].
+    ListRemoteItems {
+        query_id: TaskSrcQueryId,
+        /// Which project's link table the answer's `linked` set is read against. Carried even
+        /// though the binding names no project: **only a project has link rows**, and without it
+        /// the dialog cannot say which offered items are already tasks — which is the one thing
+        /// that stops it making a second copy of a task that exists (`D188`).
+        project_id: ProjectId,
+        binding: Box<Binding>,
+    },
+    /// Create a task for each of these items and link it. **Import is explicit** (`R12`): the
+    /// filter governs what is offered, not what is created. Answered with `TaskCreated` ×n to
+    /// every window, the ordinary work-family path, because an imported task is an ordinary task
+    /// from the moment it lands.
+    ImportRemoteItems {
+        project_id: ProjectId,
+        items: Vec<RemoteItemId>,
+    },
+    /// Run a pass now rather than at the next interval. `scope` is the whole board or one task —
+    /// one message for the board's force button and a card's, because they differ in nothing else.
+    SyncTaskSource {
+        project_id: ProjectId,
+        scope: SyncScope,
+    },
+    /// Settle one drifted task by hand, whatever the binding's authority switch says (`D188`).
+    ///
+    /// `Push` writes the task's values to the remote item; `Pull` writes the item's values to the
+    /// task. **Only the fields already on the link row's `drift` list move** — this is a resolution
+    /// of a divergence somebody is looking at, not a blanket overwrite of one side by the other,
+    /// and a field the provider cannot accept is refused by name rather than silently skipped.
+    ///
+    /// Answered with `TaskChanged` and [`Message::TaskLinkChanged`]. A failure comes back on
+    /// [`Message::TaskSourceState`] rather than on [`Message::TaskSourceError`], because this
+    /// names a **project** and not a query: `TaskSourceError` is keyed by a `TaskSrcQueryId` the
+    /// interface would have to have minted, and it discards a reply naming an id it does not hold.
+    /// Every project-scoped ask in this family — this, `SyncTaskSource`, `ImportRemoteItems` —
+    /// reports the same way.
+    ResolveTaskDrift {
+        project_id: ProjectId,
+        task_id: TaskId,
+        side: DriftSide,
+    },
+    /// Drop one task's link row. The task keeps its content and its history (`R9`).
+    UnlinkTask {
+        project_id: ProjectId,
+        task_id: TaskId,
+    },
+
+    // ── Task-source family: host → UI ───────────────────────────────
+    /// The answer to [`Message::ListTaskProviders`].
+    TaskProviders {
+        query_id: TaskSrcQueryId,
+        providers: Vec<ProviderInfo>,
+    },
+    /// The answer to [`Message::ListRemoteContainers`].
+    RemoteContainers {
+        query_id: TaskSrcQueryId,
+        containers: Vec<RemoteContainer>,
+    },
+    /// The answer to [`Message::ListRemoteLanes`]: the lane map's candidates, and every facet the
+    /// declared fields draw from.
+    RemoteLanes {
+        query_id: TaskSrcQueryId,
+        lanes: Vec<RemoteLane>,
+        facets: Facets,
+    },
+    /// The answer to [`Message::TestTaskSource`]: **a count the filter actually returned**, and
+    /// the first handful of what it returned, so the number can be recognised rather than trusted.
+    TaskSourceTest {
+        query_id: TaskSrcQueryId,
+        count: usize,
+        sample: Vec<RemoteItem>,
+    },
+    /// The answer to [`Message::GetTaskSource`] and to [`Message::SetTaskSource`], and what a
+    /// window that has just opened a project is told.
+    TaskSource {
+        project_id: ProjectId,
+        binding: Option<Box<Binding>>,
+        state: SyncState,
+    },
+    /// The answer to [`Message::ListRemoteItems`]. An item already linked is marked so the dialog
+    /// can say so rather than offering a second copy of a task that exists.
+    RemoteItems {
+        query_id: TaskSrcQueryId,
+        items: Vec<RemoteItem>,
+        /// The subset of `items` that already has a link row on this project.
+        linked: Vec<RemoteItemId>,
+    },
+    /// Unsolicited: what the binding is doing, for the board's status item.
+    TaskSourceState {
+        project_id: ProjectId,
+        state: SyncState,
+        last_sync: Option<DateTime<Utc>>,
+        /// The tasks that differ from their remote item, for the drift overview. **What each one
+        /// differs *in* is on its own link row** (`TaskLink::drift`), which the interface already
+        /// holds: this is the count the status item draws, not a second copy of the detail.
+        drifted: Vec<TaskId>,
+        /// A sentence, when the last pass failed. `None` while it is fine.
+        error: Option<String>,
+    },
+    /// Unsolicited: one task's link row changed, or went away. `None` is a task that is no longer
+    /// linked — it keeps everything else it had.
+    TaskLinkChanged {
+        project_id: ProjectId,
+        task_id: TaskId,
+        link: Option<Box<TaskLink>>,
+    },
+    /// A task-source ask failed. A sentence rather than a kind, on `WorkError`'s reasoning: what
+    /// the interface does with it is print it.
+    TaskSourceError {
+        query_id: TaskSrcQueryId,
+        error: String,
+    },
+
+    // ── Project family: UI → host ───────────────────────────────────
+    /// Every project in the catalogue, probed. Answered with [`Message::ProjectList`].
+    ListProjects,
+    /// Take a folder into the catalogue. A path that does not exist is refused; no folder is ever
+    /// created. A folder already in the catalogue resolves to the project that is there. A
+    /// temporary folder is never written to the catalogue and is forgotten once it closes.
+    AddProject {
+        path: String,
+        name: Option<String>,
+        colour: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_colour: Option<u32>,
+        #[serde(default)]
+        temporary: bool,
+        /// Where this project's own data is written, chosen here and only here — see
+        /// [`StorageMode`]. Absent is [`StorageMode::KubiqManaged`], which is what every caller
+        /// before this field meant. A [`StorageMode::ProjectManaged`] add that cannot make its
+        /// `.kubiq/` folder is refused with [`Message::ProjectError`] rather than quietly falling
+        /// back: the user asked for the project's own folder, and a silent config-root project
+        /// would be the wrong answer written down.
+        ///
+        /// Ignored for a `temporary` folder, which is never written down at all.
+        #[serde(default, skip_serializing_if = "StorageMode::is_default")]
+        storage: StorageMode,
+        /// A folder on a drone's machine rather than this one: `path` is the far path, and the
+        /// record is written with this origin. Nothing is checked on disk here — the folder is
+        /// not on this machine to check — and the mode is always Kubiq-managed, since there is no
+        /// `.kubiq/` this host could make. A folder already pinned to the same place through the
+        /// same carrier resolves to the project that is there.
+        ///
+        /// Additive: absent is the local add every caller before this field meant.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        runs_on: Option<DroneOrigin>,
+    },
+    /// Drop the record and the project's own directory in Kubiq's config. Nothing inside the
+    /// project's folder is touched — which is why the word in the interface is "Forget". A
+    /// project-managed project keeps its `.kubiq/` folder for the same reason: it is inside the
+    /// user's own tree.
+    ForgetProject {
+        project_id: ProjectId,
+    },
+    /// Rename or recolour. Display only: it touches no filesystem and cannot fail. The two colour
+    /// fields travel together: `custom_colour` is applied only when `colour` is `Some`, and a
+    /// `None` `custom_colour` alongside a `Some` `colour` clears the custom colour back to the
+    /// swatch. A name-only update (`colour: None`) leaves both untouched.
+    UpdateProject {
+        project_id: ProjectId,
+        name: Option<String>,
+        colour: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_colour: Option<u32>,
+        /// The project's own search excludes. Absent leaves them as they are; `Some` replaces the
+        /// whole list.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        search_excludes: Option<Vec<String>>,
+        /// What to do with the project's indexing override. Absent leaves it as it is; see
+        /// [`IndexChange`] for why this is not an `Option<Option<_>>`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<IndexChange>,
+        /// What to do with the project's own word for a mission. Absent leaves it as it is; see
+        /// [`MissionTermChange`] for why this is not an `Option<Option<_>>`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mission_term: Option<MissionTermChange>,
+        /// The project's own runnable tools. Absent leaves them as they are; `Some` replaces
+        /// the whole list.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tools: Option<Vec<ToolDef>>,
+        /// Which repositories inside the project it manages. Absent leaves the set as it is;
+        /// `Some` replaces the whole list. A path that names no repository the walk can find is
+        /// kept as it was given — a repository behind a branch switch is still the user's answer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        managed_repos: Option<Vec<String>>,
+        /// The project's own task-board lane preferences. Absent leaves them as they are; `Some`
+        /// replaces the whole list.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lanes: Option<Vec<LanePref>>,
+        /// What to do with the drone this project's folder lives behind. Absent leaves it as it
+        /// is; see [`DroneChange`] for why this is not an `Option<Option<_>>`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        runs_on: Option<DroneChange>,
+        /// Whether this project inherits every global agent definition. Absent leaves it as it is;
+        /// see [`crate::projects::ProjectRecord::definitions_use_global`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        definitions_use_global: Option<bool>,
+        /// Which global definitions it inherits while that flag is off. Absent leaves the set as
+        /// it is; `Some` replaces the whole list, the way `search_excludes` does. See
+        /// [`crate::projects::ProjectRecord::definitions_allowed`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        definitions_allowed: Option<Vec<String>>,
+    },
+    /// Override the letters the rail's badge shows for this project, in place of the name's own
+    /// first letter. Capped at two characters; an empty string clears the override and returns
+    /// the badge to that default. Its own message rather than another field on
+    /// [`Message::UpdateProject`] so that message's callers — every one already in the tree —
+    /// need not learn a field they never set.
+    SetProjectInitials {
+        project_id: ProjectId,
+        initials: String,
+    },
+    /// Move this project's own data between the two storage modes (`D173`) — out of
+    /// `<config root>/projects/<ulid>/` into the project's own `.kubiq/`, or back.
+    ///
+    /// Its own message rather than a field on [`Message::UpdateProject`], which `D31` keeps
+    /// display-only, infallible and filesystem-free: this copies a tree across two unrelated
+    /// roots and can fail for every reason a filesystem can.
+    ///
+    /// Answered with [`Message::ProjectStorageMoved`] to the window that asked, and with a
+    /// [`Message::ProjectChanged`] to every window carrying the record's new mode; refused with
+    /// [`Message::ProjectStorageError`]. A mode the project is already in is a success that
+    /// touches no disk. **Refused while anything is running in the project** — a pane or a live
+    /// conversation — because a store resolving the old location mid-move would write into the
+    /// tree being taken away.
+    SetProjectStorage {
+        project_id: ProjectId,
+        storage: StorageMode,
+    },
+    /// Re-point a record at a folder that moved, keeping its id, colour and history. Unlike
+    /// [`Message::UpdateProject`] this changes truth, so it can answer [`Message::ProjectError`].
+    LocateProject {
+        project_id: ProjectId,
+        path: String,
+    },
+    /// A window pointed at a project. The host decides what that means and stamps it.
+    OpenedProject {
+        project_id: ProjectId,
+    },
+    /// Take over every pane and every conversation running in a project, from whichever window
+    /// owned them until now.
+    ///
+    /// A project is open in one window at a time, so moving it between windows moves its running
+    /// harnesses with it: the panes are the same pseudo-terminals with the same processes behind
+    /// them, and only the client their bytes are addressed to changes. Without this the window
+    /// losing the project would have to kill what it holds, which is the user's work.
+    ///
+    /// Sent by the window a project has just been moved *into*, and only by it — the registry in
+    /// the interface is what guarantees there is exactly one such window. The host takes the
+    /// sender's word for it: it re-homes whatever it is running for that project and answers
+    /// nothing, because the interface already knows what it adopted.
+    AdoptProject {
+        project_id: ProjectId,
+    },
+    /// Probe the folder again — the Locate-and-refresh path for a project marked missing.
+    RefreshProject {
+        project_id: ProjectId,
+    },
+    /// A drone's one catalogue write: serve the folder at `path` — a path on the *drone's*
+    /// machine — under `project_id`, the id the interface's own catalogue already holds for it.
+    ///
+    /// What a window sends an attached drone for every project pinned to it (`runs_on`), so a
+    /// drone serves whatever it is asked to rather than only the `--root` it was launched with.
+    /// Idempotent: a second ask for the same id replaces the folder it names. Answered with the
+    /// drone's whole [`Message::ProjectList`] to every client, or a [`Message::ProjectError`] when
+    /// `path` is not a directory there. A local host refuses it: its catalogue is the user's,
+    /// written through [`Message::AddProject`].
+    ServeProject {
+        project_id: ProjectId,
+        path: String,
+    },
+    /// Read back what the interface stored for a scope.
+    GetPreferences {
+        scope: Scope,
+    },
+    /// Store an opaque blob for a scope. Answers nothing: losing where a splitter sat is not an
+    /// event, and the write is debounced.
+    SetPreferences {
+        scope: Scope,
+        value: String,
+    },
+    /// Read back the settings stored for a layer. Answered with [`Message::Settings`].
+    GetSettings {
+        layer: SettingsLayer,
+    },
+    /// Store a settings blob for a layer. The Ui layer is opaque and answers nothing. The Host
+    /// layer is parsed; a blob the host cannot read answers [`Message::SettingsError`].
+    SetSettings {
+        layer: SettingsLayer,
+        value: String,
+    },
+
+    // ── Project family: host → UI ───────────────────────────────────
+    ProjectList {
+        projects: Vec<ProjectSnapshot>,
+    },
+    ProjectAdded {
+        project: ProjectSnapshot,
+    },
+    ProjectChanged {
+        project: ProjectSnapshot,
+    },
+    ProjectForgotten {
+        project_id: ProjectId,
+    },
+    /// A [`Message::SetProjectStorage`] finished: the project's data is now in `dir`, which is
+    /// the data directory the mode names. To the window that asked — every other window learns
+    /// the new mode from the [`Message::ProjectChanged`] that goes out beside this.
+    ProjectStorageMoved {
+        project_id: ProjectId,
+        storage: StorageMode,
+        /// Where the data actually is now, for the window that asked to show.
+        dir: String,
+    },
+    /// A [`Message::SetProjectStorage`] was refused or failed, and the project is **still in the
+    /// mode it was in** — the pointer file is the commit point and nothing before it is visible.
+    /// Its own variant rather than [`Message::ProjectError`] so the panel that asked can put its
+    /// row back to `storage` rather than draw a banner and guess.
+    ProjectStorageError {
+        project_id: ProjectId,
+        /// The mode that was asked for and not reached.
+        storage: StorageMode,
+        error: String,
+    },
+    /// Something went wrong for one project, or for the catalogue as a whole when the id is absent.
+    ProjectError {
+        project_id: Option<ProjectId>,
+        error: String,
+    },
+    /// The blob stored for a scope. Absent means never set, which is not an empty blob.
+    Preferences {
+        scope: Scope,
+        value: Option<String>,
+    },
+    /// The blob stored for a settings layer. Absent means never set, which is not an empty blob.
+    Settings {
+        layer: SettingsLayer,
+        value: Option<String>,
+    },
+    /// The host could not read or would not store a settings blob.
+    SettingsError {
+        layer: SettingsLayer,
+        error: String,
+    },
+
+    // ── The command-line shortcut ───────────────────────────────────
+    /// Ask after, write or delete the small `kubiq` script that puts the application on the
+    /// shell's `PATH`. The host owns every path in this exchange and chooses the directory
+    /// itself; the interface only says which of the three things to do. Answered with
+    /// [`Message::CliShortcutState`].
+    CliShortcut {
+        action: CliShortcutAction,
+    },
+
+    // ── The command-line shortcut: host → UI ────────────────────────
+    /// Where the shortcut is, where one would go, and what the candidate directories look like.
+    /// Sent in answer to every [`Message::CliShortcut`], whichever action it carried, so one
+    /// path in the interface draws the section.
+    CliShortcutState {
+        /// Where a shortcut this application wrote was found, if one was.
+        installed: Option<String>,
+        /// It was found, but it launches a different build than the one running.
+        stale: bool,
+        /// Where writing one would put it. Absent when no directory can be used at all.
+        target: Option<String>,
+        /// Every directory considered, in the order they were considered.
+        candidates: Vec<CliDir>,
+        /// Why the last write or delete did not happen. A sentence, never a stack trace.
+        error: Option<String>,
+    },
+
+    // ── The shell integration ───────────────────────────────────────
+    /// Ask after, write or delete the *Open in Kubiq* entries in the desktop's file-manager context
+    /// menu — on Windows, Explorer's right-click menu for files, folders and folder backgrounds,
+    /// for the current user only. The host owns every key and every path in this exchange; the
+    /// interface only says which of the three things to do. Answered with
+    /// [`Message::ShellIntegrationState`].
+    ShellIntegration {
+        action: ShellIntegrationAction,
+    },
+
+    // ── The shell integration: host → UI ────────────────────────────
+    /// Whether the entries are there and which build they launch. Sent in answer to every
+    /// [`Message::ShellIntegration`], whichever action it carried, so one path in the interface
+    /// draws the section.
+    ShellIntegrationState {
+        /// This host's platform has a context menu Kubiq knows how to join. When false, nothing else
+        /// here means anything and no action changes anything.
+        supported: bool,
+        /// The entries are there, written by Kubiq.
+        installed: bool,
+        /// They are there, but they launch a different build than the one running.
+        stale: bool,
+        /// The command the entries run, or would run once installed. Absent when unsupported, or
+        /// when the running executable cannot be found.
+        command: Option<String>,
+        /// Why the last write or delete did not happen. A sentence, never a stack trace.
+        error: Option<String>,
+    },
+
+    // ── The host browse family: UI → host ───────────────────────────
+    /// List one absolute directory on the host's own filesystem, with no project in scope yet.
+    ///
+    /// `path` absent asks for a sensible starting place instead of a listing of one the interface
+    /// named — the host's own choice, typically the user's home directory, on the rule that the
+    /// interface never composes a path it cannot itself resolve (`D32`, the same one that keeps
+    /// `AddProject.path` coming from the platform's own dialog). Unlike the file family, `path` is
+    /// absolute and is resolved against nothing: there is no project root yet for it to be
+    /// relative to. Answered with [`Message::HostDirListing`] or [`Message::HostDirError`].
+    BrowseHostDir {
+        path: Option<String>,
+    },
+
+    // ── The host browse family: host → UI ───────────────────────────
+    /// One absolute directory, listed. Sent in answer to [`Message::BrowseHostDir`].
+    HostDirListing {
+        /// The path that was listed, canonicalised — so the interface shows where it actually
+        /// landed, not the string it asked for (or asked for nothing and got the default).
+        /// Without the verbatim `\\?\` prefix on Windows, which does not display and does not
+        /// survive the interface joining it with a separator.
+        path: String,
+        /// `path`'s parent, canonicalised the same way. Absent only at the filesystem root, so a
+        /// picker knows when to stop offering to walk up.
+        parent: Option<String>,
+        entries: Vec<HostDirEntry>,
+        /// Whether the entry ceiling cut the listing short, on [`crate::files::DirListing`]'s own
+        /// rule.
+        truncated: bool,
+    },
+    /// The path could not be listed: it does not exist, is not a directory, or the host could not
+    /// read it.
+    HostDirError {
+        /// Echoes the request's own `path` — `None` when the failure was in finding a default
+        /// starting place rather than in listing a named one.
+        path: Option<String>,
+        error: HostPathError,
+    },
+
+    // ── The host file family: UI → host ─────────────────────────────
+    /// Write a whole file at an absolute host path, with no project in scope — the write half of
+    /// a guest tab, whose read (`crates/kubiq/src/app/mod.rs::read_guest_file`) is one of the two
+    /// places the interface reads disk itself.
+    ///
+    /// Unlike [`Message::WriteProjectFile`] there is no project root to bound this against, so it
+    /// keeps no creation door and no `overwrite` escape hatch: `expected` is mandatory rather than
+    /// optional, and the write is refused unless it lands on exactly the file whose version this
+    /// names — an overwrite of something the interface already read, never the creation of
+    /// something new at a path it was merely told about.
+    WriteHostFile {
+        path: String,
+        // See the comment on `Message::TerminalOutput::bytes`: same reasoning, same fix.
+        #[serde(with = "serde_bytes")]
+        bytes: Vec<u8>,
+        expected: FileVersion,
+    },
+    /// Create or replace the file at an absolute host path the user picked in the native save
+    /// dialog — an export, not an edit of something already read. [`Message::WriteHostFile`]'s
+    /// atomic write without its version check, since the target may not exist. Answered with
+    /// [`Message::HostFileExported`] or [`Message::HostFileError`].
+    SaveHostFileAs {
+        path: String,
+        // See the comment on `Message::TerminalOutput::bytes`: same reasoning, same fix.
+        #[serde(with = "serde_bytes")]
+        bytes: Vec<u8>,
+    },
+
+    // ── The host file family: host → UI ─────────────────────────────
+    /// The host file as it now is, so a guest tab's next save has a version to name. Sent in
+    /// answer to [`Message::WriteHostFile`].
+    HostFileWritten {
+        path: String,
+        version: FileVersion,
+    },
+    /// [`Message::SaveHostFileAs`] wrote the file. `path` echoes the request.
+    HostFileExported {
+        path: String,
+    },
+    /// [`Message::WriteHostFile`] or [`Message::SaveHostFileAs`] was refused. `path` echoes the
+    /// request.
+    HostFileError {
+        path: String,
+        error: FileError,
+    },
+
+    // ── File family: UI → host ──────────────────────────────────────
+    /// One level of a project's tree. `rel_path` is empty for the root; `depth` is how many levels
+    /// below it to list, clamped by the host, and one is what an expand asks for.
+    ProjectTree {
+        project_id: ProjectId,
+        rel_path: String,
+        depth: u8,
+        /// The window's background cache is asking, not the user. The host then walks no folder
+        /// version control ignores, and answers a request *for* one with no listings at all, so
+        /// it stays unlisted until the user opens it — which asks again without this.
+        #[serde(default)]
+        prefetch: bool,
+    },
+    /// Read a file. `max_bytes` narrows the host's own ceiling and never widens it.
+    ReadProjectFile {
+        project_id: ProjectId,
+        rel_path: String,
+        max_bytes: Option<u64>,
+    },
+    /// Save a file, whole.
+    ///
+    /// The interface sends the buffer it holds, never a patch, and names the version it read so a
+    /// write cannot land on somebody else's change. `expected` absent means it is creating a file
+    /// that must not already exist, unless `overwrite` says the interface asked and the user said
+    /// yes. No folder is ever created — the mirror of [`Message::AddProject`] never creating one.
+    WriteProjectFile {
+        project_id: ProjectId,
+        rel_path: String,
+        // See the comment on `Message::TerminalOutput::bytes`: same reasoning, same fix.
+        #[serde(with = "serde_bytes")]
+        bytes: Vec<u8>,
+        expected: Option<FileVersion>,
+        /// Write over whatever is already there, when `expected` is absent.
+        ///
+        /// `expected: None` alone means *create, and refuse if anything is there* — the contract does
+        /// not hand out a forced overwrite for free. This is the interface saying it asked the user
+        /// and they said yes, which is the only thing that buys one. It is meaningless beside an
+        /// `expected` and refused there rather than ignored, because a field the host silently drops
+        /// is a wiring mistake the interface cannot see.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        overwrite: bool,
+    },
+    /// Compare a file against a version-control base. The host computes the hunks; the interface
+    /// draws rows and holds no diff library. `old` and `new` are the two commit ids when `base`
+    /// is [`DiffBase::Commits`]; they are ignored otherwise.
+    DiffProjectFile {
+        project_id: ProjectId,
+        rel_path: String,
+        base: DiffBase,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        old: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        new: Option<String>,
+        /// Compare with CRLF and LF alike, so a file whose only change is its line endings has no
+        /// hunks. Absent means off: an older sender gets the byte-exact comparison it always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ignore_eol: bool,
+    },
+    /// Create, move, copy or remove one path.
+    ///
+    /// One message for the five, because the interface's need is the same every time — a path, a
+    /// destination for the two that have one, and what to do — and five variants would be five
+    /// coordinator arms answering the same worker.
+    ///
+    /// `to` is the destination and is present for [`PathOp::Move`] and [`PathOp::Copy`] only. It is
+    /// *refused* where it does not belong rather than ignored, because a field the host silently
+    /// drops is a wiring mistake the interface cannot see.
+    ///
+    /// **Every op refuses a destination that already exists.** The alternative reading is a forced
+    /// overwrite, which is the same thing an absent `expected` on [`Message::WriteProjectFile`]
+    /// refuses, and for the same reason: the contract does not hand one out for free.
+    EditProjectPath {
+        project_id: ProjectId,
+        rel_path: String,
+        to: Option<String>,
+        op: PathOp,
+        /// Also apply this op to whatever [`Message::ProjectFileRelated`] would answer for
+        /// `rel_path` — the checkbox the explorer's rename and delete questions raise, default
+        /// checked. The host resolves the related files itself, again, rather than the interface
+        /// naming them: the answer it was shown may be stale by the time this lands, and the
+        /// resolver is the one place that rule lives. Meaningless, and ignored, for
+        /// [`PathOp::Create`] and [`PathOp::Copy`].
+        #[serde(default)]
+        carry_related: bool,
+    },
+    /// What else belongs to `rel_path` — the resolver's whole answer, asked before a rename, move
+    /// or delete is confirmed, so the question can say what else it would carry.
+    RelatedProjectFiles {
+        project_id: ProjectId,
+        rel_path: String,
+    },
+    /// Bring files and folders from outside the project into one of its folders — a drop from the
+    /// platform's file manager, or a paste of files it copied.
+    ///
+    /// **The one message in this family that names absolute host paths**, because what is being
+    /// brought in is by definition outside every root: `sources` are paths on the machine the
+    /// host runs on, as the platform handed them to the interface. Only a window whose host is
+    /// local sends one — a remote's disk is not the disk the user dropped from.
+    ///
+    /// `into` is a project-relative folder, empty for the root, and every source lands directly
+    /// inside it under its own leaf name — or the first free `name copy`, `name copy 2` when that
+    /// is taken, on [`crate::files::copy_name`]'s rule. Never an overwrite. Each source succeeds
+    /// or fails on its own, so one locked file does not cost the rest of the drop.
+    ImportIntoProject {
+        project_id: ProjectId,
+        into: String,
+        sources: Vec<String>,
+        mode: ImportMode,
+    },
+
+    // ── File family: host → UI ──────────────────────────────────────
+    /// `rel_path` first, then every directory listed below it. Both paths are echoed, because an
+    /// answer arrives after the click that asked for it and has to land on the right row.
+    ProjectTreeListing {
+        project_id: ProjectId,
+        rel_path: String,
+        listings: Vec<DirListing>,
+    },
+    ProjectFileContents {
+        project_id: ProjectId,
+        rel_path: String,
+        contents: FileContents,
+    },
+    /// The file as it now is, so the tab's next save has a version to name and its dirty mark
+    /// clears on a fact rather than on optimism.
+    ProjectFileWritten {
+        project_id: ProjectId,
+        rel_path: String,
+        version: FileVersion,
+    },
+    /// The file's change against the base it was asked for, hunk by hunk.
+    ProjectFileDiffed {
+        project_id: ProjectId,
+        rel_path: String,
+        diff: FileDiff,
+    },
+    /// The edit was made.
+    ///
+    /// The request is echoed whole. An answer arrives after the click that asked for it, and the
+    /// interface has to know which gesture finished before it can finish it: a created file is
+    /// opened, a moved one retargets its tab, a removed one closes it.
+    ///
+    /// A failed edit is [`Message::ProjectFileError`], on the same reasoning that gives every other
+    /// per-path failure that variant — the interface can only mark the row the user is looking at if
+    /// the message says which one.
+    ProjectPathEdited {
+        project_id: ProjectId,
+        rel_path: String,
+        to: Option<String>,
+        op: PathOp,
+        #[serde(default)]
+        carry_related: bool,
+    },
+    /// The answer to [`Message::RelatedProjectFiles`]: everything the resolver found for
+    /// `rel_path`, empty when there is nothing to carry.
+    ProjectFileRelated {
+        project_id: ProjectId,
+        rel_path: String,
+        related: Vec<RelatedFile>,
+    },
+    /// The answer to [`Message::ImportIntoProject`], whole: `into` and `mode` echoed, every
+    /// source that landed as the project-relative path it landed at (in the order asked, so the
+    /// first is the one to select), and every one that did not as `(source, reason)`.
+    ///
+    /// One answer rather than a [`Message::ProjectFileError`] per failure: a failed source is an
+    /// absolute path outside the project and has no row to be marked on. A refusal of the whole
+    /// request — `into` outside the root, no such project — is still a `ProjectFileError` on
+    /// `into`, on that variant's own reasoning.
+    ProjectPathsImported {
+        project_id: ProjectId,
+        into: String,
+        mode: ImportMode,
+        imported: Vec<String>,
+        failed: Vec<(String, String)>,
+    },
+    /// Something went wrong for one path in one project.
+    ///
+    /// Separate from [`Message::ProjectError`] on the reasoning that separates
+    /// [`Message::PaneError`] from a catalogue-wide one: the interface can only mark the row or the
+    /// tab the user is looking at if the message says which one.
+    ProjectFileError {
+        project_id: ProjectId,
+        rel_path: String,
+        error: FileError,
+    },
+    /// Something changed on disk in a project, said without being asked.
+    ///
+    /// Coarse by design: relative paths, never content — the same rule a search hit obeys. A
+    /// reader that wants the new bytes asks the normal way, with `ProjectTree`, `ReadProjectFile`
+    /// or the git family. Coalesced per path over the watcher's debounce window and bounded like a
+    /// search batch; `truncated` means the burst was larger than the window could carry and the
+    /// whole subtree should be re-listed rather than the named paths patched.
+    ProjectFilesChanged {
+        project_id: ProjectId,
+        changed: Vec<String>,
+        truncated: bool,
+        /// Something in the repository's plumbing moved — `HEAD`, `MERGE_HEAD`, the index or a
+        /// ref. Paths under `.git` never appear in `changed`, so this bool is the only way a
+        /// window learns to ask for the git overview again.
+        repository: bool,
+    },
+
+    // ── Git family: UI → host ───────────────────────────────────────
+    // Every variant names a project, because the interface holds no repository identity of its
+    // own — a repository is a fact about a project, discovered by the host. Nothing in this
+    // family is broadcast: a project is open in exactly one window, so the window that asked is
+    // the only one drawing it. Not a repository is [`Message::GitOverview`] with `overview`
+    // absent, not an error. A project may hold several repositories: every variant but
+    // `RefreshProjectGit` and `GitWorkingTree` (which is one merged map) carries a `repo`, empty
+    // for the project's own and a managed nested repository's `rel_path` otherwise, and a reply
+    // echoes the request's.
+    /// What the status bar reads. Cheap: refs and a handful of files in the git directory.
+    ProjectGit {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+    },
+    /// Re-read the repository. `full` also walks the working tree for the explorer's badges.
+    RefreshProjectGit {
+        project_id: ProjectId,
+        full: bool,
+    },
+    /// A page of history. **Cursor-paged, not offset-paged**: a page is a bounded walk from a
+    /// starting commit and the next cursor is the commit after the last returned. An offset would
+    /// re-walk from HEAD every page and be wrong the moment the tree moved underneath.
+    ///
+    /// Answered with [`Message::GitLogPage`], or [`Message::GitError`].
+    ProjectGitLog {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        /// Where this page of the walk starts. Absent is the first page, which starts at HEAD
+        /// unless [`Self::ProjectGitLog::rev`] names a ref.
+        cursor: Option<String>,
+        /// How many commits, clamped to [`git::MAX_LOG_PAGE`].
+        count: u32,
+        /// The history of one path, project-relative. Absent is the whole repository.
+        rel_path: Option<String>,
+        first_parent: bool,
+        /// Walk this ref instead of HEAD. A branch name, a remote-tracking name, a tag, or any
+        /// other rev `revparse` accepts. Ignored once `cursor` is set — that page continues the
+        /// walk already started. Absent with no cursor is HEAD.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rev: Option<String>,
+    },
+    /// Branches, remote-tracking branches, tags and stashes. `with_tracking` adds ahead and behind
+    /// per branch, which is one merge-base walk each — the branch picker asks without it.
+    ///
+    /// Answered with [`Message::GitRefs`], or [`Message::GitError`].
+    ProjectGitRefs {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        with_tracking: bool,
+    },
+    /// Mutate the project's repository. Answered with a full refresh — [`Message::GitOverview`]
+    /// and [`Message::GitWorkingTree`] — or [`Message::GitError`].
+    WriteProjectGit {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        op: git::GitWriteOp,
+    },
+    /// The paths that differ between two revs. `from` absent is the empty tree — the files a
+    /// single commit introduced against nothing. Answered with [`Message::GitChanged`], or
+    /// [`Message::GitError`].
+    ProjectGitChanged {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        from: Option<String>,
+        to: String,
+    },
+
+    // ── Git family: host → UI ───────────────────────────────────────
+    /// `overview` absent means the project is not in a repository. That is an ordinary answer.
+    GitOverview {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        overview: Option<RepoOverview>,
+    },
+    /// Paths that have something to say, plus a rollup for every ancestor directory of those
+    /// paths. A row not in the map is clean. `generation` is how a stale walk is discarded.
+    ///
+    /// One map covers every repository the project holds. `repos` names the ones nested inside it,
+    /// so the interface can draw the boundary the merged paths no longer show: a folder that is a
+    /// repository of its own, and the head it is on. A project with no repository above it can
+    /// still answer with entries here, when the repositories it holds are all below it.
+    GitWorkingTree {
+        project_id: ProjectId,
+        generation: u64,
+        entries: Vec<GitEntry>,
+        rollups: Vec<GitRollup>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        repos: Vec<GitNested>,
+        truncated: bool,
+    },
+    /// A repository that exists and could not be read.
+    GitError {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        error: git::GitError,
+    },
+    /// One page of history. `cursor` echoes the request's own, so a reply that lands after a
+    /// later request already advanced the cursor is told apart from a fresh one instead of
+    /// guessed at from whether the interface already holds a cursor. `next_cursor` absent is the
+    /// end.
+    GitLogPage {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        /// The cursor [`Message::ProjectGitLog`] was asked with. `None` was a request for the
+        /// first page.
+        cursor: Option<String>,
+        commits: Vec<GitCommit>,
+        next_cursor: Option<String>,
+    },
+    /// Every ref the sidebar draws, in one reply — five sections would otherwise be five walks.
+    GitRefs {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        refs: Vec<GitRef>,
+    },
+    /// The paths that differ between the two revs [`Message::ProjectGitChanged`] asked for.
+    GitChanged {
+        project_id: ProjectId,
+        /// The managed nested repository this is about, as [`git::GitNested::rel_path`] spells it.
+        /// Empty is the project's own repository.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        repo: String,
+        from: Option<String>,
+        to: String,
+        files: Vec<GitChangedPath>,
+    },
+
+    // ── Knowledge-base family: UI → host ────────────────────────────
+    // The documents half of a project, and the one family whose paths are relative to something
+    // other than the project's root — which is why every variant carries a `KbSourceId` beside the
+    // path it names. A source may sit anywhere the user pointed at, so the host resolves the pair
+    // and the interface learns no absolute path from a listing.
+    /// What this project's knowledge base is configured as. Answered with
+    /// [`Message::KbSourcesListed`], whose list is empty for a project nobody has configured — which
+    /// is what the explorer's "Add KB" page is drawn from.
+    KbSources {
+        project_id: ProjectId,
+    },
+    /// Replace the whole source list.
+    ///
+    /// Whole rather than one row per message: it is a short list edited in a settings form, and a
+    /// whole-list write makes a reorder, a rename and a removal one fact instead of three. The
+    /// host answers [`Message::KbSourcesListed`], and fetches whatever source is new.
+    SetKbSources {
+        project_id: ProjectId,
+        sources: Vec<KbSource>,
+    },
+    /// One level of one source's tree. `rel_path` is empty for the source itself; `depth` is how
+    /// many levels below it to list, clamped by the host exactly as [`Message::ProjectTree`] is.
+    KbTree {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        depth: u8,
+    },
+    /// Read a document. `max_bytes` narrows the host's own ceiling and never widens it.
+    ReadKbFile {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        max_bytes: Option<u64>,
+    },
+    /// Fetch or refresh a source that has to be fetched. A no-op for a folder, which is always as
+    /// current as the disk under it.
+    SyncKbSource {
+        project_id: ProjectId,
+        source: KbSourceId,
+    },
+    /// Write a document's whole contents. Refused for a source that is not writable.
+    WriteKbFile {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        contents: String,
+    },
+    /// Create an empty file or a folder at `rel_path`.
+    CreateKbEntry {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        kind: EntryKind,
+    },
+    /// Rename one entry in place. `new_name` is a name, never a path — the host refuses one
+    /// holding a separator.
+    RenameKbEntry {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        new_name: String,
+    },
+    /// Delete one entry. A folder goes with what is inside it.
+    DeleteKbEntry {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+    },
+    /// Show one entry in the platform's file manager, on the machine the *host* runs on.
+    RevealKbPath {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+    },
+    /// The absolute path of one entry, for the clipboard. The one place this family hands the
+    /// interface an absolute path, and it is asked for rather than volunteered.
+    AskKbPath {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+    },
+    /// Open a password-protected wiki (`D206`) — or, for one still [`KbSourceState::Locked`] with
+    /// `first_use`, set the password it is created with. `remember` files the password in the OS
+    /// keychain so the next run opens it without asking; `false` also forgets one filed before.
+    /// Answered with [`Message::KbPasswordAnswer`] to the asker and, on success,
+    /// [`Message::KbSourceChanged`] `Ready` to every window.
+    UnlockKbSource {
+        project_id: ProjectId,
+        source: KbSourceId,
+        password: Secret,
+        remember: bool,
+    },
+    /// Replace a protected wiki's password, re-encrypting every document under the new one. `old`
+    /// is required even when the wiki is open — the keychain having it is not the person knowing
+    /// it. Answered with [`Message::KbPasswordAnswer`].
+    ChangeKbPassword {
+        project_id: ProjectId,
+        source: KbSourceId,
+        old: Secret,
+        new: Secret,
+        remember: bool,
+    },
+
+    // ── Knowledge-base family: host → UI ────────────────────────────
+    /// The configuration, and what the host knows about each source now. Sent in answer to
+    /// [`Message::KbSources`] and to [`Message::SetKbSources`], so a settings form that saved and an
+    /// explorer that asked land on the same record.
+    KbSourcesListed {
+        project_id: ProjectId,
+        sources: Vec<KbSourceStatus>,
+    },
+    /// One source's state changed on its own — a clone started, got somewhere, finished or failed.
+    KbSourceChanged {
+        project_id: ProjectId,
+        source: KbSourceId,
+        state: KbSourceState,
+    },
+    /// `rel_path` first, then every directory listed below it, filtered by the source's own globs.
+    /// Both the source and the path are echoed, for [`Message::ProjectTreeListing`]'s reason.
+    KbTreeListing {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        listings: Vec<DirListing>,
+    },
+    KbFileContents {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        contents: FileContents,
+    },
+    /// Something went wrong for one path in one source, on [`Message::ProjectFileError`]'s
+    /// reasoning: the interface can only mark the row the user is looking at if the message says
+    /// which one.
+    KbFileError {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        error: FileError,
+    },
+    /// Something under `rel_path` changed, so whoever is drawing that folder re-lists it.
+    /// `rel_path` names the *directory* to ask about, which is the parent of whatever was written
+    /// — [`Message::ProjectFilesChanged`]'s reasoning, narrowed to the one path a write or an edit
+    /// just touched rather than a watcher's whole batch.
+    KbChanged {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+    },
+    /// Answer to [`Message::AskKbPath`].
+    KbPath {
+        project_id: ProjectId,
+        source: KbSourceId,
+        rel_path: String,
+        path: String,
+    },
+    /// Answer to [`Message::UnlockKbSource`] and [`Message::ChangeKbPassword`], to the asker only.
+    /// `error` absent is accepted; present is the sentence to show under the password field — a
+    /// wrong password among them, which is a prompt to try again and never a lockout.
+    KbPasswordAnswer {
+        project_id: ProjectId,
+        source: KbSourceId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+
+    // ── The Archify family: host → UI ───────────────────────────────
+    // What an agent's diagram tools tell the windows. Both are broadcast and both carry the
+    // project, so a window that does not have it ignores them.
+    /// An agent created or rendered the diagram at `rel`: open it, or focus its tab, in the
+    /// diagram viewer.
+    ArchifyShow {
+        project_id: ProjectId,
+        rel: String,
+    },
+    /// A diagram tool ran: the tab's tool chip and the "fixed it" notice. `rel` is the diagram it
+    /// touched, when it touched one; `ok` is whether the call succeeded.
+    ArchifyToolCall {
+        project_id: ProjectId,
+        rel: Option<String>,
+        tool: String,
+        ok: bool,
+    },
+
+    // ── Browser family: UI → host ───────────────────────────────────
+    // The internal browser. Project-scoped like the knowledge-base family: every variant carries
+    // `project_id` and none a pane — a browser tab is an editor tab, named by the opaque `tab`
+    // string the window hands out, never a pseudo-terminal.
+    /// Send this project's history to the asker, as [`Message::BrowserHistory`].
+    BrowserHistoryGet {
+        project_id: ProjectId,
+    },
+    /// A page finished loading: record the visit. Answered with [`Message::BrowserHistory`] to
+    /// every window.
+    BrowserHistoryAdd {
+        project_id: ProjectId,
+        url: String,
+        title: String,
+    },
+    /// Forget this project's history. Answered with an empty [`Message::BrowserHistory`] to every
+    /// window.
+    BrowserHistoryClear {
+        project_id: ProjectId,
+    },
+    /// The window's answer to a [`Message::BrowserCommand`]: the command's JSON result, or a
+    /// sentence the agent reads as the tool's error. The first reply for a `req_id` wins; any
+    /// other is dropped. `project_id` is the command's own, echoed so a window attached to several
+    /// hosts routes it back to the one that asked.
+    BrowserReply {
+        project_id: ProjectId,
+        req_id: BrowserReqId,
+        result: Result<String, String>,
+    },
+
+    // ── Browser family: host → UI ───────────────────────────────────
+    /// One project's history, most recent first, at most [`crate::browser::HISTORY_CAP`] rows.
+    /// To the asker for a [`Message::BrowserHistoryGet`], to every window after any change.
+    BrowserHistory {
+        project_id: ProjectId,
+        entries: Vec<BrowserHistoryEntry>,
+    },
+    /// An agent's `kubiq-browser` tool call, for one window to carry out: the window owning the
+    /// calling agent's conversation or pane, else one window that has the project open. Answered
+    /// with exactly one [`Message::BrowserReply`] naming the same `req_id`, within
+    /// [`crate::browser::BROWSER_TIMEOUT_SECS`].
+    BrowserCommand {
+        project_id: ProjectId,
+        req_id: BrowserReqId,
+        cmd: BrowserCmd,
+    },
+
+    // ── Database family: UI → host ──────────────────────────────────
+    // A project's saved connections and what is behind them. Every variant carries `project_id` —
+    // the knowledge-base family's discipline — and none carries a pane: the objects are named by
+    // `DbConnId`, `DbSessionId` and `DbQueryId`. A table or SQL write travels as a structure
+    // (`TableRef` plus fragments, `RowEdit`s) and never as rendered SQL, so the host is
+    // authoritative; only the SQL editor sends text, because the text is the user's input.
+    /// What this project's connections are. Answered with [`Message::DbConnectionsListed`].
+    DbConnections {
+        project_id: ProjectId,
+    },
+    /// Create (`id` absent — the host mints one) or edit a connection. `config.password` is always
+    /// `None`; the password rides `password`. `remember: false` keeps a typed password in the
+    /// host's memory for the run. Answered with [`Message::DbConnectionsListed`].
+    SaveDbConnection {
+        project_id: ProjectId,
+        id: Option<DbConnId>,
+        config: Box<ConnectionConfig>,
+        password: SecretEdit,
+        remember: bool,
+        /// `None` keeps what is saved.
+        agent: Option<DbAgentSettings>,
+        /// The SSH profile to tunnel through, by reference; `None` is a direct connection. Always
+        /// the whole choice, unlike `agent`: the form that saves is the form that picks it.
+        #[serde(default)]
+        ssh: Option<SshProfileId>,
+    },
+    /// What shared query editors this project has. Answered with [`Message::DbEditorsListed`].
+    DbEditors {
+        project_id: ProjectId,
+    },
+    /// The user edited a shared query editor's text. `base_rev` is the `rev` the edit started
+    /// from. Answered with [`Message::DbEditorChanged`].
+    DbEditorEdit {
+        project_id: ProjectId,
+        session: DbSessionId,
+        text: String,
+        base_rev: u64,
+    },
+    /// Remove a connection; its sessions close and its sealed password goes. Answered with
+    /// [`Message::DbConnectionsListed`].
+    DeleteDbConnection {
+        project_id: ProjectId,
+        id: DbConnId,
+    },
+    /// Try a configuration without saving it. `id` and `Keep` mean the saved password, used
+    /// host-side. Answered with [`Message::DbTested`].
+    TestDbConnection {
+        project_id: ProjectId,
+        probe: DbProbeId,
+        id: Option<DbConnId>,
+        config: Box<ConnectionConfig>,
+        password: SecretEdit,
+        /// The SSH profile the Test tunnels through, as the form has it now; `None` dials direct.
+        #[serde(default)]
+        ssh: Option<SshProfileId>,
+    },
+    /// The password for a connection that answered [`DbConnState::NeedsPassword`]. Answered with
+    /// [`Message::DbConnectionState`].
+    DbPassword {
+        project_id: ProjectId,
+        conn: DbConnId,
+        password: Secret,
+        remember: bool,
+    },
+    /// The children of one node of a connection's structure tree. Answered with
+    /// [`Message::DbTreeListing`].
+    DbTree {
+        project_id: ProjectId,
+        conn: DbConnId,
+        node: DbNode,
+    },
+    /// One page of a table. `filter` and `order_by` are the WHERE and ORDER BY fragments, validated
+    /// host-side. `count` also asks for the exact row count. Answered with
+    /// [`Message::DbTablePageResult`].
+    DbTablePage {
+        project_id: ProjectId,
+        conn: DbConnId,
+        session: DbSessionId,
+        query: DbQueryId,
+        table: Box<TableRef>,
+        filter: String,
+        order_by: String,
+        limit: u32,
+        offset: u64,
+        count: bool,
+        read_only: bool,
+    },
+    /// Run SQL. `statements` are already split; `database` selects the session's current database
+    /// first. Answered with one [`Message::DbQueryResult`] per statement.
+    DbQuery {
+        project_id: ProjectId,
+        conn: DbConnId,
+        session: DbSessionId,
+        query: DbQueryId,
+        database: Option<String>,
+        statements: Vec<String>,
+        run: DbRun,
+        opts: DbRunOptions,
+    },
+    /// Apply a batch of row edits in one transaction. Answered with [`Message::DbEditsApplied`].
+    DbApplyEdits {
+        project_id: ProjectId,
+        conn: DbConnId,
+        session: DbSessionId,
+        query: DbQueryId,
+        table: Box<TableRef>,
+        edits: Vec<RowEdit>,
+    },
+    /// Stop a running statement. Answers nothing: the running reply ends `Cancelled`.
+    DbCancel {
+        project_id: ProjectId,
+        session: DbSessionId,
+        query: DbQueryId,
+    },
+    /// Close a table or SQL tab's session. Answers nothing.
+    DbCloseSession {
+        project_id: ProjectId,
+        session: DbSessionId,
+    },
+    /// Drop every session of a connection. Answered with [`Message::DbConnectionState`].
+    DbDisconnect {
+        project_id: ProjectId,
+        conn: DbConnId,
+    },
+    /// Create an empty SQLite database at a host path the host-browse picker chose. Answered with
+    /// [`Message::DbFileCreated`] or [`Message::DbFileError`].
+    CreateDbFile {
+        project_id: ProjectId,
+        path: String,
+    },
+    /// A connection's structure as DBML, on the window's tree session. `database` `None` is the
+    /// session's current one; `scope` narrows it to one schema or to some tables. Read-only.
+    /// Answered with [`Message::DbDbmlReady`].
+    DbExportDbml {
+        project_id: ProjectId,
+        conn: DbConnId,
+        request: DbExportId,
+        database: Option<String>,
+        scope: StructureScope,
+    },
+
+    // ── Database family: host → UI ──────────────────────────────────
+    /// The connections, and whether this install can seal a password. Sent to every window of the
+    /// project, as [`Message::KbSourcesListed`] is, so a settings form and an explorer agree.
+    DbConnectionsListed {
+        project_id: ProjectId,
+        connections: Vec<DbConnection>,
+        keystore: DbKeystore,
+    },
+    /// Answer to [`Message::TestDbConnection`]: the server's version string, or why not.
+    DbTested {
+        project_id: ProjectId,
+        probe: DbProbeId,
+        result: Result<String, DbFailure>,
+    },
+    /// Where a connection stands. Sent to every window of the project.
+    DbConnectionState {
+        project_id: ProjectId,
+        conn: DbConnId,
+        state: DbConnState,
+    },
+    /// Answer to [`Message::DbTree`]; `node` is echoed so the interface files it where it asked.
+    DbTreeListing {
+        project_id: ProjectId,
+        conn: DbConnId,
+        node: DbNode,
+        result: Result<DbListing, DbFailure>,
+    },
+    /// Answer to [`Message::DbTablePage`].
+    DbTablePageResult {
+        project_id: ProjectId,
+        session: DbSessionId,
+        query: DbQueryId,
+        result: Result<Box<DbPage>, DbFailure>,
+        elapsed_ms: u64,
+    },
+    /// Answer to one statement of [`Message::DbQuery`]. `index` is its place in `statements`;
+    /// `last` marks the final reply of the run (a failure ends the run early and is `last`).
+    DbQueryResult {
+        project_id: ProjectId,
+        session: DbSessionId,
+        query: DbQueryId,
+        index: u32,
+        last: bool,
+        result: Result<Box<DbOutcome>, DbFailure>,
+        elapsed_ms: u64,
+    },
+    /// Answer to [`Message::DbApplyEdits`]: the rows changed, or the statement that rolled the batch
+    /// back.
+    DbEditsApplied {
+        project_id: ProjectId,
+        session: DbSessionId,
+        query: DbQueryId,
+        result: Result<u64, DbEditFailure>,
+    },
+    /// Answer to [`Message::DbExportDbml`], to the asker: the DBML text, or why not.
+    DbDbmlReady {
+        project_id: ProjectId,
+        conn: DbConnId,
+        request: DbExportId,
+        result: Result<String, DbFailure>,
+    },
+    /// Answer to [`Message::CreateDbFile`].
+    DbFileCreated {
+        project_id: ProjectId,
+        path: String,
+    },
+    DbFileError {
+        project_id: ProjectId,
+        path: String,
+        message: String,
+    },
+    /// Answer to [`Message::DbEditors`]: every shared query editor of the project.
+    DbEditorsListed {
+        project_id: ProjectId,
+        editors: Vec<DbEditor>,
+    },
+    /// A shared query editor was created or changed (by an agent or by [`Message::DbEditorEdit`]).
+    /// `reveal` asks the window to open or show its tab.
+    DbEditorChanged {
+        project_id: ProjectId,
+        editor: Box<DbEditor>,
+        reveal: bool,
+    },
+    /// An agent runs statements in a shared editor's session. The results follow as
+    /// [`Message::DbQueryResult`] for the same `session` and `query`, to everyone.
+    DbAgentRun {
+        project_id: ProjectId,
+        session: DbSessionId,
+        query: DbQueryId,
+        statements: Vec<String>,
+    },
+
+    // ── Work family: UI → host ──────────────────────────────────────
+    // Every variant here is addressed by `project_id`, because the work belongs to a project: its
+    // tasks are written down under that project's own directory, and its sessions and agents are
+    // minted per project. A task id alone would not say which store to write.
+    //
+    // Nothing in this family is broadcast. A project is open in exactly one window at a time, so
+    // the window that asked is the only one drawing that project's work — the file family's rule,
+    // for the file family's reason.
+    /// Every session, agent and task the host holds for one project. Answered with
+    /// [`Message::WorkList`], which carries all three at once: two round trips would let the board
+    /// draw a card naming a session it has not heard of.
+    ListWork {
+        project_id: ProjectId,
+    },
+    /// Name a task. It lands in the backlog, unprioritised, direct and with no steps, because that
+    /// is everything known at the moment it is named.
+    CreateTask {
+        project_id: ProjectId,
+        title: String,
+        session: Option<SessionId>,
+    },
+    /// Change what a task *is*. Display only, like [`Message::UpdateProject`]: it touches nothing
+    /// outside the record and cannot be refused for anything but a task that is not there.
+    UpdateTask {
+        project_id: ProjectId,
+        task_id: TaskId,
+        title: Option<String>,
+        description: Option<String>,
+        priority: Option<Priority>,
+    },
+    /// Set one of a task's optional facts, or clear it.
+    ///
+    /// One variant carrying a field rather than a field per fact on [`Message::UpdateTask`], for
+    /// the reason [`Message::AssignTask`] gives: absent and cleared are different answers, and
+    /// `Option<Option<Shape>>` inside an update is a wire type nobody should have to read. Each
+    /// arm's `None` is the cleared state, and the whole set is the task's optional half — the
+    /// facts a task can perfectly well not have.
+    SetTaskField {
+        project_id: ProjectId,
+        task_id: TaskId,
+        field: TaskField,
+    },
+    /// Move a task to another column, and to a place in it.
+    ///
+    /// Its own variant rather than a field on [`Message::UpdateTask`], because a column is a stage:
+    /// moving a card changes where the work has got to and nothing else about it.
+    MoveTask {
+        project_id: ProjectId,
+        task_id: TaskId,
+        status: Status,
+        /// Put it immediately before this task; `None` is the end of the column.
+        ///
+        /// An id rather than [`Message::MoveStep`]'s index, because the board filters and a step
+        /// list does not: an index into what the user can see is wrong by however many hidden
+        /// cards of that status sit above it. An anchor needs no clamping either, and one naming
+        /// a task the host no longer holds lands at the end of the column rather than being
+        /// refused — a card deleted mid-drag is not a reason to refuse the drag.
+        before: Option<TaskId>,
+    },
+    /// Hand a task to a session, or take it back. Absent is a task nobody has started.
+    ///
+    /// Its own variant because it names another entity, will be fallible the day sessions are real,
+    /// and because `Option<Option<SessionId>>` inside an update is a wire type nobody should have
+    /// to read.
+    AssignTask {
+        project_id: ProjectId,
+        task_id: TaskId,
+        session: Option<SessionId>,
+    },
+    /// Drop a task. Unlike [`Message::ForgetProject`] this really deletes: there is nothing left
+    /// behind for it to point at.
+    DeleteTask {
+        project_id: ProjectId,
+        task_id: TaskId,
+    },
+    /// Move every `Done` or `Abandoned` task — a mission's anchor excepted — out of the live list
+    /// and into the project's paged archive (`T-190`).
+    ///
+    /// Its own variant rather than a `TaskField` or a second `DeleteTask` shape: nothing here names
+    /// a task, because which ones qualify is the host's question to answer, not the window's to
+    /// enumerate and send one at a time. An archived task is answered exactly as a deleted one is —
+    /// [`Message::TaskDeleted`], once per task — because the panel's rule is the same either way:
+    /// stop drawing it. The archive itself is never read back on this wire; browsing, searching or
+    /// restoring what it holds is unbuilt (`backlog.md`).
+    ArchiveTasks {
+        project_id: ProjectId,
+    },
+    AddStep {
+        project_id: ProjectId,
+        task_id: TaskId,
+        title: String,
+    },
+    RenameStep {
+        project_id: ProjectId,
+        task_id: TaskId,
+        step_id: StepId,
+        title: String,
+    },
+    RemoveStep {
+        project_id: ProjectId,
+        task_id: TaskId,
+        step_id: StepId,
+    },
+    /// Reorder one step. `to` is the place it should end up in, clamped by the host.
+    MoveStep {
+        project_id: ProjectId,
+        task_id: TaskId,
+        step_id: StepId,
+        to: usize,
+    },
+    /// Tick or untick a step.
+    ///
+    /// A toggle rather than a target state, because "unticking lands on idle, because nothing here
+    /// can know what its owner would go back to doing" is a rule about the work and so is the
+    /// host's to keep.
+    ToggleStep {
+        project_id: ProjectId,
+        task_id: TaskId,
+        step_id: StepId,
+    },
+    /// Leave a comment on a task. The host stamps the author as the user: a comment's author is
+    /// who wrote it, not a field the writer sets (`D121`).
+    AddComment {
+        project_id: ProjectId,
+        task_id: TaskId,
+        text: String,
+    },
+    /// Move an agent's card into another task's outline, or out of every one.
+    ///
+    /// Where a card *sits* is the interface's own fact and never crosses; which task it *serves* is
+    /// the host's, even while the agent is a mock.
+    AssignAgent {
+        project_id: ProjectId,
+        agent_id: AgentId,
+        task_id: Option<TaskId>,
+    },
+    /// Put a line in an agent's thread. Nothing answers it, and the reply is the agent record with
+    /// one more turn on it — inventing a response is the one thing a screen with no live agent must
+    /// not draw.
+    SendToAgent {
+        project_id: ProjectId,
+        agent_id: AgentId,
+        text: String,
+    },
+    /// One work message, aimed at a named board instead of the project's default one (`T-360`).
+    /// **Both directions**: the host answers a board's work in the same envelope, so a
+    /// [`Message::WorkList`], `TaskCreated`, `TaskChanged`, `TaskDeleted` or `WorkError` that
+    /// arrives inside one is about `board` and never about the default board.
+    ///
+    /// An envelope rather than a `board` field on every work variant, so the default board's wire
+    /// and every existing sender stay exactly as they were. The host accepts inside it only the
+    /// task-editing variants — `ListWork`, `CreateTask`, `UpdateTask`, `SetTaskField` (never a
+    /// `Level`), `MoveTask`, `AssignTask`, `DeleteTask`, `ArchiveTasks`, the step variants and
+    /// `AddComment` — and refuses the rest with a wrapped `WorkError`: missions, agents, plans and
+    /// task sync are the default board's alone. A [`BoardId::DEFAULT`] envelope is the bare message.
+    OnBoard {
+        board: BoardId,
+        message: Box<Message>,
+    },
+    /// A project's boards. Answered with [`Message::Boards`].
+    ListBoards {
+        project_id: ProjectId,
+    },
+    /// Add a named board, enabled and empty. Its id is a slug of `name`, made unique in the
+    /// project. Answered with [`Message::Boards`].
+    CreateBoard {
+        project_id: ProjectId,
+        name: String,
+    },
+    /// Show or hide a named board. The default board cannot be disabled. A disabled board keeps its
+    /// tasks and still answers an [`Message::OnBoard`]; hiding it is the interface's to do.
+    SetBoardEnabled {
+        project_id: ProjectId,
+        board: BoardId,
+        enabled: bool,
+    },
+    /// Remove a named board and its file. Refused with [`Message::WorkError`] while the board holds
+    /// any task, live or archived, and always for the default board.
+    DeleteBoard {
+        project_id: ProjectId,
+        board: BoardId,
+    },
+
+    // ── Work family: host → UI ──────────────────────────────────────
+    /// A project's boards, the default one first. Sent to every window — after `ListBoards` and
+    /// after every change to the list — because every window showing the project draws its tabs.
+    Boards {
+        project_id: ProjectId,
+        boards: Vec<BoardInfo>,
+    },
+    /// One project's work, whole. The graph needs all three lists in the same frame.
+    WorkList {
+        project_id: ProjectId,
+        sessions: Vec<WorkSession>,
+        agents: Vec<WorkAgent>,
+        tasks: Vec<TaskRecord>,
+    },
+    /// The task that was just made, carrying the id the interface could not have known.
+    TaskCreated {
+        project_id: ProjectId,
+        task: TaskRecord,
+    },
+    /// The task as it now is, whole rather than as a diff — [`Message::ProjectChanged`]'s
+    /// discipline, which is what makes the interface's projection idempotent by replacing on id.
+    TaskChanged {
+        project_id: ProjectId,
+        task: TaskRecord,
+    },
+    TaskDeleted {
+        project_id: ProjectId,
+        task_id: TaskId,
+    },
+    /// Boxed, and it is the one payload in the set that is: a [`WorkAgent`] is the widest record
+    /// here by some way, and an unboxed one makes every message on the bus as wide as it —
+    /// including the terminal chunks on the hot path. Nothing about the wire form changes.
+    AgentChanged {
+        project_id: ProjectId,
+        agent: Box<WorkAgent>,
+    },
+    /// Something went wrong for one task, or for a project's work as a whole when the id is absent.
+    ///
+    /// The error is a sentence rather than an enum, unlike [`FileError`]: an enum earns its keep
+    /// when each arm is a different thing for the interface to do, and every failure here — no such
+    /// project, no such task, no such step, a store that will not write — comes down to saying so
+    /// once, where the user is looking.
+    WorkError {
+        project_id: ProjectId,
+        task_id: Option<TaskId>,
+        error: String,
+    },
+
+    // ── Plan family: UI → host ────────────────────────────────────────
+    // **Every variant here names a [`DocumentHandle`] and nothing else.** The family annotates a
+    // task's plan and an ordinary markdown file in the project's tree through the same messages,
+    // the same host-side block matcher and the same orphaning rule; the handle is the only thing
+    // that says which, and where the body and its sidecar sit is the host's answer to it. The
+    // names stayed `Plan*` because the records they carry are ([`PlanBlock`], [`PlanRevision`],
+    // [`PlanChangedRegion`]) and renaming half a vocabulary is not what makes a document generic.
+    //
+    // A **plan** belongs to any task carrying a [`crate::work::Level`] — not to ordinary tasks,
+    // and not to some special mission subtype. The host refuses every variant here for a task
+    // whose `level` is `None`, with [`Message::PlanError`], the same posture
+    // [`Message::WorkError`] already takes with a task that is not there at all. It is stored at
+    // `<config root>/projects/<ProjectId>/plans/<TaskId>.md`, beside `tasks.toml` and `kb.toml`
+    // rather than inside either — a plan is markdown, long, and edited on its own schedule, and
+    // putting it inside `tasks.toml` would mean every checkbox tick on the board rewrites the plan
+    // too.
+    //
+    // A **file** document is the project's own markdown, annotated in place: the body is the file
+    // itself and the sidecar is `<file>.md.annotation.json` beside it, inside the repository. The
+    // host refuses a path that is not markdown and one that does not land inside the project.
+    /// Read a document. Answered with [`Message::Plan`], carrying an empty body for one that does
+    /// not exist yet — a mission nobody has planned is not an error, the same way a project with
+    /// no tasks yet is not.
+    LoadPlan {
+        doc: DocumentHandle,
+    },
+    /// Replace a task's plan, whole. There is no partial edit on the wire: the body is markdown a
+    /// human or an agent rewrites in full, the same discipline [`Message::UpdateTask::description`]
+    /// already keeps.
+    ///
+    /// **This message is what makes a save a human's.** It carries no origin field and must never
+    /// grow one: only the interface sends it, so the host stamps
+    /// [`crate::plan::SaveOrigin::Human`] on arrival and an agent has no way to ask for the other
+    /// stamp. The agent's path is `kubiq-plan`'s `write_plan`, which never becomes this message.
+    ///
+    /// **`expected` is mandatory and there is no force flag** — [`Message::WriteHostFile`]'s
+    /// discipline, for the same reason: the host is the arbiter of a race, not the window. It is
+    /// the revision this body was written against, and the save is refused with
+    /// [`Message::PlanConflict`] unless the plan still stands there. A user who has been shown
+    /// whose copy they are about to replace and asked again does not get a flag that skips the
+    /// check; the second press names the revision the host has since stated, so **every save on
+    /// the wire names the revision it truly expects** and a third save landing between the
+    /// question and the answer is refused as well.
+    ///
+    /// `0` is the watermark of a plan whose body has never been written, so a first save names it
+    /// and is refused if somebody wrote one first.
+    SavePlan {
+        doc: DocumentHandle,
+        body: String,
+        expected: PlanRevision,
+    },
+    /// Delete a task's plan. Not an error when there was none — the same posture
+    /// [`Message::DeleteKbEntry`] takes: asking for an absent thing to be gone is already
+    /// satisfied.
+    ///
+    /// **A file document is refused**: the body is the user's own file, and a message that
+    /// annotates it may not be the one that deletes it. Only a plan — a document Kubiq brought into
+    /// being under its own root — can be dropped this way.
+    DeletePlan {
+        doc: DocumentHandle,
+    },
+    /// Write a copy of a task's plan into the project's own working tree, at a project-relative
+    /// path — an explicit, one-shot action the user asks for, never a continuous mirror and never
+    /// written to on a save the user did not request. `rel_path` is resolved and refused the way
+    /// [`Message::WriteProjectFile`]'s is; the folders it names are created, the way a save-as's
+    /// are, because the export is what brings the file into being.
+    ExportPlan {
+        doc: DocumentHandle,
+        rel_path: String,
+    },
+    /// Every annotation on a task's plan, open, resolved and orphaned alike. Answered with
+    /// [`Message::PlanAnnotations`]; the filtering is the interface's, because a panel that hides
+    /// resolved threads still has to be able to show them on a toggle without a second round trip.
+    ListPlanAnnotations {
+        doc: DocumentHandle,
+        /// The surface is opening the document rather than refreshing it: the host forgets the
+        /// document's lineage codes and mints them flat again (`D208`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        open: bool,
+    },
+    /// Open an annotation on one block of a task's plan.
+    ///
+    /// `block_id` comes from the block index the last [`Message::SavePlan`] assigned — the
+    /// interface never mints one — and an id no longer in the plan is refused with
+    /// [`Message::PlanError`] rather than creating an annotation that is orphaned on arrival.
+    /// `quote` is the passage inside the block the user selected, where the surface had one to
+    /// give; a whole-block annotation leaves it absent.
+    AnnotatePlan {
+        doc: DocumentHandle,
+        block_id: BlockId,
+        quote: Option<String>,
+        text: String,
+        /// Flags to stand on the new thread from the start.
+        #[serde(default)]
+        marks: Vec<AnnotationMark>,
+        /// `Some(Agent)` addresses the opening comment to an agent, and sets the `Agent` mark.
+        #[serde(default)]
+        to: Option<Addressee>,
+    },
+    /// A window merged a file that moved on disk into a buffer holding an unsaved edit, and kept
+    /// the user's words where both sides changed the same ones (`D208`). Each conflict carries the
+    /// other side's version of the passage, and the host posts it as a thread on the passage's
+    /// block so nothing the other writer wrote is lost.
+    ///
+    /// **The host checks the claim against the disk rather than trusting it**: a conflict whose
+    /// `theirs` is not in the body as it now stands is dropped. The thread's author is the
+    /// document's last saver as provenance records it — `Agent` when an agent's write is what
+    /// moved it — so a window never stamps an agent's name on text of its own (`D121`).
+    DocMergeConflicts {
+        doc: DocumentHandle,
+        conflicts: Vec<crate::merge::Conflict>,
+    },
+    /// Append to an annotation's thread.
+    ReplyToAnnotation {
+        doc: DocumentHandle,
+        annotation_id: AnnotationId,
+        text: String,
+        #[serde(default)]
+        to: Option<Addressee>,
+    },
+    /// Set or clear one mark on an annotation.
+    MarkAnnotation {
+        doc: DocumentHandle,
+        annotation_id: AnnotationId,
+        mark: AnnotationMark,
+        on: bool,
+    },
+    /// Colour blocks, or clear their colour with `None`. Independent of threads.
+    SetBlockHighlight {
+        doc: DocumentHandle,
+        block_ids: Vec<BlockId>,
+        colour: Option<HighlightColour>,
+    },
+    /// Close an annotation, or reopen one. **Anyone may resolve an annotation, including an
+    /// agent** — a planning assistant that answers a comment can close it — so there is no author
+    /// check here and no author on the wire; the host stamps the comments and nothing else.
+    ResolveAnnotation {
+        doc: DocumentHandle,
+        annotation_id: AnnotationId,
+        resolved: bool,
+    },
+    /// Where a task's plan has been edited since a revision, and by how much. Answered with
+    /// [`Message::PlanChanges`].
+    ///
+    /// The one message in the family that reads the edit-provenance layer. It exists so the
+    /// editor can decorate the lines a human changed since the agent last wrote — the same
+    /// question `kubiq-plan`'s `plan_changes` tool answers for an agent, over the same records, so
+    /// the two can never disagree about what changed.
+    ///
+    /// `since_revision` absent means "since the beginning", which for a plan with any history is
+    /// every line that was ever written and is a deliberate, boring answer rather than an error.
+    ListPlanChanges {
+        doc: DocumentHandle,
+        since_revision: Option<PlanRevision>,
+    },
+    /// Replace the text of one comment on an annotation's thread, and stamp its `edited_at`.
+    /// **Only a user-authored comment may be edited** — an agent's words are never rewritten by
+    /// the window — so the host refuses an agent's comment with [`Message::PlanError`]. Answered
+    /// like every mutation in the family. An edit is not a new comment and is never queued for an
+    /// agent.
+    EditAnnotationComment {
+        doc: DocumentHandle,
+        annotation_id: AnnotationId,
+        comment_id: CommentId,
+        text: String,
+    },
+    /// Bind the document to an agent, move it to another, or unbind it with `None` (`D207`). Kept
+    /// in the sidecar; answered like every mutation in the family, so the new
+    /// [`Message::PlanAnnotations::binding`] is what the window reads back. Unbinding drops that
+    /// document's threads from the old agent's doc queue.
+    SetDocAgent {
+        doc: DocumentHandle,
+        agent_id: Option<AgentId>,
+    },
+    /// Turn auto-send on or off for the document: with it on, every user annotation or reply is
+    /// queued for the bound agent, not only the ones addressed to it.
+    SetDocAutoSend {
+        doc: DocumentHandle,
+        auto_send: bool,
+    },
+    /// The manual "ask the agent" button: queue threads of the document for its bound agent now.
+    /// `annotation_ids` empty means every open thread whose last comment is the user's. Refused
+    /// with [`Message::PlanError`] for a document with no agent bound. The host answers with
+    /// [`Message::DocAgentQueue`].
+    AskDocAgent {
+        doc: DocumentHandle,
+        #[serde(default)]
+        annotation_ids: Vec<AnnotationId>,
+    },
+
+    // ── Plan family: host → UI ──────────────────────────────────────
+    /// A task's plan, whole — the answer to [`Message::LoadPlan`] and [`Message::SavePlan`] alike,
+    /// on [`Message::TaskChanged`]'s discipline of answering with the current whole rather than a
+    /// diff. Sent only to whoever asked: the body can be long, and every other window hears
+    /// [`Message::PlanChanged`] instead and asks again if it still cares.
+    ///
+    /// `revision` is the watermark the reader holds on to. A caller that wants to know what
+    /// changed while it was away sends it back in [`Message::ListPlanChanges`]; a plan whose body
+    /// has never been written answers `0`, which is the watermark meaning "nothing yet".
+    Plan {
+        doc: DocumentHandle,
+        body: String,
+        revision: PlanRevision,
+    },
+    /// A task's plan is gone. Broadcast, on [`Message::TaskDeleted`]'s reasoning turned up one
+    /// notch: unlike a task, a plan may be open for reading in more than one window's viewer at
+    /// once, so every window is told rather than only the one that asked.
+    PlanDeleted {
+        doc: DocumentHandle,
+    },
+    /// The plan was written into the project's tree, at the path it was asked to go to.
+    PlanExported {
+        doc: DocumentHandle,
+        rel_path: String,
+    },
+    /// A task's plan changed by some route other than the window's own request — another window's
+    /// save, or an agent's `write_plan` call through `kubiq-plan`. Broadcast, carrying no body: a
+    /// window showing that plan re-asks with [`Message::LoadPlan`] rather than being sent content
+    /// it may not even have open, the same economy [`Message::KbChanged`] already banks.
+    ///
+    /// It does carry `revision` and `origin`, which are two scalars rather than content: a window
+    /// holding a watermark can tell from this alone whether the save was a person's or an agent's
+    /// and how far it has fallen behind, and decide whether re-asking is worth it. A window
+    /// hearing its *own* save echoed back reads the same two fields to recognise it.
+    PlanChanged {
+        doc: DocumentHandle,
+        revision: PlanRevision,
+        origin: SaveOrigin,
+    },
+    /// A task's annotations, whole — the answer to [`Message::ListPlanAnnotations`] and to every
+    /// mutation in the family alike, on [`Message::Plan`]'s own discipline of answering with the
+    /// current whole rather than a diff. Sent only to whoever asked; every other window hears
+    /// [`Message::PlanAnnotationsChanged`].
+    ///
+    /// The block index rides with it because a [`crate::ids::BlockId`] is the host's to assign: a
+    /// window annotating a passage has to be told which block that passage is, and an annotation
+    /// it already holds is unreadable without the block it names. `blocks` is in document order,
+    /// as of the last [`Message::SavePlan`].
+    PlanAnnotations {
+        doc: DocumentHandle,
+        blocks: Vec<PlanBlock>,
+        annotations: Vec<Annotation>,
+        #[serde(default)]
+        highlights: Vec<BlockHighlight>,
+        /// The agent the document is bound to and its auto-send switch, from the sidecar
+        /// (`D207`). Default — unbound, off — for a document nobody bound.
+        #[serde(default)]
+        binding: DocBinding,
+    },
+    /// A task's annotations changed by some route other than this window's own request — another
+    /// window's comment, an agent's reply through `kubiq-plan`, or a [`Message::SavePlan`] whose
+    /// block matching orphaned or re-anchored a thread. Broadcast, carrying nothing, on
+    /// [`Message::PlanChanged`]'s economy: a window showing that plan re-asks with
+    /// [`Message::ListPlanAnnotations`] if it still cares.
+    PlanAnnotationsChanged {
+        doc: DocumentHandle,
+    },
+    /// Where a task's plan changed since a watermark, and by how much — the answer to
+    /// [`Message::ListPlanChanges`]. Sent only to whoever asked: the regions carry the text
+    /// standing at those lines, so this is as long as the edits were.
+    ///
+    /// `regions` is in document order and describes the body **as it is now**, so a window can
+    /// decorate straight from it without re-deriving anything. It is empty when nothing changed
+    /// in the window, which is the ordinary case and not an error — `stats` then reads all zeroes
+    /// with `since_revision` equal to `revision`.
+    PlanChanges {
+        doc: DocumentHandle,
+        regions: Vec<PlanChangedRegion>,
+        stats: PlanChangeStats,
+    },
+    /// A [`Message::SavePlan`] was refused: the plan had already moved past the revision the save
+    /// named, so writing it would have replaced a copy its author never read. Sent only to whoever
+    /// asked, and **nothing was written** — the buffer is still theirs.
+    ///
+    /// Its own variant rather than a [`Message::PlanError`] sentence, because it is the one
+    /// failure in the family the interface does something other than report: it says where the
+    /// plan actually stands and who moved it there, which is exactly what the surface needs to ask
+    /// the overwrite question again and what the next save has to name to win. That is
+    /// [`Message::PlanError`]'s own test for when an enum — or here, a variant — earns its keep.
+    PlanConflict {
+        doc: DocumentHandle,
+        /// The revision the plan stands at now, and therefore what a save that means to replace it
+        /// has to name.
+        revision: PlanRevision,
+        /// Who moved it there, so the banner names an agent or a person rather than "somebody".
+        origin: SaveOrigin,
+    },
+    /// Something went wrong with one document, or with the family as a whole when `doc` is absent
+    /// — [`Message::WorkError`]'s own shape, for the reason it gives: every failure here comes
+    /// down to saying so once, where the user is looking.
+    ///
+    /// `project_id` rides beside `doc` rather than being read out of it, because the one failure
+    /// that has no document to name — a project the catalogue does not hold — still has to route
+    /// and still has to be reported against something.
+    ///
+    /// A stale save is **not** one of these: see [`Message::PlanConflict`].
+    PlanError {
+        project_id: ProjectId,
+        doc: Option<DocumentHandle>,
+        error: String,
+    },
+    /// Where one agent's doc queue stands (`D207`): the threads still waiting for it, and why.
+    /// Broadcast whenever the queue for that agent changes — a thread queued, the pending prompt
+    /// delivered (`pending` empty, `state` `Delivered`), or unbinding dropping threads. At most
+    /// one pending prompt exists per agent; `pending` is every thread it will carry.
+    DocAgentQueue {
+        project_id: ProjectId,
+        agent_id: AgentId,
+        pending: Vec<DocThreadRef>,
+        state: DocDelivery,
+    },
+    /// An agent tried to write, annotate, reply on or resolve a document bound to another agent,
+    /// through the MCP tools, and was refused (`D207`). Broadcast so a window can offer to
+    /// reassign the document to `requester` with [`Message::SetDocAgent`]. `requester_name` is
+    /// what the interface calls that agent, for the question.
+    DocOwnershipConflict {
+        doc: DocumentHandle,
+        requester: AgentId,
+        requester_name: String,
+        owner: AgentId,
+    },
+
+    // ── Mission family: UI → host ───────────────────────────────────
+    // **Every variant here names `(project_id, task_id)` directly**, unlike the plan family beside
+    // it, which keys off a [`DocumentHandle`]. A mission is not a document: it has no body, no
+    // sidecar and no placement to resolve, and the pair *is* its identity — a mission **is** its
+    // parent task ([`crate::mission`]), so there is no second id space to carry.
+    //
+    // The host refuses every variant here for a task that is not there or whose
+    // [`crate::work::Level`] is `None`, with [`Message::MissionError`] — the plan family's posture,
+    // for the plan family's reason.
+    //
+    // **Mutations broadcast, answers do not.** There is no per-project address on the bus
+    // (`bus::To` is one client or everyone), so [`Message::MissionChanged`] and
+    // [`Message::MissionDeleted`] go to every window and each filters by project itself — `D120`'s
+    // existing cost, followed rather than fixed. A [`Message::MissionList`], a
+    // [`Message::MissionHistory`] and a [`Message::MissionError`] go only to whoever asked, and a
+    // [`Message::MissionLaunch`] to exactly one client.
+    /// Every mission in one project, as snapshots. Answered with [`Message::MissionList`]. Creates
+    /// nothing.
+    ListMissions {
+        project_id: ProjectId,
+    },
+    /// Create a mission: the whole of the new-mission dialog in one message, and the host does
+    /// everything — the parent task, the children it adopts, the first plan and the planner's
+    /// launch, addressed to the asker.
+    CreateMission {
+        project_id: ProjectId,
+        mission: Box<NewMission>,
+    },
+    /// Set one of a mission's settings — [`Message::SetTaskField`]'s shape, one variant carrying a
+    /// field enum.
+    SetMissionField {
+        project_id: ProjectId,
+        task_id: TaskId,
+        field: MissionField,
+    },
+    /// Something the user does to the mission as a whole: approve the plan, start it, redo the
+    /// breakdown, pause or resume, replan, run the agent review, reject, complete, abandon, resume
+    /// the planner.
+    MissionControl {
+        project_id: ProjectId,
+        task_id: TaskId,
+        action: MissionAction,
+    },
+    /// Something the user does to one task of a mission. `task_id` is the **subtask**.
+    MissionTask {
+        project_id: ProjectId,
+        task_id: TaskId,
+        action: MissionTaskAction,
+    },
+    /// Add to the mission's guidance document. With `send_to_running` the text is also delivered to
+    /// every live worker.
+    AddGuidance {
+        project_id: ProjectId,
+        task_id: TaskId,
+        text: String,
+        send_to_running: bool,
+    },
+    /// A mission's history, newest first. Answered with [`Message::MissionHistory`] to the asker.
+    LoadHistory {
+        project_id: ProjectId,
+        task_id: TaskId,
+    },
+    /// What the window did with a [`Message::MissionLaunch`]. `task_id` is the mission.
+    ///
+    /// **Send this after the launch.** On [`LaunchOutcome::Launched`] the agent id must be one the
+    /// window has already minted and sent a [`Message::StartConversation`] (or a revive) for. An
+    /// `id` the host no longer holds is discarded.
+    MissionLaunched {
+        project_id: ProjectId,
+        task_id: TaskId,
+        id: SpawnId,
+        outcome: LaunchOutcome,
+    },
+    /// Something happened to `task_id` that the mission runner may care about.
+    ///
+    /// **The host's wake to itself, not the interface's message.** The runner runs on the
+    /// coordinator's own loop, with no thread and no timer, so the events it decides on have to
+    /// reach that loop — and the ones that come from an MCP tool (`use-task::change_state` is how a
+    /// worker finishes) land on the listener's thread instead. That thread says this into the
+    /// host's own inbox and the run loop does the deciding (`D138`).
+    ///
+    /// It names the **task**, not the mission: the sender does not have to know whether the task
+    /// is in one. A window may send it and nothing goes wrong, but nothing in the interface does.
+    MissionSchedule {
+        project_id: ProjectId,
+        task_id: TaskId,
+    },
+
+    // ── Mission family: host → UI ───────────────────────────────────
+    /// The host asks a window to launch an agent, because only a window can start a conversation.
+    ///
+    /// **`To::Client`, never broadcast**: one window launches, and a broadcast would have every
+    /// window with the project open start its own agent. The window resolves `definition` (or the
+    /// project's default for the role), starts or revives the conversation, assigns it, prompts it
+    /// and answers with [`Message::MissionLaunched`].
+    MissionLaunch {
+        project_id: ProjectId,
+        task_id: TaskId,
+        request: Box<LaunchRequest>,
+    },
+    /// A mission's history, **newest first**, whole (no paging), sent only to whoever asked.
+    MissionHistory {
+        project_id: ProjectId,
+        task_id: TaskId,
+        entries: Vec<HistoryEntry>,
+    },
+    /// One project's missions, whole — the answer to [`Message::ListMissions`], sent only to
+    /// whoever asked.
+    MissionList {
+        project_id: ProjectId,
+        missions: Vec<MissionSnapshot>,
+    },
+    /// A mission as it now is, whole rather than as a diff — [`Message::TaskChanged`]'s
+    /// discipline. Broadcast, and boxed for [`Message::AgentChanged`]'s reason: the snapshot is the
+    /// widest payload in this family and an unboxed one would widen every message on the bus.
+    MissionChanged {
+        project_id: ProjectId,
+        mission: Box<MissionSnapshot>,
+    },
+    /// A mission is gone — the task was deleted, or demoted. Broadcast, on
+    /// [`Message::PlanDeleted`]'s reasoning.
+    MissionDeleted {
+        project_id: ProjectId,
+        task_id: TaskId,
+    },
+    /// Something went wrong for one mission, or for a project's missions as a whole when the id is
+    /// absent — [`Message::WorkError`]'s own shape, for the reason it gives. A refused demotion is
+    /// one of these.
+    MissionError {
+        project_id: ProjectId,
+        task_id: Option<TaskId>,
+        error: String,
+    },
+
+    // ── Conversation family: UI → host ──────────────────────────────
+    /// Start a live agent: compose the harness, drive it over structured I/O, and stream what it
+    /// says back as [`Message::ConversationUpdate`].
+    ///
+    /// The sibling of [`Message::SpawnWorkspace`], and the other face of the same thing — a
+    /// workspace is either a terminal or a conversation, never both, because a child's stdout is
+    /// either a tty or a pipe. This one answers with an agent rather than a pane, which is why the
+    /// two are separate messages rather than a flag: nothing about a conversation has a size.
+    StartConversation {
+        /// Minted by the window rather than the host — the [`SessionId`] precedent — so a
+        /// conversation can be drawn, selected and given a loader before the harness that will
+        /// answer it exists. The host adopts this id rather than minting its own.
+        agent_id: AgentId,
+        project_id: ProjectId,
+        session_id: SessionId,
+        /// Where in the project it runs, absent for its root.
+        rel_path: Option<String>,
+        /// The library's harness id, from [`AgentTypeInfo`].
+        agent_type: String,
+        /// Which identity to run as, from [`AccountInfo`]. Absent falls back to whatever the
+        /// library resolves — the definition named `default`, or the user's own home.
+        ///
+        /// Chosen once, at the start, and never after: a turn already taken was taken as
+        /// somebody, and a conversation that changed identity halfway would be two
+        /// conversations wearing one transcript.
+        account: Option<String>,
+        /// Which saved setup to start from, from [`AgentDefinition`]. Absent is a bare start with
+        /// no definition at all. `account` above still wins where both name one — the definition is
+        /// the default, the pick is the user saying otherwise.
+        definition: Option<String>,
+        /// Which model to launch on, from [`Message::HarnessCatalogue`]. `None` or empty leaves
+        /// the harness on its own default. Outranks the definition's, the way a pick always does.
+        model: Option<String>,
+        /// Which reasoning-effort level, same convention as `model`.
+        thinking: Option<String>,
+        /// Which permission mode, from [`AgentTypeInfo::modes`], same convention.
+        mode: Option<String>,
+        /// The MCP servers to inject into this run, by [`McpInfo::name`], for a start that is
+        /// not from a saved definition — or that is overriding one. Empty is not "none of the
+        /// definition's": it is read the way `model`/`thinking`/`mode` are, a pick that stands on
+        /// its own rather than a diff against [`AgentDefinition::mcps`].
+        #[serde(default)]
+        mcps: Vec<String>,
+        /// The skills to make available to this run, by [`SkillInfo::id`], read the way `mcps` is:
+        /// a pick that stands on its own rather than a diff against
+        /// [`AgentDefinition::skills`].
+        #[serde(default)]
+        skills: Vec<String>,
+        /// The agent that asked for this one. It becomes [`crate::work::WorkAgent::parent`], which
+        /// the Teams spawn connector draws off. Always `None` from a mission launch.
+        ///
+        /// It is a fact about who asked, not about who the agent works for:
+        /// `Work::assign_agent` clears `parent` on every reassignment.
+        #[serde(default)]
+        spawned_by: Option<AgentId>,
+        /// Extra folders this one launch may write when isolation is on, on top of the
+        /// definition's own [`AgentDefinition::grants`] and the host-wide grants. Empty is the
+        /// normal case.
+        #[serde(default)]
+        grants: Vec<crate::settings::Grant>,
+        /// The saved remote this agent is bound to, by [`crate::settings::SavedRemoteHost::id`].
+        /// Set, the host injects the `kubiq-remote` MCP server — whose calls travel as
+        /// [`Message::RemoteToolCall`] naming this remote — and runs the harness in
+        /// `<project>/.kubiq/remote/<label>/`. Absent is an ordinary local agent.
+        #[serde(default)]
+        remote: Option<String>,
+    },
+    /// A turn. Nothing is appended by the sender: the line is drawn when it comes back as a
+    /// [`ConvUpdate::UserChunk`], which is what the harness actually received.
+    PromptAgent {
+        agent_id: AgentId,
+        text: String,
+    },
+    /// Interrupt the turn in flight. Every permission request still waiting is answered as
+    /// cancelled.
+    CancelTurn {
+        agent_id: AgentId,
+    },
+    /// Answer a [`ConvUpdate::PermissionRequest`], naming one of the options it carried.
+    AnswerPermission {
+        agent_id: AgentId,
+        request_id: String,
+        option_id: String,
+    },
+    /// An agent is asking the user something, through the `kubiq-ask` MCP server. Host to the one
+    /// window that owns the conversation, unsolicited: the tool call that raised it is parked
+    /// until [`Message::AnswerAsk`] comes back or the ask times out.
+    ///
+    /// Unlike a [`ConvUpdate::PermissionRequest`] this is not part of the harness's own protocol
+    /// and carries no tool call to hang itself under — it is raised by a tool the agent chose to
+    /// call, so it stands on its own in the transcript. See [`crate::ask`].
+    AskUser {
+        agent_id: AgentId,
+        ask_id: AskId,
+        questions: Vec<AskQuestion>,
+        /// Which of the dialogs raised together this one is, counting from one, and how many were
+        /// raised with it (`G362`). An agent may register several questions in a turn and they all
+        /// go up at the turn boundary; nothing reaches it until every one of them is answered, and
+        /// the dialog says so. `0`/`0` — the default, and what every ask raised on its own carries
+        /// — means there is no set to speak of and the dialog draws nothing extra.
+        #[serde(default)]
+        batch_at: usize,
+        #[serde(default)]
+        batch_of: usize,
+    },
+    /// What the user said, or that they would rather talk about it. One per ask: the host drops
+    /// an answer naming an ask it is no longer holding, so a dialog left open across a timeout
+    /// changes nothing.
+    AnswerAsk {
+        agent_id: AgentId,
+        ask_id: AskId,
+        outcome: AskOutcome,
+    },
+    /// An ask stopped waiting without the user ending it. Host to the owning window, so the
+    /// dialog and the transcript's entry stop offering an answer that can no longer land.
+    ///
+    /// **It travels both ways.** A window that cannot show an ask — it holds no conversation for
+    /// that agent, because the project was closed between the tool call and the push — sends this
+    /// back with [`AskClosed::Gone`], and the host frees the parked call there and then rather
+    /// than leaving the harness to wait out [`crate::ask::ASK_TIMEOUT_SECS`]. One message, because
+    /// it says one thing in both directions: nobody is going to answer this.
+    AskEnded {
+        agent_id: AgentId,
+        ask_id: AskId,
+        why: AskClosed,
+    },
+    /// Change a model, a mode, a thinking level — whatever the harness advertised under that id in
+    /// a [`ConvUpdate::ConfigOptions`]. One message for all of them, because upstream has one
+    /// mechanism for all of them.
+    SetAgentConfig {
+        agent_id: AgentId,
+        config_id: String,
+        value: String,
+    },
+    /// Stop the agent and clean up after it.
+    EndConversation {
+        agent_id: AgentId,
+    },
+    /// Kill the harness without ending the conversation. The transcript stays, the run directory
+    /// stays — seeded credentials included — and the same `agent_id` can be started again by
+    /// [`Message::ResumeConversation`] or by the next [`Message::PromptAgent`], exactly as a
+    /// conversation that has not launched yet is. [`Message::EndConversation`] is still what takes
+    /// everything with it.
+    UnloadConversation {
+        agent_id: AgentId,
+    },
+    /// Unload, without asking the harness first.
+    ///
+    /// [`Message::UnloadConversation`] asks the harness to shut down and waits for it to; a
+    /// harness that does not act on the ask is what makes that wait long. This kills its process
+    /// outright and reaps it, so the answer does not depend on the harness cooperating. Nothing
+    /// else differs: the transcript, the run directory and the `WorkAgent` all stay, the same
+    /// `agent_id` resumes exactly as after an unload, and the reply is the same
+    /// [`Message::ConversationUnloaded`] — so an interface has nothing new to handle. A turn in
+    /// flight is not stopped, it is lost; [`Message::CancelTurn`] is what interrupts one and
+    /// leaves the harness running.
+    AbortConversation {
+        agent_id: AgentId,
+    },
+    /// Start an unloaded conversation's harness again, under the same `agent_id`, with no prompt.
+    /// The launch recipe is the `PendingConversation` the agent has carried since it was created,
+    /// so this is the same launch a first [`Message::PromptAgent`] performs — only with no turn to
+    /// forward afterwards. A conversation that is already live is left alone.
+    ResumeConversation {
+        agent_id: AgentId,
+    },
+    /// Mark a conversation as one that outlives the window: its record and its run directory are
+    /// kept, and it comes back after a restart rather than being collected.
+    ///
+    /// Not folded into [`Message::SetAgentConfig`] because the two say different kinds of thing.
+    /// That message carries the harness's own config options — model, thinking, mode — under ids
+    /// the harness itself advertised, and the host forwards them without knowing what they mean.
+    /// This is Kubiq's own property of the conversation: the harness has never heard of it, has no
+    /// option id for it, and nothing about it reaches the child process.
+    SetConversationPersistent {
+        agent_id: AgentId,
+        persistent: bool,
+    },
+    /// Answer every permission this conversation's harness asks for with `allow`, in the host,
+    /// before the ask reaches a window.
+    ///
+    /// Not folded into [`Message::SetAgentConfig`], and **not the harness's own permission mode**,
+    /// for the reason [`Message::SetConversationPersistent`] is not: that message carries options
+    /// the harness advertised, under ids the harness chose, and the host forwards them without
+    /// knowing what they mean. This is Kubiq's own override laid on top of whatever mode the
+    /// harness is in — the harness has never heard of it, goes on asking exactly as before, and
+    /// only the answer changes. It therefore works the same way for every harness, including one
+    /// whose modes offer nothing like it.
+    ///
+    /// A request offering no allowing option is shown to the window as normal: the flag says which
+    /// answer to give, never that some answer must be invented.
+    SetConversationAcceptAll {
+        agent_id: AgentId,
+        accept_all: bool,
+    },
+    /// Give a conversation a new name, from a window that asked to. Written onto
+    /// [`WorkAgent::title`](crate::work::WorkAgent::title) on the host's live record and broadcast
+    /// as `AgentChanged`, so a rename shows up on every surface rather than only the one it was
+    /// typed into. [`WorkAgent::name`](crate::work::WorkAgent::name), the handle, is untouched.
+    ///
+    /// The host's naming pass writes the same field once, from its own idea of a title (and the
+    /// summary beside it), through the same `AgentChanged`; this is the user's, and it does not ask that pass to run again — a
+    /// conversation renamed by hand is not renamed a second time out from under the user once its
+    /// opening reply lands.
+    RenameConversation {
+        agent_id: AgentId,
+        name: String,
+    },
+    /// Write this conversation's traffic to a file — the harness's own frames and the bus messages
+    /// about it — for reading afterwards.
+    ///
+    /// Kubiq's own property of the conversation, on the same terms as
+    /// [`Message::SetConversationPersistent`]: nothing about it reaches the child process. It is
+    /// the process-wide tape narrowed to one agent and written from the first frame on, in the
+    /// same one-object-per-line shape [`crate::bus::Tape::dump`] writes, into the same folder.
+    ///
+    /// The path is reported back on [`WorkAgent::debug_dump`], which is how a window says where to
+    /// look.
+    SetConversationDebugDump {
+        agent_id: AgentId,
+        debug_dump: bool,
+    },
+    /// Bring a conversation back from its run directory — either the one it left behind, or a copy
+    /// of somebody else's.
+    ///
+    /// **The run directory *is* the conversation.** It holds the harness's own session store, so
+    /// resuming a session id inside a given directory is the whole of what "continue this
+    /// conversation" means. That is why one message covers both paths, and why the fork needs no
+    /// harness-specific support at all — copying a directory is something the filesystem does.
+    ///
+    /// - `source == agent_id` — **re-attach**. The harness resumes its own session in its own kept
+    ///   run directory, and the agent carries on where the last restart left it.
+    /// - `source != agent_id` — **fork**. The source's run directory is copied, and a new agent is
+    ///   launched in the copy with the same harness session id, so the two share every turn up to
+    ///   this point and diverge from the next one on. The source is untouched: it is not stopped,
+    ///   not unloaded and not modified.
+    ReviveConversation {
+        /// The conversation whose run directory is the starting point. Equal to `agent_id` for a
+        /// re-attach, different for a fork.
+        source: AgentId,
+        /// The agent the revived conversation runs as. Minted by the window, the way
+        /// [`Message::StartConversation`] mints one.
+        agent_id: AgentId,
+        project_id: ProjectId,
+        session_id: SessionId,
+        /// The saved remote to bind the revived conversation to, as
+        /// [`Message::StartConversation`]'s `remote` — the drone serving a project whose folder is
+        /// on a far machine. `None` keeps the binding the live recipe holds, if any (`G461`).
+        /// Additive, so `MESSAGE_SCHEMA` does not move.
+        #[serde(default)]
+        remote: Option<String>,
+    },
+
+    // ── Conversation family: host → UI ──────────────────────────────
+    /// The agent exists. Its record joins the project's work, so the sidebar and the graph find it
+    /// exactly as they find any other.
+    ConversationStarted {
+        project_id: ProjectId,
+        agent: Box<WorkAgent>,
+        /// The session the agent belongs to. It travels with the agent because a window's own
+        /// session is not one the work invented, and the sidebar lists agents *under* a session —
+        /// so an agent whose session nothing names is an agent nothing draws.
+        session: WorkSession,
+        /// Whether this harness takes anything after its first turn. A one-shot harness answers
+        /// `false`, and a composer that offered to send into it would be offering nothing — so
+        /// the capability travels with the agent rather than being discovered by a refusal.
+        accepts_input: bool,
+    },
+    /// One thing the agent said.
+    ///
+    /// A delta, not a record: a token stream cannot re-send a whole conversation, and `seq` is
+    /// what an interface checks to know it has missed nothing. Boxed for the reason
+    /// [`Message::AgentChanged`] is — an enum is as wide as its widest variant, and the terminal
+    /// chunks on the hot path share it.
+    ConversationUpdate {
+        agent_id: AgentId,
+        /// Per agent, monotonic, starting at one. Order is promised per agent and not across
+        /// them, on the same terms as a pane's output.
+        seq: u64,
+        update: Box<ConvUpdate>,
+        /// The harness's own line that produced this update — the ACP frame or the JSONL line —
+        /// where the bridge behind it keeps one. It is what the debug viewer draws beside the
+        /// message; nothing in the transcript reads it.
+        #[serde(default)]
+        raw: Option<String>,
+    },
+    /// The harness is gone. The transcript stays; the agent stops accepting turns.
+    ConversationEnded {
+        agent_id: AgentId,
+        stop_reason: StopReason,
+    },
+    /// The harness is gone and the conversation is not. It is back to the state a conversation has
+    /// before its first turn: the pickers return, and the next prompt — or a resume — starts a new
+    /// process.
+    ConversationUnloaded {
+        agent_id: AgentId,
+    },
+    /// [`Message::EndConversation`] answered: the conversation is gone, not merely ended — its
+    /// transcript, its run directory and its row all went with it. Unlike `ConversationEnded`,
+    /// which keeps the record so what was said stays readable, this is the one message that means
+    /// there is nothing left to show, so the window drops the conversation and detaches any chat
+    /// tab that was looking at it.
+    ConversationDeleted {
+        agent_id: AgentId,
+    },
+    /// The conversation could not be started, or its stream failed. A sentence, for the reason
+    /// [`Message::WorkError`] carries one.
+    ConversationError {
+        agent_id: AgentId,
+        error: String,
+    },
+    // ── Search family: UI → host ────────────────────────────────────
+    /// Start a content search across a project. One live search per project; a new one supersedes
+    /// the old, which is interrupted mid-file. The interface mints `search_id` and discards every
+    /// reply naming a search it is not holding.
+    SearchProject {
+        project_id: ProjectId,
+        search_id: SearchId,
+        query: Query,
+        scope: search::Scope,
+        /// What the search looks at, beside the query. Empty is the whole project.
+        filter: search::Filter,
+    },
+    /// Stop a running search. The flag is checked between files and between matched lines.
+    CancelSearch {
+        project_id: ProjectId,
+        search_id: SearchId,
+    },
+
+    // ── Search family: host → UI ────────────────────────────────────
+    /// A bounded batch of results. Flushed on whichever comes first: 64 files, 512 hits, or a
+    /// short interval. Batches arrive in the file walk's order, not sorted.
+    SearchMatches {
+        project_id: ProjectId,
+        search_id: SearchId,
+        batch: Batch,
+    },
+    /// How many files the walker has seen, so an empty result can be trusted — a search that
+    /// finds nothing and a search that has not started look identical without it.
+    SearchProgress {
+        project_id: ProjectId,
+        search_id: SearchId,
+        files_seen: usize,
+    },
+    /// The walk is done. `searched` names what was actually looked at — in v1, `File` only.
+    /// `truncated` is true when any ceiling was hit.
+    SearchFinished {
+        project_id: ProjectId,
+        search_id: SearchId,
+        searched: Vec<Source>,
+        truncated: bool,
+    },
+    /// The search itself failed — the root is gone, the query is bad, the walk refused.
+    SearchError {
+        project_id: ProjectId,
+        search_id: SearchId,
+        error: search::SearchError,
+    },
+
+    // ── Assist family: UI → host ────────────────────────────────────
+    /// Ask whether assistance can run here at all, answered with [`Message::Assist`]. A window
+    /// asks as it opens a control that would use it, because whether a model is there is a fact
+    /// about the host's machine and can change while a window is open.
+    GetAssist,
+    /// Ask for one suggestion. `subject` names what is being written and carries no prompt: the
+    /// prompt is the host's, which is what keeps it out of the interface and out of the bus tape.
+    /// The interface mints `suggest_id` and discards every reply naming one it is not holding.
+    Suggest {
+        suggest_id: SuggestId,
+        subject: SuggestSubject,
+    },
+    /// Give up on a suggestion. Best effort: the model may already be running, and a
+    /// [`Message::Suggestion`] for a cancelled id can still arrive — which is what the id is for.
+    CancelSuggest {
+        suggest_id: SuggestId,
+    },
+    /// List the configured API providers, answered with [`Message::AiProviders`]. Asked as a
+    /// settings page opens, because the host is the half that knows which of them has a key.
+    GetAiProviders,
+    /// Write a new provider. The host mints the id, files `key` in the OS secret store under it,
+    /// and answers with the whole list — a record whose key could not be stored is not written at
+    /// all, so a row on screen always has a key behind it.
+    ///
+    /// The draft's models may be blank, and normally are: a model picker needs an id to name and a
+    /// key to call with, so the host lists this provider's models as soon as it has written both
+    /// and the user chooses from the answer. A provider with a key and no model reports itself
+    /// unavailable with a detail saying so.
+    AddAiProvider {
+        draft: AiProviderDraft,
+        key: Secret,
+    },
+    /// Change a provider that exists. `key: None` leaves the stored key alone, which is what an
+    /// edit that only renames or re-models must do: the interface is never sent a key, so it
+    /// cannot send one back.
+    UpdateAiProvider {
+        provider_id: AiProviderId,
+        draft: AiProviderDraft,
+        key: Option<Secret>,
+    },
+    /// File the passphrase or password an SSH profile authenticates with, in the secret store's
+    /// `ssh` namespace under `profile_id`. Answered with the host layer's whole
+    /// [`Message::Settings`] record, because the profile's host-derived `has_*` flag moves with
+    /// the secret and the interface draws that flag — or with [`Message::SettingsError`].
+    ///
+    /// The profile itself rides `SetSettings` whole, like every other interface-owned setting;
+    /// only the material comes this way, and only ever in a [`Secret`] (`D65`). Sending this for
+    /// a profile whose auth takes no secret — agent, or a config alias — is refused rather than
+    /// filed: a passphrase stored against a profile that will never read it is a leak with no
+    /// user-visible way back to it.
+    SetSshSecret {
+        profile_id: SshProfileId,
+        secret: Secret,
+    },
+    /// Forget an SSH profile's stored secret, leaving the profile itself alone. What the user
+    /// presses to go back to an unencrypted key or to re-type a password they got wrong.
+    ///
+    /// A profile *removed* from the list needs no such message: the host prunes the secret of
+    /// every id the incoming list no longer names, which is what keeps a forgotten row from
+    /// stranding its material.
+    ClearSshSecret {
+        profile_id: SshProfileId,
+    },
+    /// Remove a provider and its key together. If the assist setting named it, the setting falls
+    /// back to [`crate::assist::AssistProvider::Off`] — a setting pointing at nothing would report
+    /// itself unavailable forever.
+    ForgetAiProvider {
+        provider_id: AiProviderId,
+    },
+    /// The models a provider says it has, answered with [`Message::AiModels`].
+    ///
+    /// `refresh: false` is served from the host's cache when there is one and calls the provider
+    /// only when there is not, which is what makes a model picker openable without a network. The
+    /// interface sets `refresh: true` only for a control the user pressed.
+    ListAiModels {
+        provider_id: AiProviderId,
+        refresh: bool,
+    },
+
+    // ── Assist family: host → UI ────────────────────────────────────
+    /// Whether assistance can run, and what is behind it. `reason` is present exactly when
+    /// `available` is false, in words that name no vendor the user did not configure; `detail` is
+    /// an optional sentence to sit under it, and `limits` is present when a backend is there.
+    Assist {
+        available: bool,
+        reason: Option<AssistReason>,
+        detail: Option<String>,
+        limits: Option<AssistLimits>,
+    },
+    /// One suggestion, as prose. It is advisory and nothing has been renamed, written or
+    /// committed: the interface puts the text where the user can edit or discard it.
+    Suggestion {
+        suggest_id: SuggestId,
+        text: String,
+    },
+    /// Part of a suggestion, as it arrives.
+    ///
+    /// Zero or more of these precede the [`Message::Suggestion`] that ends the same id, and every
+    /// chunk concatenated is the answer that message carries — modulo the surrounding whitespace
+    /// `Suggestion` trims, since a suggestion is put where a user edits it. So an interface that
+    /// ignores chunks entirely still renders the right thing, and one that draws them shows a
+    /// first token instead of a spinner. A backend that cannot stream sends exactly one.
+    SuggestChunk {
+        suggest_id: SuggestId,
+        text: String,
+    },
+    /// The suggestion could not be made. The subject keeps its mechanical name — nothing was
+    /// changed on the way to failing — so this is a line to show beside the control, not a repair.
+    /// Chunks already delivered for this id are not a partial answer: the interface discards them.
+    SuggestError {
+        suggest_id: SuggestId,
+        error: String,
+    },
+    /// Every configured API provider, with whether each has a key. Which one is *selected* is not
+    /// here: that is `HostSettings.assist`, which every window already mirrors, so a row asks it
+    /// rather than being told twice.
+    ///
+    /// Broadcast rather than answered to the asker alone, because a provider list is a property of
+    /// the host and a second window's settings page must not show a row that no longer exists.
+    AiProviders {
+        providers: Vec<AiProviderInfo>,
+    },
+    /// A provider's model list, and when it was obtained. `refreshed` is true when the provider was
+    /// actually called for this answer, false when it came from the cache.
+    AiModels {
+        list: AiModelList,
+        refreshed: bool,
+    },
+    /// A provider list could not be obtained, or a write to the secret store failed. One line to
+    /// show on the settings page: nothing was changed on the way to failing.
+    AiProviderError {
+        provider_id: Option<AiProviderId>,
+        error: String,
+    },
+
+    // ── Notification family: UI → host ──────────────────────────────
+    /// File a notification. Any subsystem on either side may raise one; the host is what decides
+    /// whether a standing mute rule silences it, mints its id, and tells every window.
+    RaiseNotification {
+        request: NotificationRequest,
+    },
+    /// Send the bell's whole state. A window asks once, when it attaches.
+    ListNotifications,
+    /// Tick one notification off, or every one of them when `id` is `None`.
+    ReadNotifications {
+        id: Option<NotificationId>,
+    },
+    /// Drop one notification from the history, or every one of them when `id` is `None`.
+    DismissNotifications {
+        id: Option<NotificationId>,
+    },
+    /// Stand up a mute rule. A scope holds at most one rule, so this replaces any rule already on
+    /// that scope rather than stacking a second.
+    MuteNotifications {
+        scope: MuteScope,
+        max_level: Level,
+        duration: MuteFor,
+    },
+    /// Lift the rule on one scope. Lifting a scope that has no rule is not an error.
+    UnmuteNotifications {
+        scope: MuteScope,
+    },
+
+    // ── Notification family: host → UI ──────────────────────────────
+    /// One notification, as it was filed. Broadcast, because the bell is in every window and a
+    /// badge that disagrees between two of them is the bug this avoids by construction.
+    ///
+    /// `notification.muted` is the host's verdict after the rules: a window flashes its bell for a
+    /// notification that is not muted, and only counts one that is.
+    NotificationRaised {
+        notification: Box<Notification>,
+    },
+    /// The bell's whole state — the history, newest first, and the rules in force. Broadcast for
+    /// the same reason, and sent whole rather than as a diff: the list is capped and it changes on
+    /// a click, so a patch protocol would buy nothing and could leave two windows disagreeing.
+    NotificationsState {
+        state: Box<Notifications>,
+    },
+
+    // ── Web asset family: UI → host ─────────────────────────────────
+    /// Make sure the vendor bundle a web panel needs is on disk, and say where it is.
+    ///
+    /// The interface asks; the host fetches, verifies every file against a manifest in its own
+    /// source, unpacks into the shared workarea and answers when it is there. Downloading is
+    /// network plus disk, which is the host's half — the interface only serves the bytes off its
+    /// own origin afterwards.
+    ///
+    /// **The interface does not name a version.** The pinned version and the manifest are the
+    /// host's, and [`Message::WebBundleReady`] says which one it got — a bundle is versioned by
+    /// directory, so a host that pins a newer one simply answers a different path.
+    ///
+    /// **Idempotent and re-entrant, which is why there is no cancel.** Asking for a bundle that is
+    /// already complete answers immediately and fetches nothing; asking for one already in flight
+    /// joins that fetch rather than starting a second. Answered with
+    /// [`Message::WebBundleReady`] or [`Message::WebBundleFailed`], with
+    /// [`Message::WebBundlePending`] along the way.
+    EnsureWebBundle {
+        app: String,
+    },
+
+    // ── Web asset family: host → UI ─────────────────────────────────
+    /// How far a fetch has got, in files rather than bytes. Throttled, and sent only to the
+    /// windows waiting on this bundle — a download nobody asked about is nobody's progress bar.
+    ///
+    /// `total` is known before the first byte, so the very first report carries it with `done`
+    /// at zero and the bar fills rather than sweeps for the whole download. `file` is the cache
+    /// path of the last entry that landed — a name to show, so a stalled fetch says where it
+    /// stalled — and is empty on that first report, when nothing has landed yet.
+    WebBundlePending {
+        app: String,
+        done: u32,
+        total: u32,
+        file: String,
+    },
+    /// The bundle is complete on disk. `path` is the absolute directory the interface serves the
+    /// bytes out of, told rather than composed, and `version` is the one the host pinned.
+    WebBundleReady {
+        app: String,
+        version: String,
+        path: String,
+    },
+    /// The bundle is not there and could not be fetched. A sentence the interface can show:
+    /// failure here is a downgrade — the feature that wanted the bundle is unavailable and says
+    /// why — and never an error the user has to act on.
+    WebBundleFailed {
+        app: String,
+        error: String,
+    },
+
+    // ── Help family: UI → host ──────────────────────────────────────
+    /// Make Kubiq's own documentation available, and say where it is.
+    ///
+    /// The interface asks the first time a help panel opens; the host finds the bundle, unpacks it
+    /// once into the shared workarea and answers with the catalogue. Nothing is fetched and no
+    /// network is touched — the bundle either shipped with this build or it did not.
+    ///
+    /// **The interface names no version and no path.** Both are the host's, as they are for a web
+    /// bundle, and [`Message::HelpReady`] states what it got.
+    ///
+    /// **Idempotent.** Asking again after an answer re-answers from the catalogue already parsed.
+    /// Answered with [`Message::HelpReady`] or [`Message::HelpUnavailable`] — never with an error,
+    /// because help that is not built is a downgrade and not a fault.
+    EnsureHelp,
+
+    // ── Help family: host → UI ──────────────────────────────────────
+    /// The documentation is unpacked and readable. `root` is the absolute directory the pages sit
+    /// under, told rather than composed, and `catalog` is every page, the nav order and the
+    /// context map.
+    ///
+    /// The interface reads a page's markdown from `root` itself, on the same standing it reads a
+    /// web bundle's bytes from the path the host names.
+    HelpReady {
+        root: String,
+        catalog: Box<HelpCatalog>,
+    },
+    /// There is no documentation to show, and why — no bundle was built, or the one found could
+    /// not be read. A sentence fit to put in front of a user, who is shown the built-in page that
+    /// says how to build one rather than an error.
+    HelpUnavailable {
+        reason: String,
+    },
+
+    // ── Remote-tool family: host → window → drone, and back ─────────
+    // An agent's `kubiq-remote` tool call. The host's MCP listener cannot reach a drone — the link is
+    // the window's (`D116`) — so the call goes to one window, which relays it to the drone the
+    // `remote` names without reading it, and relays the result back the same way (`D226`). A thin
+    // façade: the drone answers each op by delegating to its existing file and search handlers.
+    // Project-scoped like the browser family: `project_id` is the calling agent's, echoed so a
+    // window attached to several hosts routes the result to the one that asked; no pane id.
+    /// One tool call. Host → window, then window → drone, unchanged. Answered with exactly one
+    /// [`Message::RemoteToolResult`] naming the same `call_id`.
+    RemoteToolCall {
+        call_id: RemoteCallId,
+        project_id: ProjectId,
+        /// The saved remote to run it on, by [`crate::settings::SavedRemoteHost::id`]. `None` is
+        /// the one the agent was started bound to ([`Message::StartConversation`]'s `remote`).
+        remote: Option<String>,
+        /// Which of the drone's roots the op's paths are relative to, by
+        /// [`crate::remote_tools::RemoteRoot::name`]. `None` is the drone's first — usually only —
+        /// root.
+        #[serde(default)]
+        root: Option<String>,
+        op: RemoteOp,
+    },
+    /// The answer to a [`Message::RemoteToolCall`]: drone → window, then window → host. `Err` is a
+    /// sentence the agent reads as the tool's error. The first result for a `call_id` wins.
+    RemoteToolResult {
+        call_id: RemoteCallId,
+        project_id: ProjectId,
+        result: Result<RemoteOutput, String>,
+    },
+
+    // ── Carrier family: transport only, never dispatched ────────────
+    //
+    // The four variants below are the only ones in this enum that no dispatch ever sees. They are
+    // read and written by the pumps on each end of a byte stream — `kubiq_host::carrier::pump` and
+    // `crates/kubiq/src/app/remote_connect.rs`'s — and swallowed there, on the same standing the
+    // HTTP upgrade in `kubiq_host::remote` has: they are how a carrier is established and kept
+    // alive, not something either half of Kubiq says. They travel as ordinary frames because the
+    // stream is already framed, and a second encoding on it is a second thing to get wrong.
+    //
+    // A pump that delivered one of these to the hub would be a bug, not a degradation: the
+    // coordinator's dispatch and the relay's would answer it with a refusal, and `AppState` would
+    // see a message it has no arm for.
+    /// A drone naming itself, the first frame it writes on a new carrier. Answered with
+    /// [`Message::DroneReady`], which it waits for before serving anything.
+    ///
+    /// `message_schema` is [`crate::wire::MESSAGE_SCHEMA`] as the drone was built with it, and is
+    /// what the far end compares against its own. `capabilities` is a string set, so a build that
+    /// gains one is understood by an interface that does not know the name yet; a relay drone
+    /// advertises `files` and nothing else.
+    DroneHello {
+        drone_version: String,
+        os: String,
+        arch: String,
+        triplet: String,
+        message_schema: u32,
+        capabilities: Vec<String>,
+    },
+    /// Kubiq's answer to a [`Message::DroneHello`]: serve, or do not.
+    ///
+    /// `accepted` false carries a `reason` a modal can show — a schema mismatch is a mismatch of
+    /// builds, and reporting it as a `PaneError` would read like a crashed shell. Both sides close
+    /// the stream cleanly after a refusal, and the drone spawns nothing.
+    DroneReady {
+        kubiq_version: String,
+        message_schema: u32,
+        accepted: bool,
+        reason: Option<String>,
+    },
+    /// Are you still there? Sent by either end on an idle carrier; answered with a
+    /// [`Message::Pong`] carrying the same `nonce`.
+    ///
+    /// A message pair rather than a frame type below the message: a frame type would change
+    /// `[u32 length][msgpack]` for every existing build, and two variants on a self-describing
+    /// enum cost nothing by comparison (`G189`).
+    Ping {
+        nonce: u64,
+    },
+    /// The answer to a [`Message::Ping`], echoing its `nonce`.
+    Pong {
+        nonce: u64,
+    },
+}
+
+impl Message {
+    /// The project this message names, for whichever variant carries one. `None` for a pane-only,
+    /// account-only or catalogue-wide message — [`Message::ProjectError`]'s own `project_id` is
+    /// already an `Option`, for the catalogue-wide case, and is returned as it is.
+    pub fn project_id(&self) -> Option<ProjectId> {
+        match self {
+            Message::SpawnWorkspace { project_id, .. }
+            | Message::RunTool { project_id, .. }
+            | Message::ForgetProject { project_id, .. }
+            | Message::UpdateProject { project_id, .. }
+            | Message::SetProjectInitials { project_id, .. }
+            | Message::LocateProject { project_id, .. }
+            | Message::SetProjectStorage { project_id, .. }
+            | Message::ProjectStorageMoved { project_id, .. }
+            | Message::ProjectStorageError { project_id, .. }
+            | Message::OpenedProject { project_id, .. }
+            | Message::AdoptProject { project_id, .. }
+            | Message::RefreshProject { project_id, .. }
+            | Message::ServeProject { project_id, .. }
+            | Message::ProjectForgotten { project_id, .. }
+            | Message::ProjectTree { project_id, .. }
+            | Message::ReadProjectFile { project_id, .. }
+            | Message::WriteProjectFile { project_id, .. }
+            | Message::DiffProjectFile { project_id, .. }
+            | Message::EditProjectPath { project_id, .. }
+            | Message::RelatedProjectFiles { project_id, .. }
+            | Message::ImportIntoProject { project_id, .. }
+            | Message::ProjectPathsImported { project_id, .. }
+            | Message::ProjectTreeListing { project_id, .. }
+            | Message::ProjectFileContents { project_id, .. }
+            | Message::ProjectFileWritten { project_id, .. }
+            | Message::ProjectFileDiffed { project_id, .. }
+            | Message::ProjectPathEdited { project_id, .. }
+            | Message::ProjectFileRelated { project_id, .. }
+            | Message::ProjectFileError { project_id, .. }
+            | Message::KbSources { project_id, .. }
+            | Message::SetKbSources { project_id, .. }
+            | Message::KbTree { project_id, .. }
+            | Message::ReadKbFile { project_id, .. }
+            | Message::SyncKbSource { project_id, .. }
+            | Message::WriteKbFile { project_id, .. }
+            | Message::CreateKbEntry { project_id, .. }
+            | Message::RenameKbEntry { project_id, .. }
+            | Message::DeleteKbEntry { project_id, .. }
+            | Message::RevealKbPath { project_id, .. }
+            | Message::AskKbPath { project_id, .. }
+            | Message::UnlockKbSource { project_id, .. }
+            | Message::ChangeKbPassword { project_id, .. }
+            | Message::KbPasswordAnswer { project_id, .. }
+            | Message::KbSourcesListed { project_id, .. }
+            | Message::KbSourceChanged { project_id, .. }
+            | Message::KbTreeListing { project_id, .. }
+            | Message::KbFileContents { project_id, .. }
+            | Message::KbFileError { project_id, .. }
+            | Message::KbChanged { project_id, .. }
+            | Message::KbPath { project_id, .. }
+            | Message::ArchifyShow { project_id, .. }
+            | Message::ArchifyToolCall { project_id, .. }
+            | Message::BrowserHistoryGet { project_id }
+            | Message::BrowserHistoryAdd { project_id, .. }
+            | Message::BrowserHistoryClear { project_id }
+            | Message::BrowserReply { project_id, .. }
+            | Message::BrowserHistory { project_id, .. }
+            | Message::BrowserCommand { project_id, .. }
+            | Message::RemoteToolCall { project_id, .. }
+            | Message::RemoteToolResult { project_id, .. }
+            | Message::DbConnections { project_id, .. }
+            | Message::SaveDbConnection { project_id, .. }
+            | Message::DeleteDbConnection { project_id, .. }
+            | Message::TestDbConnection { project_id, .. }
+            | Message::DbPassword { project_id, .. }
+            | Message::DbTree { project_id, .. }
+            | Message::DbTablePage { project_id, .. }
+            | Message::DbQuery { project_id, .. }
+            | Message::DbApplyEdits { project_id, .. }
+            | Message::DbCancel { project_id, .. }
+            | Message::DbCloseSession { project_id, .. }
+            | Message::DbDisconnect { project_id, .. }
+            | Message::CreateDbFile { project_id, .. }
+            | Message::DbExportDbml { project_id, .. }
+            | Message::DbDbmlReady { project_id, .. }
+            | Message::DbConnectionsListed { project_id, .. }
+            | Message::DbTested { project_id, .. }
+            | Message::DbConnectionState { project_id, .. }
+            | Message::DbTreeListing { project_id, .. }
+            | Message::DbTablePageResult { project_id, .. }
+            | Message::DbQueryResult { project_id, .. }
+            | Message::DbEditsApplied { project_id, .. }
+            | Message::DbFileCreated { project_id, .. }
+            | Message::DbFileError { project_id, .. }
+            | Message::DbEditors { project_id }
+            | Message::DbEditorEdit { project_id, .. }
+            | Message::DbEditorsListed { project_id, .. }
+            | Message::DbEditorChanged { project_id, .. }
+            | Message::DbAgentRun { project_id, .. }
+            | Message::ProjectFilesChanged { project_id, .. }
+            | Message::ProjectGit { project_id, .. }
+            | Message::RefreshProjectGit { project_id, .. }
+            | Message::ProjectGitLog { project_id, .. }
+            | Message::ProjectGitRefs { project_id, .. }
+            | Message::WriteProjectGit { project_id, .. }
+            | Message::ProjectGitChanged { project_id, .. }
+            | Message::GitOverview { project_id, .. }
+            | Message::GitChanged { project_id, .. }
+            | Message::GitWorkingTree { project_id, .. }
+            | Message::GitError { project_id, .. }
+            | Message::GitLogPage { project_id, .. }
+            | Message::GitRefs { project_id, .. }
+            | Message::ListWork { project_id, .. }
+            | Message::CreateTask { project_id, .. }
+            | Message::UpdateTask { project_id, .. }
+            | Message::SetTaskField { project_id, .. }
+            | Message::MoveTask { project_id, .. }
+            | Message::AssignTask { project_id, .. }
+            | Message::DeleteTask { project_id, .. }
+            | Message::ArchiveTasks { project_id, .. }
+            | Message::AddStep { project_id, .. }
+            | Message::RenameStep { project_id, .. }
+            | Message::RemoveStep { project_id, .. }
+            | Message::MoveStep { project_id, .. }
+            | Message::ToggleStep { project_id, .. }
+            | Message::AddComment { project_id, .. }
+            | Message::AssignAgent { project_id, .. }
+            | Message::SendToAgent { project_id, .. }
+            | Message::ListBoards { project_id, .. }
+            | Message::CreateBoard { project_id, .. }
+            | Message::SetBoardEnabled { project_id, .. }
+            | Message::DeleteBoard { project_id, .. }
+            | Message::Boards { project_id, .. }
+            | Message::WorkList { project_id, .. }
+            | Message::TaskCreated { project_id, .. }
+            | Message::TaskChanged { project_id, .. }
+            | Message::TaskDeleted { project_id, .. }
+            | Message::AgentChanged { project_id, .. }
+            | Message::WorkError { project_id, .. }
+            | Message::PlanError { project_id, .. }
+            | Message::DocAgentQueue { project_id, .. }
+            | Message::StartConversation { project_id, .. }
+            | Message::ReviveConversation { project_id, .. }
+            | Message::ConversationStarted { project_id, .. }
+            | Message::SearchProject { project_id, .. }
+            | Message::CancelSearch { project_id, .. }
+            | Message::SearchMatches { project_id, .. }
+            | Message::SearchProgress { project_id, .. }
+            | Message::SearchFinished { project_id, .. }
+            | Message::SearchError { project_id, .. } => Some(*project_id),
+            // The annotation family names a document rather than a project, and the project is
+            // inside the handle — one arm for the whole family, on `Suggest`'s own reasoning.
+            Message::LoadPlan { doc }
+            | Message::SavePlan { doc, .. }
+            | Message::DeletePlan { doc }
+            | Message::ExportPlan { doc, .. }
+            | Message::ListPlanAnnotations { doc, .. }
+            | Message::AnnotatePlan { doc, .. }
+            | Message::DocMergeConflicts { doc, .. }
+            | Message::ReplyToAnnotation { doc, .. }
+            | Message::ResolveAnnotation { doc, .. }
+            | Message::MarkAnnotation { doc, .. }
+            | Message::SetBlockHighlight { doc, .. }
+            | Message::ListPlanChanges { doc, .. }
+            | Message::EditAnnotationComment { doc, .. }
+            | Message::SetDocAgent { doc, .. }
+            | Message::SetDocAutoSend { doc, .. }
+            | Message::AskDocAgent { doc, .. }
+            | Message::DocOwnershipConflict { doc, .. }
+            | Message::Plan { doc, .. }
+            | Message::PlanAnnotations { doc, .. }
+            | Message::PlanAnnotationsChanged { doc }
+            | Message::PlanChanges { doc, .. }
+            | Message::PlanDeleted { doc }
+            | Message::PlanExported { doc, .. }
+            | Message::PlanChanged { doc, .. }
+            | Message::PlanConflict { doc, .. } => Some(doc.project_id()),
+            // The mission family names the project beside the task rather than inside a handle,
+            // so it reads its own field — one grouped arm, the work family's shape.
+            Message::ListMissions { project_id }
+            | Message::CreateMission { project_id, .. }
+            | Message::SetMissionField { project_id, .. }
+            | Message::MissionControl { project_id, .. }
+            | Message::MissionTask { project_id, .. }
+            | Message::AddGuidance { project_id, .. }
+            | Message::LoadHistory { project_id, .. }
+            | Message::MissionLaunched { project_id, .. }
+            | Message::MissionSchedule { project_id, .. }
+            | Message::MissionLaunch { project_id, .. }
+            | Message::MissionHistory { project_id, .. }
+            | Message::MissionList { project_id, .. }
+            | Message::MissionChanged { project_id, .. }
+            | Message::MissionDeleted { project_id, .. }
+            | Message::MissionError { project_id, .. } => Some(*project_id),
+            // The project is inside the subject rather than beside it, so this arm stands alone.
+            Message::Suggest {
+                subject:
+                    SuggestSubject::CommitMessage { project_id }
+                    | SuggestSubject::TaskTitle { project_id, .. },
+                ..
+            } => Some(*project_id),
+            // A board's envelope is about whatever project the message inside it is.
+            Message::OnBoard { message, .. } => message.project_id(),
+            // The catalog family names a layer, not a project: `None` is the application's own.
+            Message::ListCatalog { scope }
+            | Message::AddSkill { scope, .. }
+            | Message::RemoveSkill { scope, .. }
+            | Message::RemoveSkillFolder { scope, .. }
+            | Message::SaveCatalogMcp { scope, .. }
+            | Message::RemoveCatalogMcp { scope, .. }
+            | Message::Catalog { scope, .. } => *scope,
+            Message::ProjectError { project_id, .. } => *project_id,
+            Message::ToolError { project_id, .. } => *project_id,
+            Message::ListTools { project_id, .. } => *project_id,
+            _ => None,
+        }
+    }
+}
+
+/// One of a task's optional facts, with the value to set it to — or `None`, to clear it.
+///
+/// The payload of [`Message::SetTaskField`], and the whole optional half of a
+/// [`crate::work::TaskRecord`]: everything a task can perfectly well not have. The mandatory half —
+/// its title, its description and its priority — is [`Message::UpdateTask`]'s, because none of
+/// those three can be absent and so none of them needs the distinction this enum exists to draw.
+///
+/// A trimmed empty string on [`Self::Key`] and [`Self::Link`] is the clear, the way an emptied
+/// description is: the user rubbed the field out, which is a thing to mean.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskField {
+    Shape(Option<Shape>),
+    Kind(Option<Kind>),
+    /// What level this task sits at — see [`crate::work::Level`].
+    Level(Option<crate::work::Level>),
+    /// The task this one is a child of, or `None` to clear it — see
+    /// [`crate::work::TaskRecord::parent`]. The host may refuse this with [`Message::WorkError`]:
+    /// depth is capped at one, and only a task carrying a [`crate::work::Level`] may be a parent.
+    Parent(Option<TaskId>),
+    /// The whole reference list, replaced — see [`crate::work::TaskRecord::references`]. Untyped
+    /// and symmetric, the same posture as [`Self::Labels`].
+    References(Vec<TaskId>),
+    /// The whole prerequisite list, replaced — see [`crate::work::TaskRecord::prerequisites`].
+    /// Typed and directed, unlike [`Self::References`]. The host may refuse this with
+    /// [`Message::WorkError`]: a prerequisite in another project, the task itself, or one that
+    /// would close a cycle.
+    Prerequisites(Vec<TaskId>),
+    /// The whole attachment list, replaced — see [`crate::work::TaskRecord::attachments`]. The
+    /// same posture as [`Self::References`] and [`Self::Labels`], for the same reason: a short
+    /// list edited as a set, where a delta would cost a second message and an ordering rule.
+    Attachments(Vec<crate::work::Attachment>),
+    Complexity(Option<Complexity>),
+    /// Who has the task, as free text. A trimmed empty string is the clear, as on [`Self::Key`].
+    AssignedTo(Option<String>),
+    Key(Option<String>),
+    Link(Option<String>),
+    /// The whole set, replaced. A label list is short and is edited as a set, so a delta would be
+    /// two messages and an ordering rule to save a handful of bytes.
+    Labels(Vec<Label>),
+    /// The card's own swatch, or `None` to clear it so the edge reads the pulse again.
+    Colour(Option<usize>),
+    /// Whether the task waits for the user's confirmation in review — see
+    /// [`crate::work::TaskRecord::approve`].
+    Approve(bool),
+    /// The task this one reviews, or `None` to clear it — see
+    /// [`crate::work::TaskRecord::review_of`]. `worker`, `auto_fails` and `mission` are
+    /// host-written and not settable here.
+    ReviewOf(Option<TaskId>),
+}
+
+/// What a start chooses over and above the harness and the folder: the identity, the saved setup,
+/// and the levers a harness advertises.
+///
+/// The same set [`Message::StartConversation`] spells out field by field, gathered into a record
+/// because [`Message::SpawnWorkspace`] asks the identical questions — a harness in a terminal pane
+/// is the same run wearing a different face, and a pane that could not name an account or an MCP
+/// server would be a second, poorer way to start the same agent.
+///
+/// Every field is a **pick**, and a pick outranks what the definition saved. `Default::default()` is
+/// the zero-config start: whatever the harness, its definition and its own defaults say. Isolation is
+/// not here and never will be — it is a host setting, not something a start chooses.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentPicks {
+    /// Which identity to run as, from [`AccountInfo`]. Absent falls back to whatever the library
+    /// resolves — the definition named `default`, or the user's own home.
+    #[serde(default)]
+    pub account: Option<String>,
+    /// Which saved setup to start from, from [`AgentDefinition`]. Absent is a bare start with no
+    /// definition at all. `account` above still wins where both name one.
+    #[serde(default)]
+    pub definition: Option<String>,
+    /// Which model to launch on, from [`Message::HarnessCatalogue`]. `None` or empty leaves the
+    /// harness on its own default.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Which reasoning-effort level, same convention as `model`.
+    #[serde(default)]
+    pub thinking: Option<String>,
+    /// Which permission mode, from [`AgentTypeInfo::modes`], same convention.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// The MCP servers to inject into this run, by [`crate::mcp::McpInfo::name`]. Empty is not
+    /// "none of the definition's": it is read the way the fields above are, a pick that stands on its
+    /// own rather than a diff against [`AgentDefinition::mcps`].
+    #[serde(default)]
+    pub mcps: Vec<String>,
+    /// The skills to make available to this run, by [`SkillInfo::id`]. Read the way `mcps` is: a
+    /// pick that stands on its own rather than a diff against [`AgentDefinition::skills`].
+    #[serde(default)]
+    pub skills: Vec<String>,
+    /// Extra folders this launch may write when isolation is on, in addition to the definition's
+    /// own [`AgentDefinition::grants`]. Empty is the normal case.
+    #[serde(default)]
+    pub grants: Vec<crate::settings::Grant>,
+}
+
+/// One shell the host found on this machine, as the new-pane menu offers it.
+///
+/// `program` is what a spawn asks for, and it is an absolute path wherever the probe found one, so
+/// a pane does not depend on the `PATH` Kubiq itself was launched with. The interface reads nothing
+/// out of it: it shows `label` and hands `program` straight back on
+/// [`Message::SpawnWorkspace`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShellInfo {
+    /// What the row says: the shell's own name on Unix (`zsh`), or a product name and version on
+    /// Windows (`PowerShell 7`, `Windows PowerShell 5.1`).
+    pub label: String,
+    pub program: String,
+    /// Whether this is the one a bare click on the new-pane control already starts.
+    pub is_default: bool,
+}
+
+/// One agent of the public ACP registry, as [`Message::AcpRegistryChecked`] reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcpRegistryAgent {
+    /// The registry's id, e.g. `gemini` — the harness id it becomes once added.
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub status: AcpRegistryStatus,
+    /// What the status is about: the executable found, the package an install would add, or the
+    /// tool (`node`, `uv`) that is missing. Shown, never composed into anything.
+    pub detail: String,
+    /// The built-in harness this registry agent already is (`copilot`, `grok`, `opencode`), when
+    /// it is one. Such an agent is never added as a second harness.
+    pub builtin: Option<String>,
+    /// A [`AcpRegistryStatus::Downloadable`] agent's archive has a published checksum, which the
+    /// install checks. An unverified one is labelled, and confirmed before it is downloaded.
+    #[serde(default)]
+    pub verified: bool,
+    /// The registry's version, when it is newer than the installed one. Shown only: nothing is
+    /// ever upgraded on its own.
+    #[serde(default)]
+    pub update: Option<String>,
+    /// `npx` or `uvx` for a [`AcpRegistryStatus::ViaRunner`] row; absent otherwise.
+    #[serde(default)]
+    pub runner: Option<String>,
+}
+
+/// What this machine can do about one registry agent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpRegistryStatus {
+    /// Runnable as is; it can be added as a harness.
+    Installed,
+    /// Its CLI is here but its ACP adapter package is not, and the installer is.
+    NeedsAdapter,
+    /// As `NeedsAdapter`, but the installer (`node`, `uv`) is missing too.
+    NeedsInstaller,
+    /// Not found, but a prebuilt binary for this platform can be downloaded into Kubiq's own
+    /// install directory; [`Message::InstallAcpAdapter`] does it. `detail` is the archive URL.
+    Downloadable,
+    /// Not installed, but its version-pinned package runs through `npx` / `uvx`, which is here;
+    /// it can be added as a harness as it is. `detail` is the package.
+    ViaRunner,
+    /// Nothing usable found.
+    NotInstalled,
+}
+
+/// One agent type a workspace can be, as the UI is told about it.
+///
+/// Every field comes from the embedded harness library — `id` is the library's harness id, and it
+/// is what a spawn asks for on [`Message::SpawnWorkspace`]. The interface shows `label` and hands
+/// `id` back; it never names a config path or a launch flag, because how a harness is started is
+/// not a fact it holds.
+///
+/// `command` is the one exception, and it is here to be *shown*, not composed: the user may
+/// override what this machine runs for a harness ([`crate::settings::HostSettings::agent_commands`]),
+/// and a field asking for that override with no idea what it is replacing is a field nobody can
+/// fill in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTypeInfo {
+    /// The library's harness id, e.g. `claude-code`.
+    pub id: String,
+    /// What the row says — the harness's display name.
+    pub label: String,
+    /// What the library would run for it, e.g. `claude` — the placeholder a custom command is
+    /// typed over, and never something the interface composes a launch from.
+    pub command: String,
+    /// Whether it can be started here: the harness's own binary was found, or a custom command is
+    /// configured for it. A row that cannot start says so before it is picked rather than failing
+    /// as a spawn the user has to interpret.
+    pub available: bool,
+    /// Whether this harness can hold a *conversation* — the library has a structured bridge for
+    /// it, so its output arrives as `ConvUpdate`s rather than as terminal bytes. False for a
+    /// harness that can only be driven through a pane, which is a real thing it can still do:
+    /// this field is what keeps such a harness out of every chat-start menu without taking it out
+    /// of the new-pane one.
+    ///
+    /// It says nothing about how many turns one process takes. A one-shot harness — prompt in
+    /// argv, one answer, exit — is `chat: true`, because the host continues it by launching again
+    /// with the session id the last run reported.
+    pub chat: bool,
+    /// Whether that structured bridge is the **Agent Client Protocol** rather than a wire of the
+    /// harness's own. The library's `IoSupport::acp`, verbatim.
+    ///
+    /// It is what makes [`Message::ListAcpCapabilities`] worth asking: an ACP agent states what it
+    /// can do in its `initialize` answer, and nothing else does. A surface reads this to decide
+    /// whether to offer that list at all, rather than inferring it from a harness id — `-acp` in a
+    /// name is a naming convention, not a fact, and three of the ACP harnesses do not carry it.
+    #[serde(default)]
+    pub acp: bool,
+    /// The permission modes this harness advertises, as the library reports them. Empty when
+    /// the harness has no such axis — a mode is not a universal concept, it is whatever this
+    /// particular harness named.
+    pub modes: Vec<ConfigChoice>,
+    /// Which of [`Self::modes`] means "ask nothing" — the harness's own word for it, from the
+    /// library's `Harness::unattended_mode`. `None` where the harness has no such mode, or
+    /// already asks nothing. It is what a start form defaults its mode picker to, so the
+    /// interface never has to guess which id means "all permissions".
+    pub unattended_mode: Option<String>,
+    /// Whether this harness keeps its own session store inside the run directory Kubiq provisions
+    /// for it — that is, whether its `config_anchor` declares a lever that relocates it there.
+    ///
+    /// **It is what makes a conversation keepable.** Kubiq resumes a conversation across a restart
+    /// by keeping that directory, and forks one by copying it (`D97`), so a harness that writes its
+    /// sessions somewhere else can be offered neither: keeping would preserve nothing and copying
+    /// would leave two agents sharing one store. Grok is the one that answers `false` — it declares
+    /// no lever and writes under the user's real home whatever Kubiq relocates.
+    ///
+    /// The interface reads it to draw those two controls disabled, with the reason, rather than
+    /// offering an action the host will refuse. The host refuses it regardless; this is so the
+    /// refusal is not the first the user hears of it.
+    pub keeps_sessions: bool,
+    /// Whether this harness's provider states how much of the plan is left, and by what route.
+    ///
+    /// Read the same way [`Self::chat`] is: a fact about the harness, answered before anything is
+    /// spawned, so the usage readout is offered, disabled with the reason, or replaced by the
+    /// sentence that says the provider names no limit. `QuotaSource::None` is the honest and
+    /// permanent answer for three of the five harnesses, so it is drawn in place rather than
+    /// hidden — an absent control reads as a missing feature, and this is not one.
+    #[serde(default)]
+    pub quota: QuotaSource,
+    /// Whether this harness runs from an account's own config home, where its login lives and
+    /// the harness refreshes it (`D194`) — the library's `Harness::shares_home`. It is what
+    /// puts this harness on the **Add harness** picker and offers an account a **Sign in**.
+    #[serde(default)]
+    pub shares_home: bool,
+    /// Whether a prompt sent while a turn is running **steers** that turn — the library's
+    /// `IoSupport::steer` (native Codex's `turn/steer`). The composer reads it to send mid-turn
+    /// rather than waiting for the turn to end; false keeps the send idle-only.
+    #[serde(default)]
+    pub steers: bool,
+    /// Whether an account's home can be signed in to this harness **by device code** — a page and
+    /// a code drawn in the window, no pane ([`Message::BeginDeviceLogin`]). The library's
+    /// `Harness::device_login`. The pane sign-in stays on offer beside it.
+    #[serde(default)]
+    pub device_login: bool,
+}
+
+/// One model a harness will answer for, with the reasoning-effort levels it accepts folded in.
+///
+/// The interface's own copy of the host's `store::harness::CachedModel`: the two probes
+/// (`discover_models` + `discover_thinking`) are joined once, host-side, so a picker reads one
+/// record rather than two lists it has to correlate.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogueModel {
+    /// The harness's own model id, e.g. `sonnet`, `gpt-5-codex`.
+    pub id: String,
+    pub description: Option<String>,
+    /// Whether the harness names this one its default.
+    pub default: bool,
+    /// The reasoning-effort levels this model accepts, in the harness's own vocabulary. Empty
+    /// is the normal case — most models have no such knob.
+    pub levels: Vec<ConfigChoice>,
+    /// Which level the harness starts at, where it says.
+    pub default_level: Option<String>,
+}
+
+/// One account, as the UI is told about it.
+///
+/// An account is an identity a harness runs as — environment-variable references, a base URL,
+/// a key helper — and what crosses the bus is only ever a *reference* to one: its id. The
+/// credential itself never appears here, and neither does a path — the domain rule is that
+/// accounts carry credential references, never credential material, and this type is where
+/// that rule is enforced or lost. A harness login is the account's (`D194`), and what crosses
+/// here is only which harnesses have one, never the login or the home holding it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountInfo {
+    /// What the user named this identity, e.g. `work`.
+    pub id: String,
+    /// The harnesses that have a config home under this account, by [`AgentTypeInfo::id`] —
+    /// the ones a run as this account starts signed in. A *reference*: that a home exists,
+    /// not where it is or what is in it. Empty is an account that is a name and nothing more.
+    #[serde(default)]
+    pub logged_in: Vec<String>,
+}
+
+/// One **agent definition**, as the UI is told about it.
+///
+/// A definition is a saved setup: which harness, as whom, with which model and which permission
+/// mode. Like [`AccountInfo`] every field is a reference — an id the library resolves — and
+/// nothing here is credential material or a path. `None` on a field means the definition does not
+/// mention that axis, and a lower layer decides.
+///
+/// **A definition is not an agent.** A [`crate::work::AgentId`] names a *running* agent, a live
+/// conversation; this is the saved recipe one may be started from, and the two are never the same
+/// word in prose (`D174`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentDefinition {
+    /// What the user named this setup, e.g. `review`.
+    pub id: String,
+    /// The library's harness id this definition is for, from [`AgentTypeInfo`].
+    pub agent_type: String,
+    /// Which identity it runs as, from [`AccountInfo`].
+    pub account: Option<String>,
+    /// The model id it picks, from the harness's own model list.
+    pub model: Option<String>,
+    /// The permission mode it picks, from [`AgentTypeInfo::modes`].
+    pub mode: Option<String>,
+    /// The reasoning-effort level it picks, in the harness's own vocabulary.
+    pub thinking: Option<String>,
+    /// The most subagents this setup asks for at once. Never a launch flag — no harness has
+    /// one: the interface writes it into the conversation's opening prompt as a directive, and
+    /// this is only where the number is remembered.
+    pub max_subagents: Option<u8>,
+    /// The **agent prompt**: standing instructions the interface folds in front of the first turn
+    /// of every conversation started from this definition. It travels inside a turn, which is
+    /// why it is text here rather than anything the run is composed from.
+    pub prompt: Option<String>,
+    /// What this definition is for and what it carries, in prose — free-form, may be several
+    /// lines. This is the one field written for another agent to read rather than for the host to
+    /// act on: an agent reads it alongside a definition's name and harness, so it can pick a
+    /// definition by what it actually does instead of by name alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The MCP servers this definition enables, by [`McpInfo::name`]. Empty is the normal case —
+    /// most definitions ask for none — and a name a build no longer offers is simply not injected,
+    /// the same "a stale reference costs nothing but the row" rule [`Message::SaveAgentDefinition`]
+    /// already lives by.
+    #[serde(default)]
+    pub mcps: Vec<String>,
+    /// The skills this definition enables, by catalog id ([`SkillInfo::id`]). Same rules as
+    /// [`Self::mcps`]: empty is the normal case, and an id the catalog no longer holds costs the
+    /// row and nothing else.
+    #[serde(default)]
+    pub skills: Vec<String>,
+    /// Whether this definition is fit to run as a planning assistant. The new-mission dialog's
+    /// assistant picker filters to definitions carrying `true`; every other screen ignores it.
+    /// `None`/`Some(false)` read the same to a filter — the distinction between them exists only
+    /// on disk, so an inherited definition can un-mention it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mission_assistant: Option<bool>,
+    /// Labels saying what this definition is for — the [`STANDARD_AGENT_TAGS`] or anything the
+    /// user typed. A filter reads them (a surface may offer only `worker` definitions); empty is
+    /// the normal case.
+    ///
+    /// Two tags are not only labels. `coordinator` (runs the mission, writes the plan, manages the
+    /// tasks) and `worker` (reads the mission, works a task, reports progress) each imply an MCP
+    /// set the host **re-adds on every save**, so a definition carrying one cannot be left without
+    /// the servers the role needs, however it was edited — see [`Message::SaveAgentDefinition`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Whether the user has switched this definition off. A disabled definition is still listed
+    /// and still editable — it is simply not offered anywhere a run is started from. Nothing
+    /// about a run already under way changes when its definition is disabled.
+    #[serde(default)]
+    pub disabled: bool,
+    /// Extra folders this definition's runs may **write** when isolation is on, each a
+    /// [`crate::settings::Grant`] with `write: true`. Added to the host-wide grants of
+    /// [`crate::settings::HostSettings::extra_grants`], never instead of them; a run with no
+    /// isolation ignores them. Empty is the normal case.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grants: Vec<crate::settings::Grant>,
+    /// The project this setup belongs to, when it belongs to one. `None` is a global definition —
+    /// every definition written before this field existed, and every one the app-wide settings
+    /// screen writes.
+    ///
+    /// The scope is not a preference the record carries: it is **where the definition is stored**
+    /// (`<config root>/projects/<id>/agent-definitions/` against the global `agent-definitions/`),
+    /// so a record cannot claim a scope its location contradicts, and forgetting a project takes
+    /// its definitions with it. This field is the host reporting which root a definition came
+    /// from, and — on [`Message::SaveAgentDefinition`] — the interface saying which root to write
+    /// it into.
+    ///
+    /// A project definition is offered inside its project and nowhere else; the app-wide settings
+    /// screen lists only the global ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectId>,
+}
+
+/// The tag a definition carries to run the coordinator side of a mission or a task.
+pub const TAG_COORDINATOR: &str = "coordinator";
+/// The tag for a definition that plans.
+pub const TAG_PLANNER: &str = "planner";
+/// The tag a definition carries to run the worker side of a mission or a task.
+pub const TAG_WORKER: &str = "worker";
+/// The tag for a definition that works with the user on a markdown document through its
+/// annotation threads (`D207`) — offered first when an editor agent is started from annotation mode.
+pub const TAG_DOC: &str = "doc";
+/// The tags the definition editor offers as toggles, in the order it draws them. Any other tag is
+/// free text the user typed.
+pub const STANDARD_AGENT_TAGS: [&str; 4] = [TAG_COORDINATOR, TAG_PLANNER, TAG_WORKER, TAG_DOC];
+
+impl AgentDefinition {
+    /// Whether this definition carries `tag`.
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.iter().any(|it| it == tag)
+    }
+
+    /// Whether this definition carries at least one of `tags`.
+    pub fn has_any_tag(&self, tags: &[String]) -> bool {
+        tags.iter().any(|tag| self.has_tag(tag))
+    }
+}
+
+/// Secret material as it crosses the bus.
+///
+/// Two variants carry material — [`Message::SubmitConnectSecret`] and [`Message::SetAppSecret`] —
+/// and the rule they encode is not "these two are blessed" but **material crosses only in a
+/// `Secret`, and a `Secret` is never printed**. The type is the enforcement rather than a
+/// convention: `Debug` writes `Secret(***)`, and there is deliberately no `Display`, no `Deref`
+/// and no `AsRef<str>`, so `tracing::info!(token = %secret)` does not compile and `?secret`
+/// redacts itself. [`Self::expose`] is the only way out, which makes every place material leaves
+/// this type one grep.
+///
+/// Serialisation is transparent on the wire — the host needs the value — and redacted to `"***"`
+/// inside [`redacting_secrets`], which is how the bus tape serialises a message: the tape is
+/// dumped to a file, so it must never hold material.
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(transparent)]
+pub struct Secret(String);
+
+thread_local! {
+    static REDACT_SECRETS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with every [`Secret`] it serialises written as `"***"` — on this thread only, so the
+/// wire, serialising on any other thread or outside the call, still carries the value.
+pub fn redacting_secrets<T>(f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            REDACT_SECRETS.with(|flag| flag.set(self.0));
+        }
+    }
+    let _restore = Restore(REDACT_SECRETS.with(|flag| flag.replace(true)));
+    f()
+}
+
+impl Serialize for Secret {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if REDACT_SECRETS.with(std::cell::Cell::get) {
+            serializer.serialize_str("***")
+        } else {
+            serializer.serialize_str(&self.0)
+        }
+    }
+}
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The material itself. Named so that reading it is a deliberate act.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(***)")
+    }
+}
+
+/// One connection as the interface is told about it: the stored record, plus what the host read
+/// out of the token without calling anyone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectionInfo {
+    pub connection: Connection,
+    pub status: LoginStatus,
+    /// Whether this connection's instance has a pinned certificate. Derived from the trusted list
+    /// rather than stored, so a row can say so where the user is already looking.
+    #[serde(default)]
+    pub pinned: bool,
+}
+
+/// The three things the interface can ask about the `kubiq` command.
+///
+/// `Install` names no directory: which one is a fact about the machine's `PATH`, and the host is
+/// the half that may look at it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CliShortcutAction {
+    /// Look, change nothing.
+    Query,
+    /// Write the shortcut, replacing one this application wrote before.
+    Install,
+    /// Delete it. A file this application did not write is left alone.
+    Remove,
+}
+
+/// The three things the interface can ask about the *Open in Kubiq* context-menu entries.
+///
+/// `Install` names no key and no executable: both are facts about the host's machine and the build
+/// running on it, and the host is the half that may look at them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShellIntegrationAction {
+    /// Look, change nothing.
+    Query,
+    /// Write the entries, replacing ones this application wrote before.
+    Install,
+    /// Delete them. An entry this application did not write is left alone.
+    Remove,
+}
+
+/// One directory the shortcut could live in, as the host found it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CliDir {
+    pub path: String,
+    /// The directory is there. Absent directories are still offered — the first candidate is
+    /// created on install.
+    pub exists: bool,
+    /// The shell would find a command here.
+    pub on_path: bool,
+    /// This is the one the shortcut is in, or would go into.
+    pub chosen: bool,
+}
+
+/// What a stored credential says about its own validity, as the host computed it from
+/// the credential's embedded expiry field. This is a claim the credential makes about
+/// itself, not a round trip to the provider — a token the provider revoked early still
+/// reads as `Valid` here.
+///
+/// No credential material, and no path: the expiry is a timestamp, which is why it is
+/// the one thing about a credential that may cross this bus.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoginStatus {
+    /// An expiry was found and has not passed.
+    Valid { expires_at_ms: i64 },
+    /// An expiry was found and has passed. A re-authentication is what fixes it.
+    Expired { expires_at_ms: i64 },
+    /// A credential is stored but names no expiry, so nothing here can say whether it
+    /// still works. An API-key credential looks like this and is usually fine.
+    Unknown,
+    /// Nothing is stored for this account and harness.
+    Missing,
+}
+
+/// One running workspace, as the UI is told about it. It carries no process, no writer and no
+/// pseudo-terminal — a pane is an ID plus a byte stream.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkspaceInfo {
+    /// The workspace's ID, which is also its pane's.
+    pub id: PaneId,
+    pub session_id: SessionId,
+    /// The resolved agent type — what the coordinator actually started.
+    pub agent_type: String,
+    /// Which project the pane runs in. It is what routes a spawn that lands after the window has
+    /// switched projects, and it is why no absolute path is needed here: the interface already
+    /// holds the project's name and path-free identity in its projection.
+    pub project_id: ProjectId,
+    /// Where in the project it started, absent for its root.
+    pub rel_path: Option<String>,
+    pub cols: u16,
+    pub rows: u16,
+    pub running: bool,
+    /// Keep the pane open after the process ends instead of closing it: a tool run with
+    /// "wait on exit". Absent on answers from older hosts, which never set it.
+    #[serde(default)]
+    pub wait_on_exit: bool,
+    /// Keep the pane open when the process ends with a non-zero status: a tool run with "wait
+    /// on error". Absent on answers from older hosts, which never set it.
+    #[serde(default)]
+    pub wait_on_error: bool,
+    /// The tool this pane was started by, when [`Message::RunTool`] is what started it. A shell
+    /// and a harness carry `None`. It is what lets a stopped tool pane offer Restart — the
+    /// interface sends the very same `RunTool` again rather than guessing from the tab's title.
+    #[serde(default)]
+    pub tool: Option<crate::tools::ToolRun>,
+    /// The pane's handle — `claude`, `claude 2` — minted by the host over the same namespace it
+    /// names conversations from, and the name the pane answers to over MCP. Set for a harness
+    /// pane; a shell, a tool, a drone's pane and an older host leave it `None`, and the interface
+    /// names those itself.
+    #[serde(default)]
+    pub handle: Option<String>,
+}

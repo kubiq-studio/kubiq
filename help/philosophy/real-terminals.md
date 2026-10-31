@@ -5,12 +5,12 @@ summary: Why every agent gets a real terminal rather than a chat box, and what a
 keywords: [terminal, tui, chat, transcript, screen, full screen, log]
 order: 20
 status: current
-related: [panes, agents-chat, philosophy-why-ubiq]
+related: [panes, agents-chat, philosophy-why-kubiq]
 ---
 
 ## What it is
 
-Every agent in Ubiq can run in a real terminal [pane](panes). The harness runs there exactly as it
+Every agent in Kubiq can run in a real terminal [pane](panes). The harness runs there exactly as it
 would in your own terminal: its colours, its full-screen layout, its menus and every key you press,
 including arrows, Ctrl and Alt chords, paste and the mouse.
 
@@ -21,7 +21,7 @@ a form, and attach files and images to a message.
 
 ## Why it works this way
 
-The harnesses Ubiq runs are full-screen programs. They take over the whole screen, move the cursor
+The harnesses Kubiq runs are full-screen programs. They take over the whole screen, move the cursor
 anywhere on it and redraw when its size changes. Shown as a scrolling log, they would make no
 sense, because they are not writing a log — they are drawing a screen. A real terminal shows each
 harness the way its makers meant it to be seen.

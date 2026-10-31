@@ -8,7 +8,7 @@
 //!
 //! **This bridge is not superseded by ACP and is not to be deleted** — `D95`. The `claude-code-acp`
 //! harness is a sibling that speaks [`super::AcpBridge`]; this is the path with no adapter process
-//! and no npm dependency between Ubiq and the model, and it states three things no ACP adapter
+//! and no npm dependency between Kubiq and the model, and it states three things no ACP adapter
 //! does: the per-model context window (`result.modelUsage[model].contextWindow`, reconciled through
 //! `canonical`), a delegate's spend subtracted out of the turn's so a subagent never moves the
 //! parent's ring (`subagent_spend`), and the full five-field [`super::Spend`] breakdown alongside
@@ -2357,7 +2357,7 @@ mod tests {
 
     /// Live, two-turn diagnostic against a real, persistent, structured
     /// Claude Code session (`claude -p --input-format stream-json`, prompts
-    /// on stdin via [`super::write_input`]) — the actual path Ubiq drives, not
+    /// on stdin via [`super::write_input`]) — the actual path Kubiq drives, not
     /// the one-shot `claude -p "prompt"` invocation `discover_models_live_*`
     /// checks. Skips gracefully when `claude` is absent, same convention as
     /// that sibling test (`harness/claude.rs`).

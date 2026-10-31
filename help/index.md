@@ -1,25 +1,25 @@
 ---
 id: index
-title: Welcome to Ubiq
-summary: What Ubiq is, a map of this manual by section, and how to reach the page for the screen or control in front of you.
+title: Welcome to Kubiq
+summary: What Kubiq is, a map of this manual by section, and how to reach the page for the screen or control in front of you.
 keywords: [start, home, welcome, overview, contents, manual, map]
 order: 0
 status: current
-related: [getting-started, philosophy-why-ubiq, workbench-help, glossary]
+related: [getting-started, philosophy-why-kubiq, workbench-help, glossary]
 ---
 
-Ubiq is one window that runs several AI coding agents side by side, each in its own real terminal, beside your project's files, history and documents. It hosts the harnesses you already use — Claude Code, Codex, Gemini CLI, opencode and GitHub Copilot CLI — and leaves the choice of harness and model to you; [Why Ubiq](philosophy-why-ubiq) says more.
+Kubiq is one window that runs several AI coding agents side by side, each in its own real terminal, beside your project's files, history and documents. It hosts the harnesses you already use — Claude Code, Codex, Gemini CLI, opencode and GitHub Copilot CLI — and leaves the choice of harness and model to you; [Why Kubiq](philosophy-why-kubiq) says more.
 
 ## Where to start
 
-New to Ubiq? Read [Getting started](getting-started): it takes you from the first launch to one agent working in one project.
+New to Kubiq? Read [Getting started](getting-started): it takes you from the first launch to one agent working in one project.
 
-![The Ubiq window with a project open: the rail on the left, the project's files in the explorer and the editor beside it](img/start/index-1.png)
+![The Kubiq window with a project open: the rail on the left, the project's files in the explorer and the editor beside it](img/start/index-1.png)
 
 ## The manual, section by section
 
 - **Start** — [Getting started](getting-started): the first launch, a first project and a first agent.
-- **Philosophy** — [Why Ubiq](philosophy-why-ubiq): what Ubiq believes, and [What Ubiq is not](philosophy-what-ubiq-is-not).
+- **Philosophy** — [Why Kubiq](philosophy-why-kubiq): what Kubiq believes, and [What Kubiq is not](philosophy-what-kubiq-is-not).
 - **Concepts** — [Projects](projects), [Panes and panels](panes) and the [Glossary](glossary): the words the rest of the manual uses.
 - **Guides** — [Your first project and your first agent](guides-first-project-and-agent): real tasks walked through end to end.
 - **How-to** — [Switch a harness's permission mode](how-to-switch-permission-mode) and the pages after it: one task per page.

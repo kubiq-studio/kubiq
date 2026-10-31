@@ -7,7 +7,7 @@ summary: The rail's IDE mode — the project's file explorer and its right-click
 read_when: you are changing the explorer tree, the editor tabs, what a file panel draws, which viewer draws it, how a diagram is rendered or cached, capturing the window, editing a picture, or saving a file
 updated: 2026-10-24
 verified: 2026-10-26
-code_anchors: [crates/ubiq/src/ui/explorer.rs, crates/ubiq/src/app/explorer.rs, crates/ubiq/src/state/explorer/mod.rs, crates/ubiq/src/state/explorer/tree.rs, crates/ubiq/src/state/explorer/rows.rs, crates/ubiq/src/state/explorer/menu.rs, crates/ubiq/tests/explorer.rs, crates/ubiq/tests/files_changed.rs, crates/ubiq/src/ui/kit/files.rs, crates/ubiq/src/ui/editor.rs, crates/ubiq/src/state/editor.rs, crates/ubiq/src/ui/mark.rs, crates/ubiq/src/app/mark.rs, crates/ubiq/src/ui/viewer/mod.rs, crates/ubiq/src/ui/viewer/diff.rs, crates/ubiq/src/ui/viewer/markdown.rs, crates/ubiq/src/ui/mdview/view.rs, crates/ubiq/src/ui/mdview/search.rs, crates/ubiq/src/ui/mdview/minimap.rs, crates/ubiq/src/ui/mdview/outline.rs, crates/ubiq/src/ui/mdview/blockedit.rs, crates/ubiq/src/ui/viewer/md_options.rs, crates/ubiq/src/ui/viewer/diagram.rs, crates/ubiq/src/ui/viewer/scene.rs, crates/ubiq/src/ui/viewer/viewport.rs, crates/ubiq/src/ui/viewer/image.rs, crates/ubiq/src/ui/viewer/image_edit.rs, crates/ubiq/src/ui/viewer/web.rs, crates/ubiq/src/app/capture.rs, crates/ubiq/src/app/feedback.rs, crates/ubiq/src/state/feedback.rs, crates/ubiq/src/ui/feedback.rs, crates/ubiq/src/app/image_edit.rs, crates/ubiq/src/state/image_edit.rs, crates/ubiq/tests/image_gestures.rs, crates/ubiq/src/app/clipboard.rs, crates/ubiq/src/state/diagrams.rs, crates/ubiq/src/state/viewport.rs, crates/ubiq/src/state/scene.rs, crates/ubiq-draw/src/model.rs, crates/ubiq-draw/src/excalidraw.rs, crates/ubiq-draw/src/drawio.rs, crates/ubiq/tests/diagrams.rs, crates/ubiq/tests/viewport.rs, crates/ubiq/tests/scene.rs, crates/ubiq/tests/viewer_kind.rs, crates/ubiq/src/ui/file_dialog.rs, crates/ubiq/src/ui/web_view.rs, crates/ubiq/src/app/web_panel.rs, crates/ubiq/src/state/web_panel.rs, crates/ubiq/src/ext/viewer.rs, crates/ubiq/tests/viewer_container.rs]
+code_anchors: [crates/kubiq/src/ui/explorer.rs, crates/kubiq/src/app/explorer.rs, crates/kubiq/src/state/explorer/mod.rs, crates/kubiq/src/state/explorer/tree.rs, crates/kubiq/src/state/explorer/rows.rs, crates/kubiq/src/state/explorer/menu.rs, crates/kubiq/tests/explorer.rs, crates/kubiq/tests/files_changed.rs, crates/kubiq/src/ui/kit/files.rs, crates/kubiq/src/ui/editor.rs, crates/kubiq/src/state/editor.rs, crates/kubiq/src/ui/mark.rs, crates/kubiq/src/app/mark.rs, crates/kubiq/src/ui/viewer/mod.rs, crates/kubiq/src/ui/viewer/diff.rs, crates/kubiq/src/ui/viewer/markdown.rs, crates/kubiq/src/ui/mdview/view.rs, crates/kubiq/src/ui/mdview/search.rs, crates/kubiq/src/ui/mdview/minimap.rs, crates/kubiq/src/ui/mdview/outline.rs, crates/kubiq/src/ui/mdview/blockedit.rs, crates/kubiq/src/ui/viewer/md_options.rs, crates/kubiq/src/ui/viewer/diagram.rs, crates/kubiq/src/ui/viewer/scene.rs, crates/kubiq/src/ui/viewer/viewport.rs, crates/kubiq/src/ui/viewer/image.rs, crates/kubiq/src/ui/viewer/image_edit.rs, crates/kubiq/src/ui/viewer/web.rs, crates/kubiq/src/app/capture.rs, crates/kubiq/src/app/feedback.rs, crates/kubiq/src/state/feedback.rs, crates/kubiq/src/ui/feedback.rs, crates/kubiq/src/app/image_edit.rs, crates/kubiq/src/state/image_edit.rs, crates/kubiq/tests/image_gestures.rs, crates/kubiq/src/app/clipboard.rs, crates/kubiq/src/state/diagrams.rs, crates/kubiq/src/state/viewport.rs, crates/kubiq/src/state/scene.rs, crates/kubiq-draw/src/model.rs, crates/kubiq-draw/src/excalidraw.rs, crates/kubiq-draw/src/drawio.rs, crates/kubiq/tests/diagrams.rs, crates/kubiq/tests/viewport.rs, crates/kubiq/tests/scene.rs, crates/kubiq/tests/viewer_kind.rs, crates/kubiq/src/ui/file_dialog.rs, crates/kubiq/src/ui/web_view.rs, crates/kubiq/src/app/web_panel.rs, crates/kubiq/src/state/web_panel.rs, crates/kubiq/src/ext/viewer.rs, crates/kubiq/tests/viewer_container.rs]
 depends_on: [feat-workbench, tech-ui]
 review_cycle: monthly
 ---
@@ -18,7 +18,7 @@ review_cycle: monthly
 
 IDE is the rail mode a project's files are read and written in: the explorer down the left, one
 editor tab per open file in the centre, and a viewer chosen from the file's own kind to draw it.
-It is where Ubiq is a text editor, and the mode the workbench opens a file into from anywhere
+It is where Kubiq is a text editor, and the mode the workbench opens a file into from anywhere
 else. The chrome around it — the rail, the dock, the tabs and the status bar — belongs to
 [the workbench](./workbench.md).
 
@@ -72,7 +72,7 @@ same reason. The flat list has no such row, because a list is flat by definition
 for a root to contain.
 
 **The explorer is worked from the keyboard, and the filter and the tree are two focuses** — the
-convention [`tech/ui-and-design.md`](../tech/ui-and-design.md) states for every tree in Ubiq. `⌘P`
+convention [`tech/ui-and-design.md`](../tech/ui-and-design.md) states for every tree in Kubiq. `⌘P`
 (and `ctrl-p`) reveals the explorer and puts the caret in its filter from anywhere, including from
 inside another field. `down` and `tab` step from there onto the tree, `tab` and `shift-tab` step
 back off it onto the field, and the keys below are live only while the tree holds the keyboard.
@@ -128,7 +128,7 @@ comes back as an index and rows drawn without matching entries behind them would
 every action below one. There is no Expand or Collapse row: the twisty and a click on the row
 already do it, and a third way to say the same thing is a row that earns nothing. `Open in Finder` — Explorer or File Manager on other platforms — shows
 the row in the system's file manager: on Windows a folder opens as itself and a file is revealed
-selected in its folder (`open_in_system` in `crates/ubiq/src/app/mod.rs`), and on macOS and Linux the
+selected in its folder (`open_in_system` in `crates/kubiq/src/app/mod.rs`), and on macOS and Linux the
 file's folder is what opens. On Windows the path reaches Explorer, and Copy full path the clipboard,
 with backslashes and no `\\?\` prefix, since Explorer cannot parse a `/`-joined path and opens the
 Desktop instead. `Open in Web` starts the local web-export server
@@ -310,7 +310,7 @@ already-open buffer into line rather than waiting for a reopen. A buffer with no
 uses its editor's own default, which is to wrap.
 
 **With no file open, the centre shows the brand, big and soft.** The page that is about to hold a
-file says so without furniture — no button, no menu, just Ubiq's own mark at 200px and half opacity
+file says so without furniture — no button, no menu, just Kubiq's own mark at 200px and half opacity
 on the window's ground. The mark is theme picked, the blue on a light palette and the white on a
 dark one, exactly as the rail's mark is on its swatch.
 
@@ -378,10 +378,10 @@ change re-reads it when nothing in it is unsaved, where every other viewer's on-
 alone.
 
 **A markdown tab follows its file live** (`D208`). Whatever moved it — an agent's `write_doc`, another
-window, an editor outside Ubiq — the fresh bytes are merged into the buffer the tab already has, on
+window, an editor outside Kubiq — the fresh bytes are merged into the buffer the tab already has, on
 screen or not, dirty or not, with nothing asked: a clean buffer simply takes them; a dirty one is
 three-way merged (base = what was last read or saved, ours = the buffer, theirs = the disk) by
-`ubiq_proto::merge`, line-level and then word-level, so edits to different lines or different words
+`kubiq_proto::merge`, line-level and then word-level, so edits to different lines or different words
 of one line both land, and where both changed the same words the user's text stays and the other
 side's is handed to the host to post as a thread. The caret keeps its line and column, the scroll
 stays, and the rows the other writer changed flash in `agent_edit_flash` and fade over ~1.8 s —
@@ -491,7 +491,7 @@ system-wide"** button writes the tab's own values into
 `UiSettings.md_char_scale_default`/`md_text_shade_default`/`md_line_spacing_default`/`md_paragraph_spacing_default`, through the same
 `Message::SetSettings { layer: Ui }` path every other row on this popover already persists by — no
 new wire message, because that layer is exactly the interface-owned, opaque-to-the-host blob this
-needed. **There is no per-project counterpart.** `ubiq-proto` carries no message that scopes a
+needed. **There is no per-project counterpart.** `kubiq-proto` carries no message that scopes a
 settings blob to one project, and this card stops at reporting the shape one would need —
 `ui/viewer/md_options.rs`'s own module doc comment — rather than adding it.
 
@@ -717,8 +717,8 @@ loud rather than swallowed, in the **Not saved**
 modal: it names the reason, says the edits are still in the tab, and its one button only dismisses
 it. A version-less write that lands on a path already taken is the one refusal with a question in
 it — the **Overwrite file** modal — and confirming it re-sends the same bytes asking the host to
-write over what is there, the only place Ubiq offers to do that (`tech/transport-contract.md` owns
-the message). Ubiq is not the only thing editing these files, and the agents in the panes are the
+write over what is there, the only place Kubiq offers to do that (`tech/transport-contract.md` owns
+the message). Kubiq is not the only thing editing these files, and the agents in the panes are the
 other one: for a version mismatch there is no merge, and resolving a conflict is the user's.
 
 **A tab with nothing typed into it follows the file on disk; a dirty one is left alone.** A clean
@@ -802,7 +802,7 @@ expanded folders and the selected row, and the host neither parses nor validates
 ## Implementation
 
 `state/explorer/` holds every piece of tree logic and no frame, which is what makes it testable in
-`crates/ubiq/tests/explorer.rs`. `merge()` puts one directory's listing into the tree, matching
+`crates/kubiq/tests/explorer.rs`. `merge()` puts one directory's listing into the tree, matching
 entries by name so that a folder re-listed keeps the children and the expanded flags below it, an
 entry that has gone is dropped with its subtree, and a new one arrives shut and unlisted — which also
 makes an unsolicited listing harmless — which is what the filesystem watch relies on.
@@ -841,7 +841,7 @@ clipboard — and not the developer's — holding a test's copy. `ui/explorer.rs
 `ExplorerCopy`/`ExplorerCut`/`ExplorerPaste` at the panel's context only, and its rows and
 background take `ExternalPaths` drops into `drop_external_paths_on()`; `drop_onto` is drawn only
 while `has_active_drag()`, so a drag that left the window leaves nothing lit. The reply lands in
-`app/wire.rs`'s `paths_imported()`. The free names both sides count are `ubiq_proto::files::copy_name`,
+`app/wire.rs`'s `paths_imported()`. The free names both sides count are `kubiq_proto::files::copy_name`,
 which `ExplorerState::free_name` and the host's `files::import` share.
 
 `state/editor.rs` names the component library, unlike its neighbours, because a file's buffer *is*
@@ -903,7 +903,7 @@ markdown file in Preview or Split the tab's `OpenFile::md` entity (`ui/mdview/vi
 created by `app/editor.rs`'s `attach_md_view` from `attach_file` and `app/kb.rs`'s attach path,
 its `MdViewEvent::LinkClicked` routed to `AppState::follow_link`). The header's navigator and Edit
 chip call `MdView::open_navigator` and `MdView::set_editable`. A contributed viewer is
-`ViewerKind::Contributed(SlotId)` over `crates/ubiq/src/ext/viewer.rs`'s `ViewerSpec` — `claims`,
+`ViewerKind::Contributed(SlotId)` over `crates/kubiq/src/ext/viewer.rs`'s `ViewerSpec` — `claims`,
 `layouts`, `default_layout`, `language`, `live_reload`, `render`, `menu`, `header_left` / `header_right` (content for the top row, either side of the layout pills, flush) — installed from
 `Contributions::viewers`; `ViewerKind::of` consults `default_for` where the table falls through,
 `OpenFile::claim_by_head` runs in `attach_file` before the buffer is built, `ViewerKind::open_with`
@@ -923,11 +923,11 @@ A diagram or a scene in a panel is wrapped by `viewer/viewport.rs`, which is the
 wheel; `state/viewport.rs` is the camera they share — fit, zoom about a point, pan, reset — and
 is what `tests/viewport.rs` asserts, because none of it needs a frame. A fence still draws
 through `diagram.rs` and `scene.rs` directly, at the picture's own size. `scene.rs` paints only
-`ubiq_draw::Drawing` (`crates/ubiq-draw/src/model.rs`, `D222`): `live()` and `render()` take an
-Excalidraw file through `ubiq_draw::excalidraw::Scene::to_drawing()` — the parser and
+`kubiq_draw::Drawing` (`crates/kubiq-draw/src/model.rs`, `D222`): `live()` and `render()` take an
+Excalidraw file through `kubiq_draw::excalidraw::Scene::to_drawing()` — the parser and
 `stacking_order()` live there, and `state/scene.rs` re-exports them — and `drawio_live()` takes a
-draw.io file through `ubiq_draw::drawio::parse()`, falling back to `diagram::exported()` on an
-error. `crates/ubiq-draw/tests/` holds the converter fixtures. None of them reaches a
+draw.io file through `kubiq_draw::drawio::parse()`, falling back to `diagram::exported()` on an
+error. `crates/kubiq-draw/tests/` holds the converter fixtures. None of them reaches a
 path or a handle; the camera is keyed by the tab and lives on the window.
 
 The capture is four modules over that machinery and one dependency line. `app/capture.rs` is the
@@ -943,7 +943,7 @@ passes a callback that attaches the picture and restores it, on
 `crop_rect()` and `crop_png()` are the crop and the encode — the frame becomes RGBA in
 `frame_rgba()` on the capturer's own thread, from `zed_scap::frame::Frame` on
 Windows and Linux and from a `CVImageBuffer` on macOS, which is why `gpui` and `gpui_platform` carry
-the `screen-capture` feature in `crates/ubiq/Cargo.toml` and `objc2-core-video` and `zed-scap` sit behind
+the `screen-capture` feature in `crates/kubiq/Cargo.toml` and `objc2-core-video` and `zed-scap` sit behind
 target `cfg`s there. The pixels land in `app/editor.rs`'s `open_untitled_image()`, and
 `clipboard.rs`'s `next_capture_name()` numbers the tab. `state/image_edit.rs` is the buffer:
 `ImageEdit::new()` builds the scene of `state/scene.rs` elements over the base bytes, `push()`,
@@ -1008,7 +1008,7 @@ same three currencies: `RefreshProjectGit { full: true }` when it reports the gi
 candidate when the batch is truncated, put back to reading by `OpenFile::reload()` — after `set_restore()` has captured the
 outgoing buffer's `selected_range()` and scroll offset, so the fresh `Entity<EditorState>` the
 answering contents build is put back where the old one was read rather than opened at the top.
-`crates/ubiq/tests/files_changed.rs` is what asserts each of those without a frame, cursor position
+`crates/kubiq/tests/files_changed.rs` is what asserts each of those without a frame, cursor position
 included. `activate_file()` and `closed_file_panel()`
 are the other direction — the dock deciding which tab is in front and which has gone, which the
 editor learns from it rather than the other way round. `activate_kb_doc()` and `closed_kb_panel()`
@@ -1059,7 +1059,7 @@ library's own so they win — and the binary calls it beside its own quit bindin
 | A file's read fails | The tab shows the reason in the danger colour instead of a buffer |
 | A file is too large for one read | What arrived is drawn and can be read; saving it is refused, because writing a prefix back would shorten the file |
 | A file is not text | The tab says so rather than drawing bytes as characters |
-| A file changed on disk since it was read | The save is refused, the file is left alone, and the tab and the status bar say so. Ubiq offers no merge |
+| A file changed on disk since it was read | The save is refused, the file is left alone, and the tab and the status bar say so. Kubiq offers no merge |
 | A save fails for any other reason | The same report, cleared by the next edit |
 | The host cannot watch the project's folder | Logged, and the project has no watch: the tree and the git state go stale until something asks for them, which is every other path in this table unchanged |
 | The project is not a repository | The explorer's rows stay unmarked and the status bar prints no branch. That is an ordinary answer, not an error |

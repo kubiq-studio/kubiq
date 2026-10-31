@@ -397,7 +397,7 @@ needs the grant in order to be created, and a grant on an absent path is inert. 
 environment read is the caller's, not `plan`'s** — `plan` must answer identically for a
 given `IsolateOptions`, the front-end-agnostic invariant this module keeps — so a host calls
 it where it decides to consult its own environment: `compose_run` in
-`crates/ubiq-host/src/agent.rs` and `isolate_options` in `crates/agent-manager/src/cli/run.rs`,
+`crates/kubiq-host/src/agent.rs` and `isolate_options` in `crates/agent-manager/src/cli/run.rs`,
 both one line, both **before** the caller's own extra grants so an explicit grant is the last
 word. `TOOLCHAIN_ROOT_VARS` is the relocation half of `ENV_PASS` and the two stay in step;
 the test `every_toolchain_root_var_is_also_passed_through` is what makes that hold. The

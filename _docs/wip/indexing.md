@@ -3,11 +3,11 @@ id: wip-indexing
 title: Indexing a project
 kind: wip
 status: current
-summary: What Ubiq keeps about a project so a search need not re-read it — a per-project level defaulting from an application setting, and a full-text index that selects candidate files for the existing content search rather than answering it. The full-text half is built; the symbol half the `full` level names is not, which is the gap this document exists to record.
-read_when: you are changing what Ubiq indexes, how a content search is answered, or what the indexing level means
+summary: What Kubiq keeps about a project so a search need not re-read it — a per-project level defaulting from an application setting, and a full-text index that selects candidate files for the existing content search rather than answering it. The full-text half is built; the symbol half the `full` level names is not, which is the gap this document exists to record.
+read_when: you are changing what Kubiq indexes, how a content search is answered, or what the indexing level means
 updated: 2026-10-23
 verified: 2026-10-23
-code_anchors: [crates/ubiq-host/src/index/mod.rs, crates/ubiq-host/src/index/text.rs, crates/ubiq-host/src/index/ceiling.rs, crates/ubiq-host/src/search/worker.rs, crates/ubiq-host/src/search/hits.rs, crates/ubiq-host/src/search/walk.rs, crates/ubiq-host/src/watch/mod.rs, crates/ubiq-host/src/coordinator.rs, crates/ubiq-proto/src/projects.rs, crates/ubiq-proto/src/settings.rs, crates/ubiq/src/ui/settings.rs, crates/ubiq/src/ui/sink/project.rs]
+code_anchors: [crates/kubiq-host/src/index/mod.rs, crates/kubiq-host/src/index/text.rs, crates/kubiq-host/src/index/ceiling.rs, crates/kubiq-host/src/search/worker.rs, crates/kubiq-host/src/search/hits.rs, crates/kubiq-host/src/search/walk.rs, crates/kubiq-host/src/watch/mod.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ui/sink/project.rs]
 depends_on: [tech-architecture, tech-transport, tech-structure, feat-workbench]
 ---
 
@@ -24,10 +24,10 @@ project reads only the files that could match, refreshed as the watcher reports 
 
 **Not built:** the symbol table. `full` is selectable and behaves exactly like `light` — it keeps
 no symbols, because nothing extracts any. There is no `ProjectSymbols` message, no tree-sitter
-dependency in `crates/ubiq-host/`, no outline fed from a project-wide table. **A user who picks
+dependency in `crates/kubiq-host/`, no outline fed from a project-wide table. **A user who picks
 "Full text + symbols" today gets full text and no symbols, and nothing says so** (`G156`).
 
-The buffer's own outline is a separate thing and does exist: `crates/ubiq/src/ui/outline.rs` parses
+The buffer's own outline is a separate thing and does exist: `crates/kubiq/src/ui/outline.rs` parses
 the file in front of the user with tree-sitter in the interface crate, needs no host, no index and
 no project, and works at every level including `none`.
 
@@ -125,7 +125,7 @@ indexed, and only then.
 
 ## Where the work runs
 
-`crates/ubiq-host/src/index/` — one thread named `ubiq-index`, one unbounded queue, one open index
+`crates/kubiq-host/src/index/` — one thread named `kubiq-index`, one unbounded queue, one open index
 per project, on the shape `search/` and `watch/` already proved. The thread owns every index, so a
 writer is never shared and never locked; what leaves it is a read handle carrying no writer, so a
 search can never block indexing. A `readers` map beside the queue is what lets the coordinator take
@@ -169,7 +169,7 @@ repairing derived data is a second implementation of building it, and building i
 
 ## Ceilings
 
-`crates/ubiq-host/src/index/ceiling.rs`. Files over `MAX_FILE_BYTES` and files with a NUL in their
+`crates/kubiq-host/src/index/ceiling.rs`. Files over `MAX_FILE_BYTES` and files with a NUL in their
 first `BINARY_SNIFF_BYTES` are never indexed — they are still found by the walk, and by nothing
 else. `FILES` bounds how many one project holds. `CANDIDATES` bounds one query's answer and sets
 the same `truncated` flag the walk's own ceilings set, meaning the same thing. `MIN_QUERY_CHARS` is

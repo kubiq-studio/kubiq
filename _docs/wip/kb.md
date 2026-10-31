@@ -3,11 +3,11 @@ id: wip-kb
 title: The knowledge base — sources, the write half, and what is next
 kind: wip
 status: current
-summary: A project's knowledge base as it stands — a per-project list of sources persisted as one TOML file, a folder read where it lies, a git repository cloned and refreshed, an internal wiki, a host-side write half (`kb/ops.rs`) behind six new messages, the `ubiq-kb` MCP server that reaches it, the explorer's right-click menu that reaches it from the interface, and a document as a dock tab — the same `OpenFile` the IDE's editor uses, with its own Save gated on the source's write access.
-read_when: you are touching the knowledge base's sources, its git sync worker, its write half, its `ubiq-kb` MCP server, or its explorer panel or document tabs
+summary: A project's knowledge base as it stands — a per-project list of sources persisted as one TOML file, a folder read where it lies, a git repository cloned and refreshed, an internal wiki, a host-side write half (`kb/ops.rs`) behind six new messages, the `kubiq-kb` MCP server that reaches it, the explorer's right-click menu that reaches it from the interface, and a document as a dock tab — the same `OpenFile` the IDE's editor uses, with its own Save gated on the source's write access.
+read_when: you are touching the knowledge base's sources, its git sync worker, its write half, its `kubiq-kb` MCP server, or its explorer panel or document tabs
 updated: 2026-10-25
 verified: 2026-09-22
-code_anchors: [crates/ubiq-proto/src/kb.rs, crates/ubiq-host/src/kb/mod.rs, crates/ubiq-host/src/kb/ops.rs, crates/ubiq-host/src/kb/vault.rs, crates/ubiq-host/src/kb/store.rs, crates/ubiq-host/src/kb/sync.rs, crates/ubiq-host/src/mcp/kb.rs, crates/ubiq/src/state/kb.rs, crates/ubiq/src/state/dock.rs, crates/ubiq/src/state/editor.rs, crates/ubiq/src/app/kb.rs, crates/ubiq/src/app/web_panel.rs, crates/ubiq/src/ui/kb/mod.rs, crates/ubiq/src/ui/kb/source_form.rs, crates/ubiq/src/ui/kb/password.rs, crates/ubiq/src/ui/file_dialog.rs, crates/ubiq/src/ui/sink/project.rs, crates/ubiq-proto/src/messages.rs, crates/ubiq/tests/kb.rs]
+code_anchors: [crates/kubiq-proto/src/kb.rs, crates/kubiq-host/src/kb/mod.rs, crates/kubiq-host/src/kb/ops.rs, crates/kubiq-host/src/kb/vault.rs, crates/kubiq-host/src/kb/store.rs, crates/kubiq-host/src/kb/sync.rs, crates/kubiq-host/src/mcp/kb.rs, crates/kubiq/src/state/kb.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/state/editor.rs, crates/kubiq/src/app/kb.rs, crates/kubiq/src/app/web_panel.rs, crates/kubiq/src/ui/kb/mod.rs, crates/kubiq/src/ui/kb/source_form.rs, crates/kubiq/src/ui/kb/password.rs, crates/kubiq/src/ui/file_dialog.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq-proto/src/messages.rs, crates/kubiq/tests/kb.rs]
 depends_on: [tech-architecture, tech-transport, feat-workbench, tech-decisions]
 ---
 
@@ -17,7 +17,7 @@ depends_on: [tech-architecture, tech-transport, feat-workbench, tech-decisions]
 
 The knowledge base is the documents half of a project: markdown, plain text and — once a viewer is
 wired behind it — diagrams and images, read from one or more sources that need not be inside the
-project at all. `crates/ubiq-proto/src/kb.rs`'s own header states the difference from the project
+project at all. `crates/kubiq-proto/src/kb.rs`'s own header states the difference from the project
 explorer plainly: a knowledge base has **several sources**, and the project's own folder is the
 common case rather than a special one.
 
@@ -25,14 +25,14 @@ A source ([`KbSource`]) is a name, an id, a [`KbOrigin`], a filter of space-sepa
 against a file's name at any depth, and a [`KbAccess`]. `KbOrigin` has three arms: `Folder { path }`,
 read where it lies; `Git { url, branch?, store }`, fetched onto a directory of its own, where
 [`KbStore`] says whether that directory is the machine's temporary area (`Cache`), the project's own
-area of the config root (`Internal`, the default, `D30`'s guarantee) or a `.ubiq/local/kb` folder inside
+area of the config root (`Internal`, the default, `D30`'s guarantee) or a `.kubiq/local/kb` folder inside
 the project itself (`Project`, the one arm that writes there on purpose); and `Internal`, a wiki
-Ubiq keeps for the project itself, always writable and with nothing to fetch. The whole list for a
+Kubiq keeps for the project itself, always writable and with nothing to fetch. The whole list for a
 project rides one message rather than one row per edit — `SetKbSources` — because it is a short
 list edited in a settings form, and a reorder, a rename and a removal are one fact together rather
 than three.
 
-**The host.** `crates/ubiq-host/src/kb/mod.rs`'s `Kb` is a concrete service, the same shape
+**The host.** `crates/kubiq-host/src/kb/mod.rs`'s `Kb` is a concrete service, the same shape
 `store::usage::Usage` takes: one per coordinator, holding the config root and an `overrides` map for
 the two states disk cannot answer — `Syncing` while a thread is fetching, `Failed` after an attempt
 that left nothing behind. Every other state is derived: a folder source reads `Ready` when the path
@@ -44,10 +44,10 @@ a settings row's own control or the explorer's row asks for, and is a no-op for 
 `Kb::base_path` resolves once where a source's documents actually are, and nothing else in the module
 composes that path a second time.
 
-`crates/ubiq-host/src/kb/store.rs` is the list itself: one TOML file at
+`crates/kubiq-host/src/kb/store.rs` is the list itself: one TOML file at
 `<config root>/projects/<project ulid>/kb.toml`, `version` at the top, written atomically, missing
 read as an empty list rather than an error — `store::file::FileTaskStore`'s own convention.
-`crates/ubiq-host/src/kb/sync.rs` is the git fetch, on a thread of its own, on the shape
+`crates/kubiq-host/src/kb/sync.rs` is the git fetch, on a thread of its own, on the shape
 `repos::clone` set: a first clone requires `https://` and removes what it wrote if it fails, a
 refresh fetches and hard-resets whatever branch is actually checked out — read off `HEAD`, not off
 the source's own `branch` field, since a source edited to name a different branch is a new checkout
@@ -55,9 +55,9 @@ once its directory is gone. Progress is throttled the same 250ms `repos::clone::
 there is no cancel: a fetch already running is left to finish rather than torn down under a working
 tree it might be resetting.
 
-**The write half.** `crates/ubiq-host/src/kb/ops.rs` is six free functions — `write_file`, `create`,
+**The write half.** `crates/kubiq-host/src/kb/ops.rs` is six free functions — `write_file`, `create`,
 `rename`, `delete`, `absolute`, `reveal` — rather than methods on `Kb`, so a caller with no bus in
-reach (the `ubiq-kb` MCP server, below) can use them too. Every mutating one opens with
+reach (the `kubiq-kb` MCP server, below) can use them too. Every mutating one opens with
 `KbSource::is_writable` — `ReadWrite` access, or any `KbOrigin::Internal` source whatever `access`
 says — and refuses before it touches disk; containment is `files/path.rs`'s, the same resolver the
 file family uses, so a second implementation never has the chance to drift from the first. The
@@ -69,8 +69,8 @@ about to hide it. The coordinator answers six new UI → host messages through `
 `AskKbPath`'s answer, and nothing on a successful `RevealKbPath`. `tech/transport-contract.md`'s Kb
 table has the full shape of all eight.
 
-**The `ubiq-kb` MCP server.** `crates/ubiq-host/src/mcp/kb.rs` is the fifth built-in server, beside
-`test`, `project-info`, `manage-ubiq-tasks` and `use-task`, so an agent Ubiq started can read and
+**The `kubiq-kb` MCP server.** `crates/kubiq-host/src/mcp/kb.rs` is the fifth built-in server, beside
+`test`, `project-info`, `manage-kubiq-tasks` and `use-task`, so an agent Kubiq started can read and
 write the project's documents without being told where they are on disk. Eight tools:
 `list_kb_sources`, `list_kb_documents`, `read_kb_document`, `write_kb_document`, `create_kb_entry`,
 `rename_kb_entry`, `delete_kb_entry` and `sync_kb_source`.
@@ -99,7 +99,7 @@ URL says which agent is calling, and that agent's project is the knowledge base 
 source's URL and branch are answered as the facts they are; nothing that would authenticate to it
 is in this family to answer with.
 
-**The interface.** `crates/ubiq/src/state/kb.rs`'s `KbState` holds one `KbSourceView` per source —
+**The interface.** `crates/kubiq/src/state/kb.rs`'s `KbState` holds one `KbSourceView` per source —
 the host's status plus a tree that is deliberately smaller than `ExplorerState`'s: no git marks, no
 filter walk and no drag, just what is inside a folder, whether it is open and whether its listing is
 in flight, plus the one thing a documents explorer cannot do without, a right-click menu. Its
@@ -111,7 +111,7 @@ being one rather than by restating any of them (`T-31`). `kb_tab_key(source, pat
 `"kb:{source}:{path}"` — is the one key space every document, panel and cache entry uses, so a
 document and a project file of the same path are two tabs rather than one; `KbDocKey::tab_key()` and
 `KbDocKey::from_tab_key()` convert between the pair and the string.
-`crates/ubiq/src/app/kb.rs` is the wire between a click and a message: opening a folder sends
+`crates/kubiq/src/app/kb.rs` is the wire between a click and a message: opening a folder sends
 `KbTree`, opening a document opens its tab (`KbState::open_doc`, a no-op if the tab is already open)
 and sends `ReadKbFile`, a press on a source that is not ready sends `SyncKbSource`, and a click on a
 row whose read failed retries it. The settings mutators — `confirm_kb_source`, `remove_kb_source`,
@@ -130,7 +130,7 @@ id, or once the source's own listed folder does not hold the name; `Unknown` —
 live — for a source not yet loaded or a folder not yet listed, on
 `state::explorer::locate()`'s shared reasoning with `ExplorerState::presence()`.
 
-**A source's folder is chosen on the host, through Ubiq's own picker.** `browse_kb_source_folder`
+**A source's folder is chosen on the host, through Kubiq's own picker.** `browse_kb_source_folder`
 opens a `PickKind::Folders` file picker owned by `PickerOwner::KbFolder` over a `host_browse` session
 begun against `Bus::host_of_project` — the same two steps `open_remote_project_picker` takes, with a
 different owner on the end — so the path the form holds is one the *host* resolved. The session
@@ -139,7 +139,7 @@ default: a source is almost always found inside or beside the project it is bein
 platform dialog `cx.prompt_for_paths` is gone from this family; `G32` still names it for a project's
 Add and Locate, which have not moved.
 
-`crates/ubiq/src/ui/kb/mod.rs` draws the left panel — a multi-source explorer that borrows
+`crates/kubiq/src/ui/kb/mod.rs` draws the left panel — a multi-source explorer that borrows
 `ui::kit::files`'s row, twisty and kind-icon exactly as `ui/explorer.rs` does, with a source's own
 row carrying its origin as a tooltip and a state word — `pending`, a syncing detail, or `failed` with
 a retry control — that `Ready` never draws. **A document is a dock tab, exactly as a file is**
@@ -147,7 +147,7 @@ a retry control — that `Ready` never draws. **A document is a dock tab, exactl
 documents are open at once, each with the dock's own tab strip, dirty dot, drag, pin and close — the
 module's own flush header naming the open document is gone with the single-document centre it existed
 for (`T-23`'s reasoning is now the dock's). `ui::kb::centre()` is only the "no document open" page,
-drawn while `KbState::docs` is empty — the sentence pointing at the explorer, over Ubiq's brand mark
+drawn while `KbState::docs` is empty — the sentence pointing at the explorer, over Kubiq's brand mark
 as a faint backdrop, which is `ui::mark::backdrop` and the same page `ui/editor.rs` draws with no
 file open; `ui::kb::render_doc()` is one panel's body, looked up by tab key
 and handed to `ui::viewer::render()` unconditionally — the same seam the IDE editor draws through
@@ -168,7 +168,7 @@ is gone.
 `FileBody::Bytes` rather than `OpenFile::set_image`'s `ImageEdit` a project file's does — the
 annotation toolbar is never offered, and there is nothing for `save_kb_doc` to refuse. Annotating a
 knowledge-base picture and saving it back would need `WriteKbFile` to carry bytes rather than only
-`contents: String`, which is a `crates/ubiq-proto/src/messages.rs` change this card did not make;
+`contents: String`, which is a `crates/kubiq-proto/src/messages.rs` change this card did not make;
 see `backlog.md`.
 
 **Every document opens with a buffer, whatever its source's access says** — `app/kb.rs`'s
@@ -188,13 +188,13 @@ already sends for the explorer's re-list; every document mid-save under that par
 costs no second round trip. A reply for a document the user has since closed is discarded; a reply
 for one still open fills its own tab even if the user has since opened others, so no click against a
 second document ever costs what the first one's reply was about to answer with (`T-31`).
-`crates/ubiq/src/ui/sink/project.rs`'s `kb` function is the third surface: an inline section in the
+`crates/kubiq/src/ui/sink/project.rs`'s `kb` function is the third surface: an inline section in the
 project settings dialog, drawn only for a project with a live record — the sink's fixture page and
 the create form have no project for a source to belong to — listing each source with its filter
 field, a read-only/read-write marker and a remove control, under one **Add source** button, every
 edit sent as it is made.
 
-`crates/ubiq/src/ui/kb/source_form.rs` is the fourth: the modal that button raises, painted at the
+`crates/kubiq/src/ui/kb/source_form.rs` is the fourth: the modal that button raises, painted at the
 window root over the settings page for the reason every other dialog is — a modal drawn inside the
 page it overlays is one the page can clip. Its state is `state::kb::KbSourceForm` on
 `WorkbenchState::kb_source`, and it is the New agent modal's shape throughout: a `kit::modal` with a
@@ -227,7 +227,7 @@ copied in as it opens, `kb_menu_entries` is the pure function that says what the
 What a row offers depends on its kind and on `KbSource::is_writable`. A **source row** offers
 open-in-Finder (`RevealKbPath`), copy-path (`AskKbPath`), *Get latest version* (`SyncKbSource`) only
 for a `KbOrigin::Git` source, New file and New folder only where the source is writable, and *Rename
-source* always — a source's name is Ubiq's own label for where the documents come from, so it is
+source* always — a source's name is Kubiq's own label for where the documents come from, so it is
 renameable even where the material behind it is read-only, and it commits through the whole-list
 `SetKbSources` write rather than `RenameKbEntry`. A **folder row** offers open-in-Finder and
 copy-path, plus New file, New folder, Rename and Delete where the source is writable; a **file row**
@@ -260,19 +260,19 @@ silently did nothing is the one failure mode the panel must not have.
 
 **A document's tab reaches the write half too** (`T-29`, folded into the dock's own tabs by `T-31`):
 a document over a writable source is edited and saved from its own panel, on top of the explorer's
-menu and the `ubiq-kb` MCP server — before `T-29` the panel drew a read-only viewer whatever
+menu and the `kubiq-kb` MCP server — before `T-29` the panel drew a read-only viewer whatever
 `is_writable` said, because nothing between a click and the screen ever read it.
 
 **A password-protected wiki** (`D206`, T-335). An internal source with `protected` set — chosen in
 the list it is first saved in, and kept by `Kb::set_sources` from then on — keeps its pages under
-`<project data>/wikis/<source id>/pages/`, every one sealed by `crates/ubiq-host/src/kb/vault.rs`
+`<project data>/wikis/<source id>/pages/`, every one sealed by `crates/kubiq-host/src/kb/vault.rs`
 (Argon2id key, XChaCha20-Poly1305 per page, names in the clear), with a plaintext `vault.toml`
 beside them. `Kb` holds the key in memory once `UnlockKbSource` supplies the password (the first
 one *sets* it) or the keychain had it filed (`Kb::auto_unlock`, tried once per source per run when
 a window lists the sources); until then the source reads `Locked { first_use }` and
 `Kb::vault_key` refuses every request. The coordinator passes the key to the files worker for a read
 (`files::sealed_contents`) and to `ops` for a write; `ChangeKbPassword` re-seals every page. The
-`ubiq-kb` server drops protected sources before it lists or resolves anything. A `vault.toml` lost
+`kubiq-kb` server drops protected sources before it lists or resolves anything. A `vault.toml` lost
 over sealed pages reads `Locked { first_use: false }`, and an unlock is refused (`vault::is_orphaned`)
 rather than setting a new password that would orphan them. The bus tape redacts every `Secret` and
 every KB page body (`bus::tape_value`). Two limits are deliberate: a page is not bound to its path,
@@ -290,7 +290,7 @@ mismatch or an empty field is refused locally; `KbPasswordAnswer { error }` is d
 fields and keeps the dialog up, an acceptance closes it, and the tree is re-asked on the
 `KbSourceChanged Ready` that comes with it.
 
-The wire is the Kb family in `crates/ubiq-proto/src/messages.rs`: UI → host is `KbSources`,
+The wire is the Kb family in `crates/kubiq-proto/src/messages.rs`: UI → host is `KbSources`,
 `SetKbSources`, `KbTree`, `ReadKbFile`, `SyncKbSource`, `WriteKbFile`, `CreateKbEntry`,
 `RenameKbEntry`, `DeleteKbEntry`, `RevealKbPath`, `AskKbPath`, `UnlockKbSource`,
 `ChangeKbPassword`; host → UI is `KbSourcesListed`, `KbSourceChanged`, `KbTreeListing`,
@@ -300,19 +300,19 @@ path in this family is relative to its source rather than to the project.
 
 ## The `KbStore::Project` tension with `D30`
 
-`D30` states a rule with no exception today: nothing Ubiq writes lands inside a user's project
+`D30` states a rule with no exception today: nothing Kubiq writes lands inside a user's project
 folder. A git source's clone already respects this — `Kb::base_path` puts it under
 `<config root>/projects/<ulid>/kb/`, never inside the project — and that placement is why `D30`'s own
 prose names the knowledge base as one of the things it covers.
 
-`KbStore::Project` breaks that rule on purpose: a `.ubiq/local/kb/<source id>` checkout **inside** the
+`KbStore::Project` breaks that rule on purpose: a `.kubiq/local/kb/<source id>` checkout **inside** the
 project, for a team that wants the checkout shared with everyone who has the project, or committed
 alongside it, rather than living only in one person's config root. This is a real, user-chosen
 exception rather than an oversight. The store is built: the source form offers it as **Inside the
-project**, and `Kb::base_path` (`crates/ubiq-host/src/kb/mod.rs`) resolves it through
+project**, and `Kb::base_path` (`crates/kubiq-host/src/kb/mod.rs`) resolves it through
 `ProjectData::in_project`. What is missing is its own decision row — what a reasonable person could
 later reverse about writing into a project folder for the first time since `D30`, and what it costs,
-most obviously an entry a project's own `.gitignore` may or may not carry for a checkout Ubiq did
+most obviously an entry a project's own `.gitignore` may or may not carry for a checkout Kubiq did
 not ask permission to commit; the gap is `G269`.
 
 ## Next steps
@@ -329,7 +329,7 @@ not ask permission to commit; the gap is `G269`.
    local applies here exactly as it does to a pane: a path dropped onto the panel is only meaningful
    when the host answering it is the same machine the drop happened on, which a remote host is not.
 4. **A document assistant** — an agent scoped to the knowledge base, reaching it through the
-   `ubiq-kb` MCP server above rather than through the project's own file tools.
+   `kubiq-kb` MCP server above rather than through the project's own file tools.
 5. **Marking a document as context or instruction for that assistant** — a per-document flag the
    assistant reads before answering. It cannot live inside the document's own folder for a read-only
    source, since nothing may write there; where it lives instead — a sidecar under the source's own
@@ -341,7 +341,7 @@ not ask permission to commit; the gap is `G269`.
 
 ## Related docs
 
-- [`../tech/architecture.md`](../tech/architecture.md) — the rule nothing Ubiq fetches writes inside
+- [`../tech/architecture.md`](../tech/architecture.md) — the rule nothing Kubiq fetches writes inside
   a project folder, and the coordinator/UI split every KB message crosses
 - [`../tech/transport-contract.md`](../tech/transport-contract.md) — the Kb message family in full
 - [`../tech/decisions.md`](../tech/decisions.md) — `D30`, which `KbStore::Project` needs a row of its

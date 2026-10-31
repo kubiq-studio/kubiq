@@ -18,12 +18,12 @@ authority and this entry is the one-line version.
 ### Harness
 
 An interactive AI coding agent that runs as a full-screen terminal program: Claude Code, Codex,
-Gemini CLI, opencode, GitHub Copilot CLI. Ubiq hosts harnesses; it does not implement one. The word
+Gemini CLI, opencode, GitHub Copilot CLI. Kubiq hosts harnesses; it does not implement one. The word
 covers the program itself, not a particular run of it.
 
 ### Agent type
 
-A harness Ubiq knows how to launch: an identifier, the binary to execute, a human label, and the
+A harness Kubiq knows how to launch: an identifier, the binary to execute, a human label, and the
 arguments passed on spawn. The set of agent types is what the user picks from when creating a
 workspace.
 
@@ -84,7 +84,7 @@ a tab. A saved layout is a dock written down.
 
 ### Coordinator
 
-The half of Ubiq that owns processes: it spawns each harness under a pseudo-terminal, reads its
+The half of Kubiq that owns processes: it spawns each harness under a pseudo-terminal, reads its
 output, writes keystrokes to it, propagates resizes, and reports exits. It renders nothing. Its
 counterpart is the UI, which draws panes and owns no process.
 
@@ -115,7 +115,7 @@ whatever was on screen before. Harnesses use it, which is why a pane has to be a
 
 The library and CLI that composes a harness run — pulling skills, MCP servers, an account and
 instructions from a catalog into a throwaway config directory, then launching the real binary
-against it. Ubiq embeds it rather than reimplementing it. Its own documentation lives with the
+against it. Kubiq embeds it rather than reimplementing it. Its own documentation lives with the
 crate; the boundary is stated in
 [`../tech/agent-manager.md`](../tech/agent-manager.md).
 
@@ -145,7 +145,7 @@ on top.
 
 ### Subagent
 
-An agent spawned by another agent rather than by the user. Ubiq's interest in the term is that a
+An agent spawned by another agent rather than by the user. Kubiq's interest in the term is that a
 subagent gets its own pane, so the user can watch it.
 
 ### Theme token
@@ -156,7 +156,7 @@ instead of a literal colour anywhere in the UI. Owned by
 
 ### Kitchen sink
 
-The rail destination where Ubiq is tested against itself: eight pages holding a plain buffer, one
+The rail destination where Kubiq is tested against itself: eight pages holding a plain buffer, one
 document per special viewer, the style reference every theme token and interface primitive is
 drawn on, the file picker, and the two settings layouts composed from the kit. It belongs to the
 application rather than to a project — it opens with an empty catalogue and asks the host for

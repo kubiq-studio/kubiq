@@ -11,7 +11,7 @@ related: [agents-new-agent, agents-definitions, settings-harnesses, settings-con
 An account is a named identity a harness runs under: the login Claude Code or Codex uses when it talks to its
 own service. You can keep several, and choose one per agent in the [new agent dialog](agents-new-agent), so two
 agents of one harness can run side by side as, say, your personal and your work identity. An account points at
-where the harness keeps its own login; Ubiq never holds a password or a token for it. An agent that names no
+where the harness keeps its own login; Kubiq never holds a password or a token for it. An agent that names no
 account runs under your own home configuration. [Account questions](faq-accounts) answers the common
 questions.
 
@@ -27,7 +27,7 @@ harnesses this machine has.
 | A harness row under it | The harness's name and its login status, with **Check**, **Re-authenticate** and **Sign out** |
 | **Check** | Reads the login's own expiry and writes it in place: `valid`, `expires`, `expired`, `unknown` or `missing` |
 | Plan readout | Where the provider states limits: one row per window with a meter, the reading, when it resets and how old it is, and **Refresh** |
-| **Command** on an installed harness | Sets the command Ubiq starts that harness with, with a **Check** that tries it without saving |
+| **Command** on an installed harness | Sets the command Kubiq starts that harness with, with a **Check** that tries it without saving |
 
 **Delete** is the one action with nothing left behind, so its confirm says so.
 

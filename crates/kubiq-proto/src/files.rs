@@ -1,0 +1,389 @@
+//! What a project's files are on the wire: one level of a tree, one file's bytes, one file's
+//! change against a version-control base, and the failures a single path can have.
+//!
+//! **The interface holds project-relative paths only.** A `rel_path` is forward-slashed, has no
+//! leading slash and no `..`, and is empty for the project's root. It is resolved against the
+//! record's root by the host, which is the file-level form of the rule that the interface never
+//! assumes the pseudo-terminal is local — and the seam a remote drone slots into without the
+//! interface noticing, because a project id and a relative path do not say which machine answered.
+//!
+//! Contents cross as bytes. The host does not decode a file any more than it decodes terminal
+//! output: a truncated read can cut a multi-byte sequence, a binary file has no `String` at all,
+//! and which encoding to draw is the interface's decision.
+//!
+//! This is a module of its own rather than part of [`crate::projects`], which owns the split
+//! between the durable record and the derived snapshot. A directory entry is neither: it is a
+//! per-request payload with no durability story and no relation to a `ProjectRecord`.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+/// What one entry in a listing is.
+///
+/// A symlink is classified by what it points at, and only when that is inside the project's root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EntryKind {
+    /// A directory. A further [`crate::messages::Message::ProjectTree`] lists it.
+    Dir,
+    /// A regular file. [`crate::messages::Message::ReadProjectFile`] reads it.
+    File,
+    /// Something the host will not follow or open: a symlink leading out of the root or nowhere, a
+    /// socket, a device, a pipe. It is still drawn, because a row the interface never sees is a
+    /// tree that lies, and it is refused when it is asked for.
+    Other,
+}
+
+/// One entry, as the explorer draws it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirEntry {
+    /// The leaf name, which is what the row shows.
+    pub name: String,
+    /// Project-relative, built from the parent's `rel_path` and `name` — never from a path on
+    /// disk, so no absolute path can be formed into a message by mistake.
+    pub rel_path: String,
+    pub kind: EntryKind,
+    /// Size in bytes, absent for anything that is not a regular file. It is what lets the
+    /// interface warn before opening something large, which it cannot learn any other way.
+    pub size: Option<u64>,
+    /// Whether the entry is a symlink, whatever it points at. The directory read already says so,
+    /// and it is the difference between a folder and a link to one.
+    pub symlink: bool,
+}
+
+/// Folder names a depth walk does not descend into.
+///
+/// It bounds a walk the interface asked for; it does **not** hide a row, because a tree with rows
+/// missing is a tree that lies. An explicit `ProjectTree` aimed at one of these is answered in
+/// full. The explorer's background cache uses the same set so it does not walk `node_modules`
+/// either.
+pub const WALK_SKIP: &[&str] = &[
+    ".git",
+    ".hg",
+    ".svn",
+    ".jj",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".venv",
+    "__pycache__",
+    ".direnv",
+    ".cache",
+];
+
+/// Leaf names the host omits from every listing, including an explicit one.
+///
+/// Unlike [`WALK_SKIP`], these are not folders a walk might descend into: they are junk files that
+/// are never user content. A tree with a real file missing is a tree that lies; a tree without
+/// `.DS_Store` is a tree that is usable on macOS.
+pub const LIST_HIDE: &[&str] = &[".DS_Store"];
+
+/// One directory, listed.
+///
+/// A listing is always exactly one level, so the reply's shape does not depend on the depth that
+/// was asked for.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirListing {
+    /// The directory this lists, project-relative. Empty is the project's root.
+    pub rel_path: String,
+    /// Directories first, then names compared without case. The host sorts, so two windows agree
+    /// and neither re-sorts.
+    pub entries: Vec<DirEntry>,
+    /// Whether the entry ceiling cut the listing short. The interface says so on the row rather
+    /// than drawing a folder as smaller than it is.
+    pub truncated: bool,
+}
+
+/// One entry in a listing of an absolute host path, with no project in scope yet.
+///
+/// Deliberately not [`DirEntry`]: that type's `rel_path` is built from a project's root and would
+/// name nothing here, and its `size` is not something a folder picker needs. [`EntryKind`] is
+/// reused as-is, because the three-way split it makes — directory, file, or something the host
+/// will not follow or open — is exactly what a picker needs here too.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostDirEntry {
+    /// The leaf name.
+    pub name: String,
+    pub kind: EntryKind,
+    /// A dotfile, by the Unix convention. Marked rather than dropped: unlike [`LIST_HIDE`], a
+    /// dotfile is real user content (`.ssh`, `.config`), so silently omitting it would make this
+    /// the one listing in the contract that lies about what is there. Whether to show it is the
+    /// picker's call, not this message's.
+    pub hidden: bool,
+    /// Whether the host could open or enter this entry when it looked — a directory it could
+    /// list, or a file it could open for reading. A hint for greying out a row before the click,
+    /// not a promise: the filesystem can still change before the next request.
+    pub readable: bool,
+}
+
+/// What went wrong listing an absolute host path.
+///
+/// Smaller than [`FileError`] on purpose: there is no project root here for a path to escape, so
+/// there is no `Refused` for containment, and nothing here is ever written, so there is no
+/// `Conflict`. What is left is the plain set a stat and a directory read can fail at.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HostPathError {
+    /// Nothing is there.
+    Missing,
+    /// Something is there, but it is not a directory.
+    NotADirectory,
+    /// The operating system refused, in its own words.
+    Denied(String),
+    /// Anything else the operating system said.
+    Failed(String),
+}
+
+impl std::fmt::Display for HostPathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HostPathError::Missing => write!(f, "it is not there"),
+            HostPathError::NotADirectory => write!(f, "that is not a directory"),
+            HostPathError::Denied(reason) => write!(f, "{reason}"),
+            HostPathError::Failed(reason) => write!(f, "{reason}"),
+        }
+    }
+}
+
+/// What a file was when it was read: enough to refuse a write that would land on somebody else's
+/// change, and free from the metadata the read already takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileVersion {
+    pub len: u64,
+    /// Last modification as the filesystem reported it. Absent on a filesystem that has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<DateTime<Utc>>,
+}
+
+/// A file's bytes and what the host knows about them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileContents {
+    /// Opaque, like terminal bytes: a prefix from offset zero, and the interface decides what it
+    /// can draw.
+    pub bytes: Vec<u8>,
+    /// The file's whole length, which is larger than `bytes` when the read was cut short.
+    pub len: u64,
+    /// Whether the ceiling stopped the read. It never means a middle is missing — only that this
+    /// is a prefix and the file is longer.
+    pub truncated: bool,
+    /// A NUL byte in the first few kilobytes. The interface shows a viewer rather than an editor.
+    pub is_binary: bool,
+    /// What to hand back with a save. **Absent when `truncated`**, which is what makes a truncated
+    /// buffer unsavable mechanically rather than by the interface remembering not to: a write
+    /// naming no version is refused on a file that already exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<FileVersion>,
+}
+
+/// What else belongs to a path — an answer [`crate::messages::Message::ProjectFileRelated`]
+/// carries, for the explorer to ask about before a rename, move or delete carries it along or
+/// leaves it behind.
+///
+/// **General on purpose.** The annotation sidecar (`D161`) is the first rule a resolver applies to
+/// a path, not the only one there will ever be — a `foo.ts` and its `foo.test.ts`, or a component
+/// and its stylesheet, are the same shape: something else on disk that means nothing once the file
+/// it is about is gone or renamed out from under it. Nothing on the wire says which rule found
+/// this; the host may grow more without the interface changing at all.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelatedFile {
+    /// Project-relative, on the same rule every path in this family follows.
+    pub rel_path: String,
+    /// What the confirmation calls it — "annotations" today.
+    pub label: String,
+}
+
+/// What an edit to a path is.
+///
+/// Every variant is a different thing for the interface to do once it has happened — a created file
+/// is opened, a moved one retargets its tab, a removed one closes it — which is why the reply echoes
+/// the op rather than answering every edit the same way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PathOp {
+    /// Make a path that is not there. `dir` picks a folder over an empty file.
+    ///
+    /// Exactly one level: no parent is ever created, which is the rule
+    /// [`crate::messages::Message::WriteProjectFile`] already keeps.
+    Create { dir: bool },
+    /// Rename, or move into another folder. One operation on disk, and one gesture here.
+    Move,
+    /// Copy a file, or a folder with everything under it.
+    Copy,
+    /// Hand the path to the platform's trash, where the user can get it back without Kubiq.
+    Trash,
+    /// Remove it outright. A folder goes with everything under it, and nothing comes back.
+    ///
+    /// Separate from [`PathOp::Trash`] because the two are different promises to the user, and the
+    /// interface says which one it is about to keep before it asks.
+    Delete,
+}
+
+/// How [`crate::messages::Message::ImportIntoProject`] brings a path in from outside the project.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImportMode {
+    /// The source stays where it was. What a drop from the platform's file manager and a paste
+    /// of files it copied both mean.
+    Copy,
+    /// The source goes: a rename where it can be one, and a copy then a removal across volumes.
+    Move,
+}
+
+/// The name the `n`th copy of `leaf` takes in a folder that already holds it: `n == 0` is the
+/// name itself, then `notes copy.md`, `notes copy 2.md`, and so on.
+///
+/// **Shared, so the explorer's guess and the host's answer agree.** The interface names a free
+/// name for a Duplicate or a Paste from the folders it has listed (`ExplorerState::free_name`);
+/// the host picks one for an import against what is actually on disk. Both count with this.
+/// The extension stays on the end, because that is what says how to open the copy; a leading dot
+/// is part of the stem, so `.env` becomes `.env copy` rather than ` copy.env`.
+pub fn copy_name(leaf: &str, n: usize) -> String {
+    if n == 0 {
+        return leaf.to_string();
+    }
+    let (stem, ext) = match leaf.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem, format!(".{ext}")),
+        _ => (leaf, String::new()),
+    };
+    match n {
+        1 => format!("{stem} copy{ext}"),
+        n => format!("{stem} copy {n}{ext}"),
+    }
+}
+
+/// What a diff is taken against.
+///
+/// The working-tree bases compare what is on disk right now; [`DiffBase::Staged`] and
+/// [`DiffBase::Commits`] compare two blobs and do not need the file on disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiffBase {
+    /// The working tree against the commit that is checked out — every unstaged and staged change
+    /// together, which is what an editor's gutter shows.
+    Head,
+    /// The working tree against the index, so only what has not been staged yet.
+    Index,
+    /// The index against HEAD — only what a commit would carry.
+    Staged,
+    /// Two commits' blobs for this path. Neither side is the working tree.
+    /// [`crate::messages::Message::DiffProjectFile`] carries the two ids as `old` and `new`.
+    Commits,
+}
+
+/// What one row of a hunk is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiffRowKind {
+    /// Unchanged, and present on both sides. It carries both line numbers.
+    Context,
+    /// Only on the new side.
+    Added,
+    /// Only on the old side.
+    Removed,
+}
+
+/// One line of a hunk, as the interface draws it.
+///
+/// Line numbers are one-based, and each is absent on the side the row is not on: `old_line` is
+/// `None` on an [`DiffRowKind::Added`] row, `new_line` is `None` on a [`DiffRowKind::Removed`] one.
+/// The host works them out while it walks the hunk, because a gutter that counts rows itself gets
+/// it wrong the first time a hunk is truncated.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiffRow {
+    pub kind: DiffRowKind,
+    /// The line's number on the old side, one-based.
+    pub old_line: Option<u32>,
+    /// The line's number on the new side, one-based.
+    pub new_line: Option<u32>,
+    /// The line itself, without its trailing newline and without the leading marker a textual diff
+    /// would carry — the marker is [`DiffRow::kind`], which is a thing to draw rather than a
+    /// character to strip.
+    pub text: String,
+}
+
+/// One run of changed lines and the context around it.
+///
+/// The four counts are the unified-diff header's, kept as numbers rather than as the `@@` line so
+/// nothing has to parse them back out.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiffHunk {
+    /// First line of the hunk on the old side, one-based.
+    pub old_start: u32,
+    /// How many lines the hunk covers on the old side.
+    pub old_lines: u32,
+    /// First line of the hunk on the new side, one-based.
+    pub new_start: u32,
+    /// How many lines the hunk covers on the new side.
+    pub new_lines: u32,
+    pub rows: Vec<DiffRow>,
+}
+
+/// One file, compared with a version-control base.
+///
+/// The host computes the hunks and the interface draws rows: no diff library reaches the interface,
+/// on the discipline that keeps a VT parser out of the host. A file with no change against the base
+/// answers with no hunks rather than with an error.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDiff {
+    /// Echoed, because the interface may have switched base since it asked.
+    pub base: DiffBase,
+    pub hunks: Vec<DiffHunk>,
+    /// The host would not diff it — the same judgement [`FileContents::is_binary`] reports, and
+    /// there are no hunks when it is set.
+    pub binary: bool,
+    /// The host stopped at a ceiling, so the hunks are a prefix of the change rather than all of
+    /// it. The interface says so rather than drawing a file as smaller than its change.
+    pub truncated: bool,
+    /// Echoed: whether line endings were ignored, so a reply for the other setting can be told
+    /// from the one asked for.
+    #[serde(default)]
+    pub ignore_eol: bool,
+}
+
+/// What went wrong for one path.
+///
+/// An enum rather than a sentence, because each of these is a different thing for the interface to
+/// do: `Missing` means drop the row, `Conflict` means offer to overwrite, `Denied` means mark it,
+/// and `Refused` means a wiring mistake worth a log line. A string would force the interface to
+/// match on prose.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "reason")]
+pub enum FileError {
+    /// The path escaped the root after normalisation, named a link the host will not follow, or
+    /// named a project that is not in the catalogue. The interface cannot fix it.
+    Refused(String),
+    /// Nothing is there any more. The row and the tab are stale.
+    Missing,
+    /// Not the kind of thing the request needs: a directory read as a file, a file listed as a
+    /// directory, or a socket, a device or a pipe.
+    WrongKind,
+    /// The operating system refused, in its own words.
+    Denied(String),
+    /// The file changed since it was read, so the write was not made and nothing was lost.
+    Conflict,
+    /// Anything else the operating system said.
+    Failed(String),
+}
+
+impl std::fmt::Display for FileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileError::Refused(reason) => write!(f, "refused: {reason}"),
+            FileError::Missing => write!(f, "it is not there"),
+            FileError::WrongKind => write!(f, "not the kind of thing this reads"),
+            FileError::Denied(reason) => write!(f, "{reason}"),
+            FileError::Conflict => write!(f, "it changed since it was read"),
+            FileError::Failed(reason) => write!(f, "{reason}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_name;
+
+    #[test]
+    fn a_copy_name_keeps_the_extension_on_the_end() {
+        assert_eq!(copy_name("notes.md", 0), "notes.md");
+        assert_eq!(copy_name("notes.md", 1), "notes copy.md");
+        assert_eq!(copy_name("notes.md", 2), "notes copy 2.md");
+        assert_eq!(copy_name("plain", 1), "plain copy");
+        assert_eq!(copy_name(".env", 1), ".env copy");
+        assert_eq!(copy_name("archive.tar.gz", 1), "archive.tar copy.gz");
+    }
+}

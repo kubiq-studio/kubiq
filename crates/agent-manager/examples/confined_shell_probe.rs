@@ -48,7 +48,7 @@ enum Extra {
 const DEADLINE: Duration = Duration::from_secs(25);
 
 fn main() -> anyhow::Result<()> {
-    // A confine run is this same binary invoked again, exactly as `ubiq.exe` does.
+    // A confine run is this same binary invoked again, exactly as `kubiq.exe` does.
     if let Some(code) = confine_entrypoint() {
         std::process::exit(code);
     }

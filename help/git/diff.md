@@ -3,7 +3,7 @@ id: git-diff
 title: The Diff panel
 summary: How the diff beside the history compares a path or a commit, and the split and unified views.
 keywords: [diff, hunk, comparison, side by side, unified, split]
-context: [panel.ubiq.git.diff]
+context: [panel.kubiq.git.diff]
 order: 50
 status: current
 related: [git-changes, git-history, git-compare-commits]
@@ -43,6 +43,6 @@ What the panel shows depends on the list the path is in:
 ## When something goes wrong
 
 - **Pick a changed path to compare it** — nothing is selected yet; click a row in Changes.
-- **Reading…** stays while Ubiq waits for the comparison.
+- **Reading…** stays while Kubiq waits for the comparison.
 - **The panel asks for another path** when the one you were reading has no changes left, for
   instance after you discard it.

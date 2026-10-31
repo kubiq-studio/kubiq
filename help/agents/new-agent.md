@@ -21,18 +21,18 @@ chosen what to run.
 | **Customize** | Under a chosen definition; turns the harness, **Model**, **Thinking effort** and **Mode** rows on for this one start |
 | **Model**, **Thinking effort** | What the harness offers; the dialog opens on the last launch, else the harness's own default |
 | **Mode** | The permission mode, in the harness's own labels; a new agent opens on the harness's unattended mode, such as **Bypass permissions** for Claude Code; see [permission modes](agents-permissions) |
-| **Persistent** | A checkbox that keeps the conversation across a restart of Ubiq; dimmed, and its note says why, for a harness that keeps its history outside Ubiq |
+| **Persistent** | A checkbox that keeps the conversation across a restart of Kubiq; dimmed, and its note says why, for a harness that keeps its history outside Kubiq |
 | **Max subagents** | How many subagents the agent may use; the agent is told it, not given a switch |
 | **Ask for feedback**, **Plan mode** | Shown only when the dialog opens from a task's **Assign to an agent**; each changes what the initial prompt tells the agent — to ask when it needs to, or to plan before it acts |
 | **Initial prompt** | Sent as the agent's first message, so it starts working without a keystroke |
-| **MCPs**, **Skills** | Checklists of what Ubiq can add to the run; ticks apply to this agent |
+| **MCPs**, **Skills** | Checklists of what Kubiq can add to the run; ticks apply to this agent |
 | **Custom policies** | Extra folders the agent may write; live only while agent isolation is on in settings |
 | **Start** | Starts the agent as a conversation in a column or chat tab |
 | **Start in terminal** | Starts the same run as a terminal pane; it ignores the initial prompt and **Max subagents** |
 | **Save agent** | Saves these answers as an agent definition; offered when the target is a bare harness |
 
 The **Harness** tab lists **Configured** rows (a harness with an account signed in), then **Default** rows, which
-use the harness's own configuration in place. Every harness Ubiq supports is listed; one whose program is missing
+use the harness's own configuration in place. Every harness Kubiq supports is listed; one whose program is missing
 is drawn dimmed and cannot be picked. The ACP versions of Claude Code
 and Codex appear only after you turn on their **Enable … ACP** switch in [Settings](settings-harnesses).
 
@@ -40,7 +40,7 @@ and Codex appear only after you turn on their **Enable … ACP** switch in [Sett
 
 - Start from your last choice: the dialog opens on it for the project, else on the last start anywhere,
   with the **Mode** you used then.
-- Name an agent. Ubiq names it after its harness, with a number from the second one on. After the agent answers its
+- Name an agent. Kubiq names it after its harness, with a number from the second one on. After the agent answers its
   first prompt it takes a short title of its own, if a provider is set up in [Settings](settings-assist). Rename it
   from its tab to keep your name for good.
 - Choose a model, thinking effort and mode here, and change them later from the pickers beside **Send** in the
@@ -56,4 +56,4 @@ Press **Esc** to dismiss; nothing is created, so a dismissed dialog leaves no em
   [Settings](settings-harnesses) and it becomes available.
 - **The dialog opens on nothing.** The harness or definition it remembers has been removed.
 - **The start is refused.** The harness was uninstalled after the list was drawn. Pick another.
-- **The model row says it is asking.** Ubiq is asking the harness for its models; the row fills when it answers.
+- **The model row says it is asking.** Kubiq is asking the harness for its models; the row fills when it answers.

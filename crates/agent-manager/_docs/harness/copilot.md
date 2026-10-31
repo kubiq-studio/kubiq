@@ -751,7 +751,7 @@ the three env vars — only fine-grained PATs and OAuth tokens are.
 
 None. `am` neither captures, copies nor roams this login: the harness keeps it in the account's
 own config home, signed in there by `am account login` or the first run, and refreshes it itself
-(`D194` in Ubiq's `_docs/tech/decisions.md`).
+(`D194` in Kubiq's `_docs/tech/decisions.md`).
 
 ### Shared-home run (agent-manager, `D194`)
 

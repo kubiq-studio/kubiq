@@ -11,9 +11,9 @@ on:
         required: true
 
 env:
-  UBIQ_VERSION: ${{ inputs.version }}
-  UBIQ_CHANNEL: ${{ inputs.channel }}
-  UBIQ_UPDATE_PUBKEY: ${{ vars.UPDATE_PUBLIC_KEY }}
+  KUBIQ_VERSION: ${{ inputs.version }}
+  KUBIQ_CHANNEL: ${{ inputs.channel }}
+  KUBIQ_UPDATE_PUBKEY: ${{ vars.UPDATE_PUBLIC_KEY }}
 
 jobs:
   build:
@@ -41,10 +41,10 @@ jobs:
 
       - run: just bundle-linux
 
-      - run: tar -C target -czf Ubiq-linux-x86_64.tar.gz ubiq-linux-x86_64
+      - run: tar -C target -czf Kubiq-linux-x86_64.tar.gz kubiq-linux-x86_64
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux
           if-no-files-found: error
-          path: Ubiq-linux-x86_64.tar.gz
+          path: Kubiq-linux-x86_64.tar.gz

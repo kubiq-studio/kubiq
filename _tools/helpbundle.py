@@ -11,8 +11,8 @@ this bundle obey; where the two disagree, that document is the source of truth a
 what gets fixed.
 
 Three things this script owns and nothing else: reading `help/` (a human-authored markdown tree),
-validating it end to end, and writing one `UBIQBND1` archive the same reader in
-`crates/ubiq/src/web_export/archive.rs` already opens — deflated entries, a JSON index, a `u64` LE
+validating it end to end, and writing one `KUBQBND1` archive the same reader in
+`crates/kubiq/src/web_export/archive.rs` already opens — deflated entries, a JSON index, a `u64` LE
 index offset, the magic. Nothing here talks to a network and nothing here is imported by a crate.
 
 Frontmatter is parsed by a small hand-rolled subset of YAML — strings, `[a, b]` inline lists and
@@ -40,13 +40,13 @@ HELP_DIR = REPO / "help"
 MANIFEST_PATH = HELP_DIR / "manifest.toml"
 # Where the `ui.*` catalogue this checks `targets:` against lives. See `load_ui_catalogue` for
 # exactly what scraping this file can and cannot prove.
-UI_ID_SOURCE = REPO / "crates" / "ubiq" / "src" / "state" / "ui_id.rs"
+UI_ID_SOURCE = REPO / "crates" / "kubiq" / "src" / "state" / "ui_id.rs"
 # The default output. `--out-dir` overrides it, because the bundle has to land in the `target/` of
-# the workspace that built the binary: Ubiq Studio compiles the base through its own workspace, so
+# the workspace that built the binary: Kubiq Studio compiles the base through its own workspace, so
 # its `target/help/` is the one the executable walks up to.
 OUT_DIR = REPO / "target" / "help"
 
-MAGIC = b"UBIQBND1"
+MAGIC = b"KUBQBND1"
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 
@@ -74,7 +74,7 @@ STATUSES = {"current", "draft", "planned"}
 CONTEXT_KEY_RE = re.compile(r"^(panel|view|rail|modal)\.[A-Za-z0-9_.\-]+$")
 
 # A `targets:` entry: the `ui.` namespace (`UiId::NAMESPACE`) plus 1-8 dotted segments matching
-# `UiId`'s own grammar (`crates/ubiq/src/state/ui_id.rs::validate`). This checks *shape* only;
+# `UiId`'s own grammar (`crates/kubiq/src/state/ui_id.rs::validate`). This checks *shape* only;
 # whether the name after `ui.` is one the catalogue actually declares is `load_ui_catalogue`'s job.
 TARGET_KEY_RE = re.compile(
     r"^ui(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*){1,8}$"
@@ -93,7 +93,7 @@ UI_CONST_DEF_RE = re.compile(
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
-IGNORED_SCHEMES = ("http:", "https:", "mailto:", "ubiq://")
+IGNORED_SCHEMES = ("http:", "https:", "mailto:", "kubiq://")
 
 console = Console()
 
@@ -253,7 +253,7 @@ def load_pages(errors: list[str]) -> list[Page]:
 
 def load_ui_catalogue(errors: list[str]) -> set[str] | None:
     """The set of bare `UiId` names (no `ui.` prefix) that `targets:` may legally name, scraped out
-    of `crates/ubiq/src/state/ui_id.rs`, or `None` when that file cannot be read or parsed — in
+    of `crates/kubiq/src/state/ui_id.rs`, or `None` when that file cannot be read or parsed — in
     which case `targets:` shape is still checked but no page-to-id check runs.
 
     **What this can prove:** every name in `pub const CATALOGUE: &[UiId] = &[...]` today, because
@@ -484,7 +484,7 @@ def deflate_raw(data: bytes) -> bytes:
 
 def write_bundle(entries: list[tuple[str, bytes]], out_path: Path) -> None:
     """`[ deflate(entry0) ]…[ index JSON ][ u64 LE index offset ][ magic ]` — see the module doc and
-    `crates/ubiq/src/web_export/archive.rs`, which reads this format unchanged."""
+    `crates/kubiq/src/web_export/archive.rs`, which reads this format unchanged."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     index: list[list] = []
     chunks: list[bytes] = []
@@ -518,7 +518,7 @@ def build_catalog(
 
     return {
         "version": manifest.get("help", {}).get("version", ""),
-        "namespace": manifest.get("help", {}).get("namespace", "ubiq"),
+        "namespace": manifest.get("help", {}).get("namespace", "kubiq"),
         "pages": [
             {
                 "id": page.id,

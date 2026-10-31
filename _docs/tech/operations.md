@@ -7,7 +7,7 @@ summary: Prerequisites, the complete command reference, what a first build costs
 read_when: you are setting the project up, running or testing it, adding a command, or an agent reports that it cannot run a tool
 updated: 2026-10-09
 verified: 2026-10-13
-code_anchors: [Justfile, crates/ubiq-host/Cargo.toml, crates/ubiq-host/src/environment.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/src/io/structured.rs, _tools/docs.py, _tools/dump.py, _tools/icns.py, _tools/webassets.py, _tools/drone.py, _tools/helpbundle.py, _tools/licenses.py, _tools/Info.plist, _devops/scripts/bundle-version.sh, crates/ubiq-app/src/lib.rs, crates/ubiq-app/src/handoff.rs, crates/ubiq-host/src/remote.rs, crates/ubiq-app/build.rs, crates/ubiq-app/res/ubiq-app.rc, .github/workflows/create-release.yml, .github/workflows/release-macos.yml, .github/workflows/release-windows.yml, .github/workflows/release-linux.yml, _devops/scripts/channel-manifest.py, _devops/windows/ubiq.iss]
+code_anchors: [Justfile, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/src/io/structured.rs, _tools/docs.py, _tools/dump.py, _tools/icns.py, _tools/webassets.py, _tools/drone.py, _tools/helpbundle.py, _tools/licenses.py, _tools/Info.plist, _devops/scripts/bundle-version.sh, crates/kubiq-app/src/lib.rs, crates/kubiq-app/src/handoff.rs, crates/kubiq-host/src/remote.rs, crates/kubiq-app/build.rs, crates/kubiq-app/res/kubiq-app.rc, .github/workflows/create-release.yml, .github/workflows/release-macos.yml, .github/workflows/release-windows.yml, .github/workflows/release-linux.yml, _devops/scripts/channel-manifest.py, _devops/windows/kubiq.iss]
 depends_on: [tech-structure]
 review_cycle: monthly
 ---
@@ -35,13 +35,13 @@ only as a shell incantation in someone's history is a command that does not exis
 
 | Command | Does |
 |---|---|
-| `just dev` | Run Ubiq |
-| `just verbose` | Run Ubiq with `RUST_LOG=debug`, which collects every subsystem at debug |
+| `just dev` | Run Kubiq |
+| `just verbose` | Run Kubiq with `RUST_LOG=debug`, which collects every subsystem at debug |
 | `just build` | Release build of the whole workspace |
-| `ubiq --serve` | Run a headless host listening for a remote UI on `0.0.0.0:7420` — no window |
-| `ubiq --serve=<addr>` | Same, on a chosen address — a bare port, an `ip:port`, or an ip on the default port |
-| `ubiq --bind <addr>` | The address to listen on, on its own or refining a `--serve` value |
-| `ubiq --port <n>` | The port to listen on, likewise |
+| `kubiq --serve` | Run a headless host listening for a remote UI on `0.0.0.0:7420` — no window |
+| `kubiq --serve=<addr>` | Same, on a chosen address — a bare port, an `ip:port`, or an ip on the default port |
+| `kubiq --bind <addr>` | The address to listen on, on its own or refining a `--serve` value |
+| `kubiq --port <n>` | The port to listen on, likewise |
 
 **A served run opens no window.** It is the machine's host, not a copy of the interface: it keeps
 the terminal it was started in, reports through the same log writer on standard error that
@@ -50,14 +50,14 @@ handoff — handing its arguments to a window running elsewhere would leave noth
 headless host and a local window can share a machine, though not usefully a config root.
 
 **The handoff runs on every platform.** A second plain launch of the same executable under the same
-config root hands its paths to the running application and exits (`crates/ubiq-app/src/handoff.rs`).
-On Unix the door is a `ubiq-<hash>.sock` socket in the config root; on Windows it is a loopback port
-on `127.0.0.1`, named with a random token in `ubiq-<hash>.port` beside where the socket would be, and
+config root hands its paths to the running application and exits (`crates/kubiq-app/src/handoff.rs`).
+On Unix the door is a `kubiq-<hash>.sock` socket in the config root; on Windows it is a loopback port
+on `127.0.0.1`, named with a random token in `kubiq-<hash>.port` beside where the socket would be, and
 a launch counts its paths delivered only once the owner acknowledges them. A file left by a crash
 names a port nobody answers on, and the next launch replaces it and becomes the application.
 
-**On Windows a plain launch leaves its console behind — and destroys it, not just hides it.** `ubiq`
-with no serve flag detaches through `detach_console` in `crates/ubiq-app/src/lib.rs`, so a launch
+**On Windows a plain launch leaves its console behind — and destroys it, not just hides it.** `kubiq`
+with no serve flag detaches through `detach_console` in `crates/kubiq-app/src/lib.rs`, so a launch
 from Explorer or a shortcut is a window and nothing else. A double-click gives the process a console
 it alone is attached to, which `GetConsoleProcessList` confirms before anything else happens,
 because afterwards there is nothing left to ask; freeing a console this process is alone in destroys
@@ -77,11 +77,11 @@ banner on stdout and the log writer on standard error. A bootstrap failure in a 
 dialog (`gui_fatal`) rather than writing to a console that is gone. Other platforms are untouched.
 See `D141`.
 
-**The same detachment means every console-subsystem child Ubiq spawns headlessly would otherwise
+**The same detachment means every console-subsystem child Kubiq spawns headlessly would otherwise
 get a console of its own — a freestanding window flashing up beside the interface, or staying up
 for as long as the child runs — because a child with no console to inherit gets Windows to create
 one.** A harness's own `--version`/model/thinking probe, the DPAPI calls behind credential storage,
-the search fallback, `ssh`/`scp` and `taskkill` in `crates/ubiq/src/app/ssh_connect.rs`, the `cmd
+the search fallback, `ssh`/`scp` and `taskkill` in `crates/kubiq/src/app/ssh_connect.rs`, the `cmd
 /C start` shim `open_url` uses, and the confine shim a structured bridge spawns
 (`crates/agent-manager/src/io/structured.rs`'s `spawn_piped`) all ask Windows for `CREATE_NO_WINDOW`
 instead, every one of them, rather than leaving this to a process-by-process fix. `spawn_piped`'s
@@ -96,7 +96,7 @@ separate argument — `argv_paths` skips a `-`-prefixed token without knowing th
 it, so a separated value would be read as a project path. `--bind` and `--port` take either
 spelling, because `argv_paths` consumes them by name, and each wins over the matching half of a
 `--serve` value: `--serve --port 9000` is the short way to say `--serve=0.0.0.0:9000`. Either of
-them alone also asks for a server — nothing else in Ubiq has a port to set. A bad value or a bind
+them alone also asks for a server — nothing else in Kubiq has a port to set. A bad value or a bind
 failure prints an error and exits 2 rather than leaving something that looks like it worked and is
 not listening. On success a banner goes to stdout, not through `tracing`, so no log filter can hide
 it: the bind address, a generated token, and a `http://<ip>:<port>?token=<token>` string to paste
@@ -104,7 +104,7 @@ into a remote UI.
 
 **Whoever holds that token gets a terminal on this machine, and the connection is not encrypted.**
 There is no TLS and no other authentication — tunnel the connection (an SSH tunnel or similar) if
-the network is not trusted. `crates/ubiq-host/src/remote.rs` is the listener;
+the network is not trusted. `crates/kubiq-host/src/remote.rs` is the listener;
 [`architecture.md`](./architecture.md) covers the rule it follows, and [`../backlog.md`](../backlog.md)
 (`G168`) covers what it lacks. A peer has ten seconds to finish its handshake and unlimited time
 afterwards, so a port scan or a stalled dial costs one connection thread for ten seconds rather than
@@ -112,7 +112,7 @@ for the life of the process, and an attached window that says nothing all aftern
 
 `RUST_LOG` decides what the log collector keeps, and the collector feeds both the log console and a
 writer on standard error — so `just dev` in a terminal reports without the console being open. With
-`RUST_LOG` unset, Ubiq's own modules and the harness library are collected down to debug and
+`RUST_LOG` unset, Kubiq's own modules and the harness library are collected down to debug and
 everything else only when it complains. What the console does with the records is
 [`../features/logs.md`](../features/logs.md).
 
@@ -122,9 +122,9 @@ everything else only when it complains. What the console does with the records i
 |---|---|
 | `just am <args>` | Run the `am` CLI — `just am claude --print-config` provisions a run and prints what it would launch, without launching it |
 | `just host` | Build the host and prove no drawing crate reaches its dependency tree |
-| `just ui` | Build the interface and prove it never names the host, and never names a size of its own — a literal `text_size(px(N))` or a literal icon size (`with_size(px(N))`, `Size::Size(px(N))`) outside `theme.rs` fails it, and so does a database driver crate (`rusqlite`, `mysql`, `tiberius`, `sqlx-core`) anywhere in `-p ubiq`'s dependency tree (`D199`) |
-| `just core` | Build the library the way Ubiq consumes it, with default features off. **This is the check that matters** — it fails the moment a CLI or terminal type leaks into the core |
-| `just relay` | Build `ubiq-host` with `--no-default-features` — the lean core a headless drone links: `pty`, `files`, `browse`, `watch`, `search`, `projects`, `health`, `config`, `store` minus the usage meter, `host_meta`, `links`, `environment` — and prove none of `git`, `index`, `harness`, `listener` or `desktop` reached its tree by grepping `cargo tree` for the crates each one gates: `git2`, `tantivy`, `rusqlite`, `agent-manager`, `isol8`, `notify-rust`, `trash`, `ureq`, `rustls`, `tiny_http`, `gpui` |
+| `just ui` | Build the interface and prove it never names the host, and never names a size of its own — a literal `text_size(px(N))` or a literal icon size (`with_size(px(N))`, `Size::Size(px(N))`) outside `theme.rs` fails it, and so does a database driver crate (`rusqlite`, `mysql`, `tiberius`, `sqlx-core`) anywhere in `-p kubiq`'s dependency tree (`D199`) |
+| `just core` | Build the library the way Kubiq consumes it, with default features off. **This is the check that matters** — it fails the moment a CLI or terminal type leaks into the core |
+| `just relay` | Build `kubiq-host` with `--no-default-features` — the lean core a headless drone links: `pty`, `files`, `browse`, `watch`, `search`, `projects`, `health`, `config`, `store` minus the usage meter, `host_meta`, `links`, `environment` — and prove none of `git`, `index`, `harness`, `listener` or `desktop` reached its tree by grepping `cargo tree` for the crates each one gates: `git2`, `tantivy`, `rusqlite`, `agent-manager`, `isol8`, `notify-rust`, `trash`, `ureq`, `rustls`, `tiny_http`, `gpui` |
 
 ### The drone
 
@@ -133,8 +133,8 @@ the capability; these three recipes are how its provenance is produced and check
 
 | Command | Does |
 |---|---|
-| `just drone-build [TRIPLE]` | Cross-build `ubiq-drone --release` for one triple, or — with no argument — for each of the seven it knows that `rustup target list --installed` names, printing `rustup target add …` for the rest rather than failing on them |
-| `just drone-manifest` | Hash every `target/<triple>/release/ubiq-drone` that exists into the generated `crates/ubiq-proto/src/drone/manifest.rs` — sha256 and length per entry. A triple with no build is skipped with a warning and left out: a partial manifest is the honest state, not a failed run |
+| `just drone-build [TRIPLE]` | Cross-build `kubiq-drone --release` for one triple, or — with no argument — for each of the seven it knows that `rustup target list --installed` names, printing `rustup target add …` for the rest rather than failing on them |
+| `just drone-manifest` | Hash every `target/<triple>/release/kubiq-drone` that exists into the generated `crates/kubiq-proto/src/drone/manifest.rs` — sha256 and length per entry. A triple with no build is skipped with a warning and left out: a partial manifest is the honest state, not a failed run |
 | `just drone-manifest-verify` | Re-read that generated file and re-hash each binary it names, reporting drift. The generated file is the only source of truth; the script keeps no state of its own |
 
 Nothing here fetches anything: a drone binary is built locally and never downloaded, so `_tools/drone.py`
@@ -146,13 +146,13 @@ sentence naming `just drone-build`, which is what a machine with no cross toolch
 
 | Command | Does |
 |---|---|
-| `just apple` | Prove the on-device model backend is macOS-only: `foundation-models` is in `ubiq-app`'s tree for a Darwin triple and in neither a Linux nor a Windows one. Resolution answers it, so it runs anywhere without either toolchain installed |
+| `just apple` | Prove the on-device model backend is macOS-only: `foundation-models` is in `kubiq-app`'s tree for a Darwin triple and in neither a Linux nor a Windows one. Resolution answers it, so it runs anywhere without either toolchain installed |
 | `just check` | Type-check the workspace, tests and examples included |
-| `just assist` | Type-check `ubiq-app` with `assist-apple` on — the on-device backend `check` skips |
+| `just assist` | Type-check `kubiq-app` with `assist-apple` on — the on-device backend `check` skips |
 | `just clippy` | Lint, warnings as errors |
 | `just fmt` | Format |
 | `just test` | Test the workspace with stdin closed |
-| `just slots-check` | Every extension container or item id in the base is a `const SlotId` in `crates/ubiq/src/ext/ids.rs` (`D178`) — a string literal anywhere else in `crates/ubiq/src` fails the check |
+| `just slots-check` | Every extension container or item id in the base is a `const SlotId` in `crates/kubiq/src/ext/ids.rs` (`D178`) — a string literal anywhere else in `crates/kubiq/src` fails the check |
 | `just verify` | `check`, `clippy`, `test`, `host`, `relay`, `ui`, `apple`, `docs-lint`, `help-check`, `slots-check` — what a change has to pass |
 
 `just test` closes stdin deliberately. The library's passthrough tests spawn real pseudo-terminals,
@@ -160,33 +160,33 @@ and an interactive stdin makes them hang rather than fail, which is the worse of
 The application's own tests drive the coordinator over the bus and start real processes in
 pseudo-terminals for the same reason; they need no display.
 
-`crates/ubiq-db`'s tests run in `just test` against SQLite files. The three that need a server are
+`crates/kubiq-db`'s tests run in `just test` against SQLite files. The three that need a server are
 `#[ignore]`d and read their URL from the environment — `DBX_TEST_PG_URL`, `DBX_TEST_MYSQL_URL`,
-`DBX_TEST_MSSQL_URL` — so `cargo test -p ubiq-db --features drivers -- --ignored` runs them against
+`DBX_TEST_MSSQL_URL` — so `cargo test -p kubiq-db --features drivers -- --ignored` runs them against
 a server you point it at; each creates and drops its own objects.
 
-`assist-apple` is off in `ubiq-app`'s `default`, so `check`, `clippy`, `test` and `verify` build the
+`assist-apple` is off in `kubiq-app`'s `default`, so `check`, `clippy`, `test` and `verify` build the
 host's stub assist backend and never touch `foundation-models` or its Swift bridge. `just assist`
 type-checks the on-device backend on its own, deliberately outside `verify`, because compiling it
 costs a Swift toolchain, the macOS 26 SDK and a minute of `swiftc` for a backend no test exercises.
 `just dev`, `just verbose`, `just build`, `just bundle`, `just bundle-win` and `just bundle-linux` name the feature
-explicitly, so a running or bundled Ubiq carries the real backend.
+explicitly, so a running or bundled Kubiq carries the real backend.
 
 ### Packaging
 
 | Command | Does |
 |---|---|
 | `just icns` | Build `target/AppIcon.icns` from the logo in `assets/` — the ten representations an `.iconset` needs, assembled by `iconutil` |
-| `just bundle` | Assemble `target/Ubiq.app`: release build of the binary, `AppIcon.icns`, and `_tools/Info.plist`. macOS-only, unsigned, for a local `.app` |
-| `just bundle-win` | Assemble `target/ubiq-windows-x86_64/`: the release build's `ubiq.exe`, with `res/AppIcon.ico` embedded as its icon. Windows-only |
-| `just bundle-linux` | Assemble `target/ubiq-linux-x86_64/`: the release build's `ubiq`, `help.bundle` beside it, and `ubiq.png` from `assets/logo-white-on-blue.png`. Linux-only |
+| `just bundle` | Assemble `target/Kubiq.app`: release build of the binary, `AppIcon.icns`, and `_tools/Info.plist`. macOS-only, unsigned, for a local `.app` |
+| `just bundle-win` | Assemble `target/kubiq-windows-x86_64/`: the release build's `kubiq.exe`, with `res/AppIcon.ico` embedded as its icon. Windows-only |
+| `just bundle-linux` | Assemble `target/kubiq-linux-x86_64/`: the release build's `kubiq`, `help.bundle` beside it, and `kubiq.png` from `assets/logo-white-on-blue.png`. Linux-only |
 
 `just bundle` requires macOS and Xcode's command line tools for `iconutil`. The bundle is unsigned
 and carries no hardened-runtime entitlements, so it launches locally but is not ready to distribute.
 
 `just bundle-win` is the Windows counterpart — no icon-assembly step, because the icon is not a side
-file: `crates/ubiq-app/build.rs` links `res/AppIcon.ico` into the executable through
-`res/ubiq-app.rc`, using `windres` on the GNU toolchain and `rc.exe` on MSVC, and the `cfg(windows)`
+file: `crates/kubiq-app/build.rs` links `res/AppIcon.ico` into the executable through
+`res/kubiq-app.rc`, using `windres` on the GNU toolchain and `rc.exe` on MSVC, and the `cfg(windows)`
 gate keeps it out of macOS builds. `AppIcon.ico` is generated from `assets/logo-white-on-blue.png`
 at 16 through 256 pixels. Like every recipe in this file it expects a POSIX shell on the path (Git
 Bash, which a Windows runner carries).
@@ -203,20 +203,20 @@ deleted, moved or force-pushed: every nightly is a new prerelease under a new ta
 |---|---|---|---|---|
 | stable | tag `vX.Y.Z` | `vX.Y.Z` | `X.Y.Z` | normal |
 | beta | tag `vX.Y.Z-<pre>` | same | without the `v` | prerelease |
-| nightly | a manual run only | `nightly-YYYYMMDD-HHMM` | `<ubiq-app version>-nightly.YYYYMMDDHHMM` | prerelease "Nightly …" |
+| nightly | a manual run only | `nightly-YYYYMMDD-HHMM` | `<kubiq-app version>-nightly.YYYYMMDDHHMM` | prerelease "Nightly …" |
 
 A manual `workflow_dispatch` takes one checkbox per platform — `macos`, `windows`, `linux`, all on by
 default, at least one required — and `channel` (default `nightly`); a tag push builds all three.
 `stable` and `beta` must run on a matching tag ref or the `meta` job fails. The version reaches the build as
-`UBIQ_VERSION`, with `UBIQ_CHANNEL` and `UBIQ_UPDATE_PUBKEY` (the `UPDATE_PUBLIC_KEY` variable) read by
+`KUBIQ_VERSION`, with `KUBIQ_CHANNEL` and `KUBIQ_UPDATE_PUBKEY` (the `UPDATE_PUBLIC_KEY` variable) read by
 the app through `option_env!`; `just bundle` stamps `CFBundleShortVersionString` (the `X.Y.Z` core) and
 `CFBundleVersion` (the full string) into the `Info.plist` copy.
 
 | Platform | Artifacts | Built by |
 |---|---|---|
-| macOS | `Ubiq-macos-arm64.zip` (what the updater downloads), `Ubiq-macos-arm64.dmg` (signed and notarized like the app) | `release-macos.yml` |
-| Windows | `Ubiq-windows-x86_64.zip`, `Ubiq-Setup-x86_64.exe` — per-user Inno Setup installer, silent with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER` | `release-windows.yml`, `_devops/windows/ubiq.iss` |
-| Linux | `Ubiq-linux-x86_64.tar.gz` — the `bundle-linux` folder, built on `ubuntu-22.04` for the oldest glibc a runner offers | `release-linux.yml` |
+| macOS | `Kubiq-macos-arm64.zip` (what the updater downloads), `Kubiq-macos-arm64.dmg` (signed and notarized like the app) | `release-macos.yml` |
+| Windows | `Kubiq-windows-x86_64.zip`, `Kubiq-Setup-x86_64.exe` — per-user Inno Setup installer, silent with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER` | `release-windows.yml`, `_devops/windows/kubiq.iss` |
+| Linux | `Kubiq-linux-x86_64.tar.gz` — the `bundle-linux` folder, built on `ubuntu-22.04` for the oldest glibc a runner offers | `release-linux.yml` |
 | Release | `SHA256SUMS` over all of the above | `create-release.yml` |
 
 `publish` then writes `<channel>.json` with `_devops/scripts/channel-manifest.py` (a platform key,
@@ -233,7 +233,7 @@ still ships and the manifest is skipped with a warning.
 | `UPDATE_SIGNING_KEY`, `UPDATE_SIGNING_PASSWORD` | The minisign secret key file's contents, and its password |
 | variable `UPDATE_PUBLIC_KEY` | The minisign public key line, baked into the build |
 
-Make the update key pair with `minisign -G -p ubiq.pub -s ubiq.key`.
+Make the update key pair with `minisign -G -p kubiq.pub -s kubiq.key`.
 
 The macOS workflow signs the `.app` after `help.bundle` is in `Contents/Resources`, in one of three
 modes picked by the secrets set. `MACOS_CERT_P12` (a `.p12`, base64), `MACOS_CERT_PASSWORD` and
@@ -242,10 +242,10 @@ modes picked by the secrets set. `MACOS_CERT_P12` (a `.p12`, base64), `MACOS_CER
 certificate — also notarizes, staples and checks it with `spctl`, and a rejected submission fails
 the job. A self-signed code-signing certificate gives the "unidentified developer" prompt (Privacy
 & Security → Open Anyway); no certificate gives an ad-hoc signed bundle, never a "damaged" one.
-Make a self-signed one with `openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=Ubiq"
+Make a self-signed one with `openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=Kubiq"
 -addext keyUsage=critical,digitalSignature -addext extendedKeyUsage=critical,codeSigning -keyout
-k.pem -out c.pem`, then `openssl pkcs12 -export -legacy -inkey k.pem -in c.pem -out ubiq.p12` and
-`base64 -i ubiq.p12`; the identity is then `Ubiq`.
+k.pem -out c.pem`, then `openssl pkcs12 -export -legacy -inkey k.pem -in c.pem -out kubiq.p12` and
+`base64 -i kubiq.p12`; the identity is then `Kubiq`.
 
 ### Documentation
 
@@ -299,7 +299,7 @@ the manifest the repository is committed to.
 `_tools/helpbundle.py` is the one script behind all three, and it is the whole build: no `build.rs`
 and no `cargo` step knows help exists (`D146`). `help-check` is part of `just verify` and passes
 trivially when there is no `help/` tree, so a clone that has never built the content still verifies.
-`help-bundle` writes one `UBIQBND1` archive — the same format the vendor bundles use — carrying every
+`help-bundle` writes one `KUBQBND1` archive — the same format the vendor bundles use — carrying every
 page, every image and a derived `catalog.json`. `dev`, `verbose`, `build`, `bundle`, `bundle-win`
 and `bundle-linux` all depend on `help-bundle`, so the archive is rebuilt before any of them runs;
 the three `bundle` recipes then copy `target/help/help.bundle` beside the binary. Nothing has to be remembered —
@@ -308,7 +308,7 @@ and runs, opening a help panel that says so rather than failing.
 
 `--out-dir DIR` overrides the default `target/help` — Studio's Justfile passes its own, because it
 compiles both binaries into a `target/` one level up from this checkout (`_docs/tech/operations.md`
-in `ubiq-studio` has the detail).
+in `kubiq-studio` has the detail).
 
 ### Third-party licences
 
@@ -368,10 +368,10 @@ its arguments.
 
 ## Environment
 
-Ubiq resolves one config root, and everything it remembers between runs lives under it — the
+Kubiq resolves one config root, and everything it remembers between runs lives under it — the
 project catalogue, per-project view state, and the caches. The order is `--config-root`, then
-`UBIQ_CONFIG_DIR`, then the nearest `ubiq.toml` walking up from the working directory, then
-`~/.config/ubiq`. A `ubiq.toml` is a bootstrap file and says one thing, `config_root`; this
+`KUBIQ_CONFIG_DIR`, then the nearest `kubiq.toml` walking up from the working directory, then
+`~/.config/kubiq`. A `kubiq.toml` is a bootstrap file and says one thing, `config_root`; this
 repository commits one pointing at `_data/config`, which is ignored by git, so running from a
 checkout never touches the catalogue a user works with all day. A malformed one is an error rather
 than a fallback, and the status bar says when the root is not the default.
@@ -382,13 +382,13 @@ Four variables affect a run:
 |---|---|
 | `RUST_LOG` | Log filter, through `tracing-subscriber`. `just verbose` sets it to `debug` |
 | `CARGO_TARGET_DIR` | Redirects build output, useful when disk is tight |
-| `UBIQ_CONFIG_DIR` | The config root, below `--config-root` and above a `ubiq.toml` |
-| `UBIQ_VERSION` | The bundle version baked into the binary. Set it to pin a build to a known string; left unset, the Justfile computes one |
+| `KUBIQ_CONFIG_DIR` | The config root, below `--config-root` and above a `kubiq.toml` |
+| `KUBIQ_VERSION` | The bundle version baked into the binary. Set it to pin a build to a known string; left unset, the Justfile computes one |
 
-`UBIQ_VERSION` is exported near the top of the Justfile as `` `_devops/scripts/bundle-version.sh` ``,
-so every recipe's cargo invocations carry it into `option_env!("UBIQ_VERSION")` at compile time —
+`KUBIQ_VERSION` is exported near the top of the Justfile as `` `_devops/scripts/bundle-version.sh` ``,
+so every recipe's cargo invocations carry it into `option_env!("KUBIQ_VERSION")` at compile time —
 see [`architecture.md`](./architecture.md) for the `version` module that reads it. The script's
-precedence: `UBIQ_VERSION` set in the environment, taken verbatim; else the git tag starting with `v`
+precedence: `KUBIQ_VERSION` set in the environment, taken verbatim; else the git tag starting with `v`
 on a clean, tagged `HEAD`; else, with no git available, `dev-<cargo version>-<UTC timestamp>`; else
 `dev-<UTC timestamp>-<8-char git hash>`.
 
@@ -398,7 +398,7 @@ sets for a run. Those live with that crate — see [`agent-manager.md`](./agent-
 ## When an agent cannot run a tool
 
 An agent reporting `cargo: operation not permitted`, `python: operation not permitted` or an `ls`
-that cannot list a directory the user can list is the commonest report Ubiq gets, and it is almost
+that cannot list a directory the user can list is the commonest report Kubiq gets, and it is almost
 never a broken installation. It is the confinement policy answering a question nobody told it about:
 the shipped layers grant a toolchain's **default** location, and this machine put it somewhere else.
 The runbook below takes about two minutes and ends in a line in `environment.toml`.
@@ -412,20 +412,20 @@ The wording says which half of the problem it is, and they have opposite fixes.
 | `operation not permitted`, from the shell or from `ls` | The policy denied the path. The binary is there and the run cannot reach it | `environment.toml`, below |
 | `command not found` | Nothing was denied — the name is not on the run's `PATH` | `PATH` in `environment.toml`, or `agent_commands` in Settings for a harness binary |
 | `cannot find GOROOT`, `DOTNET_CLI_HOME not set`, `.. is not a directory` | The tool ran and could not find its own root. A variable is missing, not a grant | The `[env]` table |
-| On Windows, `dotnet restore` fails with `Value cannot be null. (Parameter 'path1')`, or `dotnet build` hangs with every MSBuild node idle | A session variable isol8 does not pass (`ProgramData`, `SystemDrive`, …), or MSBuild's `\\.\pipe\MSBuild<pid>` pipes denied | `WINDOWS_ENV_PASS` and the generated `toolchains/dotnet` layer in `crates/agent-manager/src/isolate.rs`; restart Ubiq |
+| On Windows, `dotnet restore` fails with `Value cannot be null. (Parameter 'path1')`, or `dotnet build` hangs with every MSBuild node idle | A session variable isol8 does not pass (`ProgramData`, `SystemDrive`, …), or MSBuild's `\\.\pipe\MSBuild<pid>` pipes denied | `WINDOWS_ENV_PASS` and the generated `toolchains/dotnet` layer in `crates/agent-manager/src/isolate.rs`; restart Kubiq |
 | The harness hangs on its splash screen, with no error | A denied lookup the harness blocks on, not a path | `DEV_LAYERS` in `crates/agent-manager/src/isolate.rs` |
 | A confined `swift` or `xcodebuild` is denied | isol8's `integrations/xcode` layer is in `BROKEN_LAYERS`, so the SDK and toolchain paths are named by hand | `APPLE_SDK_RO_ROOTS` / `APPLE_RW_HOME_ROOTS` in `crates/agent-manager/src/isolate.rs` |
-| `framework 'FoundationModels' not found`, or `unable to load standard library`, from a build pulling in `foundation-models` (`assist-apple`) — `just dev`, `just verbose`, `just build`, `just bundle`, `just bundle-win`, `just apple` or `just assist` | The Swift/clang module cache or SwiftPM's home symlinks are denied, so `swiftc` cannot load the SDK's frameworks | `~/.cache/clang` and `~/.swiftpm` are in `APPLE_RW_HOME_ROOTS`; re-restart Ubiq |
+| `framework 'FoundationModels' not found`, or `unable to load standard library`, from a build pulling in `foundation-models` (`assist-apple`) — `just dev`, `just verbose`, `just build`, `just bundle`, `just bundle-win`, `just apple` or `just assist` | The Swift/clang module cache or SwiftPM's home symlinks are denied, so `swiftc` cannot load the SDK's frameworks | `~/.cache/clang` and `~/.swiftpm` are in `APPLE_RW_HOME_ROOTS`; re-restart Kubiq |
 | `swift build` fails with `sandbox-exec: sandbox_apply: Operation not permitted` even with the SDK granted | SwiftPM shells out to `sandbox-exec` itself when it recompiles a manifest, and a sandbox cannot nest | `swift build --disable-sandbox`, or warm the SwiftPM manifest cache with an unconfined build first |
 
 Confirm the run is confined before anything else: `env | grep ISOL8_SANDBOXED` inside the pane
-prints `ISOL8_SANDBOXED=1` when it is. Ubiq also logs `confined` for the spawn.
+prints `ISOL8_SANDBOXED=1` when it is. Kubiq also logs `confined` for the spawn.
 
 ### Ask the tool what it needs, outside the pane
 
 **A sandbox cannot nest, so nothing inside a confined pane can test a policy.** Every command in
 this step belongs in an ordinary terminal, in a login shell — which is also the environment that
-still has the variables a GUI launch of Ubiq lost.
+still has the variables a GUI launch of Kubiq lost.
 
 ```
 which -a cargo                 # every path the name resolves through
@@ -452,7 +452,7 @@ what has to be named.
   `[[grants]]` block with `write = true` only when the tool genuinely writes there. Flutter does,
   into its own `bin/cache`; an SDK tree usually does not.
 
-Then restart Ubiq: the file is read once, at startup, like every other policy input. A grant on a
+Then restart Kubiq: the file is read once, at startup, like every other policy input. A grant on a
 path that does not exist yet is inert rather than an error, so a cache root can be granted before
 its first use — which is exactly what makes the first run of a tool work.
 

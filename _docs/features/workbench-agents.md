@@ -7,7 +7,7 @@ summary: The rail's Agents mode — a row of parallel columns, each a transcript
 read_when: you are changing the agents screen — its columns, its tabs, what a tab drag means, the bench, the sidebar, a column's composer or footer, or the New agent form
 updated: 2026-10-29
 verified: 2026-10-29
-code_anchors: [crates/ubiq/src/state/workbench.rs, crates/ubiq/src/state/agents.rs, crates/ubiq/src/app/agents.rs, crates/ubiq/src/state/new_agent.rs, crates/ubiq/src/app/new_agent.rs, crates/ubiq/src/ui/new_agent.rs, crates/ubiq/src/state/conversation.rs, crates/ubiq/src/ui/conversation/mod.rs, crates/ubiq/tests/conversation.rs, crates/ubiq/src/ui/agents/mod.rs, crates/ubiq/src/ui/agents/sidebar.rs, crates/ubiq/src/ui/agents/column.rs, crates/ubiq/src/state/status.rs, crates/ubiq/src/ui/work.rs, crates/ubiq/src/ui/teams/status.rs, crates/ubiq/tests/agents.rs, crates/ubiq/src/app/mission.rs]
+code_anchors: [crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/agents.rs, crates/kubiq/src/app/agents.rs, crates/kubiq/src/state/new_agent.rs, crates/kubiq/src/app/new_agent.rs, crates/kubiq/src/ui/new_agent.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/tests/conversation.rs, crates/kubiq/src/ui/agents/mod.rs, crates/kubiq/src/ui/agents/sidebar.rs, crates/kubiq/src/ui/agents/column.rs, crates/kubiq/src/state/status.rs, crates/kubiq/src/ui/work.rs, crates/kubiq/src/ui/teams/status.rs, crates/kubiq/tests/agents.rs, crates/kubiq/src/app/mission.rs]
 depends_on: [feat-workbench, tech-ui, feat-chat]
 review_cycle: monthly
 ---
@@ -191,11 +191,11 @@ definition opened for editing renames it (`NewAgentForm::original_id` rides out 
 taken. What names the old one follows: the host rewrites `extends` in the definition stores and every
 mission's planner and worker pick, and the window moves the last-used start target when the definitions list echoes the rename. A save also keeps the record's `extends` and isolation, which the form does not carry.
 
-**The form's footer offers the MCP servers Ubiq itself injects.** `MCPs` opens a checklist of the
+**The form's footer offers the MCP servers Kubiq itself injects.** `MCPs` opens a checklist of the
 `McpInfo` rows the host answered `ListMcps` with — one tick box per server, its title, what it is
 for and the tools it answers — and what is ticked rides out on `StartConversation::mcps` or is
-written into `AgentDefinition::mcps`. This build lists Test, Project info, Manage Ubiq tasks, and Use
-ubiq tasks. It is a checklist and not a picker because several servers may be
+written into `AgentDefinition::mcps`. This build lists Test, Project info, Manage Kubiq tasks, and Use
+kubiq tasks. It is a checklist and not a picker because several servers may be
 asked for at once, so the panel is the same `deferred`/`anchored` shape the pickers are built on
 with check-box rows in it, opening upward from the footer and staying down across ticks. The
 host resolves a ticked name that is not a built-in against the skill and MCP catalog
@@ -362,7 +362,7 @@ Three buttons at the foot reveal a folder in the desktop's own file manager — 
 and the folder holding the capture, which is there only while there is a capture. A folder the host
 has reported no path for is drawn dead rather than dropped.
 
-**Three toggles sit between Fork and the closing pair, and they are Ubiq's own rather than the
+**Three toggles sit between Fork and the closing pair, and they are Kubiq's own rather than the
 harness's.**
 The persistence row (`SetConversationPersistent`) marks the conversation as one that outlives the
 window, reading *Make persistent* or *Stop persisting* by which way it goes. The New agent dialog's
@@ -384,8 +384,8 @@ row's own tooltip already says the path in the place the click happened. All thr
 before the closing pair, because none is destructive and the irreversible verb stays last — which is
 where a toggle added later goes too. **Only the persistence row reads the harness**: it is drawn dead for a
 harness that keeps its sessions outside the run directory (`keeps_sessions`), since keeping that
-directory would preserve nothing, while the other two are always enabled because Ubiq answers and
-Ubiq writes, and no harness has to support either.
+directory would preserve nothing, while the other two are always enabled because Kubiq answers and
+Kubiq writes, and no harness has to support either.
 
 **Each item disables rather than disappears when it does not apply** — Stop only while a turn runs, Abort and Unload only
 while launched, Resume only while it is not, Fork only while nothing is in flight (copying a session
@@ -480,7 +480,7 @@ focused column rather than given one of its own, because "show me this agent" is
 screen can honour whatever the row looks like.
 
 **A column draws one thing below its chrome, and it is the chat panel.** Not a panel of the same
-shape — the same code, `crates/ubiq/src/ui/conversation/mod.rs`, which the chat tab the Teams and
+shape — the same code, `crates/kubiq/src/ui/conversation/mod.rs`, which the chat tab the Teams and
 IDE screens dock and the kitchen sink draw too. A column owns no transcript, no footer and no
 composer of its own; it passes a `ConversationView` and stops there. So a column is two layers:
 its own chrome (the tab strip, the `+` menu and the identity line) and, below it, the standard chat
@@ -611,7 +611,7 @@ live conversation behind it, rather than to nothing.
 ways of working share the one that means "moving" — `lifecycle_colour()`, `doing_colour()` and
 `status_colour()` do the same for the two status dictionaries, `lifecycle_icon()`, `doing_icon()`
 and `status_icon()` are their glyphs, and `role_icon()` and `role_mark()` are the glyph
-an agent wears, read off its definition's name (`WorkAgent` carries no role of its own). `ubiq_proto::work` keeps the words and `theme.rs` keeps the values, so the columns, the
+an agent wears, read off its definition's name (`WorkAgent` carries no role of its own). `kubiq_proto::work` keeps the words and `theme.rs` keeps the values, so the columns, the
 graph, the board and the status bar cannot disagree about what running looks like.
 
 `state/agents.rs` is the other view over that projection, and holds the arrangement rather than any
@@ -632,7 +632,7 @@ conversations fit and how narrow one may get are facts about a conversation. `li
 agents this window holds a `Conversation` for, written where one comes into being, and
 `live_agents()` narrows the projection to it — what every reader on the agents screen goes through.
 Nothing in it draws,
-nothing in it names a colour, and it is tested without a frame in `crates/ubiq/tests/agents.rs`.
+nothing in it names a colour, and it is tested without a frame in `crates/kubiq/tests/agents.rs`.
 
 **The New agent form is three modules with the window's usual division of labour.**
 `state/new_agent.rs` is `NewAgentForm` and small pure readings of it — `Purpose` (start, or write a
@@ -672,7 +672,7 @@ and chooses between `send_or_enqueue()` and the `SendToAgent` path a record with
 behind it takes — which no column reaches any more, since a column only holds a live one, and is
 kept only because a slot is a window-wide pool, and `send_prompt()` is the one place
 `PromptAgent` is built — folding a start's held preamble in front of the first turn and telling the
-`Conversation` what to take back off the echo. `crates/ubiq/tests/conversation.rs` covers both.
+`Conversation` what to take back off the echo. `crates/kubiq/tests/conversation.rs` covers both.
 
 **A conversation is drawn before its harness exists.** `AppState::start_new_agent()` mints the `AgentId`
 itself — the `SessionId` precedent — and the host adopts it, so `ConversationStarted` and the

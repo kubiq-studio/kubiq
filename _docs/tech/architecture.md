@@ -7,7 +7,7 @@ summary: The two halves — coordinator and UI — the single bus between them, 
 read_when: you are about to add a capability that crosses the UI/coordinator line, or you want to know why the code is shaped this way
 updated: 2026-10-29
 verified: 2026-10-29
-code_anchors: [crates/ubiq-host/src/browser.rs, crates/ubiq-host/src/mcp/browser.rs, crates/ubiq-host/Cargo.toml, crates/ubiq-host/src/web_assets/mod.rs, crates/ubiq/src/lib.rs, crates/ubiq/src/ext/mod.rs, crates/ubiq/src/ext/id.rs, crates/ubiq/src/ext/registry.rs, crates/ubiq/src/ext/ids.rs, crates/ubiq/src/ext/settings.rs, crates/ubiq/src/ext/rail.rs, crates/ubiq/src/ext/menu.rs, crates/ubiq/src/version.rs, crates/ubiq-app/src/lib.rs, crates/ubiq-app/src/main.rs, crates/ubiq/src/app/mod.rs, crates/ubiq/src/app/boot.rs, crates/ubiq/src/app/wire.rs, crates/ubiq/src/app/hosts.rs, crates/ubiq/src/app/remote_connect.rs, crates/ubiq/src/app/ssh_connect.rs, crates/ubiq/src/state/remote.rs, crates/ubiq/src/state/windows.rs, crates/ubiq-proto/src/bus.rs, crates/ubiq-proto/src/wire.rs, crates/ubiq-host/src/remote.rs, crates/ubiq-host/src/coordinator.rs, crates/ubiq-proto/src/log.rs, crates/ubiq-host/src/lib.rs, crates/ubiq-proto/src/lib.rs, crates/ubiq-host/src/work/mod.rs, crates/ubiq-host/src/files/mod.rs, crates/ubiq-host/src/files/diff.rs, crates/ubiq-host/src/kb/mod.rs, crates/ubiq-host/src/git/mod.rs, crates/ubiq-host/src/git/observe.rs, crates/ubiq-host/src/repos/mod.rs, crates/ubiq-host/src/projects.rs, crates/ubiq-host/src/settings.rs, crates/ubiq-host/src/store/mod.rs, crates/ubiq-host/src/store/file.rs, crates/ubiq-host/src/store/memory.rs, crates/ubiq-host/src/watch/mod.rs, crates/ubiq-host/src/links.rs, crates/ubiq/src/web_export/mod.rs, crates/ubiq-host/src/mcp/mod.rs, crates/ubiq-host/src/mcp/tasks.rs, crates/ubiq-drone/src/lib.rs, crates/ubiq-host/src/mcp/plan.rs, crates/ubiq-host/src/plan/mod.rs, crates/ubiq-host/src/store/plan.rs, crates/ubiq/src/ext/runner.rs, crates/ubiq/src/ext/viewer.rs]
+code_anchors: [crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq/src/lib.rs, crates/kubiq/src/ext/mod.rs, crates/kubiq/src/ext/id.rs, crates/kubiq/src/ext/registry.rs, crates/kubiq/src/ext/ids.rs, crates/kubiq/src/ext/settings.rs, crates/kubiq/src/ext/rail.rs, crates/kubiq/src/ext/menu.rs, crates/kubiq/src/version.rs, crates/kubiq-app/src/lib.rs, crates/kubiq-app/src/main.rs, crates/kubiq/src/app/mod.rs, crates/kubiq/src/app/boot.rs, crates/kubiq/src/app/wire.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/state/remote.rs, crates/kubiq/src/state/windows.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-host/src/remote.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/log.rs, crates/kubiq-host/src/lib.rs, crates/kubiq-proto/src/lib.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-host/src/files/mod.rs, crates/kubiq-host/src/files/diff.rs, crates/kubiq-host/src/kb/mod.rs, crates/kubiq-host/src/git/mod.rs, crates/kubiq-host/src/git/observe.rs, crates/kubiq-host/src/repos/mod.rs, crates/kubiq-host/src/projects.rs, crates/kubiq-host/src/settings.rs, crates/kubiq-host/src/store/mod.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-host/src/store/memory.rs, crates/kubiq-host/src/watch/mod.rs, crates/kubiq-host/src/links.rs, crates/kubiq/src/web_export/mod.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-drone/src/lib.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq/src/ext/runner.rs, crates/kubiq/src/ext/viewer.rs]
 review_cycle: quarterly
 ---
 
@@ -15,31 +15,31 @@ review_cycle: quarterly
 
 ## The shape
 
-Ubiq has two halves and one channel between them, and the halves are **crates**, so the boundary is
+Kubiq has two halves and one channel between them, and the halves are **crates**, so the boundary is
 a compile error rather than a convention.
 
 | Crate | Holds | Depends on |
 |---|---|---|
-| `crates/ubiq-proto/` | The message set, the ids, the bus, the log sink | Nothing that draws, nothing that touches disk |
-| `crates/ubiq-host/` | The coordinator, pseudo-terminals, the project catalogue and its stores | The protocol crate |
-| `crates/ubiq/` | Windows, panes, chrome, theme, the projection | The protocol crate — **not** the host crate |
-| `crates/ubiq-app/` | The binary | All three |
+| `crates/kubiq-proto/` | The message set, the ids, the bus, the log sink | Nothing that draws, nothing that touches disk |
+| `crates/kubiq-host/` | The coordinator, pseudo-terminals, the project catalogue and its stores | The protocol crate |
+| `crates/kubiq/` | Windows, panes, chrome, theme, the projection | The protocol crate — **not** the host crate |
+| `crates/kubiq-app/` | The binary | All three |
 
 Only the binary names both halves, and it names the host once: to start it and hand the interface
 the other end of the bus. The interface cannot reach around the bus because the host's types are
 not in its dependency graph, and `just host` and `just ui` check that mechanically — the first that
 no drawing crate reaches the host's tree, the second that the host never reaches the interface's.
 
-`crates/ubiq-host` is also linkable lean: `git`, `index`, `harness`, `listener` and `desktop` each
+`crates/kubiq-host` is also linkable lean: `git`, `index`, `harness`, `listener` and `desktop` each
 gate a slice of its module tree behind a Cargo feature, `full` is all five together, and `default`
 turns `full` on, so an ordinary build is unaffected. This is what lets a second, windowless binary
 embed the host's own `pty`, `files` and `host_meta` — a machine's terminal, files and facts — without
 carrying the harness-composition half those modules never needed. `just relay` builds the lean
 configuration and checks the gated crates stay out of it — the feature split is in
-[`project-structure.md`](./project-structure.md). That second binary is `crates/ubiq-drone`, and
+[`project-structure.md`](./project-structure.md). That second binary is `crates/kubiq-drone`, and
 what it does with the lean host is [`../features/drone.md`](../features/drone.md)'s.
 
-A `[[bin]]` inside `crates/ubiq` could not express this: a binary shares its package's
+A `[[bin]]` inside `crates/kubiq` could not express this: a binary shares its package's
 `[dependencies]`, so naming the host there would put it in the library's graph too. That is why the
 binary is a crate of its own — see `D27`.
 
@@ -56,7 +56,7 @@ Between them is the **bus** — a single channel carrying a small, closed set of
 set is the load-bearing decision and is owned by
 [`transport-contract.md`](./transport-contract.md); this document covers the structure around it.
 
-`crates/ubiq-proto/src/bus.rs` is that channel in code. `pair()` opens two unbounded queues of messages,
+`crates/kubiq-proto/src/bus.rs` is that channel in code. `pair()` opens two unbounded queues of messages,
 one per direction, and a window keeps one end while the coordinator thread keeps the other. The
 same module holds the two byte-stream endpoints a pane's emulator is handed in place of a
 pseudo-terminal: a `Write` whose writes leave as input messages, and a blocking `Read` fed by the
@@ -92,19 +92,19 @@ every open project is the second exception: the operating system hands the inter
 path with no host round trip available, and it is given rather than composed there too — the
 interface reads it with `std::fs` to build a read-only guest tab, and never resolves, writes to, or
 sends that path anywhere. `D54` records the decision and its cost. The web-export server
-(`crates/ubiq/src/web_export/`) is a third instance of the same reasoning at a larger scale: it reads
+(`crates/kubiq/src/web_export/`) is a third instance of the same reasoning at a larger scale: it reads
 a whole project's tree with `std::fs` and the `ignore` crate, off its own thread, using the
 project's path from the same `ProjectSnapshot` rather than a path it composed. `D55` records it.
-A fourth is not really an exception at all: `crates/ubiq/src/app/remote_connect.rs` holds a
+A fourth is not really an exception at all: `crates/kubiq/src/app/remote_connect.rs` holds a
 `TcpStream` while it dials a remote host and pumps frames over it. Rule 2 is about where a *pane's*
 byte stream terminates — the pseudo-terminal must never be assumed local — and this socket carries
 no pane; it is the client half of the wire transport the interface itself owns, the same handshake
-`ubiq-host/src/remote.rs` answers from the listening side (`D79`, `D80`). Holding the transport is
+`kubiq-host/src/remote.rs` answers from the listening side (`D79`, `D80`). Holding the transport is
 not reaching around it.
 
-A fifth is the same reasoning over a different transport: `crates/ubiq/src/app/ssh_connect.rs`
+A fifth is the same reasoning over a different transport: `crates/kubiq/src/app/ssh_connect.rs`
 spawns the system `ssh` with piped stdio and holds the `Child` and its three pipes while it runs
-`ubiq_proto::carrier::welcome` on the bare pair and drains standard error. What crosses that
+`kubiq_proto::carrier::welcome` on the bare pair and drains standard error. What crosses that
 module's boundary is a `Client` and a `ConnectFailure`, exactly as a socket dial hands
 `remote_connect.rs`'s pump the same two things — no state type or drawing module downstream ever
 sees the `Child`, a pipe or a path. `spawn_pump` in `remote_connect.rs` is generic over any
@@ -112,7 +112,7 @@ sees the `Child`, a pipe or a path. `spawn_pump` in `remote_connect.rs` is gener
 `TcpStream` is, and its closer is a `Box<dyn FnOnce() + Send>` so an SSH session can kill the child
 where a socket session only drops the stream.
 
-A sixth is a Unix socket to a drone on this machine, `crates/ubiq/src/app/unix_connect.rs`, on the
+A sixth is a Unix socket to a drone on this machine, `crates/kubiq/src/app/unix_connect.rs`, on the
 same terms: it holds the stream while it handshakes and hands the pump a `Client`.
 
 **3. The coordinator renders nothing.** It has no opinion about layout, colour, or what the bytes it
@@ -122,7 +122,7 @@ terminal component.
 **4. Every message carries a pane ID.** Output, input, resize, focus, exit. A message that cannot
 name its pane is a message that will need reworking the moment a second pane exists.
 
-**5. Terminal bytes stay opaque.** Only control messages are structured. Ubiq writes no VT parser
+**5. Terminal bytes stay opaque.** Only control messages are structured. Kubiq writes no VT parser
 and no terminal state engine; it shuttles bytes between a pseudo-terminal and an emulator built for
 exactly that problem. The host may still read the bytes it forwards unchanged — a login pane's
 output is scanned for a URL to surface as a button — without that being VT parsing: the scan is a
@@ -160,10 +160,10 @@ Coordinator and UI logic go untouched — and that is what unlocks tmux-style de
 where the window can die while the agents keep running.
 
 **A listener drives the framing, and a UI attaches to it.** The socket wire format
-predicted above is built — `crates/ubiq-proto/src/wire.rs` frames a `Message` as a length-prefixed
+predicted above is built — `crates/kubiq-proto/src/wire.rs` frames a `Message` as a length-prefixed
 MessagePack body; the transport contract's framing section owns the shape and why the format is
-self-describing. `crates/ubiq-host/src/remote.rs` accepts TCP connections, checks a bearer token
-handed out at startup, and upgrades each one to raw `wire` frames. `ubiq-app --serve` (or
+self-describing. `crates/kubiq-host/src/remote.rs` accepts TCP connections, checks a bearer token
+handed out at startup, and upgrades each one to raw `wire` frames. `kubiq-app --serve` (or
 `--serve=<addr>`, `--bind`, `--port`) starts it, and that run opens no window: it is the machine's
 host, reporting to the terminal it was started in. [`operations.md`](./operations.md) documents the
 flags and
@@ -174,12 +174,12 @@ session is idle between frames by design. **What the session that follows has in
 heartbeat**: twenty seconds of inbound silence and a pump sends a `Ping`, the other answers a
 `Pong`, and three unanswered pings end the session by the same path a dropped socket takes. Both
 are swallowed in the pumps, reaching neither the coordinator nor `AppState`; the rules are
-`ubiq_proto::carrier`'s so the two pumps cannot drift, and the transport contract's carrier family
+`kubiq_proto::carrier`'s so the two pumps cannot drift, and the transport contract's carrier family
 owns the shape. **A remote
 connection is an ordinary client of the same `Hub`:** `remote.rs` does nothing but
 `Hub::connect()` plus two pumps, so a connection is a `ClientId` in the routing table like any
 window's, no message family is special-cased for it, and closing the socket is the same
-`FromClient::Gone` a window losing its connection produces. `crates/ubiq/src/app/remote_connect.rs`
+`FromClient::Gone` a window losing its connection produces. `crates/kubiq/src/app/remote_connect.rs`
 is the other end of the same handshake: it dials, sends the `GET /attach?token=…` upgrade request,
 and on a `101` hands the socket to `bus::detached()` behind its own pair of pump threads — the
 mirror image of `remote.rs`'s accept side, one binding and one dialing. **Attaching asks the new
@@ -207,43 +207,43 @@ problem as a terminal stream crossing a machine boundary. The coordinator stops 
 pseudo-terminal is local; the per-pane stream arrives over a network transport. The contract is
 identical, because a pane was always a tagged bidirectional byte stream plus control messages.
 
-Honouring rule 1 is what lets Ubiq go in-process → two processes → distributed by only ever changing
+Honouring rule 1 is what lets Kubiq go in-process → two processes → distributed by only ever changing
 the transport beneath the contract.
 
 ## What each half is made of
 
 | Concern | Where it lives | Notes |
 |---|---|---|
-| The config root, and every store under it | `crates/ubiq-host/src/config.rs`, `store/` | Movable by flag, environment or a bootstrap `ubiq.toml`. Four traits: the catalogue, a project's tasks, the interface's opaque view state, and settings (Ui opaque, Host parsed) |
-| The project catalogue | `crates/ubiq-host/src/projects.rs` | The host acts on it; the interface holds a projection |
-| A project's tasks, and the sessions and agents over them | `crates/ubiq-host/src/work/` | Tasks are the user's data, written down per project; sessions are the host's mocks, minted per project and never written, and agents are the live ones |
-| Window, panes, chrome, focus | `crates/ubiq/src/app/`, `crates/ubiq/src/ui/` | GPUI. `AppState` is the only view; `ui/` renders it |
-| The window's multiplexer over every host it is attached to | `crates/ubiq/src/app/hosts.rs` | `Bus`, `HostRef`, the UI-local `HostId`; the local host is always attached and remotes are added alongside it. `drop_remote` takes a lost host's panes with it rather than rerouting them, and takes its projects too — except the rows `Bus::row_owner` says are the local catalogue's, which stay and resolve locally again (`D132`) |
-| Colour palette | `crates/ubiq/src/theme.rs` | Every colour goes through a token |
-| Build/bundle version | `crates/ubiq/src/version.rs` | `option_env!("UBIQ_VERSION")`, baked in at compile time by the Justfile from `_devops/scripts/bundle-version.sh`, `"dev"` when unset. Read by the status bar and the web-export footer. Also holds `SITE` (`UBIQ_SITE`, default `https://ubiq.app`) and `REPO` (`UBIQ_REPO`, default `https://github.com/mdnmdn/ubiq`), the links the About modal shows |
-| Application and pane state | `crates/ubiq/src/state/` | Pane and app lifecycle, plus the workbench, explorer, editor, chat, agents, teams and board state, and the projection of a project's work. A window holds one tree, one set of open files and one projection of the work per project |
-| The message set | `crates/ubiq-proto/src/messages.rs` | The contract, serialisable by construction |
-| The bus, and a pane's byte streams | `crates/ubiq-proto/src/bus.rs` | The channel pair, and the `Read`/`Write` ends the emulator gets |
-| Process and PTY lifecycle | `crates/ubiq-host/src/coordinator.rs` | Spawn, supervise, reap. One coordinator thread, started by the binary before the first window |
-| PTY streams and backpressure | `crates/ubiq-host/src/pty/` | `portable-pty` |
-| A project's folder, its files, a save and a diff | `crates/ubiq-host/src/files/` | The walk, the read, the atomic write and one file's comparison with version control, on a worker thread of their own so no listing blocks the coordinator |
-| A project's knowledge-base roots, a folder or a fetched repository | `crates/ubiq-host/src/kb/` | The root list, one TOML file per project, not the catalogue's; a git root fetches on a thread of its own, on `repos/clone.rs`'s shape, behind `git`. Listing and reading still ride the files worker, filtered by `KbRoot::admits` after the walk |
-| A project's repository | `crates/ubiq-host/src/git/` | The overview the status bar reads and the working-tree map the explorer's badges read, on a worker thread of their own so a cold status does not stall every pane |
-| Listing a remote's repositories, and cloning one | `crates/ubiq-host/src/repos/` | A thread per clone, deliberately not the git worker, whose synchronous queue a clone would block for minutes (`D73`). It reaches the connectors' HTTP and token helpers for a listing, and hands the finished folder to the coordinator over a channel because it cannot reach the catalogue |
-| What changed in a project's folder | `crates/ubiq-host/src/watch/` | One recursive `notify` watch and one debounce thread per open project, per window. The only thing in the host that speaks without being asked |
-| What a project contains | `crates/ubiq-host/src/index/` | One thread owning one full-text index per project that keeps one, built from the same walk content search runs and refreshed from the watcher's own batches. It hands out a read handle carrying no writer, so a search can never block indexing |
+| The config root, and every store under it | `crates/kubiq-host/src/config.rs`, `store/` | Movable by flag, environment or a bootstrap `kubiq.toml`. Four traits: the catalogue, a project's tasks, the interface's opaque view state, and settings (Ui opaque, Host parsed) |
+| The project catalogue | `crates/kubiq-host/src/projects.rs` | The host acts on it; the interface holds a projection |
+| A project's tasks, and the sessions and agents over them | `crates/kubiq-host/src/work/` | Tasks are the user's data, written down per project; sessions are the host's mocks, minted per project and never written, and agents are the live ones |
+| Window, panes, chrome, focus | `crates/kubiq/src/app/`, `crates/kubiq/src/ui/` | GPUI. `AppState` is the only view; `ui/` renders it |
+| The window's multiplexer over every host it is attached to | `crates/kubiq/src/app/hosts.rs` | `Bus`, `HostRef`, the UI-local `HostId`; the local host is always attached and remotes are added alongside it. `drop_remote` takes a lost host's panes with it rather than rerouting them, and takes its projects too — except the rows `Bus::row_owner` says are the local catalogue's, which stay and resolve locally again (`D132`) |
+| Colour palette | `crates/kubiq/src/theme.rs` | Every colour goes through a token |
+| Build/bundle version | `crates/kubiq/src/version.rs` | `option_env!("KUBIQ_VERSION")`, baked in at compile time by the Justfile from `_devops/scripts/bundle-version.sh`, `"dev"` when unset. Read by the status bar and the web-export footer. Also holds `SITE` (`KUBIQ_SITE`, default `https://kubiq.app`) and `REPO` (`KUBIQ_REPO`, default `https://github.com/kubiq-studio/kubiq`), the links the About modal shows |
+| Application and pane state | `crates/kubiq/src/state/` | Pane and app lifecycle, plus the workbench, explorer, editor, chat, agents, teams and board state, and the projection of a project's work. A window holds one tree, one set of open files and one projection of the work per project |
+| The message set | `crates/kubiq-proto/src/messages.rs` | The contract, serialisable by construction |
+| The bus, and a pane's byte streams | `crates/kubiq-proto/src/bus.rs` | The channel pair, and the `Read`/`Write` ends the emulator gets |
+| Process and PTY lifecycle | `crates/kubiq-host/src/coordinator.rs` | Spawn, supervise, reap. One coordinator thread, started by the binary before the first window |
+| PTY streams and backpressure | `crates/kubiq-host/src/pty/` | `portable-pty` |
+| A project's folder, its files, a save and a diff | `crates/kubiq-host/src/files/` | The walk, the read, the atomic write and one file's comparison with version control, on a worker thread of their own so no listing blocks the coordinator |
+| A project's knowledge-base roots, a folder or a fetched repository | `crates/kubiq-host/src/kb/` | The root list, one TOML file per project, not the catalogue's; a git root fetches on a thread of its own, on `repos/clone.rs`'s shape, behind `git`. Listing and reading still ride the files worker, filtered by `KbRoot::admits` after the walk |
+| A project's repository | `crates/kubiq-host/src/git/` | The overview the status bar reads and the working-tree map the explorer's badges read, on a worker thread of their own so a cold status does not stall every pane |
+| Listing a remote's repositories, and cloning one | `crates/kubiq-host/src/repos/` | A thread per clone, deliberately not the git worker, whose synchronous queue a clone would block for minutes (`D73`). It reaches the connectors' HTTP and token helpers for a listing, and hands the finished folder to the coordinator over a channel because it cannot reach the catalogue |
+| What changed in a project's folder | `crates/kubiq-host/src/watch/` | One recursive `notify` watch and one debounce thread per open project, per window. The only thing in the host that speaks without being asked |
+| What a project contains | `crates/kubiq-host/src/index/` | One thread owning one full-text index per project that keeps one, built from the same walk content search runs and refreshed from the watcher's own batches. It hands out a read handle carrying no writer, so a search can never block indexing |
 | Terminal emulation | `vendor/gpui-terminal/` | Vendored third-party component; the UI's, never the coordinator's |
-| Harness definitions | `crates/ubiq-host/src/agent.rs` | Seeded from the embedded library |
-| The MCP surface Ubiq injects | `crates/ubiq-host/src/mcp/` | Tools Ubiq exposes to the agents it hosts, over one loopback listener (`D102`). The catalogue is `test`, `project-info`, `manage-ubiq-tasks`, `use-task`, `ubiq-kb`, `ubiq-plan` and `ubiq-browser`; the task pair shares `Work` through a handle and posts task mutations to every window (`D120`), `ubiq-kb` shares `Kb` the same way, mutating through `kb/ops.rs` and posting `KbChanged`, and `ubiq-plan` (`crates/ubiq-host/src/mcp/plan.rs`) shares `crate::plan::Plans` the same way again, over `read_plan`, `write_plan`, `list_annotations`, `annotate_plan`, `reply_annotation` and `resolve_annotation` — a server of its own rather than more tools on `manage-ubiq-tasks`, so a task-management agent does not carry plan tools it never calls; `ubiq-browser` (`crates/ubiq-host/src/mcp/browser.rs`) holds no view, so each of its twelve tools is a `BrowserCommand` carried out by one window the host picks and answered by `BrowserReply` within 30 seconds, at most eight calls at a time, and it is in no default set (`D224`); `ubiq-remote` (`crates/ubiq-host/src/mcp/remote.rs`) is the same shape for an agent bound to a drone — each `remote_*` tool is a `RemoteToolCall` one window relays to the drone and a `RemoteToolResult` it relays back, injected only for a launch whose `StartConversation.remote` is set (`D226`); `ubiq-doc` runs the same handlers on any markdown file of the project, named by path (`D161`, T-348) |
-| A short line of prose the host writes itself | `crates/ubiq-host/src/assist/` | One `Assist` trait and every prompt string, over three backends: the platform's on-device model behind the `assist-apple` feature, a stub in its place, and one `api.rs` backend in every build that covers OpenAI-compatible, Anthropic and Gemini. `select` reads the setting and the provider records together, because an API choice names a record rather than a kind, and `providers.rs` owns those records, their keychain keys and their cached model lists. The interface names a subject and never a prompt, and the answer arrives in chunks (`D83`, `D86`, `D87`) |
-| Diagnostics from every subsystem | `crates/ubiq-proto/src/log.rs` | The one sink both halves write to, and the console reads |
+| Harness definitions | `crates/kubiq-host/src/agent.rs` | Seeded from the embedded library |
+| The MCP surface Kubiq injects | `crates/kubiq-host/src/mcp/` | Tools Kubiq exposes to the agents it hosts, over one loopback listener (`D102`). The catalogue is `test`, `project-info`, `manage-kubiq-tasks`, `use-task`, `kubiq-kb`, `kubiq-plan` and `kubiq-browser`; the task pair shares `Work` through a handle and posts task mutations to every window (`D120`), `kubiq-kb` shares `Kb` the same way, mutating through `kb/ops.rs` and posting `KbChanged`, and `kubiq-plan` (`crates/kubiq-host/src/mcp/plan.rs`) shares `crate::plan::Plans` the same way again, over `read_plan`, `write_plan`, `list_annotations`, `annotate_plan`, `reply_annotation` and `resolve_annotation` — a server of its own rather than more tools on `manage-kubiq-tasks`, so a task-management agent does not carry plan tools it never calls; `kubiq-browser` (`crates/kubiq-host/src/mcp/browser.rs`) holds no view, so each of its twelve tools is a `BrowserCommand` carried out by one window the host picks and answered by `BrowserReply` within 30 seconds, at most eight calls at a time, and it is in no default set (`D224`); `kubiq-remote` (`crates/kubiq-host/src/mcp/remote.rs`) is the same shape for an agent bound to a drone — each `remote_*` tool is a `RemoteToolCall` one window relays to the drone and a `RemoteToolResult` it relays back, injected only for a launch whose `StartConversation.remote` is set (`D226`); `kubiq-doc` runs the same handlers on any markdown file of the project, named by path (`D161`, T-348) |
+| A short line of prose the host writes itself | `crates/kubiq-host/src/assist/` | One `Assist` trait and every prompt string, over three backends: the platform's on-device model behind the `assist-apple` feature, a stub in its place, and one `api.rs` backend in every build that covers OpenAI-compatible, Anthropic and Gemini. `select` reads the setting and the provider records together, because an API choice names a record rather than a kind, and `providers.rs` owns those records, their keychain keys and their cached model lists. The interface names a subject and never a prompt, and the answer arrives in chunks (`D83`, `D86`, `D87`) |
+| Diagnostics from every subsystem | `crates/kubiq-proto/src/log.rs` | The one sink both halves write to, and the console reads |
 
 **Version control is read in two places, both in the host, both through `git2`.** A one-file diff
-lives in `crates/ubiq-host/src/files/diff.rs` and rides the files worker: the host opens the
+lives in `crates/kubiq-host/src/files/diff.rs` and rides the files worker: the host opens the
 repository, takes the blob at `HEAD` or the one staged in the index, works the hunks and their line
 numbers out, and sends them — which is what keeps a diff library out of the interface, on the
 discipline that keeps a VT parser out of the host. The overview and the working-tree map live in
-`crates/ubiq-host/src/git/` on a worker of their own, because a cold status on a large repository is
+`crates/kubiq-host/src/git/` on a worker of their own, because a cold status on a large repository is
 seconds and seconds on the files worker would stall every expand behind it. Status walks with the
 index-stat refresh turned off, so a *read* cannot touch the index (`D30`). The Git screen's writes
 run on that same worker (`D122`).
@@ -281,20 +281,20 @@ mailbox. One extra send per flush, downstream of a debounce that coalesced the b
 index's failure is not the interface's: a thread that has gone means searches walk, which is what
 they did before an index existed.
 
-**The boot is a library, and the binary is three lines.** `crates/ubiq-app/src/lib.rs` holds the
+**The boot is a library, and the binary is three lines.** `crates/kubiq-app/src/lib.rs` holds the
 whole start sequence in one function, `run(boot)`. Before any of it, `run` checks whether this launch
-is the SSH askpass helper — `UBIQ_ASKPASS_PROFILE` set in the environment — and if so reads the named
+is the SSH askpass helper — `KUBIQ_ASKPASS_PROFILE` set in the environment — and if so reads the named
 agent definition's secret from the host's own store and writes it to standard output, then exits; nothing else
 in the sequence runs, and nothing else may print to standard output ahead of that check, because
 `ssh` reads whatever is there as the password. Otherwise `run` proceeds: install logging, resolve the
 config root, open the stores and start the one host — the same steps whether or not the interface is
 compiled in. What follows is the `ui` feature's own function, `window` (`D162`): install the GPUI
 component library, set the palette, bind the quit action and the interface's own, and ask for the
-first window. `crates/ubiq-app/src/main.rs` is
+first window. `crates/kubiq-app/src/main.rs` is
 `run(Boot::default())` and nothing else. `Boot` carries what a binary composes — the four boxed
 store traits, gathered as `Stores`, as a `FnOnce(&Path)` because the config root is resolved inside
 `run` from this process's own arguments, and `contributions: Contributions`, the one value a second
-edition populates with everything it adds through `crates/ubiq/src/ext`'s registries before the
+edition populates with everything it adds through `crates/kubiq/src/ext`'s registries before the
 first window (`D177`) — and `Boot::default()` is the base itself, not a reduced configuration:
 nothing in the sequence is conditional on the binary composing it, and `Contributions::default()`
 carries the base's own registrations and nothing else, which is exactly the path the base binary
@@ -309,8 +309,8 @@ then depends on having been contributed. The viewer container (`D204`) arrives
 empty: the base's own viewers are `ViewerKind`'s built-in variants, and the container holds only
 what a second edition adds. So does the origin-carrier container (`ext::origin`): SSH is a
 project origin's own field, not a carrier in it. `run` hands the composed registries to
-`ubiq::ext::settings::install`, `ubiq::ext::rail::install`, `ubiq::ext::menu::install`,
-`ubiq::ext::runner::install`, `ubiq::ext::origin::install` and `ubiq::ext::viewer::install`
+`kubiq::ext::settings::install`, `kubiq::ext::rail::install`, `kubiq::ext::menu::install`,
+`kubiq::ext::runner::install`, `kubiq::ext::origin::install` and `kubiq::ext::viewer::install`
 immediately before the first window,
 which resolves their draw order
 once, for the process; a headless or `--serve` run never reaches it, because a UI container is
@@ -318,8 +318,8 @@ drawn or it is nothing.
 
 **`Contributions` carries both kinds of extension point, and they are handed over at different
 moments.** `task_providers` and `runner_sources` are the host-service kind (`D189`, `D197`): a
-`ubiq_host::tasksrc::Registry` and a `ubiq_host::runners::Registry`
-rather than a `ubiq::ext::Registry<Spec>`, because a provider or a source is resolved by id and never
+`kubiq_host::tasksrc::Registry` and a `kubiq_host::runners::Registry`
+rather than a `kubiq::ext::Registry<Spec>`, because a provider or a source is resolved by id and never
 drawn, so it needs no group, no label, no icon and no predicate. Each is handed to `coordinator::start` —
 which therefore builds no registry of its own — and that is one step *earlier* than the five UI
 containers, because the coordinator starts before the first window. They are also the fields that are
@@ -329,9 +329,9 @@ crates hands in a different value and cannot skip a step, because `run` is the w
 `window`. The boot is therefore testable, and a test substitutes the memory stores through `Boot`.
 
 Opening a window is `app::open_project_window`, the single place one is created, so the first window
-and "open in a new window" cannot drift apart. `ubiq-app` consumes `crates/ubiq` as a library rather
+and "open in a new window" cannot drift apart. `kubiq-app` consumes `crates/kubiq` as a library rather
 than redeclaring its modules, so the tree is compiled once. All real logic sits in the library root,
-`crates/ubiq/src/lib.rs`.
+`crates/kubiq/src/lib.rs`.
 
 **A window is one `AppState`.** Several may be open, each holding its own projects and pointed at
 one of them. They share the palette, the window registry and the bus's hub, all of which are
@@ -357,7 +357,7 @@ pseudo-terminals deliberately — without that, every closed window would leave 
 the routing table — so what it says is either a broadcast every window receives, or an answer
 nobody is waiting for. The sender it wraps is a `flume::WeakSender` on purpose: a strong clone kept
 on the host's own side would hold the inbox open against itself, and `Coordinator::run` would never
-see `Disconnected` to break its loop on. `crates/ubiq-host/src/mcp/` is the caller: the single
+see `Disconnected` to break its loop on. `crates/kubiq-host/src/mcp/` is the caller: the single
 loopback listener `D102` chooses puts a tool call on its own thread with no window on either end
 of it. Raising a notification from there means saying `Message::RaiseNotification` exactly as a
 window would. Task tools take a shared `work::Handle` rather than asking the coordinator, and post
@@ -365,7 +365,7 @@ window would. Task tools take a shared `work::Handle` rather than asking the coo
 
 ## Diagnostics
 
-One thing crosses the line without the bus: the log sink in `crates/ubiq-proto/src/log.rs`. Both halves
+One thing crosses the line without the bus: the log sink in `crates/kubiq-proto/src/log.rs`. Both halves
 write to it, the window's console reads it, and it is process-wide rather than per window. The
 workarea of rule 6 is the other, and neither weakens rule 1: the sink is written by both halves and
 read by both, and the workarea is written by neither half but one — the host says the name once and
@@ -375,7 +375,7 @@ It is not an exception to rule 1, because nothing about it is communication. Rec
 a producer never reads, and no record carries a pane's state, a path or a handle — neither half
 learns anything from the sink, and removing it would change nothing either half does. What it buys
 is a subsystem that logs with `tracing::info!` and no plumbing, including the crates that have never
-heard of Ubiq. The trade, and the shape a detached coordinator forces, are `D24` and a row in
+heard of Kubiq. The trade, and the shape a detached coordinator forces, are `D24` and a row in
 [`../backlog.md`](../backlog.md); what the sink holds and what the console does with it is
 [`../features/logs.md`](../features/logs.md).
 
@@ -391,13 +391,13 @@ mutates them only through methods that end in a redraw request: `spawn_pane()`, 
 answers with the workspace it started, not when the UI asked for one — asking is `spawn_pane()`,
 and the answer arrives, with everything else that host says, at `receive()`.
 
-**`crates/ubiq/src/app/hosts.rs` is the window's multiplexer over every host it is attached to.**
+**`crates/kubiq/src/app/hosts.rs` is the window's multiplexer over every host it is attached to.**
 `Bus` replaces the bare `Client` field `AppState` held, exposing the same `send`, `send_to`,
 `sender` and `input` surface so none of the interface's call sites had to learn a message might
 have somewhere else to go. It wraps the local, in-process host — always present, connected before
 the first window and outliving every one of them — plus a `Vec<RemoteConn>` of hosts reached over a
 connection the interface opened itself, filled by the titlebar's "Connect to a remote host" modal
-(`crates/ubiq/src/ui/remote_connect.rs`) once a dial succeeds. `AppState::route_host` is the one
+(`crates/kubiq/src/ui/remote_connect.rs`) once a dial succeeds. `AppState::route_host` is the one
 router task, spawned once per connection by `boot.rs` over `bus.connections()` at construction and
 again by the connect flow for each host dialled after boot; either way it tags every arrival with
 the `HostRef` it came from before `receive()` and its per-family handlers ever see it, so a handler
@@ -457,9 +457,9 @@ violation as breaking rule 1.
 
 ## The harness library
 
-Ubiq does not know how to compose a harness run — which skills to inject, where a harness keeps its
+Kubiq does not know how to compose a harness run — which skills to inject, where a harness keeps its
 configuration, how to launch it against a throwaway config directory. The `agent-manager` crate in
-this workspace knows all of that, and Ubiq embeds it rather than reimplementing it. The boundary,
+this workspace knows all of that, and Kubiq embeds it rather than reimplementing it. The boundary,
 and which side owns which fact, is in [`agent-manager.md`](./agent-manager.md).
 
 ## Rationale

@@ -3,12 +3,12 @@
 //! The registry is the public JSON document at [`REGISTRY_URL`]. This module parses it (leniently:
 //! unknown fields are ignored, optional and `null` ones default), keeps a local copy with a
 //! [`TTL`], falls back to the snapshot bundled at build time ([`bundled`]) when there is none, and
-//! classifies every agent against the user's `PATH` and Ubiq's own install directory — see
+//! classifies every agent against the user's `PATH` and Kubiq's own install directory — see
 //! [`detect`]. Packages are never installed here: [`install_command`] only *names* the command,
 //! and the embedder runs it. A prebuilt binary is the one thing this module installs, through
 //! [`install_binary`], into `<install dir>/<id>/<version>/`.
 //!
-//! Claude Code and Codex are never offered here. Ubiq drives them through their own native
+//! Claude Code and Codex are never offered here. Kubiq drives them through their own native
 //! protocols, so [`detect`] drops `claude-acp`, `codex-acp` and anything whose CLI is `claude`
 //! or `codex`.
 //!
@@ -369,7 +369,7 @@ pub struct AcpAgentStatus {
     pub update: Option<String>,
 }
 
-/// Agents Ubiq drives natively; never offered through the registry.
+/// Agents Kubiq drives natively; never offered through the registry.
 const NATIVE_IDS: &[&str] = &["claude-acp", "codex-acp"];
 const NATIVE_CLIS: &[&str] = &["claude", "codex"];
 

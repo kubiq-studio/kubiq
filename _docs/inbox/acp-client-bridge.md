@@ -35,16 +35,16 @@ fact to the interface is short and entirely mechanical:
    The comment gives the reason as Grok's `--format json` NDJSON stream being too thinly documented
    to bridge faithfully — which is true of *that* stream, and beside the point now that there is an
    ACP one.
-2. `crates/ubiq-host/src/agent.rs:284` sets `AgentTypeInfo.chat = harness.io_support().structured`,
+2. `crates/kubiq-host/src/agent.rs:284` sets `AgentTypeInfo.chat = harness.io_support().structured`,
    so the host reports Grok as `chat: false` while still reporting it `available`.
-3. `WorkbenchState::harness_choices` (`crates/ubiq/src/state/workbench.rs:473`) filters
+3. `WorkbenchState::harness_choices` (`crates/kubiq/src/state/workbench.rs:473`) filters
    `agent_types` down to `chat == true` before building its rows.
-4. So the New agent dialog (`crates/ubiq/src/ui/new_agent.rs`) never draws Grok, and cannot: the
+4. So the New agent dialog (`crates/kubiq/src/ui/new_agent.rs`) never draws Grok, and cannot: the
    dialog only ever sends `Message::StartConversation`, which needs a structured bridge to answer.
 
 None of that is a bug, and no layer of it should be patched around. Grok still runs perfectly well
 in a terminal pane — `new_pane_rows` keeps offering it, and two unit tests
-(`crates/ubiq/src/state/workbench.rs:665`) pin exactly this split. **The one true statement in the
+(`crates/kubiq/src/state/workbench.rs:665`) pin exactly this split. **The one true statement in the
 chain is `structured: false`, and the way to change the interface is to make it false no longer.**
 
 The same holds for any future ACP harness, which is the reason to solve this generically rather
@@ -123,6 +123,6 @@ Two open questions that want a decision before code:
   plain NDJSON, so either the document is wrong or opencode grew a mode nothing uses. Worth
   resolving while here — if opencode does speak ACP, it is a second consumer of the generic bridge
   and stops being a one-harness argument.
-- Nothing in `crates/ubiq` or `crates/ubiq-proto` should need to change. When `structured` flips
+- Nothing in `crates/kubiq` or `crates/kubiq-proto` should need to change. When `structured` flips
   true for an ACP harness, the host reports `chat: true`, `harness_choices` stops filtering it, and
   the New agent dialog draws it with no UI work at all. That is the test that the layering held.

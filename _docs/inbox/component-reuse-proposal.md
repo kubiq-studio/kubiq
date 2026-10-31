@@ -3,20 +3,20 @@ id: inbox-component-reuse
 title: Problem — the interface rebuilds widgets the library it embeds already ships
 kind: proposal
 status: proposal
-summary: Ubiq depends on gpui-component (gpui-kit) and uses seven of its parts — the editor, the input, the dock, the text view, the tooltip, the scrollbar and the keycap. Everything else in `ui/kit` is a raw `div()` — a dropdown with no keyboard navigation across fifty-three call sites, two context-menu bodies, a bespoke filterable list beside the picker's, a hand-rolled grid, and a modal stack with its own z-priority contract — while the window is wrapped in the library's `Root` and its dialogs, popovers, menus, toasts, table, list and tree sit unused. Most of the kit is house *skin* and should stay; the proposal is to adopt the library where it brings behaviour Ubiq lacks and would otherwise have to write, and to give it Ubiq's palette first so anything adopted looks like Ubiq.
-read_when: you are adding a widget to `ui/kit`, reaching for `deferred` and `anchored` to build a popup, hand-rolling a table or a filterable list, or asking which parts of gpui-kit Ubiq should be using
+summary: Kubiq depends on gpui-component (gpui-kit) and uses seven of its parts — the editor, the input, the dock, the text view, the tooltip, the scrollbar and the keycap. Everything else in `ui/kit` is a raw `div()` — a dropdown with no keyboard navigation across fifty-three call sites, two context-menu bodies, a bespoke filterable list beside the picker's, a hand-rolled grid, and a modal stack with its own z-priority contract — while the window is wrapped in the library's `Root` and its dialogs, popovers, menus, toasts, table, list and tree sit unused. Most of the kit is house *skin* and should stay; the proposal is to adopt the library where it brings behaviour Kubiq lacks and would otherwise have to write, and to give it Kubiq's palette first so anything adopted looks like Kubiq.
+read_when: you are adding a widget to `ui/kit`, reaching for `deferred` and `anchored` to build a popup, hand-rolling a table or a filterable list, or asking which parts of gpui-kit Kubiq should be using
 updated: 2026-09-09
 depends_on: [tech-ui, feat-workbench, tech-architecture]
 ---
 
 # Problem — the interface rebuilds widgets the library it embeds already ships
 
-Ubiq embeds `gpui-component`, branded gpui-kit, at revision `df1d07b`. It uses seven things from
+Kubiq embeds `gpui-component`, branded gpui-kit, at revision `df1d07b`. It uses seven things from
 it: the editor over a rope (`input::EditorState`), the text input and textarea, the docking layout
 (`dock::{DockArea, DockAreaState, NodeId}`), the markdown text view, the tooltip, the scrollbar and
 the keycap. Fifty-eight files import one of those.
 
-Everything else the interface draws is a raw `div()` composition in `crates/ubiq/src/ui/kit/`, or a
+Everything else the interface draws is a raw `div()` composition in `crates/kubiq/src/ui/kit/`, or a
 one-off in the screen that needed it. That is the right call for most of it — the kit is where the
 house style lives, and a library button cannot express "a coloured left edge means identity". It is
 the wrong call in a specific, enumerable set of places: **where the hand-rolled version is missing
@@ -25,14 +25,14 @@ behaviour the library has, and the only way to get that behaviour is to write it
 Two facts make the cost of adoption much lower than it looks:
 
 - **The library is initialised and its overlay layers are live.** `gpui_component::init(cx)`
-  (`crates/ubiq-app/src/lib.rs:206`), the asset provider (line 186), and — the one that matters —
-  every window's view is wrapped in `gpui_component::Root` (`crates/ubiq/src/app/mod.rs:1097`).
+  (`crates/kubiq-app/src/lib.rs:206`), the asset provider (line 186), and — the one that matters —
+  every window's view is wrapped in `gpui_component::Root` (`crates/kubiq/src/app/mod.rs:1097`).
   `Root` is what owns the dialog, sheet, notification and tooltip layers with their z-priority
   stacking. Dialogs, popovers, menus and toasts would work the day they are called.
 - **The palette is not wired, and that is the one blocking task.** `theme::set_mode`
-  (`crates/ubiq/src/theme.rs:233`) calls `gpui_component::Theme::change(mode, None, cx)` — it
-  switches the library between its own light and dark defaults and never hands it Ubiq's colours.
-  So every library widget draws in gpui-kit's palette, not Ubiq's, which is why the ones in use
+  (`crates/kubiq/src/theme.rs:233`) calls `gpui_component::Theme::change(mode, None, cx)` — it
+  switches the library between its own light and dark defaults and never hands it Kubiq's colours.
+  So every library widget draws in gpui-kit's palette, not Kubiq's, which is why the ones in use
   read as almost-but-not-quite. The library keeps `Theme::global_mut(cx).light_theme` and
   `.dark_theme` as public `Rc<ThemeConfig>` and offers `apply_semantic_tokens`,
   `apply_semantic_config_str` and `ThemeRegistry::load_themes_from_str`; building one config per
@@ -44,7 +44,7 @@ Two facts make the cost of adoption much lower than it looks:
 | # | Replace | With | What is gained | Size |
 |---|---|---|---|---|
 | 1 | `kit::menu::Picker` and `menu_panel` (`ui/kit/menu.rs:44,295`, 382 lines, **53 call sites**) | `PopupMenu` / `Select` / `Combobox` over a `SearchableListDelegate`, inside the existing `Picker` signature | Arrow-key navigation, type-ahead and focus handling, none of which the kit dropdown has anywhere. Reimplementing the body behind the same constructor means one file changes and fifty-three call sites do not | 382 → a wrapper |
-| 2 | `ui/project_menu.rs:121-660` — a popover with its own rows, hover states and outside-click dismiss, built from `deferred` + `anchored` | `ContextMenu` / `PopupMenu` inside `Root`'s popup layer | Keyboard navigation, submenus, and the library's layering instead of Ubiq's hand-numbered `MENU_LAYER` / `MODAL_MENU_LAYER` priorities | ~350 lines |
+| 2 | `ui/project_menu.rs:121-660` — a popover with its own rows, hover states and outside-click dismiss, built from `deferred` + `anchored` | `ContextMenu` / `PopupMenu` inside `Root`'s popup layer | Keyboard navigation, submenus, and the library's layering instead of Kubiq's hand-numbered `MENU_LAYER` / `MODAL_MENU_LAYER` priorities | ~350 lines |
 | 3 | `ui/navigator.rs:89-203` + `app/nav.rs:226-470` — a filterable list with its own cursor, filter and popover positioning, parallel to the picker's | `command::{Command, CommandState}`, or a `Combobox` over the same delegate as #1 | Fuzzy match, keyboard model, and one filtering mechanism in the interface rather than two | ~230 lines |
 | 4 | `ui/stats.rs:219-328` — a fixed-column grid with a `COLUMNS` array, a header row and a cell builder | `Table` + `TableState` | Sorting, column resize and **virtualized rows** for free; the interface's only from-scratch grid stops being a pattern others copy | ~110 lines |
 | 5 | The long lists — the diff body, commit history, refs, the working tree, the transcript | `List` + `ListDelegate` (virtualized, with selection and keyboard navigation) or the `v_virtual_list` under it | [`render-velocity-proposal.md`](./completed/render-velocity-proposal.md)'s phase 1 virtualized four of the five with raw `uniform_list` and the transcript with `v_virtual_list`; what `List` would add on top is the selection and key handling those lists hand-roll per screen, and refs are the one still built whole (`G220`) | see that proposal |
@@ -81,17 +81,17 @@ orchestration graph), and `progress_ring_in` (`ui/kit/controls.rs:233`, an arc p
 `PathBuilder`).
 
 `kit::overlay::modal_sized` (`ui/kit/overlay.rs:85`) is the judgement call. The library's `Dialog`
-stacks properly and `Root` manages it, which would retire Ubiq's hand-numbered layer priorities and
+stacks properly and `Root` manages it, which would retire Kubiq's hand-numbered layer priorities and
 the `Picker::above_modal` contract that exists to work around them. Against that, `modal_sized`'s
 viewport clamp and its documented split of Escape handling to the window's key context are correct
 and understood. **Take it only after #1 and #2 land**, because those are what make the layering
 contract removable.
 
-## 3. What the library has that Ubiq does not
+## 3. What the library has that Kubiq does not
 
 Not replacements — capabilities the interface would have to write, and does not have to:
 
-- **`Toast` / `ToastStack`** — Ubiq has no transient notification at all; the bell opens a modal
+- **`Toast` / `ToastStack`** — Kubiq has no transient notification at all; the bell opens a modal
   list. A toast is what a finished background run wants.
 - **`Skeleton` / `Shimmer` / `Spinner`** — every panel that waits on the host draws muted text.
 - **`Pagination`** — the git history's `Load more commits` row is a hand-rolled one.

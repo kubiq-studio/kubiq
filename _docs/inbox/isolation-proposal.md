@@ -3,7 +3,7 @@ id: inbox-isolation
 title: Proposal — isolated runs, custom homes, and per-agent MCP
 kind: proposal
 status: proposal
-summary: Ubiq already links isol8 through the library's isolate module, already confines every terminal pane, and already carries a profile field on the wire that no screen fills — this is the correction, a default isolated run that keeps the user's own home, named homes the user creates and picks, MCP and skill selection riding the profile that is already there, and the four surfaces that draw all of it out of components the kit already ships.
+summary: Kubiq already links isol8 through the library's isolate module, already confines every terminal pane, and already carries a profile field on the wire that no screen fills — this is the correction, a default isolated run that keeps the user's own home, named homes the user creates and picks, MCP and skill selection riding the profile that is already there, and the four surfaces that draw all of it out of components the kit already ships.
 read_when: you are deciding what a pane's $HOME is, what a sandboxed run may reach, or how an agent gets its MCP servers
 updated: 2026-09-06
 depends_on: [tech-agent-manager, tech-architecture, tech-transport, tech-ui, feat-sessions, feat-workbench, wip-agent-setup, inbox-config]
@@ -11,15 +11,15 @@ depends_on: [tech-agent-manager, tech-architecture, tech-transport, tech-ui, fea
 
 # Proposal — isolated runs, custom homes, and per-agent MCP
 
-**Most of this is already built and switched off.** `crates/agent-manager/src/isolate.rs` wraps isol8 — layer selection, path grants, a macOS Seatbelt policy, managed homes — and `crates/ubiq-host/src/agent.rs` calls it on every terminal spawn. What is missing is not a mechanism. It is three answers Ubiq currently hardcodes: which home a confined run gets, who may choose a different one, and what goes into the run's config directory.
+**Most of this is already built and switched off.** `crates/agent-manager/src/isolate.rs` wraps isol8 — layer selection, path grants, a macOS Seatbelt policy, managed homes — and `crates/kubiq-host/src/agent.rs` calls it on every terminal spawn. What is missing is not a mechanism. It is three answers Kubiq currently hardcodes: which home a confined run gets, who may choose a different one, and what goes into the run's config directory.
 
-> A confined run's home is a choice with three settings — the user's own, a scratch one, or a named one the user made. Ubiq picks the second and offers no dial.
+> A confined run's home is a choice with three settings — the user's own, a scratch one, or a named one the user made. Kubiq picks the second and offers no dial.
 
 Three proposals in order of what they cost, each shippable alone.
 
 ## 1. Where it stands
 
-`compose_run` in `crates/ubiq-host/src/agent.rs` overrides three fields of the resolved spec: the config directory, the io mode, and isolation. Isolation reads
+`compose_run` in `crates/kubiq-host/src/agent.rs` overrides three fields of the resolved spec: the config directory, the io mode, and isolation. Isolation reads
 
 ```rust
 spec.isolation = if self.isolate && !structured {
@@ -29,7 +29,7 @@ spec.isolation = if self.isolate && !structured {
 };
 ```
 
-so a terminal pane is confined when the host's toggle is on and a chat conversation never is. The policy is then planned with `IsolateOptions::new(root/isol8)`, whose constructor documents its own defaults: `HomeMode::Ephemeral`, no extra read-only grants. Nothing in Ubiq can say otherwise, and `Settings::default()` is passed to the resolver, so agent-manager's own `[isolate] home` setting never reaches this path either.
+so a terminal pane is confined when the host's toggle is on and a chat conversation never is. The policy is then planned with `IsolateOptions::new(root/isol8)`, whose constructor documents its own defaults: `HomeMode::Ephemeral`, no extra read-only grants. Nothing in Kubiq can say otherwise, and `Settings::default()` is passed to the resolver, so agent-manager's own `[isolate] home` setting never reaches this path either.
 
 The consequence is the bug users actually meet: an isolated pane gets `$TMPDIR/isol8-home-<pid>-<nanos>`, which has no nvm, no mise, no pyenv, no shell profile, and no `.gitconfig`. The harness itself survives because every harness relocates its config by an env lever — `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` — and the library seeds credentials into that directory by copy. Everything *around* the harness breaks.
 
@@ -66,7 +66,7 @@ pub enum HomeMode {
 }
 ```
 
-`isolate::plan` maps `Inherit` by setting neither `ephemeral_home` nor `home` on the isol8 spec, which is precisely how isol8 spells "keep the real home". `HomeMode::parse` gains the `"inherit"` string. Changing the `Default` derive is the whole of the Ubiq-side change, since `IsolateOptions::new` builds from it — a one-word diff in `crates/agent-manager/src/isolate.rs` and none in `crates/ubiq-host/src/agent.rs`.
+`isolate::plan` maps `Inherit` by setting neither `ephemeral_home` nor `home` on the isol8 spec, which is precisely how isol8 spells "keep the real home". `HomeMode::parse` gains the `"inherit"` string. Changing the `Default` derive is the whole of the Kubiq-side change, since `IsolateOptions::new` builds from it — a one-word diff in `crates/agent-manager/src/isolate.rs` and none in `crates/kubiq-host/src/agent.rs`.
 
 The toggle already exists and is already honest about itself: the Harnesses section of application settings draws **Confine agents to their project**, the one row that writes the host layer rather than the interface's own. Step one changes what that checkbox means — confinement without a stolen home — and changes its default to on. Nothing else moves.
 
@@ -74,7 +74,7 @@ The toggle already exists and is already honest about itself: the Harnesses sect
 
 ## 4. Step two — named homes
 
-A named home is a directory under `<ubiq root>/isol8/homes/<id>` that survives runs. isol8 materializes it, and the library already addresses it: `HomeMode::Managed(id)` becomes `@managed/<id>` in the spec. What Ubiq lacks is the noun.
+A named home is a directory under `<kubiq root>/isol8/homes/<id>` that survives runs. isol8 materializes it, and the library already addresses it: `HomeMode::Managed(id)` becomes `@managed/<id>` in the spec. What Kubiq lacks is the noun.
 
 A **home** is a record with an id, a display name, and a seed list — the relative paths copied in from the real home on first creation. Where accounts live at `<root>/accounts/<id>`, homes live at `<root>/isol8/homes/<id>`, and the record beside them. Both are references, never material: the seed list names `.gitconfig`, not its contents.
 
@@ -84,7 +84,7 @@ A **home** is a record with an id, a display name, and a seed list — the relat
 | Home contents | `<root>/isol8/homes/<id>` | isol8, on first run |
 | Selection | Session settings | UI, through the message set |
 
-Three messages, shaped like the account family in `crates/ubiq-proto/src/messages.rs`: list homes, create a home, delete a home. Deletion is the one that carries weight — isol8 never deletes, so this is Ubiq's own `remove_dir_all` against a path it composed, and it is the only destructive operation the feature introduces. It asks first.
+Three messages, shaped like the account family in `crates/kubiq-proto/src/messages.rs`: list homes, create a home, delete a home. Deletion is the one that carries weight — isol8 never deletes, so this is Kubiq's own `remove_dir_all` against a path it composed, and it is the only destructive operation the feature introduces. It asks first.
 
 The seeding question answers itself from isol8's op kinds. A toolchain is a **link** to the real directory, because copying nvm is absurd. A `.gitconfig` is a **seed-ro** copy, because the run should not edit the user's. Credentials are neither — they come from the account, by the library's own seed path into the harness config directory, and a home never holds them. The well-known runtime roots in `crates/agent-manager/src/isolate.rs` become the default seed list for a new home, promoted out of the login path into a public constant.
 
@@ -92,15 +92,15 @@ The seeding question answers itself from isol8's op kinds. A toolchain is a **li
 
 **The wire is already built.** `Message::StartConversation` carries `profile: Option<String>`, `ProfileInfo` is a proto type, and `ListProfiles`, `Profiles` and `SaveProfile` are host-implemented against the library's profile store. The interface has never sent anything but `None`, and no screen mentions a profile.
 
-`Profile` in `crates/agent-manager/src/profile.rs` binds account, harness, mcps, skills, model, hooks, instructions and isolation into one named record with an `extends` chain, and `resolve::RunFlags` already resolves against it. So the per-agent MCP question is not a new mechanism, and building a bespoke Ubiq record for it would duplicate one that exists — which is the architecture rule, not a convenience.
+`Profile` in `crates/agent-manager/src/profile.rs` binds account, harness, mcps, skills, model, hooks, instructions and isolation into one named record with an `extends` chain, and `resolve::RunFlags` already resolves against it. So the per-agent MCP question is not a new mechanism, and building a bespoke Kubiq record for it would duplicate one that exists — which is the architecture rule, not a convenience.
 
 Three gaps, all small:
 
 | Gap | Where |
 |---|---|
-| `ProfileInfo` names account, model and mode, but not mcps, skills or home | `crates/ubiq-proto/src/messages.rs` |
+| `ProfileInfo` names account, model and mode, but not mcps, skills or home | `crates/kubiq-proto/src/messages.rs` |
 | `SpawnWorkspace` has no `profile` field, so a terminal pane cannot pick one | same |
-| No screen sends or edits a profile | `crates/ubiq/src/ui` |
+| No screen sends or edits a profile | `crates/kubiq/src/ui` |
 
 Three optional fields on `ProfileInfo` — `home`, `mcps`, `skills` — and one on `SpawnWorkspace`. Every field stays a reference, which is the rule `ProfileInfo` already documents about itself.
 
@@ -138,7 +138,7 @@ The new-agent menu is a flat position-indexed list because the kit has no submen
 
 Seeing it afterwards is one chip. The conversation footer already carries a read-only harness·account chip with the whole value in its tooltip; an **isolated** chip sits beside it, faint when confinement is off — the status bar's vim chip is the precedent for a chip that is present either way rather than appearing and shifting its neighbours. Colour comes from the status group, never wording alone, and the pane's two rows of chrome stay two.
 
-The one thing the interface must not do is explain a denial. A confined run that cannot reach a path fails inside the harness, in prose Ubiq did not write, and no chip fixes that. What the chip buys is the user knowing which question to ask.
+The one thing the interface must not do is explain a denial. A confined run that cannot reach a path fails inside the harness, in prose Kubiq did not write, and no chip fixes that. What the chip buys is the user knowing which question to ask.
 
 ## 7. What a session has to remember
 
@@ -171,7 +171,7 @@ The Linux story, the scratch-home sweep, and the structured-run confinement are 
 
 ## Related docs
 
-- [`../tech/agent-manager.md`](../tech/agent-manager.md) — the boundary this proposal pushes against; it owns the rule that Ubiq never names a harness config path.
+- [`../tech/agent-manager.md`](../tech/agent-manager.md) — the boundary this proposal pushes against; it owns the rule that Kubiq never names a harness config path.
 - [`../tech/architecture.md`](../tech/architecture.md) — why a home choice has to arrive as a message rather than a shared handle.
 - [`../tech/transport-contract.md`](../tech/transport-contract.md) — where the home and profile fields land.
 - [`../features/sessions-and-workspaces.md`](../features/sessions-and-workspaces.md) — the surface that owns the isolation toggle.

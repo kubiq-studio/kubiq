@@ -11,7 +11,7 @@ depends_on: [feat-workbench, tech-ui, tech-architecture, inbox-panels, inbox-vie
 
 # Proposal — navigation
 
-Ubiq has five screens and no way to get from one to another except by hand. A task card can say
+Kubiq has five screens and no way to get from one to another except by hand. A task card can say
 `Show in graph` because somebody wrote a function that knows both ends of that jump; a diff cannot
 say "open this file at this line", a log record cannot say "the pane that wrote me", and a chat
 message that mentions `src/app.rs` is text. Nothing remembers where the user was a moment ago, and
@@ -30,7 +30,7 @@ problem, and the rest is shaped around it.
 ## 1. Where it stands
 
 **Two jumps exist, and each is a function that knows both ends.** `show_task_in_graph()` and
-`open_task_chat()` in `crates/ubiq/src/app/board.rs` are what the board's task panel calls; between them
+`open_task_chat()` in `crates/kubiq/src/app/board.rs` are what the board's task panel calls; between them
 they set the graph's selection, the inspector's tab and the rail mode. They are correct and they do
 not compose: a third jump is a third function, and neither can be recorded or written down.
 
@@ -38,7 +38,7 @@ not compose: a third jump is a third function, and neither can be recorded or wr
 process-wide registry, `WorkbenchState::rail_mode`, `EditorPaneState::active`,
 `ExplorerState::selected`, `BoardState::selected` with `show_detail`, `AgentsState::selection` with
 `tab`, `ChatState::active`, `AppState::dock_tab`, and `OpenProject::focused_pane`. Nothing reads
-them together, and `crates/ubiq/src/ui/status_bar.rs` — which comes closest, branching on the rail
+them together, and `crates/kubiq/src/ui/status_bar.rs` — which comes closest, branching on the rail
 mode to decide which facts it has — reads each one separately.
 
 **Nothing remembers.** No back stack, no visited list, no bookmarks; the picker's history group is
@@ -49,7 +49,7 @@ mode to decide which facts it has — reads each one separately.
 a search icon and a decorative hint, wired to nothing. That is `G16`.
 
 **Persistence carries a subset of position and calls it furniture.** `ViewPrefs` in
-`crates/ubiq/src/state/prefs.rs` stores the rail mode, the panel flags and sizes, the open files
+`crates/kubiq/src/state/prefs.rs` stores the rail mode, the panel flags and sizes, the open files
 and which was active, the expanded folders and the selected row. It carries no caret, no scroll, no
 graph or board selection, and no dock tab. The caret is not state at all: `cursor_line_column()`
 reads it live out of the buffer for the status bar and nothing keeps it.
@@ -86,7 +86,7 @@ The view arm carries the item, because the two are never useful apart:
 | `Control` / `Kb` | — | The two modes that are still an empty page |
 
 **A file's identity is a tab key, not a path.** A file and its diff are two tabs over one path
-(`tab_key(path, Subject)` in `crates/ubiq/src/state/editor.rs`), so the arm carries the key; for a
+(`tab_key(path, Subject)` in `crates/kubiq/src/state/editor.rs`), so the arm carries the key; for a
 plain file the key *is* the path, which is why §5's text form is unaffected by the difference.
 
 **The graph and the agents columns are two arms, not one.** The graph is the map and the columns
@@ -143,9 +143,9 @@ from a dead click.
 **Two prerequisites are real and small.** The graph's pan is not tracked state —
 `ui/orchestration/graph.rs` uses a bare scrolling container — so a `Viewport` locus on the graph
 needs a handle before it can be
-read or written. And nothing in Ubiq sets a caret; revealing a line means driving the open file's
+read or written. And nothing in Kubiq sets a caret; revealing a line means driving the open file's
 `EditorState`, which is the one thing navigation needs from the component library that
-`crates/ubiq/src/ui/editor.rs` does not use yet.
+`crates/kubiq/src/ui/editor.rs` does not use yet.
 
 ## 4. Links
 
@@ -164,11 +164,11 @@ What can emit one, once this exists:
 | A log record | The pane, project or file it names |
 | A rendered Markdown document | Its own relative links, and its headings |
 
-**One exclusion, and it is not negotiable: Ubiq does not scan terminal output for links.** Terminal
+**One exclusion, and it is not negotiable: Kubiq does not scan terminal output for links.** Terminal
 bytes are opaque — no VT parsing, no pattern matching over a harness's screen, no clickable path in a
 pane. A harness that wants to send the user somewhere says so through the chat, where the transcript
 is structured, or through a task. Making a pane's bytes linkable means reading them, and reading them
-is the thing Ubiq does not do.
+is the thing Kubiq does not do.
 
 **Following a link is one call, whatever drew it.** Same call for a card, a bookmark, a `⌘K` result
 and a back press — which is what keeps the history honest, because there is one place that records
@@ -180,17 +180,17 @@ A destination needs to survive being written down: in a bookmark on disk, in a M
 a chat message, in the `⌘K` field, on the clipboard behind a `Copy link` action.
 
 ```
-ubiq://<project-id>/<view>[/<item>][#<locus>]
+kubiq://<project-id>/<view>[/<item>][#<locus>]
 ```
 
 | Written | Example |
 |---|---|
-| A file at a line | `ubiq://01J7…/ide/crates/ubiq/src/app/wire.rs#L1712` |
-| A range | `ubiq://01J7…/ide/README.md#L10-24` |
-| A heading in a rendered document | `ubiq://01J7…/ide/_docs/INDEX.md#catalogue` |
-| A task | `ubiq://01J7…/tasks/<task-id>` |
-| An agent's transcript | `ubiq://01J7…/agents/<agent-id>` |
-| An agent on the graph, inspector on chat | `ubiq://01J7…/graph/a:<agent-id>/chat` |
+| A file at a line | `kubiq://01J7…/ide/crates/kubiq/src/app/wire.rs#L1712` |
+| A range | `kubiq://01J7…/ide/README.md#L10-24` |
+| A heading in a rendered document | `kubiq://01J7…/ide/_docs/INDEX.md#catalogue` |
+| A task | `kubiq://01J7…/tasks/<task-id>` |
+| An agent's transcript | `kubiq://01J7…/agents/<agent-id>` |
+| An agent on the graph, inspector on chat | `kubiq://01J7…/graph/a:<agent-id>/chat` |
 
 **The view slug decides the arity, not the number of segments**, which is what lets a multi-segment
 file path go unescaped. `ide` and `explorer` take everything up to the fragment; `terminal`,
@@ -257,7 +257,7 @@ worth keeping across a restart is the recents list in §8, which is a set rather
 window is skipped, and the control says so rather than yanking the project across. An entry whose
 project has been forgotten is dropped from the stack entirely.
 
-Back and forward are two actions bound beside `SaveFile` in `crates/ubiq/src/app/mod.rs` — `⌃-` and
+Back and forward are two actions bound beside `SaveFile` in `crates/kubiq/src/app/mod.rs` — `⌃-` and
 `⌃⇧-`, the editor convention — and two controls in the titlebar, each disabled when its end of the
 stack is empty and each carrying the name of where it would go.
 
@@ -320,7 +320,7 @@ and half of `G16`. It offers groups, filtered together by whatever is typed:
 | Agents | Names and roles |
 | Commands | Everything the interface can do that is not a place |
 
-A pasted `ubiq://` URI resolves to a single row naming where it goes, which is how a link from a chat,
+A pasted `kubiq://` URI resolves to a single row naming where it goes, which is how a link from a chat,
 a commit message or another machine gets followed. One naming a project this catalogue does not have
 says so and offers nothing — it cannot know the path of a folder it has never seen.
 
@@ -334,22 +334,22 @@ family carries, what `ViewPrefs` stores, and what `ExplorerState` selects on. A 
 the same string.
 
 **A task, an agent, a session and a pane are fine too.** Every contract id in
-`crates/ubiq-proto/src/ids.rs` is a ULID newtype with `Display` and `FromStr` — `ProjectId`,
+`crates/kubiq-proto/src/ids.rs` is a ULID newtype with `Display` and `FromStr` — `ProjectId`,
 `PaneId`, `SessionId`, `TaskId` and `WorkspaceId`, which is what an agent id is. They mean the same
 thing after a restart, so a bookmark to a task is a bookmark to that task, and the whole of
-`ubiq://` is printable and parseable for them.
+`kubiq://` is printable and parseable for them.
 
 **A chat is the one that is not.** `ChatId` is a `u64` minted by the window in
-`crates/ubiq/src/state/dock.rs`, and it means nothing tomorrow. A chat destination is followed and
+`crates/kubiq/src/state/dock.rs`, and it means nothing tomorrow. A chat destination is followed and
 put in the history, and it is never written into a bookmark or a recents list.
 
 Stating the limit is the point, and stating it once: **an arm with no printable id is never offered
-a bookmark by construction**, because the serialised form of a destination is its `ubiq://` text and
+a bookmark by construction**, because the serialised form of a destination is its `kubiq://` text and
 nothing else.
 
 ## 10. Where it lives
 
-A `nav` module under `crates/ubiq/src/state/` holds the value, the parser, the printer, the stack and
+A `nav` module under `crates/kubiq/src/state/` holds the value, the parser, the printer, the stack and
 the bookmark store. The router is a small set of methods on `AppState` beside the ones that already
 exist — `navigate`, `back`, `forward`, `toggle_bookmark` — each ending in `cx.notify()` like every
 other mutator in that file, and each recording the arrival.
@@ -395,7 +395,7 @@ Every row is a place navigation still arrives, or a place it declines to start �
 3. **A destination names a project, never a window.**
 4. **Navigation always arrives.** A locus that cannot be honoured is dropped, never refused.
 5. **A locus is opaque outside the view that owns its kind.**
-6. **Ubiq does not scan terminal output for links.**
+6. **Kubiq does not scan terminal output for links.**
 7. **Back never moves a project between windows.**
 
 ## 13. Phases
@@ -424,14 +424,14 @@ Seven decision rows:
 - A locus has a shared grammar and a private meaning: nothing but the view that owns a kind ever
   matches on it, and a locus that cannot be honoured is dropped rather than refused.
 - A destination names a project and never a window; which window shows it is the registry's answer.
-- Ubiq does not scan terminal output for links. A harness sends the user somewhere through the chat
+- Kubiq does not scan terminal output for links. A harness sends the user somewhere through the chat
   or through a task, never through its screen.
 - History is one bounded stack per window, spanning projects, recorded on arrival, not persisted, and
   it never moves a project between windows.
 - A bookmark rides the project's opaque view blob, and a file bookmark keeps the text of its line so
   it can say when it has come adrift rather than pointing quietly at the wrong place.
 - A destination is written down only when every id in it outlives the process that minted it, which
-  is every arm but a chat; a destination is stored as its `ubiq://` text, so compatibility belongs to
+  is every arm but a chat; a destination is stored as its `kubiq://` text, so compatibility belongs to
   one parser rather than to a set of serde variant names.
 
 Backlog rows this leaves open: a tracked pan handle for the graph, without which a graph viewport

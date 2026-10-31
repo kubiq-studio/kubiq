@@ -18,7 +18,7 @@ downloaded.
 
 Output is deterministic — sorted by name then version, no timestamp — so regenerating on an
 unchanged `Cargo.lock` is a zero diff. Web-panel vendor bundles (Excalidraw, draw.io) are not
-included: their manifests under `crates/ubiq-host/src/web_assets/` carry hashes only, no licence.
+included: their manifests under `crates/kubiq-host/src/web_assets/` carry hashes only, no licence.
 """
 
 from __future__ import annotations

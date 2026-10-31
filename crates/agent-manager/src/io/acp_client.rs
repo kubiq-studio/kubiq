@@ -1237,7 +1237,7 @@ fn vendor_select(
 /// effort*, not a permission mode — Grok exposes no permission mode over ACP
 /// at all (§2 and §4 of `_docs/wip/grok-acp-capture.md`). So the effort is
 /// published as the **thinking** option, in the exact shape the non-ACP path
-/// uses (`ubiq-host`'s `thinking_config_option`: id `thinking`, name
+/// uses (`kubiq-host`'s `thinking_config_option`: id `thinking`, name
 /// `Thinking`, [`ConfigCategory::ThoughtLevel`]), because the interface
 /// matches its chat-row chips by literal option id: published as `mode` it
 /// was drawn in the permission-mode slot, tooltip and all, and the thinking
@@ -2637,7 +2637,7 @@ fn take_notification(shared: &Shared, method: &str, value: &Value, raw: &Arc<str
 /// that flattened it instead is still readable rather than silently dropped.
 ///
 /// ACP allows `_meta` on the notification *and* on the update payload, and the
-/// subagent markers Ubiq reads (see [`super::acp::meta_string`]) could be on
+/// subagent markers Kubiq reads (see [`super::acp::meta_string`]) could be on
 /// either, so the outer one is folded into the update — the update's own keys
 /// win — before mapping. Then [`attribute`] applies what only the reader
 /// knows: whose delegate a chunk belongs to, and what a cumulative cost
@@ -4342,7 +4342,7 @@ mod tests {
         let caps = json!({"mcpCapabilities": {"http": true, "sse": true}});
         let servers = [
             mcp("local", McpTransport::Stdio),
-            mcp("ubiq", McpTransport::Http),
+            mcp("kubiq", McpTransport::Http),
             mcp("legacy", McpTransport::Sse),
         ];
         assert_eq!(
@@ -4350,7 +4350,7 @@ mod tests {
             json!([
                 {"name": "local", "command": "/usr/bin/tool", "args": ["--serve"],
                  "env": [{"name": "TOKEN_ENV", "value": "x"}]},
-                {"type": "http", "name": "ubiq", "url": "http://127.0.0.1:1/ubiq",
+                {"type": "http", "name": "kubiq", "url": "http://127.0.0.1:1/kubiq",
                  "headers": [{"name": "X-Run", "value": "r1"}]},
                 {"type": "sse", "name": "legacy", "url": "http://127.0.0.1:1/legacy",
                  "headers": [{"name": "X-Run", "value": "r1"}]},
@@ -4363,7 +4363,7 @@ mod tests {
     fn an_unadvertised_mcp_transport_is_not_sent() {
         let servers = [
             mcp("local", McpTransport::Stdio),
-            mcp("ubiq", McpTransport::Http),
+            mcp("kubiq", McpTransport::Http),
             mcp("legacy", McpTransport::Sse),
         ];
         let names = |caps: Value| -> Vec<Value> {
@@ -4375,7 +4375,7 @@ mod tests {
         assert_eq!(names(json!({})), vec![json!("local")]);
         assert_eq!(
             names(json!({"mcpCapabilities": {"http": true}})),
-            vec![json!("local"), json!("ubiq")]
+            vec![json!("local"), json!("kubiq")]
         );
     }
 

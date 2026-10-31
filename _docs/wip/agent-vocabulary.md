@@ -7,7 +7,7 @@ summary: What landed in the round that made a login reach its harness's runtime,
 read_when: you are picking up this work, or you need to know which parts of it have been seen working and which have only been reasoned about
 updated: 2026-10-02
 verified: 2026-10-02
-code_anchors: [crates/agent-manager/src/isolate.rs, crates/agent-manager/src/harness/mod.rs, crates/ubiq-host/src/coordinator.rs, crates/ubiq-host/src/store/harness.rs, crates/ubiq-host/src/shells.rs, crates/ubiq/src/ui/conversation/mod.rs, crates/ubiq/src/ui/chat/sidebar.rs, crates/ubiq/src/state/dock.rs, crates/ubiq/src/app/agents.rs, crates/ubiq/src/state/workbench.rs, crates/ubiq/src/ui/agents/column.rs]
+code_anchors: [crates/agent-manager/src/isolate.rs, crates/agent-manager/src/harness/mod.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/store/harness.rs, crates/kubiq-host/src/shells.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/ui/chat/sidebar.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/app/agents.rs, crates/kubiq/src/state/workbench.rs, crates/kubiq/src/ui/agents/column.rs]
 depends_on: [wip-agent-setup, tech-agent-manager, feat-chat, feat-workbench]
 review_cycle: monthly
 ---
@@ -17,7 +17,7 @@ review_cycle: monthly
 > **§1 is closed 2026-09-27 by `D193` and `D194`.** There is no capture directory and no
 > `login_confined`: a sign-in runs into the account's own fixed config home, confined under the
 > policy an ordinary run from that home gets, granted the home read-write
-> (`Agents::begin_home_login`, `crates/ubiq-host/src/agent.rs`). `login_runtime_grants` and the
+> (`Agents::begin_home_login`, `crates/kubiq-host/src/agent.rs`). `login_runtime_grants` and the
 > capture-shaped `$HOME` replacement it existed for are gone with the capture. The finding that
 > produced it stands — a confined login must be granted its interpreter, not only its script — and
 > lives on in `grant_config_home` and the toolchain grants. Read `D193` and `D194` in
@@ -94,7 +94,7 @@ The last model and thinking level a harness actually launched with come back pre
 picker was never touched, so what the window shows and what the harness runs are one story.
 
 **`PATH`, and why the picker showed only "Default" (D62).** Discovery spawns the harness by bare
-command name. A desktop-launched Ubiq inherits a thin `PATH`, so those spawns failed, the failure
+command name. A desktop-launched Kubiq inherits a thin `PATH`, so those spawns failed, the failure
 degraded to a lone "Default" choice, and the harness still *looked* available because availability is
 probed through the login shell. The host now repairs its own `PATH` once, before any thread exists.
 That one repair fixes discovery, `version()` and any bare-name spawn together.
@@ -140,7 +140,7 @@ so signing an account in no longer removes the ability to start that harness zer
 **Until a conversation names itself, its title is the definition it was started from.** The host
 keeps that on the record (`WorkAgent::definition`, from `Message::StartConversation`), so it
 survives a window reload, and every surface reads the agent's name through one resolver,
-`AppState::agent_label` (`crates/ubiq/src/app/agents.rs`, T-283): `WorkAgent::title` (a rename, a
+`AppState::agent_label` (`crates/kubiq/src/app/agents.rs`, T-283): `WorkAgent::title` (a rename, a
 generated or a harness title), else the definition, else the handle `WorkAgent::name`.
 
 ## What is verified, and what is not
@@ -161,7 +161,7 @@ Two failures in this round were invisible to a green build, and both are worth r
 duplicated `#[test]` attribute silently stopped a test being a test — `cargo test` did not care and
 `clippy -D warnings` caught it. And a crate whose only edit was a call site was never compiled with
 its own tests, because verification had been scoped to the crates that owned the logic; only
-`cargo test --workspace` covers `ubiq-app`.
+`cargo test --workspace` covers `kubiq-app`.
 
 ## Next steps
 

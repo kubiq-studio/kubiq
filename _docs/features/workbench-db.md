@@ -3,11 +3,11 @@ id: feat-workbench-db
 title: DB mode — connections, tables and SQL
 kind: feature
 status: draft
-summary: The rail's opt-in DB mode — the project's saved database connections (PostgreSQL, MySQL/MariaDB, SQLite, SQL Server) and the Databases section that edits them, the explorer tree, table tabs that page, filter and edit rows, SQL tabs with a timer, Stop, Explain and a read-only guard enforced in three layers by the host, the DBML export, where `db.toml` and the sealed passwords live, and the `ubiq-db` engine and host sessions behind it.
-read_when: you are changing the DB mode — the explorer, a table or SQL tab, the connection form, the Databases settings section, the host's database sessions, how a password is kept, or the `ubiq-db` engine
+summary: The rail's opt-in DB mode — the project's saved database connections (PostgreSQL, MySQL/MariaDB, SQLite, SQL Server) and the Databases section that edits them, the explorer tree, table tabs that page, filter and edit rows, SQL tabs with a timer, Stop, Explain and a read-only guard enforced in three layers by the host, the DBML export, where `db.toml` and the sealed passwords live, and the `kubiq-db` engine and host sessions behind it.
+read_when: you are changing the DB mode — the explorer, a table or SQL tab, the connection form, the Databases settings section, the host's database sessions, how a password is kept, or the `kubiq-db` engine
 updated: 2026-10-26
 verified: 2026-10-26
-code_anchors: [crates/ubiq-db/src/lib.rs, crates/ubiq-db/src/sql/readonly.rs, crates/ubiq-db/src/edit.rs, crates/ubiq-db/src/driver/mod.rs, crates/ubiq-db/src/dbml.rs, crates/ubiq-db/src/driver/structure.rs, crates/ubiq-proto/src/db.rs, crates/ubiq-host/src/db/mod.rs, crates/ubiq-host/src/db/session.rs, crates/ubiq-host/src/db/jobs.rs, crates/ubiq-host/src/db/store.rs, crates/ubiq-host/src/db/secrets.rs, crates/ubiq-host/src/db/agent.rs, crates/ubiq-host/src/db/editors.rs, crates/ubiq-host/src/db/tunnel.rs, crates/ubiq/src/state/db/mod.rs, crates/ubiq/src/state/db/tree.rs, crates/ubiq/src/state/db/table.rs, crates/ubiq/src/state/db/sql.rs, crates/ubiq/src/state/db/pending.rs, crates/ubiq/src/app/db/mod.rs, crates/ubiq/src/app/db/table.rs, crates/ubiq/src/app/db/sql.rs, crates/ubiq/src/ui/db/mod.rs, crates/ubiq/src/ui/db/explorer.rs, crates/ubiq/src/ui/db/table.rs, crates/ubiq/src/ui/db/sql.rs, crates/ubiq/src/ui/db/conn_form.rs, crates/ubiq/src/ui/db/settings.rs]
+code_anchors: [crates/kubiq-db/src/lib.rs, crates/kubiq-db/src/sql/readonly.rs, crates/kubiq-db/src/edit.rs, crates/kubiq-db/src/driver/mod.rs, crates/kubiq-db/src/dbml.rs, crates/kubiq-db/src/driver/structure.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-host/src/db/mod.rs, crates/kubiq-host/src/db/session.rs, crates/kubiq-host/src/db/jobs.rs, crates/kubiq-host/src/db/store.rs, crates/kubiq-host/src/db/secrets.rs, crates/kubiq-host/src/db/agent.rs, crates/kubiq-host/src/db/editors.rs, crates/kubiq-host/src/db/tunnel.rs, crates/kubiq/src/state/db/mod.rs, crates/kubiq/src/state/db/tree.rs, crates/kubiq/src/state/db/table.rs, crates/kubiq/src/state/db/sql.rs, crates/kubiq/src/state/db/pending.rs, crates/kubiq/src/app/db/mod.rs, crates/kubiq/src/app/db/table.rs, crates/kubiq/src/app/db/sql.rs, crates/kubiq/src/ui/db/mod.rs, crates/kubiq/src/ui/db/explorer.rs, crates/kubiq/src/ui/db/table.rs, crates/kubiq/src/ui/db/sql.rs, crates/kubiq/src/ui/db/conn_form.rs, crates/kubiq/src/ui/db/settings.rs]
 depends_on: [feat-workbench, tech-transport, tech-ui, tech-architecture]
 review_cycle: monthly
 ---
@@ -52,7 +52,7 @@ that opens the settings dialog on the Databases section.
 
 **A server connection may go through an SSH tunnel.** One naming an SSH profile is dialled — by a
 session and by Test alike — through the system `ssh` with `-N -L 127.0.0.1:<free port>:<host>:<port>`,
-built from the profile by the same argv the drone dial uses (`ubiq_proto::ssh`): `BatchMode=yes`
+built from the profile by the same argv the drone dial uses (`kubiq_proto::ssh`): `BatchMode=yes`
 unless a secret is filed, which the askpass helper supplies, plus the shared host-key and
 keep-alive options (`StrictHostKeyChecking=accept-new`, `ServerAliveInterval=15`). The host and port in the form are as
 the SSH machine sees them. The driver dials the local end; the `ssh` lives as long as the session's
@@ -141,7 +141,7 @@ The messages, ids and failure kinds are the database family of
 | Fact | Value |
 |---|---|
 | Rail slug, help context | `db`, `rail.db` |
-| Panel kinds | `DbExplorer` (`ubiq.db.explorer`, Edge / Left), `DbTable` (`ubiq.db.table`, Centre), `DbSql` (`ubiq.db.sql`, Free / Bottom) |
+| Panel kinds | `DbExplorer` (`kubiq.db.explorer`, Edge / Left), `DbTable` (`kubiq.db.table`, Centre), `DbSql` (`kubiq.db.sql`, Free / Bottom) |
 | Table and SQL tab payloads | `db:<conn>:<database>:<schema>:<name>`, `dbsql:<session id>` |
 | Settings slot | `ext_ids::PROJECT_DB`, section *Databases*, drawn like the knowledge base's |
 | Connection list | `<data dir>/db.toml`, tracked, no secret — follows the project's storage mode (`D173`) |
@@ -151,8 +151,8 @@ The messages, ids and failure kinds are the database family of
 | Agent invariants | on every save and load: a read-only connection's `rw` reads `ro`; `none` is never the default; saving a default clears every other; several defaults on disk — the first in `db.toml`'s order wins |
 | Shared editors | host memory only, keyed `(agent, name)` per project; `rev` bumped per change of text, identical text no change |
 | Password key | one per install, 32 bytes, in the OS keychain as `db` / `secrets-key` |
-| Sealing | AES-256-GCM through `ring`, a fresh 96-bit nonce per write, associated data `ubiq-db:v1:<project id>:<connection id>` |
-| Log | target `ubiq_db::sql` and `ubiq_host::db`, subsystem Database; SQL cut at 2 000 characters; no connection string or password |
+| Sealing | AES-256-GCM through `ring`, a fresh 96-bit nonce per write, associated data `kubiq-db:v1:<project id>:<connection id>` |
+| Log | target `kubiq_db::sql` and `kubiq_host::db`, subsystem Database; SQL cut at 2 000 characters; no connection string or password |
 | Draft limit | a SQL tab's text is kept to 64 KiB (`DB_SQL_DRAFT_MAX`) |
 
 A `db.toml` drops every parameter that names a secret (`password`, `pwd`, `sslpassword`, `sslkey`)
@@ -161,7 +161,7 @@ is never overwritten.
 
 ## Implementation
 
-**The engine, `crates/ubiq-db`.** A leaf crate that names no Ubiq crate. By default the model
+**The engine, `crates/kubiq-db`.** A leaf crate that names no Kubiq crate. By default the model
 (`model.rs`, `plan.rs`) and the pure engine: `conn.rs` (configuration and connection-string
 parsing), `value.rs` (`DataType`, `Value`, `parse_input`), `sql.rs` with `sql/readonly.rs` (analysis,
 `statement_at`, `check_read_only`), and `edit.rs` (`select_table`, `count_table`,
@@ -170,9 +170,9 @@ parsing), `value.rs` (`DataType`, `Value`, `parse_input`), `sql.rs` with `sql/re
 `mssql.rs`), plus the `EXPLAIN` parsers in `driver/plan.rs` and the structure queries in
 `driver/structure.rs`. `dbml.rs` is the structure model and `to_dbml`, in the default half. The interface links the default half
 and `just ui` fails if a driver crate reaches its tree; only the host enables `drivers`.
-`crates/ubiq-proto/src/db.rs` re-exports the model and adds the records the contract owns.
+`crates/kubiq-proto/src/db.rs` re-exports the model and adds the records the contract owns.
 
-**The host, `crates/ubiq-host/src/db/`.** `mod.rs` is `Db`, a concrete service the coordinator owns
+**The host, `crates/kubiq-host/src/db/`.** `mod.rs` is `Db`, a concrete service the coordinator owns
 behind the `db` feature (part of `full`), and installs `ring` as the process's default TLS provider
 (`D200`). `store.rs` reads and writes `db.toml`; `secrets.rs` seals and opens passwords, with the
 key taken from the connector family's secret store (`connectors/store.rs`). `session.rs` is one
@@ -183,7 +183,7 @@ each message into a job and applies the read-only layers. A cancel publishes the
 handle and `DbCancel` fires it on a one-off thread. `Db::client_gone`, closing a session, a
 disconnect and a saved edit or removal of a connection drop its sessions. `tunnel.rs` opens a
 connection's SSH forward before the driver dials (`route` rewrites the config to the local end) and
-kills it on drop; the profile is looked up in the host settings at dial time. `ubiq-drone` is built
+kills it on drop; the profile is looked up in the host settings at dial time. `kubiq-drone` is built
 without the `db` feature and answers the whole family `Unavailable`.
 
 **The agents' half of the host.** `store.rs`'s `split` and `join` are the one place that says
@@ -224,7 +224,7 @@ Stop cancels by. The mode is registered in `ui/rail.rs`'s `modes()` straight aft
 
 ## The SQL MCP servers
 
-Two servers, `ubiq-sql-read` and `ubiq-sql-write` (`mcp/sql/`, `D202`), let an agent use the
+Two servers, `kubiq-sql-read` and `kubiq-sql-write` (`mcp/sql/`, `D202`), let an agent use the
 connections a user opened to agents. Neither is in a default set: an agent definition names them.
 The read server sees every `ro` and `rw` connection and always runs read-only (the parser gate and
 the engine's guard); the write server sees `rw` connections only and adds `execute`.
@@ -260,7 +260,7 @@ answer is capped at 200 000 characters: trailing rows are dropped and the statem
 base64. The cache is keyed `(agent, id)`, so no agent reads another's, and holds at most 1 024
 blobs, 64 MiB in all and 16 MiB each; a blob expires 10 minutes after it was last read.
 
-Each SQL `tools/call` runs on a thread of its own (`ubiq-sql-call`), at most 8 at once; a ninth is
+Each SQL `tools/call` runs on a thread of its own (`kubiq-sql-call`), at most 8 at once; a ninth is
 refused as busy. The host waits `timeout_ms` plus 10 seconds, then cancels. The editors'
 `agent_title` is the calling agent's name in the MCP registry.
 
@@ -283,7 +283,7 @@ clipboard and raises a quiet notification; open pushes an untitled editor buffer
 `<label>.dbml` (`-2`, `-3` when taken), which a save-as turns into a file; a failure raises an error
 notification with the host's text. An unknown or already-answered request id is dropped.
 
-`Connection::structure` fills `ubiq_db::dbml::Structure` with five catalog queries per engine
+`Connection::structure` fills `kubiq_db::dbml::Structure` with five catalog queries per engine
 (`driver/structure.rs`); `to_dbml` writes it, a pure function.
 
 | Engine | Comments | Enums | Index method | Left out |

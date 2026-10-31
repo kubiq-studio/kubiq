@@ -1,5 +1,5 @@
 {
-  "format": "ubiq.teamsim/1",
+  "format": "kubiq.teamsim/1",
   "name": "many-tasks",
   "note": "nine containers of mixed shape in one session, hand-arranged into four tidy columns",
   "viewport": { "w": 1600, "h": 1000 },

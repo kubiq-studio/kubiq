@@ -78,7 +78,7 @@ SKIP_SUFFIXES = {
 # What `--outline` keeps, per language. A pattern matches the whole line, and the line is printed as
 # it was written — an outline is a filter over the file, never a rendering of it.
 OUTLINE: dict[str, re.Pattern[str]] = {
-    # `//!` is kept deliberately: a Ubiq module states what it is in its own header, so the header
+    # `//!` is kept deliberately: a Kubiq module states what it is in its own header, so the header
     # is the summary an outline would otherwise have to invent. `--max-lines` is the lever for a
     # file whose header is longer than its signatures.
     ".rs": re.compile(
@@ -151,7 +151,7 @@ def is_binary(path: Path) -> bool:
 def resolve(pattern: str) -> list[Path]:
     """Every file one target names, tried against the working directory and then the repository.
 
-    Trying `ROOT` second is what lets a caller write `crates/ubiq/src/ui/*.rs` from anywhere in the
+    Trying `ROOT` second is what lets a caller write `crates/kubiq/src/ui/*.rs` from anywhere in the
     tree, which is how these paths are written down in `_docs/` and in the code.
     """
     found: list[Path] = []
@@ -287,10 +287,10 @@ def main() -> int:
         description="Print many files at once — paths, globs, directories, or `path:start-end`.",
         epilog=(
             "examples:\n"
-            "  just dump crates/ubiq/src/ui/kit/'*'.rs\n"
-            "  just dump 'crates/ubiq/src/state/**/*.rs' --outline\n"
-            "  just dump crates/ubiq/src/state/ui_id.rs:225-300\n"
-            "  just dump-list 'crates/ubiq/src/ui/**/*.rs'\n"
+            "  just dump crates/kubiq/src/ui/kit/'*'.rs\n"
+            "  just dump 'crates/kubiq/src/state/**/*.rs' --outline\n"
+            "  just dump crates/kubiq/src/state/ui_id.rs:225-300\n"
+            "  just dump-list 'crates/kubiq/src/ui/**/*.rs'\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

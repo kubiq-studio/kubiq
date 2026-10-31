@@ -7,7 +7,7 @@ summary: The first-run wizard — a welcome with a palette choice and a highligh
 read_when: you are adding or changing an onboarding flow or step, changing when a flow starts by itself, touching the locked dialog or the highlight callout, or deciding where a first-run message belongs
 updated: 2026-10-27
 verified: 2026-10-27
-code_anchors: [crates/ubiq/src/state/onboarding.rs, crates/ubiq/src/app/onboarding.rs, crates/ubiq/src/ui/onboarding/mod.rs, crates/ubiq/src/ui/onboarding/flows.rs, crates/ubiq/tests/onboarding.rs, crates/ubiq/src/state/prefs.rs, crates/ubiq/src/ui/kit/overlay.rs, help/onboarding/welcome.md, help/onboarding/tour.md, help/onboarding/done.md, help/onboarding/ide.md, help/onboarding/ide-done.md]
+code_anchors: [crates/kubiq/src/state/onboarding.rs, crates/kubiq/src/app/onboarding.rs, crates/kubiq/src/ui/onboarding/mod.rs, crates/kubiq/src/ui/onboarding/flows.rs, crates/kubiq/tests/onboarding.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/src/ui/kit/overlay.rs, help/onboarding/welcome.md, help/onboarding/tour.md, help/onboarding/done.md, help/onboarding/ide.md, help/onboarding/ide-done.md]
 depends_on: [tech-ui, feat-workbench]
 review_cycle: monthly
 ---
@@ -16,7 +16,7 @@ review_cycle: monthly
 
 ## Purpose
 
-Ubiq's window has many places — ten rail modes, a dock, a command field, a bell — and a person
+Kubiq's window has many places — ten rail modes, a dock, a command field, a bell — and a person
 opening it for the first time sees all of them at once. Onboarding is a short, skippable walk that
 says what each place is and lets the user pick a palette on the way.
 
@@ -90,10 +90,10 @@ welcome, with its tour step, done or not.
 
 | Concern | Where |
 |---|---|
-| Flow, step, run and gate data; the chain, the sub-run stack and the progress arithmetic | `crates/ubiq/src/state/onboarding.rs` (`Flow`, `Step`, `StepBody`, `FormKind`, `Gate`, `StepAction`, `Trigger`, `OnboardingRun`, `enter_sub`, `leave_sub`) |
-| Start, Next, Back, Skip, launching a sub-flow and the due-flow check | `crates/ubiq/src/app/onboarding.rs` (`open_onboarding`, `onboarding_start_sub`, `onboarding_next`, `onboarding_back`, `skip_onboarding`, `check_onboarding`, `AUTO_STARTED`) |
-| The dialog, its palette form, the footer and the highlight layer | `crates/ubiq/src/ui/onboarding/mod.rs` (`render`, `place_callout`) |
-| The flows | `crates/ubiq/src/ui/onboarding/flows.rs` (`all`) |
+| Flow, step, run and gate data; the chain, the sub-run stack and the progress arithmetic | `crates/kubiq/src/state/onboarding.rs` (`Flow`, `Step`, `StepBody`, `FormKind`, `Gate`, `StepAction`, `Trigger`, `OnboardingRun`, `enter_sub`, `leave_sub`) |
+| Start, Next, Back, Skip, launching a sub-flow and the due-flow check | `crates/kubiq/src/app/onboarding.rs` (`open_onboarding`, `onboarding_start_sub`, `onboarding_next`, `onboarding_back`, `skip_onboarding`, `check_onboarding`, `AUTO_STARTED`) |
+| The dialog, its palette form, the footer and the highlight layer | `crates/kubiq/src/ui/onboarding/mod.rs` (`render`, `place_callout`) |
+| The flows | `crates/kubiq/src/ui/onboarding/flows.rs` (`all`) |
 | The markdown | `help/onboarding/*.md`, hidden help pages, compiled in by `flows.rs` with `include_str!` |
 | Completion | `WorkbenchState::onboarding_done`, mirrored to `InterfacePrefs.onboarding_done` by `AppState::remember_interface` |
 
@@ -126,7 +126,7 @@ Escape reaches whatever is under it.
 last complete frame, and `place_callout` puts the card right of the target, else below, else left,
 else above, else over it, clamped inside the window. The outline's fill is `accent_soft`, its
 border `accent`, and its glow a ring of `accent_muted` whose opacity pulses on `kit::pulse_animation`
-over 2.8 s. The sizes are the `ONBOARDING_*` constants in `crates/ubiq/src/theme.rs`. The tour's two new targets are `ui_id::STATUS_BAR` and
+over 2.8 s. The sizes are the `ONBOARDING_*` constants in `crates/kubiq/src/theme.rs`. The tour's two new targets are `ui_id::STATUS_BAR` and
 `ui_id::WORKSPACE`, marked in `ui/status_bar.rs` and `ui/shell.rs`.
 
 **When a check runs.** `check_onboarding` runs when either scope's preferences arrive (`apply_preferences` in
@@ -134,7 +134,7 @@ over 2.8 s. The sizes are the `ONBOARDING_*` constants in `crates/ubiq/src/theme
 `enter_project` and when a run closes, so the IDE flow follows the welcome without a second trigger. `AUTO_STARTED` is a
 process-wide flag: only the first window to find a launch flow due opens it.
 
-**Tests.** `crates/ubiq/tests/onboarding.rs` drives the run headlessly: the dialog as the top
+**Tests.** `crates/kubiq/tests/onboarding.rs` drives the run headlessly: the dialog as the top
 layer, Escape, the tour as one step, the tour's sub-run (backing out, finishing, skipping it),
 highlight steps, completion, Skip, a manual restart, the wait for the preferences, and the callout
 placement. The style reference's specimen "A locked walk" raises the

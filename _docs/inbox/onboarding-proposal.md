@@ -11,10 +11,10 @@ depends_on: [inbox-help, wip-help, wip-in-place-help, inbox-ui-id, feat-workbenc
 
 # Proposal — Onboarding
 
-Ubiq now has a manual — a Help panel, a bundled content tree, a contextual ladder, and a mode that
+Kubiq now has a manual — a Help panel, a bundled content tree, a contextual ladder, and a mode that
 points at a control and tells you its name ([`wip/help.md`](../wip/help.md),
 [`wip/in-place-help.md`](../wip/in-place-help.md)). Every one of them waits to be asked. A person
-opening Ubiq for the first time sees an empty catalogue, a rail of eight modes whose icons mean
+opening Kubiq for the first time sees an empty catalogue, a rail of eight modes whose icons mean
 nothing yet, and no reason to press `?`.
 
 This proposes the thing [`inbox/help-proposal.md`](./help-proposal.md) §12 deliberately deferred —
@@ -38,13 +38,13 @@ help pages. Build one thing, get all three.
 | Find where that place was drawn | `ui/ident.rs::Identified::ui_id` → `MarkRegistry`, `deepest_hit`, `hit_mark_at` |
 | Draw a highlight and a balloon that stays on screen | `ui/help_target.rs::highlight`, `balloon`, `place` (private today) |
 | A centred card with a title, a body and buttons | `ui/kit/overlay.rs::modal`, `modal_sized`, `modal_note` |
-| Content, versioned and shipped | the `UBIQBND1` help bundle, `_tools/helpbundle.py`, `HelpCatalog` |
-| A page to hand over to | `PanelKind::Help`, `AppState::open_help_page`, `ubiq://./help/<id>` |
+| Content, versioned and shipped | the `KUBQBND1` help bundle, `_tools/helpbundle.py`, `HelpCatalog` |
+| A page to hand over to | `PanelKind::Help`, `AppState::open_help_page`, `kubiq://./help/<id>` |
 | Somewhere to put "seen it" | `ui-settings.toml`, `Settings::get/set(SettingsLayer::Ui)` — opaque to the host |
 | A non-interrupting announcement | `ui/notifications.rs` |
-| Which version is running | `crates/ubiq/src/version.rs::FULL` |
+| Which version is running | `crates/kubiq/src/version.rs::FULL` |
 
-Onboarding adds: one step type in `ubiq-proto::help`, one tour file format the packer validates, one
+Onboarding adds: one step type in `kubiq-proto::help`, one tour file format the packer validates, one
 state struct, one overlay arm, one `Layer` rung, a seen-record, and an optional drawer on
 `kit::modal_sized`.
 
@@ -73,13 +73,13 @@ rewording the first-run tour must not be a release.
 
 ```toml
 id = "first-run"
-title = "Welcome to Ubiq"
+title = "Welcome to Kubiq"
 version = 3                      # bump to re-offer a tour that changed materially
 since = "2026.10"                # the build this tour describes
 announce = "notify"              # "never" | "notify" | "open"  — see §6
 
 [[step]]                         # no target: a centred card
-title = "Ubiq runs agents in real terminals"
+title = "Kubiq runs agents in real terminals"
 body  = "Every agent gets a pane. Panes live in **sessions**."
 page  = "concepts-panes"         # optional "Read more" → the Help panel
 
@@ -95,7 +95,7 @@ id, the same handle a link, the MCP server and the context ladder use. `body` is
 rendered by the existing renderer — a balloon that needs scrolling is a page, not a step.
 
 The packer writes the tours into `catalog.json`, so the interface reads them off `HelpCatalog` with
-no second file format at runtime. That is an **additive** `crates/ubiq-proto` change —
+no second file format at runtime. That is an **additive** `crates/kubiq-proto` change —
 `HelpCatalog::tours: Vec<HelpTour>` behind `#[serde(default)]`, so a bundle built before this lands
 still loads.
 
@@ -156,7 +156,7 @@ Everything else **announces and waits**. A tour whose `announce = "notify"` and 
 newer than the last version this user saw raises a notification — *"New in 2026.10: missions. Show
 me."* — and runs only if pressed. An established user in the middle of their work does not get their
 window taken over by a card about a feature they did not ask for, and a notification is the surface
-Ubiq already has for "something happened that you may care about". `announce = "open"` exists, is
+Kubiq already has for "something happened that you may care about". `announce = "open"` exists, is
 honoured, and content should almost never use it.
 
 The record is one JSON object inside the opaque UI settings blob:
@@ -223,12 +223,12 @@ names no target and needs no catalogue.
 Tours are namespaced with their bundle, exactly as pages are (`help-proposal.md` §9). Studio ships
 its own tours, may point at `ui.*` names only Studio's build has, and the degradation rule of §5 is
 what makes a Studio tour harmless if it is ever read by a base build. The first-run record is keyed
-by qualified tour id, so `ubiq/first-run` and `studio/first-run` are two tours and a user running
+by qualified tour id, so `kubiq/first-run` and `studio/first-run` are two tours and a user running
 both editions is asked once each — which is correct, since they are different products.
 
 ## 10. Phases
 
-1. **Centred tours.** The step model in `ubiq-proto`, `help/tours/first-run.toml`, the packer's
+1. **Centred tours.** The step model in `kubiq-proto`, `help/tours/first-run.toml`, the packer's
    reading and validation of the page half, the state and the overlay drawing centred cards only,
    the seen-record, the first-run trigger, `Help → Tours`. Ships a real welcome flow with no
    dependency on the `UiId` catalogue.
@@ -247,7 +247,7 @@ Phases 1 and 5 are the useful minimum, and they do not depend on each other.
 
 ## 11. What this owes the library when it lands
 
-- A feature document for onboarding under `features/` — deleting the tour from Ubiq would
+- A feature document for onboarding under `features/` — deleting the tour from Kubiq would
   delete it.
   It owns the tour format, the trigger rules and the drawer. `wip/help.md` keeps the bundle and the
   panel; `wip/in-place-help.md` keeps `UiId` and the pointer.
@@ -271,7 +271,7 @@ steps. It needs the tour mechanism first, and it needs the account policy questi
 already parked.
 
 **Recording what the reader did.** Which step a tour was abandoned on is the one number that would
-actually improve the content, and Ubiq collects no telemetry. Out of scope, and not by accident.
+actually improve the content, and Kubiq collects no telemetry. Out of scope, and not by accident.
 
 **Per-project onboarding.** A project shipping its own tour of its own conventions is a plausible
 extension of the same format, and belongs with

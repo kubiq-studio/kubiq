@@ -1,7 +1,7 @@
 ---
 id: settings-skills
 title: Skills
-summary: The Skills section, in Settings and in Project settings — the skills an agent can be given, and where Ubiq finds them.
+summary: The Skills section, in Settings and in Project settings — the skills an agent can be given, and where Kubiq finds them.
 keywords: [skills, skill, SKILL.md, install, repository, folder, source, agent skills]
 order: 45
 status: current
@@ -9,7 +9,7 @@ related: [settings, agents-definitions, settings-mcp-servers, settings-project]
 ---
 
 A skill is a folder with a `SKILL.md` that tells an agent when and how to use it. This section is the
-list Ubiq knows about; it gives nothing to an agent by itself. An [agent definition](agents-definitions)
+list Kubiq knows about; it gives nothing to an agent by itself. An [agent definition](agents-definitions)
 or the [new agent dialog](agents-new-agent) then ticks the skills that agent should carry.
 
 **Skills** appears twice. In [Settings](settings) it is the application's list, offered to every
@@ -40,5 +40,5 @@ carry. A skill there with the same id as an application skill takes its place.
 - **A skill from a scanned folder has no Remove.** Remove the folder under **Scanned folders**.
 - **The browser finds nothing.** **No skills found** means the chosen source holds none under its
   path; try **All** or add a source.
-- **A red banner sits above the list.** Ubiq reports why the last change was refused; correct it and
+- **A red banner sits above the list.** Kubiq reports why the last change was refused; correct it and
   try again.

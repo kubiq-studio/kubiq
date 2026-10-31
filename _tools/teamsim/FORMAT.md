@@ -1,13 +1,13 @@
-# Teamsim scenario format — `ubiq.teamsim/1`
+# Teamsim scenario format — `kubiq.teamsim/1`
 
 One JSON file describes a whole graph: sessions, the tasks inside them, the agents on those tasks,
 the delegates (subagents) inside an agent's fence, and extra links between agents. Both halves of
 the spike read it — the Python iteration tool in `_tools/teamsim/` and the `teamsim` section of the
-kitchen sink in `crates/ubiq/src/ui/sink/teamsim.rs`, which carries the same files as presets.
+kitchen sink in `crates/kubiq/src/ui/sink/teamsim.rs`, which carries the same files as presets.
 
 ```json
 {
-  "format": "ubiq.teamsim/1",
+  "format": "kubiq.teamsim/1",
   "name": "wide-coordination",
   "note": "one session, a lead over eight workers, three of them with delegates",
   "viewport": { "w": 1600, "h": 1000 },
@@ -33,7 +33,7 @@ kitchen sink in `crates/ubiq/src/ui/sink/teamsim.rs`, which carries the same fil
 
 | Field | Meaning |
 |---|---|
-| `format` | Always `ubiq.teamsim/1`. A reader that does not know the string refuses the file. |
+| `format` | Always `kubiq.teamsim/1`. A reader that does not know the string refuses the file. |
 | `name` | Short slug. The preset's label and the rendered file's stem. |
 | `note` | One line saying what the scenario stresses. Drawn as the caption. |
 | `viewport` | The rectangle readability is judged against. Optional; defaults to 1600×1000. |
@@ -57,7 +57,7 @@ this spike is about.
 
 Every file in `_tools/teamsim/scenarios/` is a preset. The Rust sink embeds them with `include_str!`,
 so adding a scenario there makes it selectable in the sink with no other change than the row in
-`crates/ubiq/src/ui/sink/teamsim.rs`'s preset table.
+`crates/kubiq/src/ui/sink/teamsim.rs`'s preset table.
 
 ## Hand-placed positions
 

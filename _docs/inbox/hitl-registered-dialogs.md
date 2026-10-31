@@ -3,36 +3,36 @@ id: inbox-hitl-dialogs
 title: "Proposal — Human-in-the-loop with no parked call: armed dialogs that fire at turn end"
 kind: proposal
 status: proposal
-summary: A second ask mode in which the agent registers a dialog through an MCP tool that returns immediately, Ubiq arms it against the conversation, and the modal is raised when the turn ends rather than while a tool call is parked — so no harness timeout can reach it. The registration call is itself the structured signal, which removes the need for a text sentinel in the agent's last message; `ask_user_question` and `crates/ubiq-host/src/ask.rs` stay for the mid-sequence pauses the new mode cannot serve.
-read_when: you are building the turn-end ask mode, changing `ubiq-ask`, serving ACP elicitation, or deciding how an agent asks the user a question
+summary: A second ask mode in which the agent registers a dialog through an MCP tool that returns immediately, Kubiq arms it against the conversation, and the modal is raised when the turn ends rather than while a tool call is parked — so no harness timeout can reach it. The registration call is itself the structured signal, which removes the need for a text sentinel in the agent's last message; `ask_user_question` and `crates/kubiq-host/src/ask.rs` stay for the mid-sequence pauses the new mode cannot serve.
+read_when: you are building the turn-end ask mode, changing `kubiq-ask`, serving ACP elicitation, or deciding how an agent asks the user a question
 updated: 2026-09-24
 depends_on: [tech-transport, tech-agent-manager, ref-acp-protocol, feat-chat, tech-architecture]
 code_anchors:
-  - crates/ubiq-host/src/ask.rs
-  - crates/ubiq-host/src/mcp/ask.rs
-  - crates/ubiq/src/state/ask.rs
+  - crates/kubiq-host/src/ask.rs
+  - crates/kubiq-host/src/mcp/ask.rs
+  - crates/kubiq/src/state/ask.rs
   - crates/agent-manager/src/io/acp_client.rs
   - crates/agent-manager/src/io/jsonl.rs
 ---
 
 # Proposal — Human-in-the-loop with no parked call
 
-`ubiq-ask`'s `ask_user_question` is the one tool in Ubiq that does not answer itself. The call
-parks on `crates/ubiq-host/src/ask.rs`'s `Asks` table for up to `ASK_TIMEOUT_SECS` (one hour) while
+`kubiq-ask`'s `ask_user_question` is the one tool in Kubiq that does not answer itself. The call
+parks on `crates/kubiq-host/src/ask.rs`'s `Asks` table for up to `ASK_TIMEOUT_SECS` (one hour) while
 a person is asked, on a thread of its own so the listener stays free (`D138`, `D155`). The harness
 in front of that call has a timeout of its own and it is much shorter than an hour, so the harness
 gives up before the human does. T-87 asks how to make that timer longer; this proposal asks the
 better question — how to ask a human with **no parked call at all**, so there is no timer to fight.
 
 The answer proposed here is **arm-and-fire**: the agent registers a dialog through a tool that
-returns in milliseconds, Ubiq holds the registration armed against that conversation, and the modal
+returns in milliseconds, Kubiq holds the registration armed against that conversation, and the modal
 is raised when the turn ends. The user's answer is sent back as the next prompt.
 
 ---
 
 ## 1. What the protocols already offer
 
-### ACP has a first-class elicitation channel, and Ubiq refuses it
+### ACP has a first-class elicitation channel, and Kubiq refuses it
 
 ACP v1 defines `elicitation/create` as a client method beside `session/request_permission`, with
 two modes: `form` (a flat JSON Schema of primitives and enums, rendered as a form) and `url`. The
@@ -51,8 +51,8 @@ and **blocks on it with no timeout of its own** — the module docs state this f
 `session/request_permission`, and the same machinery carries elicitation. There is no parked MCP
 call and nothing to time out. It is strictly better than anything below, on the paths that have it.
 
-It is also not sufficient on its own, for two reasons. It is agent-initiated: Ubiq cannot make an
-agent elicit, only answer one that does, and the ACP agents Ubiq drives are not observed emitting
+It is also not sufficient on its own, for two reasons. It is agent-initiated: Kubiq cannot make an
+agent elicit, only answer one that does, and the ACP agents Kubiq drives are not observed emitting
 it. And it does not exist on the native path at all.
 
 ### The native `claude-code` path has no equivalent
@@ -65,21 +65,21 @@ records exactly two subtypes on the wire — `can_use_tool` inbound and `interru
 no elicitation subtype and no general "ask the user" request.
 
 `can_use_tool` is not a substitute. It is scoped to one tool call's allow/deny with
-`permission_suggestions`, not to an arbitrary question, and it is the mechanism Ubiq already spends
+`permission_suggestions`, not to an arbitrary question, and it is the mechanism Kubiq already spends
 on permission modes.
 
 ### MCP elicitation does not reach either path
 
 MCP's own `elicitation/create` is a **server→client** request. Two things block it here.
 
-Ubiq's MCP listener (`crates/ubiq-host/src/mcp/server.rs`) is streamable HTTP with one JSON body per
+Kubiq's MCP listener (`crates/kubiq-host/src/mcp/server.rs`) is streamable HTTP with one JSON body per
 `POST`, **stateless, deliberately** — no session id, no SSE stream, nothing remembered between two
 requests. A server→client request has no channel to travel on; serving elicitation means adding an
 SSE response arm to the listener and a session layer the module's own header argues against.
 
 And the client half is missing where it matters most. Claude Code's interactive TUI renders
 elicitation dialogs — its backgrounding documentation says a call waiting on an open elicitation
-dialog is not backgrounded — but Ubiq's conversations run Claude Code **headless in stream-json
+dialog is not backgrounded — but Kubiq's conversations run Claude Code **headless in stream-json
 mode**, where no `control_request` subtype forwards one. The repeated feature requests against
 `anthropics/claude-code` for elicitation were closed as duplicates or not planned.
 
@@ -91,9 +91,9 @@ therefore a T-87 mitigation, not an answer to this card.
 
 | Path | First-class HITL channel | Usable today |
 |---|---|---|
-| ACP (`opencode`, `gemini`, `grok`, `claude-code-acp`) | `elicitation/create`, form mode | Spec yes, Ubiq refuses it, agents not observed using it |
+| ACP (`opencode`, `gemini`, `grok`, `claude-code-acp`) | `elicitation/create`, form mode | Spec yes, Kubiq refuses it, agents not observed using it |
 | Native `claude-code` stream-json | none | no |
-| MCP over Ubiq's listener | `elicitation/create` | no — stateless HTTP, and the harness does not forward it |
+| MCP over Kubiq's listener | `elicitation/create` | no — stateless HTTP, and the harness does not forward it |
 
 So a portable mechanism cannot be built out of an existing HITL channel. It has to be built out of
 what every path does have: **a tool call, and the end of a turn**.
@@ -104,11 +104,11 @@ what every path does have: **a tool call, and the end of a turn**.
 
 The card's shape puts a verbatim marker — `ASK-UI feedback-for-modal-detail` — in the agent's last
 message, because a text sentinel is the one carrier every harness has. That is true of *text*, and
-it is the wrong question. The register call is already a structured, in-band event that Ubiq
-**serves itself**: `POST /mcps/<agent-id>/ubiq-ask` arrives at
-`crates/ubiq-host/src/mcp/ask.rs` with the agent's identity in the URL path and its arguments
-validated against `ubiq_proto::ask::check`. Ubiq does not need the model to tell it that a dialog
-was registered; Ubiq is the thing that registered it.
+it is the wrong question. The register call is already a structured, in-band event that Kubiq
+**serves itself**: `POST /mcps/<agent-id>/kubiq-ask` arrives at
+`crates/kubiq-host/src/mcp/ask.rs` with the agent's identity in the URL path and its arguments
+validated against `kubiq_proto::ask::check`. Kubiq does not need the model to tell it that a dialog
+was registered; Kubiq is the thing that registered it.
 
 Can structured metadata ride the *end* of a turn instead? No, on both paths. ACP's `PromptResponse`
 carries only `stopReason`, with no `_meta`; `ContentChunk` has no chunk-level extension field
@@ -119,11 +119,11 @@ Dropping it removes every failure mode the card asks about:
 
 | Sentinel failure | Under arm-and-fire |
 |---|---|
-| Spoofed by file content, a diff, a quoted transcript | Cannot happen — the trigger is an authenticated call on Ubiq's own loopback listener, keyed by the agent id in the path |
+| Spoofed by file content, a diff, a quoted transcript | Cannot happen — the trigger is an authenticated call on Kubiq's own loopback listener, keyed by the agent id in the path |
 | Malformed | The registration is schema-checked at the call and refused as an in-band `isError` the model can read and correct, exactly as `ask_user_question` refuses an undrawable ask today |
 | Emitted mid-turn | Registration *is* mid-turn, by design; firing is deferred to turn end |
 | Duplicated | Several registrations arm several dialogs; they are raised in registration order, as one batch, and answered together (`D192`) |
-| Names an unknown id | Impossible — Ubiq mints the id and returns it |
+| Names an unknown id | Impossible — Kubiq mints the id and returns it |
 | The model forgets to emit it | There is nothing to forget: registering is the whole act |
 
 The one thing the sentinel would buy is *selecting* which of several registered dialogs to raise.
@@ -141,16 +141,16 @@ reads every answer in one message.
 
 ## 3. The mechanism
 
-1. The agent calls `ubiq-ask`'s new `register_question` with the same `questions` array
-   `ask_user_question` takes. The host validates it with `ubiq_proto::ask::check`, mints an `AskId`,
+1. The agent calls `kubiq-ask`'s new `register_question` with the same `questions` array
+   `ask_user_question` takes. The host validates it with `kubiq_proto::ask::check`, mints an `AskId`,
    files it as **armed** against that `AgentId`, and returns `{"registered": "<ask id>"}` on the
    listener's own thread. No thread is spawned, nothing parks.
 2. The agent carries on, and ends its turn however it likes. There is no sentinel, no required
    phrasing and no last-message contract.
-3. `crates/ubiq-host/src/conversation.rs` already sees `AgentEvent::TurnEnded` and turns it into
+3. `crates/kubiq-host/src/conversation.rs` already sees `AgentEvent::TurnEnded` and turns it into
    `ConvUpdate::TurnEnded`. On that event, every dialog armed for the conversation is raised as
    `Message::AskUser` — **the message that exists today, unchanged**.
-4. The window draws it with the modal that exists today. `crates/ubiq/src/state/ask.rs`'s
+4. The window draws it with the modal that exists today. `crates/kubiq/src/state/ask.rs`'s
    `AskRecord`, `AskDraft`, `AskStage` and the dialog over them need no change: an armed ask is
    `AskStage::Waiting` like any other, and the answer goes back as `Message::AnswerAsk`, unchanged.
 5. The host, receiving `AnswerAsk` for an *armed* id rather than a *parked* one, renders the
@@ -200,13 +200,13 @@ This is why the recommendation is **a second mode, not a replacement.**
 
 ## 5. Recommendation
 
-**Build arm-and-fire as a second `ubiq-ask` tool. Keep `ask_user_question` and
-`crates/ubiq-host/src/ask.rs` exactly as they are. Drop the sentinel.**
+**Build arm-and-fire as a second `kubiq-ask` tool. Keep `ask_user_question` and
+`crates/kubiq-host/src/ask.rs` exactly as they are. Drop the sentinel.**
 
 `register_question` becomes the tool the harness prompt points at first, because it cannot time out
 and costs the harness nothing; `ask_user_question` stays for the pauses that must happen mid-turn,
-and T-87's mitigations still apply to it. The two share the vocabulary in `ubiq_proto::ask`, the two
-transport messages, and the whole of the dialog in `crates/ubiq`. The only thing that differs is
+and T-87's mitigations still apply to it. The two share the vocabulary in `kubiq_proto::ask`, the two
+transport messages, and the whole of the dialog in `crates/kubiq`. The only thing that differs is
 what the outcome is delivered into: a channel, or a prompt.
 
 **What it costs.**
@@ -223,7 +223,7 @@ what the outcome is delivered into: a channel, or a prompt.
 - **A second delivery format to write** — the outcome as prose for a prompt, not JSON for a tool
   result — and the transcript has to show the dialog and its answer rather than that prose verbatim.
 
-**Where it works.** Everywhere Ubiq runs a conversation, on every harness, today: it needs only an
+**Where it works.** Everywhere Kubiq runs a conversation, on every harness, today: it needs only an
 MCP tool call and a turn boundary, both of which every path in `crates/agent-manager/src/io/` already
 produces. There is no harness-capability gate and no fallback, because there is nothing to fall back
 from — `ask_user_question` is not a fallback, it is the other mode.

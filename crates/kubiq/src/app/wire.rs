@@ -1,0 +1,4186 @@
+use super::*;
+use crate::state::settings::ShellIntegration;
+use crate::state::work::WorkProjection;
+// A pane's write half is an `io::Write`; the key handler's image paste is the one caller here.
+use std::io::Write as _;
+
+impl AppState {
+    /// The panes the dock draws: the active project's, and none at all without one.
+    pub fn panes(&self, cx: &App) -> &[PaneState] {
+        self.open_project(cx)
+            .map(|open| open.panes.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn focused_pane(&self, cx: &App) -> Option<&PaneState> {
+        let open = self.open_project(cx)?;
+        let id = open.focused_pane?;
+        open.panes.iter().find(|pane| pane.id == id)
+    }
+
+    /// One pane of whichever project holds it, named rather than found through focus. Every panel
+    /// draws its own pane, so the lookup is across every project the window holds.
+    pub fn pane(&self, pane_id: PaneId) -> Option<&PaneState> {
+        self.projects
+            .values()
+            .find_map(|open| open.panes.iter().find(|pane| pane.id == pane_id))
+    }
+
+    /// Whether a pane belongs to the project this window is pointed at. A pane of any other keeps
+    /// running and keeps its scrollback; its panel is hidden rather than closed, which is what
+    /// keeps its place in the arrangement.
+    pub fn pane_is_on_screen(&self, pane_id: PaneId, cx: &App) -> bool {
+        self.open_project(cx)
+            .is_some_and(|open| open.panes.iter().any(|pane| pane.id == pane_id))
+    }
+
+    /// The emulator a pane is drawn by, for the one module that draws it.
+    pub fn terminal(&self, pane_id: PaneId) -> Option<&Entity<TerminalView>> {
+        self.terminals.get(&pane_id).map(|pane| &pane.view)
+    }
+
+    /// Say on the project banner that the drone behind a pinned project has not attached yet, in
+    /// place of a request the bus would drop.
+    pub(super) fn show_remote_not_attached(&mut self, cx: &mut Context<Self>) {
+        self.workbench.project_error = Some("the remote is not attached yet".to_string());
+        self.workbench.open_menu = Some(MenuId::Project);
+        cx.notify();
+    }
+
+    /// Ask for a workspace. The pane appears when the coordinator answers, so a harness that fails
+    /// to start leaves no empty tab behind.
+    ///
+    /// A pane runs in a project's folder, so a window holding no project asks for nothing: there is
+    /// no directory a harness could be started in that the user chose.
+    ///
+    /// `picks` is what a terminal harness resolves the identity, the model and the rest against —
+    /// the pseudo-terminal has no composer to fold a start's answers into, so they travel with the
+    /// spawn instead. A shell ignores them: it has no account, no definition and no modes to be picked.
+    pub fn spawn_pane(
+        &mut self,
+        agent_type: Option<String>,
+        args: Vec<String>,
+        picks: AgentPicks,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        if self.bus.is_pinned_unserved(project_id) {
+            self.show_remote_not_attached(cx);
+            return;
+        }
+        self.bus.send(Message::SpawnWorkspace {
+            session_id: self.session,
+            project_id,
+            rel_path: None,
+            agent_type,
+            args,
+            picks,
+        });
+    }
+
+    /// Run a configured tool in this project's folder. The pane appears when the coordinator
+    /// answers, so a tool that fails to start leaves no empty tab behind — the same standing
+    /// `spawn_pane` gives a harness.
+    ///
+    /// The pane region is brought on screen *before* the ask rather than when the answer lands:
+    /// a run the user cannot see is a run they will start twice, and the reveal is the same
+    /// gesture whether the spawn succeeds or is refused. See
+    /// [`Self::reveal_pane_region`](Self::reveal_pane_region), which also moves a window out of a
+    /// mode that has no pane region at all.
+    pub fn run_tool(&mut self, scope: Scope, id: ToolId, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        if self.bus.is_pinned_unserved(project_id) {
+            self.show_remote_not_attached(cx);
+            return;
+        }
+        // Every run path counts as a recent, so the one place a run is asked for is the one place
+        // it is written down.
+        if let Some(open) = self.projects.get_mut(&project_id) {
+            crate::state::run_picker::remember(&mut open.prefs.tool_recents, id.to_string());
+        }
+        self.store_prefs(project_id);
+        self.reveal_pane_region(cx);
+        self.bus.send(Message::RunTool {
+            session_id: self.session,
+            project_id,
+            scope,
+            id,
+        });
+    }
+
+    /// Run a tool pane's tool again, and take the old pane away — stopped, or still running (the
+    /// close kills it).
+    ///
+    /// The old pane is closed **first**, and the order matters: a `single_instance` tool would
+    /// refuse the second run while the first pane is still held, and the coordinator answers
+    /// messages in the order they arrive. What comes back is a new pane with a new id, not the
+    /// old one revived — a pseudo-terminal cannot be restarted, only replaced.
+    pub fn restart_pane_tool(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        let Some(run) = self.pane(pane_id).and_then(|pane| pane.tool.clone()) else {
+            return;
+        };
+        self.close_pane(pane_id, cx);
+        self.run_tool(run.scope, run.id, cx);
+    }
+
+    /// Whether a panel currently draws this pane. `panels` is the live registry, so this is what
+    /// tells a running pane the user can see from one that is only still running.
+    pub fn pane_has_panel(&self, pane_id: PaneId) -> bool {
+        self.panels.contains_key(&PanelKind::Terminal(pane_id))
+    }
+
+    /// Every pane the open project holds that no panel draws — still running, nothing showing them.
+    ///
+    /// Computed, not stored, the way the agents screen's bench is: a detach only takes the panel
+    /// away, so the difference between `panes` and `panels` *is* the list, and no flag can fall out
+    /// of step with it.
+    pub fn detached_panes(&self, cx: &App) -> Vec<PaneId> {
+        self.panes(cx)
+            .iter()
+            .map(|pane| pane.id)
+            .filter(|id| !self.pane_has_panel(*id))
+            .collect()
+    }
+
+    /// Whether the user can actually see a pane right now — not merely whether a panel exists for
+    /// it.
+    ///
+    /// [`Self::pane_has_panel`] answers a registry membership, and a panel can be held without
+    /// being shown: its region put away, a sibling tab displayed instead of it, or the current
+    /// rail mode not drawing it at all. The dock is the only thing that knows which, so it is
+    /// asked — `ui::dock::on_screen` is the one predicate, and no flag beside it can fall out of
+    /// step with the arrangement the user is looking at.
+    pub fn pane_is_visible(&self, pane_id: PaneId, cx: &App) -> bool {
+        self.panels
+            .get(&PanelKind::Terminal(pane_id))
+            .is_some_and(|panel| crate::ui::dock::on_screen(&self.dock, panel, cx))
+    }
+
+    /// Every pane of the project on screen the user cannot currently see.
+    ///
+    /// A superset of [`Self::detached_panes`]: a detached pane has no panel at all, and these are
+    /// every way a pane can be out of sight, panel or no panel. Computed rather than stored, for
+    /// `detached_panes`' reason — the arrangement *is* the answer, and a cached one would be wrong
+    /// the moment a tab or a rail mode changed.
+    pub fn offscreen_panes(&self, cx: &App) -> Vec<PaneId> {
+        self.panes(cx)
+            .iter()
+            .map(|pane| pane.id)
+            .filter(|id| !self.pane_is_visible(*id, cx))
+            .collect()
+    }
+
+    /// The project's first pane a panel still draws, skipping `except`.
+    ///
+    /// Where the keyboard goes when the pane holding it stops being drawn. `except` is for the
+    /// pane whose own panel is only *queued* to leave: `pending_panels` settles a frame later, so
+    /// its entry is still in `panels` and [`Self::pane_has_panel`] cannot answer for it yet.
+    fn next_focus_pane(&self, project: ProjectId, except: Option<PaneId>) -> Option<PaneId> {
+        self.projects
+            .get(&project)?
+            .panes
+            .iter()
+            .map(|pane| pane.id)
+            .find(|id| Some(*id) != except && self.pane_has_panel(*id))
+    }
+
+    /// Take a pane's panel off the screen and leave everything else alone: the harness keeps
+    /// running, the emulator keeps taking its bytes, and the pane stays in its project.
+    ///
+    /// This is what closing a tab means. Nothing is sent to the host and nothing is forgotten —
+    /// `terminals` still holds the live screen, `bus` still knows which host owns the pane so
+    /// keystrokes keep their route, and the name and the pin the user gave the tab are still
+    /// theirs. [`Self::reattach_pane`] puts a panel back over a session that never stopped;
+    /// [`Self::close_pane`] is the one that kills.
+    ///
+    /// Idempotent, because the dock reaches it too — a panel whose tab was closed asks for this
+    /// once it is sure it was closed rather than displaced. A pane no panel draws is not detached
+    /// twice.
+    pub fn detach_pane(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        let Some(project) = self.project_of_pane(pane_id) else {
+            return;
+        };
+        if !self.pane_has_panel(pane_id) {
+            return;
+        }
+        // The keyboard only moves for the project on screen: a tab closed in a background project
+        // must not take focus off the terminal the user is typing into.
+        let on_screen = self.project(cx) == Some(project);
+        self.pending_panels
+            .push(PanelEdit::Close(PanelKind::Terminal(pane_id)));
+
+        let mut next = None;
+        if self.projects.get(&project).map(|open| open.focused_pane) == Some(Some(pane_id)) {
+            next = self.next_focus_pane(project, Some(pane_id));
+            if let Some(open) = self.projects.get_mut(&project) {
+                open.focused_pane = next;
+            }
+        }
+        if on_screen && let Some(pane_id) = next {
+            self.pending_focus = Some(pane_id);
+        }
+        cx.notify();
+    }
+
+    /// Draw an out-of-sight pane again: the panel comes back over the emulator that never stopped,
+    /// so the screen is the one the harness has been writing to all along.
+    ///
+    /// Deliberately not `open_terminal`, which inserts a fresh emulator unconditionally and would
+    /// throw that screen away. Refused for a pane this window does not hold, and for one already
+    /// on screen — there is nothing to bring back.
+    ///
+    /// The guard is [`Self::pane_is_visible`] rather than [`Self::pane_has_panel`] because holding
+    /// a panel is not showing one: a pane whose panel sits in a put-away region or behind a
+    /// sibling tab still has to be revealed, and `Reveal` is already exactly that edit. Only a
+    /// pane the user is looking at is the no-op.
+    pub fn reattach_pane(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        if self.pane(pane_id).is_none() || self.pane_is_visible(pane_id, cx) {
+            return;
+        }
+        // `Reveal` rather than `Open`: the region terminals live in may have been put away since,
+        // and the tab has to end up the displayed one of its group.
+        self.pending_panels
+            .push(PanelEdit::Reveal(PanelKind::Terminal(pane_id)));
+        // The same pair `focus_pane` sends for an ordinary pane: the project's focus moves, and the
+        // host hears it on the transition.
+        if let Some(project) = self.project_of_pane(pane_id)
+            && let Some(open) = self.projects.get_mut(&project)
+            && open.focused_pane != Some(pane_id)
+        {
+            open.focused_pane = Some(pane_id);
+            self.bus.send(Message::Focus { pane_id });
+        }
+        self.pending_focus = Some(pane_id);
+        cx.notify();
+    }
+
+    /// End a pane: the harness is killed, the emulator dropped, and the panel taken out of the
+    /// dock.
+    ///
+    /// Idempotent, because more than one caller reaches it — a harness that exited, a pin menu's
+    /// Close, a host that went away. A pane the window has already let go of is not closed twice.
+    /// The dock's own tab close does not come here: it detaches.
+    pub fn close_pane(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        let Some(project) = self.project_of_pane(pane_id) else {
+            return;
+        };
+        self.bus.send(Message::CloseWorkspace { pane_id });
+        self.terminals.remove(&pane_id);
+        // After the send above, which still needed to know which host owned it.
+        self.bus.forget_pane(pane_id);
+        self.tab_names.remove(&PanelKind::Terminal(pane_id));
+        self.pinned_tabs.remove(&PanelKind::Terminal(pane_id));
+
+        let showing = self.project(cx);
+        // The keyboard only moves for the project on screen: a pane closed in a background
+        // project must not take focus off the terminal the user is typing into.
+        let on_screen = showing == Some(project);
+        self.pending_panels
+            .push(PanelEdit::Close(PanelKind::Terminal(pane_id)));
+
+        let mut refocus = false;
+        if let Some(open) = self.projects.get_mut(&project) {
+            open.panes.retain(|pane| pane.id != pane_id);
+            refocus = open.focused_pane == Some(pane_id);
+        }
+        // Not simply the first pane: a detached pane is still in `panes` with nothing on screen,
+        // and the keyboard must never go to one of those.
+        let mut next = None;
+        if refocus {
+            next = self.next_focus_pane(project, None);
+            if let Some(open) = self.projects.get_mut(&project) {
+                open.focused_pane = next;
+            }
+        }
+        // Closing a pane while a panel that is not a terminal holds the keyboard must not hand it
+        // to a terminal that is off screen.
+        if on_screen && let Some(pane_id) = next {
+            self.pending_focus = Some(pane_id);
+        }
+        cx.notify();
+    }
+
+    /// Whether a pane is running an **agent harness** rather than a plain shell.
+    ///
+    /// The test is the harness catalogue: a pane's `harness` is the `agent_type` the coordinator
+    /// resolved, and `WorkbenchState::agent_types` is the list of ids that name a harness the
+    /// library knows how to drive. A plain shell's resolves to a program instead — `zsh`, `pwsh`,
+    /// whatever `shells::default_program` answered — which is in no catalogue entry. This is the
+    /// same match `ui::new_pane_menu` already makes to label a detached pane, and it fails safe:
+    /// before the host has answered `ListAgentTypes` the catalogue is empty and every pane reads
+    /// as a shell, which is the milder of the two settings this decides between.
+    pub fn pane_is_agent(&self, pane_id: PaneId) -> bool {
+        let Some(pane) = self.pane(pane_id) else {
+            return false;
+        };
+        self.workbench
+            .agent_types
+            .iter()
+            .any(|agent| agent.id == pane.harness)
+    }
+
+    /// Ask before ending a pane: the harness is killed and the screen it has been writing to goes
+    /// with it, so the destructive close is confirmed rather than fired on the click.
+    ///
+    /// The tab is left up while the question is on screen. Taking it away first would answer half
+    /// of the question before it was asked, and a cancelled confirm has to leave the user exactly
+    /// where they were.
+    pub fn ask_close_pane(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        self.workbench.confirm_close_pane = Some(pane_id);
+        cx.notify();
+    }
+
+    /// The close confirm answered yes.
+    pub fn confirm_close_pane(&mut self, cx: &mut Context<Self>) {
+        if let Some(pane_id) = self.workbench.confirm_close_pane.take() {
+            self.close_pane(pane_id, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn dismiss_close_pane_confirm(&mut self, cx: &mut Context<Self>) {
+        self.workbench.confirm_close_pane = None;
+        cx.notify();
+    }
+
+    /// A harness renamed itself over its own stream (`ESC ] 0 ; title BEL`). It lands on the
+    /// pane's title, never its handle — the handle is what tells two panes apart, and it is in the
+    /// tooltip whatever the program calls itself.
+    fn pane_title_reported(&mut self, pane_id: PaneId, title: String, cx: &mut Context<Self>) {
+        for open in self.projects.values_mut() {
+            if let Some(pane) = open.panes.iter_mut().find(|pane| pane.id == pane_id) {
+                pane.title = osc_title(&title);
+                cx.notify();
+                return;
+            }
+        }
+    }
+
+    pub fn resize_pane(&mut self, pane_id: PaneId, cols: u16, rows: u16, cx: &mut Context<Self>) {
+        // A background project's panes are still measured — an emulator that is not drawn keeps
+        // the geometry it was last given — so the search is across every project the window holds.
+        for open in self.projects.values_mut() {
+            if let Some(pane) = open.panes.iter_mut().find(|pane| pane.id == pane_id) {
+                if pane.cols == cols && pane.rows == rows {
+                    return;
+                }
+                pane.cols = cols;
+                pane.rows = rows;
+                cx.notify();
+                return;
+            }
+        }
+    }
+
+    /// Give a pane the keyboard. Only the project on screen has panes the user can click, so a
+    /// pane belonging to any other is not focusable.
+    pub fn focus_pane(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        let Some(project) = self.project(cx) else {
+            return;
+        };
+        let held = self
+            .projects
+            .get(&project)
+            .is_some_and(|open| open.panes.iter().any(|pane| pane.id == pane_id));
+        if !held {
+            return;
+        }
+        let already = self
+            .projects
+            .get(&project)
+            .is_some_and(|open| open.focused_pane == Some(pane_id));
+        if let Some(open) = self.projects.get_mut(&project) {
+            open.focused_pane = Some(pane_id);
+        }
+        // `Focus` is sent on the transition and no other. The dock calls this every time a
+        // terminal panel becomes the displayed tab of its group, which includes the tab it was
+        // already showing.
+        if !already {
+            self.bus.send(Message::Focus { pane_id });
+        }
+        cx.notify();
+    }
+
+    /// The keyboard has gone to a panel that is not a terminal, so no pane holds it.
+    ///
+    /// This is today's console rule stated for every non-terminal panel rather than for one. The
+    /// project keeps which pane was last focused, so coming back to a terminal panel is where the
+    /// pane gets the keyboard again.
+    pub fn blur_panes(&mut self, cx: &mut Context<Self>) {
+        self.pending_focus = None;
+        // The keyboard left any editor too, so an editor focus asked for earlier and not yet
+        // granted is withdrawn: whatever panel took the keyboard owns it now.
+        self.pending_editor_focus = None;
+        cx.notify();
+    }
+
+    /// One router task: drain a connection's inbound stream and hand each arrival to [`Self::receive`],
+    /// tagged with the [`HostRef`] it came from before that method ever sees it.
+    ///
+    /// Shared by the loop `boot.rs` runs once over `bus.connections()` at construction, and by
+    /// `remote_connect.rs`'s success path for a connection minted after boot — the same shape
+    /// either way, so it lives once here rather than twice. Ends when the channel disconnects: for
+    /// the local host that never happens before the window itself does, but for a remote it means
+    /// the pump threads gave up (the socket failed, or the connection was dropped on purpose), so
+    /// this also removes it from `Bus` and says so where every window already reads its log —
+    /// `tracing::warn!` reaches the console panel through `kubiq_proto::log`.
+    pub(super) fn route_host(
+        host: HostRef,
+        from_host: flume::Receiver<Message>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            while let Ok(message) = from_host.recv_async().await {
+                if this
+                    .update(cx, |this, cx| this.receive(host, message, cx))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            if let HostRef::Remote(id) = host {
+                // The socket failed rather than the user asking for this. Panes close the same
+                // way a manual disconnect closes them, and a connection with a saved entry
+                // behind it starts the reconnect loop — see `remote_socket_lost`.
+                let _ = this.update(cx, |this, cx| {
+                    this.remote_socket_lost(id, cx);
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Let a remote host go: close every pane it was running, forget its projects, and drop the
+    /// connection — which is what tells the far side, over `FromClient::Gone`, that this window is
+    /// no longer attached.
+    ///
+    /// One method for both ways a host is lost: the socket ending under [`Self::route_host`], and
+    /// the Hosts section's Disconnect button. Answers with the label it was attached under, which
+    /// is all either caller needs afterwards and is gone from the `Bus` by then.
+    ///
+    /// Panes are closed *before* anything is forgotten about them — `close_pane` sends a
+    /// `CloseWorkspace` that has to resolve to this host to be dropped rather than misdelivered,
+    /// and forgets the pane itself as it goes. See [`Bus::drop_remote`].
+    ///
+    /// This is the user's let-go, so the host's forwarded ports stop listening too; a lost socket
+    /// goes through [`Self::release_host`] and keeps them, refusing, for the reconnect.
+    pub fn disconnect_host(&mut self, id: HostId, cx: &mut Context<Self>) -> String {
+        let save_id = self.bus.remote(id).map(|remote| remote.save_id.clone());
+        let label = self.release_host(id, cx);
+        if let Some(save_id) = save_id {
+            self.forget_tunnels(&save_id);
+        }
+        label
+    }
+
+    /// [`Self::disconnect_host`] without touching the host's tunnels.
+    pub(super) fn release_host(&mut self, id: HostId, cx: &mut Context<Self>) -> String {
+        let saved = self.bus.remote(id).map(|remote| {
+            (
+                remote.save_id.clone(),
+                remote.address.clone(),
+                remote.label.clone(),
+            )
+        });
+        let label = saved
+            .as_ref()
+            .map(|(_, _, label)| label.clone())
+            .unwrap_or_default();
+        // Read while this host is still on the bus: the rows it was only *serving* survive it,
+        // and after `drop_remote` there is nothing left to ask which those were.
+        let served = self.bus.local_rows_served_by(id);
+        self.bus.fail_tool_calls(id);
+        for pane_id in self.bus.drop_remote(id) {
+            self.close_pane(pane_id, cx);
+            // `close_pane` gives up on a pane whose project this window does not hold open, so it
+            // has not necessarily forgotten it. Nothing may stay recorded under a host that is
+            // gone.
+            self.bus.forget_pane(pane_id);
+        }
+        // A project pinned to this drone keeps its row and says why it cannot be read, rather
+        // than vanishing from the catalogue — `Bus::row_owner`. The folder is on a machine that
+        // is no longer answering, which is exactly `ProjectHealth::Unreadable`.
+        if !served.is_empty() {
+            let reason = if label.is_empty() {
+                "the drone serving this folder is not attached".to_string()
+            } else {
+                format!("the drone {label} is not attached")
+            };
+            let registry = cx.global_mut::<crate::state::WindowRegistry>();
+            for project in served {
+                registry.mark_unreadable(project, reason.clone());
+            }
+        }
+        // Asked for, not dropped: the reconnect loop stops with it rather than dialling back a
+        // host the user just let go of.
+        if let Some((save_id, address, _)) = saved {
+            let key = crate::app::host_secrets::key_for(&save_id, &address);
+            self.workbench.settings.reconnects.remove(&key);
+        }
+        cx.notify();
+        label
+    }
+
+    /// The saved address a live connection's label belongs to.
+    ///
+    /// A remote is labelled with the saved host's name when it was reconnected from the Hosts
+    /// section and with the bare address when it was dialled fresh, so both are tried — the
+    /// address is what `failed_hosts` and every other saved-host lookup is keyed by.
+    pub(super) fn address_of_host(&self, label: &str) -> Option<String> {
+        self.workbench
+            .settings
+            .host
+            .remote_hosts
+            .iter()
+            .find(|host| host.name == label || host.address == label)
+            .map(|host| host.address.clone())
+    }
+
+    /// Everything the coordinator says, in the order it said it.
+    ///
+    /// `host` names which of the window's connections `message` arrived on — routed here by
+    /// [`Self::route_host`], one task per connection. It is threaded through every family so a
+    /// handler can record which host a pane or project belongs to as it first hears of one, and,
+    /// from a later phase on, keep two hosts' projections apart instead of merging a remote's
+    /// answer into the local one's state.
+    ///
+    /// The families are disjoint, so each helper answers with the message back when it is
+    /// none of its own and the next one is offered it.
+    pub(super) fn receive(&mut self, host: HostRef, message: Message, cx: &mut Context<Self>) {
+        let Some(message) = self.receive_pane(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_project(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_file(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_git(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_kb(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_archify(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_work(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_conversation(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_session(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_account(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_search(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_assist(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_repo(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_tasksrc(message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_host_browse(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_feedback(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_feedback_settings(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_updates(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_ask(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_notifications(host, message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_remote_tools(host, message) else {
+            return;
+        };
+        let Some(message) = self.receive_browser(message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_web_assets(message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_help(message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_db(host, message, cx) else {
+            return;
+        };
+        // The rest are the window's own words, coming back the wrong way.
+        tracing::warn!("the window was sent a message only it may send: {message:?}");
+    }
+
+    /// The pane family.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_pane(
+        &mut self,
+        host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::WorkspaceSpawned { workspace } => {
+                // Recorded before `open_pane` draws anything, so a message about this pane that
+                // arrives on the very next poll — a resize, an exit — already finds it owned.
+                self.bus.note_pane(workspace.id, host);
+                self.open_pane(workspace, cx);
+            }
+
+            // Output is handed straight to the pane's emulator. Output for a pane that has gone is
+            // dropped: nothing is left to draw it.
+            Message::TerminalOutput { pane_id, bytes } => {
+                if let Some(terminal) = self.terminals.get(&pane_id)
+                    && let Some(output) = &terminal.output
+                {
+                    let _ = output.send(bytes);
+                }
+            }
+
+            // The harness ended: close the tab. `close_pane` sends `CloseWorkspace` so the host
+            // drops the pseudo-terminal, and queues the panel out of the dock.
+            Message::PaneExited { pane_id, code } => {
+                let project = self.projects.iter().find_map(|(id, open)| {
+                    open.panes
+                        .iter()
+                        .any(|pane| pane.id == pane_id)
+                        .then_some(*id)
+                });
+                tracing::info!("pane {pane_id} exited with {code}");
+                // A login pane belongs to no project, so `close_pane` would return early and
+                // the host would never be told the pane is over — and being told is what makes
+                // it report the outcome. Ending it here is the whole of the successful path: a
+                // harness that finishes its own sign-in exits by itself.
+                if self.login_pane() == Some(pane_id) {
+                    self.bus.send(Message::CloseWorkspace { pane_id });
+                    return None;
+                }
+                if let Some(project_id) = project {
+                    self.request_git_refresh(project_id);
+                }
+                // A tool run with "wait on exit" stays readable: the command is over but its
+                // output is what the pane was opened for, so the tab keeps it until it is
+                // closed. "Wait on error" is the same, but only when the exit code was
+                // non-zero — a clean exit closes the tab as usual.
+                // The dot reports the stop; closing still goes through `close_pane`.
+                if self.pane_wait_on_exit(pane_id)
+                    || (code != 0 && self.pane_wait_on_error(pane_id))
+                {
+                    self.pane_stopped(pane_id);
+                    cx.notify();
+                } else {
+                    self.close_pane(pane_id, cx);
+                }
+            }
+
+            Message::PaneError { pane_id, error } => {
+                let refused_spawn = !self.terminals.contains_key(&pane_id);
+                self.pane_stopped(pane_id);
+                tracing::error!("pane {pane_id}: {error}");
+                // A spawn the host refused has no pane to show it on, so it lands on the project
+                // menu's banner, the place a refused project edit already goes. An error on a
+                // live pane (a write, a resize) stays in the log.
+                if refused_spawn {
+                    self.workbench.project_error = Some(error);
+                    self.workbench.open_menu = Some(MenuId::Project);
+                }
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The project family.
+    /// Every window is sent the same snapshots, so each replaces by id and the projection
+    /// is idempotent by construction.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_project(
+        &mut self,
+        host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::ProjectList { projects } => {
+                // Every project this catalogue answer names belongs to whichever host sent it —
+                // recorded before `sync_projects` reads the registry, so a project this window
+                // adopts as it reconciles already resolves to the right host.
+                // Read before `cx.global_mut` borrows the app: every project some *other* host
+                // reported, which this answer knows nothing about and must not take away.
+                let keep = self.bus.projects_not_on(host);
+                // Open projects whose serving host this answer changes: their tree was asked of
+                // the old one at open, and the new one has never been asked.
+                let mut moved = Vec::new();
+                for project in &projects {
+                    let id = project.record.id;
+                    let before = self.bus.host_of_project(id);
+                    self.bus.note_project(id, host);
+                    if host == HostRef::Local {
+                        let was = self.bus.is_pinned(id);
+                        self.bus.note_pinned(id, project.record.runs_on.is_some());
+                        if !was {
+                            self.serve_if_pinned(&project.record);
+                        }
+                    }
+                    if self.projects.contains_key(&id) && self.bus.host_of_project(id) != before {
+                        moved.push(id);
+                    }
+                    self.note_definition_scope(&project.record);
+                }
+                cx.global_mut::<WindowRegistry>()
+                    .replace_all_except(projects, &keep);
+                self.adopt_if_owed(cx);
+                // A catalogue that no longer names a project this window held takes it away, so
+                // what the window holds is reconciled before anything is drawn from it.
+                self.sync_projects(cx);
+                for id in moved {
+                    self.ask_root_tree(id);
+                    self.revive_deferred(id);
+                }
+            }
+
+            Message::ProjectAdded { project } => {
+                let id = project.record.id;
+                let root = project.record.path.clone();
+                self.bus.note_project(id, host);
+                if host == HostRef::Local {
+                    self.bus.note_pinned(id, project.record.runs_on.is_some());
+                    self.serve_if_pinned(&project.record);
+                }
+                self.note_definition_scope(&project.record);
+                cx.global_mut::<WindowRegistry>().apply(project);
+                // There is no clone-success message: a finished clone is a registered project, so
+                // this is where the modal learns it worked and gets out of the way.
+                if self.clone_in_flight() {
+                    self.workbench.clone_project = None;
+                    self.take_project(id, cx);
+                    cx.notify();
+                    return None;
+                }
+                // Whoever asked for it is the window that opens it.
+                if self.adding {
+                    self.adding = false;
+                    self.take_project(id, cx);
+                    // A file dropped with no project open named this folder's leaf as what to
+                    // show once the project it became was actually open.
+                    if let Some(dropped) = self.adding_select.take()
+                        && let Some(rel) = relative_to_root(Path::new(&dropped), &root)
+                    {
+                        self.select_file(rel, cx);
+                    }
+                }
+                cx.notify();
+            }
+
+            Message::ProjectChanged { project } => {
+                self.bus.note_project(project.record.id, host);
+                if host == HostRef::Local {
+                    self.bus
+                        .note_pinned(project.record.id, project.record.runs_on.is_some());
+                    // A re-pin — or a pin to another machine — while that machine is attached.
+                    self.serve_if_pinned(&project.record);
+                }
+                self.note_definition_scope(&project.record);
+                cx.global_mut::<WindowRegistry>().apply(project);
+                cx.notify();
+            }
+
+            Message::ProjectForgotten { project_id } => {
+                self.bus.forget_project(project_id);
+                self.bus.note_pinned(project_id, false);
+                self.workbench
+                    .settings
+                    .definition_scopes
+                    .remove(&project_id);
+                cx.global_mut::<WindowRegistry>().forget(project_id);
+                self.sync_projects(cx);
+            }
+
+            // The two answers to `SetProjectStorage`. The record's own new mode rides on the
+            // `ProjectChanged` broadcast beside the first of them, so neither of these writes a
+            // record — they only stop the row waiting, and say what happened.
+            Message::ProjectStorageMoved {
+                project_id,
+                storage,
+                dir,
+            } => self.project_storage_moved(project_id, storage, dir, cx),
+
+            Message::ProjectStorageError {
+                project_id,
+                storage,
+                error,
+            } => self.project_storage_failed(project_id, storage, error, cx),
+
+            Message::ProjectError { project_id, error } => {
+                tracing::error!("project {project_id:?}: {error}");
+                // A drone refusing to serve a pinned folder (`ServeProject`) is a fact about the
+                // row, said on it — not a banner that pops the picker on every reconnect.
+                if host != HostRef::Local
+                    && let Some(id) = project_id
+                    && self.bus.is_pinned_unserved(id)
+                {
+                    cx.global_mut::<WindowRegistry>().mark_unreadable(id, error);
+                    cx.notify();
+                    return None;
+                }
+                self.workbench.project_error = Some(error);
+                self.adding = false;
+                self.workbench.open_menu = Some(MenuId::Project);
+                cx.notify();
+            }
+
+            Message::Preferences { scope, value } => self.apply_preferences(scope, value, cx),
+
+            Message::CliShortcutState {
+                installed,
+                stale,
+                target,
+                candidates,
+                error,
+            } => self.apply_cli_shortcut(
+                CliShortcut {
+                    installed,
+                    stale,
+                    target,
+                    candidates,
+                    error,
+                },
+                cx,
+            ),
+
+            Message::ShellIntegrationState {
+                supported,
+                installed,
+                stale,
+                command,
+                error,
+            } => self.apply_shell_integration(
+                ShellIntegration {
+                    supported,
+                    installed,
+                    stale,
+                    command,
+                    error,
+                },
+                cx,
+            ),
+
+            Message::Settings { layer, value } => self.apply_settings(layer, value, cx),
+            Message::SettingsError { layer, error } => {
+                tracing::error!("settings {layer:?}: {error}");
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The file family.
+    /// Every answer names its project and its path, so one that arrives after the user has
+    /// switched projects lands where it belongs rather than on screen.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_file(
+        &mut self,
+        // Every file message already names its project, and today every project is Local; a
+        // later phase that keeps two hosts' files apart reads this instead of re-deriving it.
+        _host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::ProjectTreeListing {
+                project_id,
+                rel_path,
+                listings,
+            } => {
+                let started = std::time::Instant::now();
+                let open = self.projects.get_mut(&project_id)?;
+                open.explorer.set_loading(&rel_path, false);
+                let mut ask_full = false;
+                if open.explorer.cache_answered(&rel_path)
+                    && !listings.iter().any(|listing| listing.rel_path == rel_path)
+                {
+                    // An ignored folder, skipped by the prefetch: it opens empty forever unless
+                    // whoever wanted it open now asks in full.
+                    ask_full = open.explorer.cache_skipped(&rel_path, &open.wanted);
+                }
+                let filter = self.workbench.file_filter.clone();
+                let folders = listings.len();
+                for listing in listings {
+                    open.explorer.merge(listing);
+                }
+                open.explorer.reanchor(&filter);
+                if ask_full {
+                    self.bus.send(Message::ProjectTree {
+                        project_id,
+                        rel_path: rel_path.clone(),
+                        depth: EXPAND_DEPTH,
+                        prefetch: false,
+                    });
+                }
+                // A listing can put a remembered folder within reach, which is what makes
+                // restoring a deep one terminate: each answer either resolves one or drops it.
+                self.reach_wanted(project_id, cx);
+                // A folder opened by a reveal moves the row that was being revealed, so a tree
+                // that is following brings it back into view as each answer lands.
+                if self
+                    .explorer(cx)
+                    .is_some_and(|tree| tree.follow != Follow::Off)
+                {
+                    self.scroll_explorer_to_cursor(cx);
+                }
+                // The cache fills in the background from project open: each reply names more
+                // folders, and those are asked about next, until the skip set is all that remains.
+                self.fill_explorer_cache(project_id);
+                tracing::debug!(
+                    "tree listing {rel_path:?}: {folders} folders merged in {:?}",
+                    started.elapsed()
+                );
+                if !self.workbench.file_filter.trim().is_empty() {
+                    let text = self.workbench.file_filter.clone();
+                    self.spawn_explorer_filter(text, cx);
+                }
+                cx.notify();
+            }
+
+            Message::ProjectFileContents {
+                project_id,
+                rel_path,
+                contents,
+            } => {
+                // The attachment preview reads through the same message the editor does, and a
+                // file can be open in a tab and looked at in a panel at the same moment — so the
+                // panel is filled here and the arrival still queues for the tab.
+                self.fill_attachment_preview(project_id, &rel_path, &contents);
+                self.pending_files.push(FileArrival {
+                    project: project_id,
+                    path: rel_path,
+                    contents,
+                });
+                cx.notify();
+            }
+
+            Message::ProjectFileWritten {
+                project_id,
+                rel_path,
+                version,
+            } => {
+                // A pasted picture's write landing is the optimistic chip proved right, so the
+                // row is forgotten and nothing else happens.
+                self.pasted_write_settled(project_id, &rel_path, None, cx);
+                // What the buffer holds now, not what was written: anything typed while the save
+                // was in flight is still unsaved, and the tab has to keep saying so.
+                let current = self
+                    .projects
+                    .get(&project_id)
+                    .and_then(|open| open.editor.open.iter().find(|f| f.path == rel_path))
+                    .and_then(|file| file.buffer())
+                    .map(|buffer| buffer.read(cx).value().to_string())
+                    .unwrap_or_default();
+
+                let mut owed = false;
+                if let Some(open) = self.projects.get_mut(&project_id) {
+                    if let Some(file) = open.editor.find_mut(&rel_path) {
+                        file.saved(version, &current);
+                        // Typed while the write was in flight: the autosave is owed another go.
+                        owed = file.dirty();
+                    }
+                    // The watcher will echo this write back as a `ProjectFilesChanged` shortly;
+                    // that arrival is not a change to react to.
+                    open.just_saved.insert(rel_path.clone());
+                }
+                if owed {
+                    self.schedule_autosave(project_id, &rel_path, cx);
+                }
+                self.request_git_refresh(project_id);
+                cx.notify();
+            }
+
+            Message::ProjectFileDiffed {
+                project_id,
+                rel_path,
+                diff,
+            } => {
+                // The base is echoed because the interface may have switched since it asked, and
+                // it is the base that says which of a file's tabs this belongs in.
+                let key = tab_key(&rel_path, Subject::Diff(diff.base));
+                if let Some(open) = self.projects.get_mut(&project_id) {
+                    // The Git screen's pane asked for the same comparison a diff tab would, so the
+                    // one reply serves whichever of the two is waiting for this path.
+                    // The flag is echoed: a reply for the other setting — stale after a toggle, or a
+                    // tab's — is not this pane's, and a tab only ever asks with it on.
+                    if open.git_view.path() == Some(rel_path.as_str())
+                        && open.git_view.base == diff.base
+                        && open.git_view.ignore_eol == diff.ignore_eol
+                    {
+                        open.git_view.diff = Some(diff.clone());
+                    }
+                    if diff.ignore_eol {
+                        if let Some(file) =
+                            open.editor.open.iter_mut().find(|file| file.key() == key)
+                        {
+                            file.attach_diff(diff);
+                        }
+                    }
+                }
+                cx.notify();
+            }
+
+            Message::ProjectPathEdited {
+                project_id,
+                rel_path,
+                to,
+                op,
+                carry_related: _,
+            } => self.path_edited(project_id, rel_path, to, op, cx),
+
+            // The answer to a rename or delete question's own round trip, asked before the
+            // question was confirmed — see `AppState::ask_rename` / `ask_remove`. Matched by path
+            // and project against whichever `FileDialog::Rename` or `FileDialog::Remove` is still
+            // up: a reply for a question the user has since closed, or replaced with a different
+            // one, is simply dropped.
+            Message::ProjectFileRelated {
+                project_id,
+                rel_path,
+                related,
+            } => {
+                if self.project(cx) == Some(project_id) {
+                    match &mut self.workbench.file_dialog {
+                        Some(FileDialog::Rename {
+                            path,
+                            related: slot,
+                        }) if *path == rel_path => *slot = related,
+                        Some(FileDialog::Remove {
+                            path,
+                            related: slot,
+                            ..
+                        }) if *path == rel_path => *slot = related,
+                        _ => {}
+                    }
+                }
+                cx.notify();
+            }
+
+            Message::ProjectPathsImported {
+                project_id,
+                into,
+                mode: _,
+                imported,
+                failed,
+            } => self.paths_imported(project_id, into, imported, failed, cx),
+
+            Message::ProjectFileError {
+                project_id,
+                rel_path,
+                error,
+            } => self.file_failed(project_id, rel_path, error, cx),
+
+            // A guest tab's write landed. There is no `project_id` to look the tab up by — a
+            // guest file belongs to no project — so every open project's tabs are searched for
+            // the one this path and `guest` names, on `OpenFile::guest`'s own doc for why the tab
+            // key can be the absolute path safely. A tab that has since closed finds nothing here
+            // and the answer is simply dropped, the same as any other stale arrival.
+            Message::HostFileWritten { path, version } => {
+                let current = self
+                    .guest_file_mut(&path)
+                    .and_then(|file| file.buffer())
+                    .map(|buffer| buffer.read(cx).value().to_string())
+                    .unwrap_or_default();
+                if let Some(file) = self.guest_file_mut(&path) {
+                    file.saved(version, &current);
+                }
+                cx.notify();
+            }
+            Message::HostFileError { path, error } => {
+                let reason = describe(&error);
+                // An export the viewer sent is no guest tab: its error is the viewer's to raise.
+                if crate::state::archify::ui(cx).exports.remove(&path) {
+                    crate::ui::archify::viewer::say(self, &format!("Export failed: {reason}"), cx);
+                    return None;
+                }
+                tracing::warn!("guest file {path}: {reason}");
+                // Only a write this tab actually had in flight is worth a modal, on
+                // `file_failed`'s own reasoning — there is no `FileDialog::OverwriteFile` here,
+                // because `WriteHostFile` always names a version and a `Conflict` on one always
+                // means the file changed, never that a path is merely taken.
+                let saving_key = self
+                    .guest_file_mut(&path)
+                    .filter(|file| file.is_saving())
+                    .map(|file| file.key());
+                if let Some(key) = saving_key {
+                    self.workbench.file_dialog = Some(FileDialog::SaveFailed {
+                        key,
+                        reason: reason.clone(),
+                    });
+                }
+                if let Some(file) = self.guest_file_mut(&path)
+                    && file.is_saving()
+                {
+                    file.save_failed(reason);
+                }
+                cx.notify();
+            }
+
+            Message::ProjectFilesChanged {
+                project_id,
+                changed,
+                truncated,
+                repository,
+            } => {
+                if repository {
+                    self.request_git_refresh(project_id);
+                }
+                let open = self.projects.get(&project_id)?;
+                // Only folders the tree already holds are re-asked: a listing for one it does not
+                // know is thrown away by `merge` anyway. A burst too large to name its paths says
+                // to re-list what is on screen instead — the root and every folder open under it.
+                let mut dirs: Vec<String> = Vec::new();
+                if truncated {
+                    // A listing is one level deep, so the root alone would leave every open folder
+                    // below it holding what it held before the burst — which is the tree that has
+                    // to be refreshed by hand after a branch switch. Every folder on screen is
+                    // asked about instead.
+                    if open.explorer.is_listed() {
+                        dirs.push(String::new());
+                    }
+                    for dir in open.explorer.expanded() {
+                        if !dirs.contains(&dir) && open.explorer.is_folder_listed(&dir) {
+                            dirs.push(dir);
+                        }
+                    }
+                } else {
+                    for path in &changed {
+                        let dir = match path.rsplit_once('/') {
+                            Some((head, _)) => head.to_string(),
+                            None => String::new(),
+                        };
+                        if !dirs.contains(&dir) && open.explorer.is_folder_listed(&dir) {
+                            dirs.push(dir);
+                        }
+                    }
+                }
+                // A clean background tab shows what is on disk, so it is read again. A dirty one is
+                // left exactly as it is: what has been typed into it is not on disk anywhere. The
+                // tab on screen is left alone too — rebuilding its buffer reruns the highlighter,
+                // which is a visible flash for a file the user is looking at right now. A markdown
+                // tab is the exception, merged in place below (`D208`).
+                // A path this window just wrote is the watcher echoing our own save, not a change
+                // to react to at all.
+                // Whatever is reread keeps its cursor and scroll — captured off the buffer here,
+                // before `reload` drops it, and handed back once the fresh bytes attach — because a
+                // reread is not a fact the user asked to see from the top; the file they were
+                // looking at just changed under them, in place.
+                let active_key = open.editor.active_file().map(|file| file.key());
+                type Restore = (std::ops::Range<usize>, gpui::Point<Pixels>);
+                // A burst names no paths, so every open tab is a candidate: there is no way to
+                // tell which of them the burst moved, and a tab left holding what the file said
+                // before a branch switch is the same staleness the tree would have.
+                let candidates: Vec<String> = if truncated {
+                    open.editor
+                        .open
+                        .iter()
+                        .map(|file| file.path.clone())
+                        .collect()
+                } else {
+                    changed.clone()
+                };
+                // A markdown tab follows its file live instead (`D208`): on screen or not, dirty
+                // or not, the fresh bytes are merged into the buffer it already has. Our own save's
+                // echo is re-read too — merging a body the buffer already holds changes nothing,
+                // and an agent's write landing inside the echo's window must not be swallowed.
+                let follow: Vec<String> = candidates
+                    .iter()
+                    .filter(|path| {
+                        open.editor
+                            .index_of(path)
+                            .is_some_and(|index| open.editor.open[index].follows_disk())
+                    })
+                    .cloned()
+                    .collect();
+                let reload: Vec<(String, Option<Restore>)> = candidates
+                    .iter()
+                    .filter_map(|path| {
+                        if open.just_saved.contains(path) || follow.contains(path) {
+                            return None;
+                        }
+                        let file = open
+                            .editor
+                            .index_of(path)
+                            .map(|index| &open.editor.open[index])?;
+                        // …unless its viewer asked to follow the file live (`D204`).
+                        let on_screen =
+                            Some(file.key()) == active_key && !file.viewer.reloads_on_screen();
+                        if file.dirty() || file.is_loading() || on_screen {
+                            return None;
+                        }
+                        let restore = file.buffer().map(|buffer| {
+                            let state = buffer.read(cx);
+                            (state.selected_range(), state.scroll_offset())
+                        });
+                        Some((path.clone(), restore))
+                    })
+                    .collect();
+
+                if let Some(open) = self.projects.get_mut(&project_id) {
+                    // The echo this arrival might be has now arrived either way. A burst names
+                    // nothing, so it is the echo of every write this window was still waiting on.
+                    if truncated {
+                        open.just_saved.clear();
+                    }
+                    for path in &changed {
+                        open.just_saved.remove(path);
+                    }
+                    for dir in &dirs {
+                        open.explorer.set_loading(dir, true);
+                    }
+                    for (path, restore) in &reload {
+                        if let Some(file) = open.editor.find_mut(path) {
+                            if let Some((selection, scroll)) = restore {
+                                file.set_restore(selection.clone(), *scroll);
+                            }
+                            file.reload();
+                        }
+                    }
+                    for path in &follow {
+                        if let Some(file) = open.editor.find_mut(path) {
+                            file.follow = true;
+                        }
+                    }
+                }
+                for path in follow {
+                    self.bus.send(Message::ReadProjectFile {
+                        project_id,
+                        rel_path: path,
+                        max_bytes: Some(MAX_FILE_BYTES),
+                    });
+                }
+                for dir in dirs {
+                    self.bus.send(Message::ProjectTree {
+                        project_id,
+                        rel_path: dir,
+                        depth: EXPAND_DEPTH,
+                        prefetch: false,
+                    });
+                }
+                for (path, _) in reload {
+                    self.bus.send(Message::ReadProjectFile {
+                        project_id,
+                        rel_path: path,
+                        max_bytes: Some(MAX_FILE_BYTES),
+                    });
+                }
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The git family.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_git(
+        &mut self,
+        _host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::GitOverview {
+                project_id,
+                repo,
+                overview,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                // The project's own overview always lands — the status bar and the explorer read
+                // it. A nested repository's lands only while it is the one on screen: an answer for
+                // the one the user has since left is not the screen's any more.
+                let selected = repo == open.git_repo;
+                if !repo.is_empty() && !selected {
+                    return None;
+                }
+                if repo.is_empty() {
+                    match overview {
+                        None => {
+                            open.git = None;
+                            open.git_truncated = false;
+                            open.explorer.clear_git();
+                            open.git_entries.clear();
+                            open.refilter_git();
+                            open.git_view.settle(&open.git_screen_entries);
+                        }
+                        Some(next) => {
+                            if let Some(held) = &open.git
+                                && next.generation < held.generation
+                            {
+                                return None;
+                            }
+                            let mut next = next;
+                            if next.counts.is_none() {
+                                next.counts = open.git.as_ref().and_then(|g| g.counts);
+                            }
+                            open.git = Some(next);
+                        }
+                    }
+                } else {
+                    open.git_nested = overview;
+                }
+                if selected {
+                    // The Submodules section is built from the overview, not the refs reply,
+                    // so a refresh that changes it would otherwise lag one refs answer behind.
+                    // Submodule rows always sort last (`RefSection::all()`'s own order), so
+                    // dropping and re-appending them leaves every other row's index alone.
+                    let submodules = open
+                        .git_overview()
+                        .map(|overview| overview.submodules.clone())
+                        .unwrap_or_default();
+                    if !open.git_view.refs.is_empty() {
+                        open.git_view
+                            .refs
+                            .retain(|row| row.section != RefSection::Submodules);
+                        open.git_view.refs.extend(submodule_rows(&submodules));
+                        if open
+                            .git_view
+                            .selected_ref
+                            .is_some_and(|i| i >= open.git_view.refs.len())
+                        {
+                            open.git_view.selected_ref = None;
+                        }
+                    }
+                }
+                cx.notify();
+            }
+
+            Message::GitWorkingTree {
+                project_id,
+                generation,
+                entries,
+                rollups,
+                repos,
+                truncated,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                if !open
+                    .explorer
+                    .apply_git(generation, &entries, &rollups, &repos)
+                {
+                    return None;
+                }
+                open.git_truncated = truncated;
+                // The Git screen's lists are the pairs themselves, so the map is kept whole beside
+                // the projection the tree got. A selection whose path has gone clean goes with it.
+                open.git_entries = entries;
+                // Kept whole, managed or not, so the settings dialog can draw what the walk found
+                // even for a repository the explorer never shows a mark for.
+                open.git_repos = repos;
+                open.refilter_git();
+                open.git_view.settle(&open.git_screen_entries);
+                open.git_view.last_error = None;
+                // A working tree landing while a commit was in flight is that commit's
+                // success: the draft it was written from has been recorded, so the box is
+                // emptied rather than left holding a message that is now history.
+                if open.git_view.pending == Some(GitPending::Commit) {
+                    open.git_view.message.clear();
+                    open.git_view.amend = false;
+                }
+                open.git_view.pending = None;
+                // A working tree is a checkout's success as much as a commit's: nothing is left
+                // for a later failure to be read as that checkout's refusal.
+                open.git_view.checkout_in_flight = None;
+                // The repository on screen may not exist any more — the project stopped managing
+                // it, or the folder went — and a project with no repository of its own opens on
+                // the first nested one it manages. Either way the screen moves to what is there.
+                let wanted = (!open.git_repo_exists()).then(|| open.default_git_repo());
+                if let Some(wanted) = wanted {
+                    self.apply_git_repo(project_id, wanted);
+                }
+                cx.notify();
+            }
+
+            Message::GitError {
+                project_id,
+                repo,
+                error,
+            } => {
+                tracing::error!("git {project_id} {repo}: {error}");
+                let open = self.projects.get_mut(&project_id)?;
+                let selected = repo == open.git_repo;
+                if !repo.is_empty() && !selected {
+                    return None;
+                }
+                match error {
+                    GitFailure::Corrupt | GitFailure::NotFound => {
+                        if repo.is_empty() {
+                            open.git = None;
+                            open.git_truncated = false;
+                            open.explorer.clear_git();
+                            open.git_entries.clear();
+                        } else {
+                            open.git_nested = None;
+                        }
+                        open.refilter_git();
+                        open.git_view.settle(&open.git_screen_entries);
+                        open.git_view.checkout_in_flight = None;
+                    }
+                    GitFailure::Interrupted => {}
+                    GitFailure::Denied => {}
+                    // A failure of the project's own repository is not the screen's while a
+                    // nested one is showing: its write and its error are the nested one's.
+                    GitFailure::Failed(reason) if selected => {
+                        // The one failure that is a question rather than an error: an unforced
+                        // checkout the host refused because the working tree holds changes it
+                        // would overwrite. The confirm asks it, and its accept is what sends
+                        // `force: true` — see `AppState::checkout_git_ref`. Every other way that
+                        // same checkout can fail reads as the plain error it is.
+                        let overwrites = open
+                            .git_view
+                            .checkout_in_flight
+                            .take()
+                            .filter(|_| checkout_conflict(&reason));
+                        open.git_view.pending = None;
+                        match overwrites {
+                            Some(rev) => open.git_view.ask_confirm(GitConfirm::Checkout { rev }),
+                            None => open.git_view.last_error = Some(reason),
+                        }
+                    }
+                    GitFailure::Failed(_) => {}
+                }
+                cx.notify();
+            }
+
+            Message::GitRefs {
+                project_id,
+                repo,
+                refs,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                if repo != open.git_repo {
+                    return None;
+                }
+                let submodules = open
+                    .git_overview()
+                    .map(|overview| overview.submodules.as_slice())
+                    .unwrap_or(&[]);
+                open.git_view.refs = ref_rows(&refs, submodules);
+                open.git_view.selected_ref = open.git_view.refs.iter().position(|row| row.current);
+                cx.notify();
+            }
+
+            Message::GitLogPage {
+                project_id,
+                repo,
+                cursor,
+                commits,
+                next_cursor,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                if repo != open.git_repo {
+                    return None;
+                }
+                // Staleness rule: this reply is answered only if its echoed `cursor` matches the
+                // request the view is currently waiting on (`log_inflight`). Two requests can
+                // share the same cursor value — most commonly two first-page requests, both
+                // `None` — so the *value* alone cannot tell a stale reply from the current one;
+                // `log_inflight` is overwritten on every send, so it always names the most
+                // recently sent request, and every other reply is discarded here rather than
+                // replacing or appending.
+                if open.git_view.log_inflight != Some(cursor.clone()) {
+                    return None;
+                }
+                open.git_view.log_inflight = None;
+                let rows = commit_rows(&commits);
+                if cursor.is_none() {
+                    open.git_view.set_commits(rows);
+                } else {
+                    open.git_view.extend_commits(rows);
+                }
+                open.git_view.log_done = next_cursor.is_none();
+                open.git_view.log_cursor = next_cursor;
+                if self.project(cx) == Some(project_id) {
+                    self.settle_git_jump(cx);
+                }
+                cx.notify();
+            }
+
+            Message::GitChanged {
+                project_id,
+                repo,
+                from,
+                to,
+                files,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                if repo != open.git_repo
+                    || open.git_view.range_from != from
+                    || open.git_view.range_to.as_deref() != Some(to.as_str())
+                {
+                    return None;
+                }
+                open.git_view.range_files = files;
+                open.git_view.range_inflight = false;
+                open.git_view.settle(&open.git_screen_entries);
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The diagram viewer's family: an agent's render opens the file, its tool calls feed the tab's
+    /// chip, and an export the viewer sent is answered.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_archify(
+        &mut self,
+        _host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        use crate::state::archify::ui as archify;
+        match message {
+            Message::ArchifyShow { project_id, rel } => {
+                if self.projects.contains_key(&project_id) {
+                    self.open_file_with(
+                        rel,
+                        ViewerKind::Contributed(crate::ext::ids::ARCHIFY_VIEWER),
+                        cx,
+                    );
+                }
+            }
+            Message::ArchifyToolCall {
+                project_id,
+                rel,
+                tool,
+                ok,
+            } => {
+                if self.projects.contains_key(&project_id) {
+                    let key = rel.map(|rel| tab_key(&rel, Subject::File));
+                    let notice = archify(cx).agent_called(key, tool, ok, std::time::Instant::now());
+                    if let Some(notice) = notice {
+                        self.raise_notification(crate::ui::archify::agent::notification(notice));
+                    }
+                    crate::ui::archify::agent::keep_fresh(cx);
+                    cx.notify();
+                }
+            }
+            Message::HostFileExported { path } => {
+                if archify(cx).exports.remove(&path) {
+                    crate::ui::archify::viewer::say(self, &format!("Saved {path}."), cx);
+                }
+            }
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The knowledge-base family.
+    ///
+    /// Every arm is guarded on the project still being held, the file family's rule: a reply can
+    /// land after the window has stopped holding the project it names, and there is nothing left
+    /// to draw it on.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_kb(
+        &mut self,
+        _host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::KbSourcesListed {
+                project_id,
+                sources,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                open.kb.accept(sources);
+                for source in open.kb.take_unlisted_roots() {
+                    self.bus.send(Message::KbTree {
+                        project_id,
+                        source,
+                        rel_path: String::new(),
+                        depth: 1,
+                    });
+                }
+                self.continue_kb_reveal(project_id, cx);
+                cx.notify();
+            }
+
+            Message::KbSourceChanged {
+                project_id,
+                source,
+                state,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                // Ready again means synced, unlocked or cloned: the root and every open folder
+                // are asked for again, merged over the tree the user has open.
+                for rel_path in open.kb.source_changed(source, state) {
+                    self.bus.send(Message::KbTree {
+                        project_id,
+                        source,
+                        rel_path,
+                        depth: 1,
+                    });
+                }
+                cx.notify();
+            }
+
+            // The host's word on an unlock or a change: a sentence keeps the dialog up for another
+            // try, nothing takes it down. The tree is refreshed by the `KbSourceChanged` it sends
+            // alongside.
+            Message::KbPasswordAnswer {
+                project_id,
+                source,
+                error,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                open.kb.password_answered(source, error);
+                cx.notify();
+            }
+
+            Message::KbTreeListing {
+                project_id,
+                source,
+                rel_path: _,
+                listings,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                for listing in listings {
+                    open.kb.merge(source, listing);
+                }
+                self.continue_kb_reveal(project_id, cx);
+                cx.notify();
+            }
+
+            Message::KbFileContents {
+                project_id,
+                source,
+                rel_path,
+                contents,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                let key = KbDocKey::new(source, rel_path);
+                // A reply for a document whose tab has since been closed is discarded, not drawn.
+                // The buffer is built in `attach_kb_docs`, which needs a `Window` this message
+                // does not carry — queued exactly as `ProjectFileContents` queues `pending_files`.
+                if open.kb.doc(&key.tab_key()).is_some() {
+                    self.pending_kb_docs.push(KbArrival {
+                        project_id,
+                        key,
+                        contents,
+                    });
+                    cx.notify();
+                }
+            }
+
+            Message::KbFileError {
+                project_id,
+                source,
+                rel_path,
+                error,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                let reason = describe(&error);
+                let key = KbDocKey::new(source, rel_path);
+                // A refusal for the document on screen is drawn in its place. Anything else — a
+                // listing, or a write, create, rename or delete that has no document behind it —
+                // lands on the source's own row, because a gesture that silently did nothing is
+                // the one failure mode the panel must not have.
+                let tab = key.tab_key();
+                let mid_save = open.kb.doc(&tab).is_some_and(|doc| doc.is_saving());
+                if mid_save {
+                    // A save that was refused leaves the buffer exactly as the user left it — the
+                    // one place a `KbFileError` must not read as "the document is gone", since
+                    // what it names here is a write, not the read that put the document on screen.
+                    if let Some(doc) = open.kb.doc_mut(&tab) {
+                        doc.save_failed(reason);
+                    }
+                } else if let Some(doc) = open.kb.doc_mut(&tab) {
+                    doc.set_failed(reason);
+                } else {
+                    open.kb.fail(source, &key.path, reason);
+                }
+                cx.notify();
+            }
+
+            // Something under `rel_path` changed. The directory is marked unlisted and asked for
+            // again, so the tree redraws from what the host says is there rather than from a guess
+            // about what the gesture did — and a directory nobody has open is not re-asked for.
+            Message::KbChanged {
+                project_id,
+                source,
+                rel_path,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                // A write this window made lands here too, since `WriteKbFile` answers with
+                // `KbChanged` naming the parent directory rather than with anything of its own —
+                // the document mid-save is found by that same parent, and the save it was
+                // carrying is the one thing this arm confirms rather than merely re-lists.
+                let saved: Vec<String> = open
+                    .kb
+                    .docs
+                    .iter()
+                    .filter(|doc| {
+                        doc.kb_source == Some(source)
+                            && kb_parent_path(&doc.path) == rel_path
+                            && doc.is_saving()
+                    })
+                    .map(|doc| doc.key())
+                    .collect();
+                for key in saved {
+                    let current = open
+                        .kb
+                        .doc(&key)
+                        .and_then(|doc| doc.buffer())
+                        .map(|buffer| buffer.read(cx).value().to_string())
+                        .unwrap_or_default();
+                    if let Some(doc) = open.kb.doc_mut(&key) {
+                        doc.saved_unversioned(&current);
+                    }
+                }
+                if open.kb.mark_unlisted(source, &rel_path) {
+                    open.kb.mark_loading(source, &rel_path);
+                    self.bus.send(Message::KbTree {
+                        project_id,
+                        source,
+                        rel_path,
+                        depth: 1,
+                    });
+                }
+                cx.notify();
+            }
+
+            // The answer to a Copy path. It goes to the clipboard and nowhere else: the panel has
+            // no note to raise for a copy, and a path drawn somewhere would be the interface
+            // holding an absolute host path after the gesture that asked for it is over.
+            Message::KbPath { path, .. } => {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(path));
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The work family.
+    /// Every arm is guarded on the project still being held, because an answer can arrive
+    /// after the window has stopped holding it — the file family's rule, for the file
+    /// family's reason. The work belongs to the project, so an answer for one nobody here
+    /// has open has nowhere to be drawn.
+    ///
+    /// Anything the host confirms clears the last refusal: a sentence about a change that
+    /// did not happen is stale the moment one does.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_work(
+        &mut self,
+        host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::WorkList {
+                project_id,
+                sessions,
+                agents,
+                tasks,
+            } => {
+                self.workbench.work_error = None;
+                let open = self.projects.get_mut(&project_id)?;
+                open.work.replace_all(sessions, agents, tasks);
+                // A restored filter naming a session, label or mission this project no longer has
+                // would hide every card with nothing in the toolbar to say why (`T-169`). This is
+                // the first moment there is anything to check it against, and the check is cheap
+                // enough to repeat on every list.
+                open.board.prune(&open.work);
+                // Teams draws its own narrower work and lays it out here — the projection update
+                // every card's arrival goes through, rather than a frame discovering the count
+                // changed.
+                open.teams
+                    .relayout(&live_work(&open.work, &open.agents.live));
+                // The agents screen lays its columns out the first time it hears there is work,
+                // and only prunes after that: an arrangement the user has changed is not something
+                // a re-sent list may undo.
+                if open.agents.arranged {
+                    open.agents.prune(&open.work);
+                } else {
+                    open.agents.arrange(&open.work);
+                }
+                // And the window span's own view over the merged projection: it is a second
+                // arrangement over a second set of cards, and this arm has only fed the first.
+                self.settle_window_layout(true, cx);
+                self.refill_columns = true;
+                self.settle_persistent_chat(project_id, cx);
+                cx.notify();
+            }
+
+            Message::TaskCreated { project_id, task } => {
+                self.workbench.work_error = None;
+                let open = self.projects.get_mut(&project_id)?;
+                let id = task.id;
+                open.work.apply_task(task);
+                open.teams
+                    .absorb_new(&live_work(&open.work, &open.agents.live));
+                // The task that arrives is the one to select, because the interface could not know
+                // the id it was going to be given — the same mechanism `AppState::adding` uses to
+                // open the project an `AddProject` answers with.
+                let mut pending = None;
+                let mut pending_parent = None;
+                if open.board.awaiting_new {
+                    open.board.awaiting_new = false;
+                    open.board.select(id);
+                    // The rest of the draft: a `CreateTask` carries a title and a session, so a
+                    // description and a title that has to be written both wait for the id.
+                    pending = open.board.pending.take();
+                    pending_parent = open.board.pending_parent.take();
+                }
+                if let Some(pending) = pending {
+                    self.settle_new_task(project_id, id, pending);
+                }
+                if let Some(parent) = pending_parent {
+                    self.bus.send(Message::SetTaskField {
+                        project_id,
+                        task_id: id,
+                        field: kubiq_proto::messages::TaskField::Parent(Some(parent)),
+                    });
+                }
+                self.settle_window_layout(false, cx);
+                cx.notify();
+            }
+
+            Message::TaskChanged { project_id, task } => {
+                self.workbench.work_error = None;
+                let open = self.projects.get_mut(&project_id)?;
+                // The mark goes on whatever column the answer reports, the old one included: a
+                // refusal that left the card where it was must not leave it saying it is still on
+                // its way.
+                if open.board.is_moving(task.id) {
+                    open.board.moving = None;
+                }
+                let selected = open.board.selected == Some(task.id);
+                let editing = open.board.editing.is_some();
+                open.work.apply_task(task);
+                open.teams
+                    .absorb_new(&live_work(&open.work, &open.agents.live));
+                // Refill the panel from what the host actually stored — it trims a title, and a
+                // field showing what was typed rather than what was kept would be a small lie. Not
+                // while a field is open: the user's text wins until they commit or discard it.
+                if selected && !editing {
+                    self.form_filled = None;
+                }
+                self.settle_window_layout(false, cx);
+                cx.notify();
+            }
+
+            Message::TaskDeleted {
+                project_id,
+                task_id,
+            } => {
+                self.workbench.work_error = None;
+                let open = self.projects.get_mut(&project_id)?;
+                open.work.forget_task(task_id);
+                // A panel pointed at a task that has gone reports on nothing, and a mark for a
+                // move that can never be answered would never come off.
+                if open.board.selected == Some(task_id) {
+                    open.board.selected = None;
+                    // A field open on a task that has gone has nowhere to commit to.
+                    open.board.stop_editing();
+                    open.board.confirm_delete = false;
+                }
+                if open.board.is_moving(task_id) {
+                    open.board.moving = None;
+                }
+                cx.notify();
+            }
+
+            // The host's record, whole. Its `title` and `summary` are the host's to write — a rename,
+            // a naming, the harness's own title — and nothing on this side copies a name over
+            // them, so taking the record as it comes is the whole of keeping them (T-283).
+            Message::AgentChanged { project_id, agent } => {
+                self.workbench.work_error = None;
+                let open = self.projects.get_mut(&project_id)?;
+                // Whether this change moves what a restart brings back — the remembered chat tabs
+                // are the persistent and restorable ones — read before the record is replaced.
+                let kept =
+                    |agent: &kubiq_proto::work::WorkAgent| (agent.persistent, agent.restorable);
+                let rekept = open.work.agent(agent.id).map(kept) != Some(kept(&agent));
+                open.work.apply_agent(*agent);
+                open.teams
+                    .absorb_new(&live_work(&open.work, &open.agents.live));
+                if rekept {
+                    self.remember(project_id, cx);
+                }
+                let open = self.projects.get_mut(&project_id)?;
+                // An arriving agent is not put in a column: the arrangement is the user's, and the
+                // sidebar lists it on the bench with one click to bring it on. What a change *can*
+                // do is take a column's tab away, if the agent behind it has gone.
+                if open.agents.prune(&open.work) {
+                    self.refill_columns = true;
+                }
+                self.settle_window_layout(false, cx);
+                cx.notify();
+            }
+
+            // ── Mission family ─────────────────────────────────────────
+            // One project's missions, whole — the answer to the `ListMissions` sent when the
+            // project was taken. Replaced rather than merged: the reply is the whole of it, and a
+            // record the host no longer holds must not survive in the map.
+            Message::MissionList {
+                project_id,
+                missions,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                open.missions = missions
+                    .into_iter()
+                    .map(|mission| (mission.task_id, mission))
+                    .collect();
+                cx.notify();
+            }
+
+            // A broadcast: every window gets it and filters by project itself, `To::Everyone`'s
+            // existing cost (`D120`). A window not holding the project drops it here. Keyed on the
+            // parent task, so the same snapshot twice is the same map. History is computed, not
+            // pushed, so a window showing it asks again when the mission moves.
+            Message::MissionChanged {
+                project_id,
+                mission,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                let task_id = mission.task_id;
+                open.missions.insert(task_id, *mission);
+                let showing = open.mission_view.tab == crate::state::mission::MissionTab::History
+                    && open.mission_history.contains_key(&task_id);
+                if showing {
+                    self.bus.send(Message::LoadHistory {
+                        project_id,
+                        task_id,
+                    });
+                }
+                cx.notify();
+            }
+
+            // The host asks this window to start a conversation for a mission (addressed to one
+            // client, never broadcast). The window starts it through its ordinary path and answers
+            // with `MissionLaunched`.
+            Message::MissionLaunch {
+                project_id,
+                task_id,
+                request,
+            } => {
+                // A window that no longer holds the project still answers, so the host's launch
+                // is not left in flight forever.
+                if !self.projects.contains_key(&project_id) {
+                    self.bus.send(Message::MissionLaunched {
+                        project_id,
+                        task_id,
+                        id: request.id,
+                        outcome: kubiq_proto::mission::LaunchOutcome::Failed(
+                            "this window no longer has the project open".to_string(),
+                        ),
+                    });
+                    return None;
+                }
+                self.launch_for_mission(project_id, task_id, *request, cx);
+            }
+
+            // A mission's computed history, newest first, sent only to whoever asked.
+            Message::MissionHistory {
+                project_id,
+                task_id,
+                entries,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                open.mission_history.insert(task_id, entries);
+                cx.notify();
+            }
+
+            Message::MissionDeleted {
+                project_id,
+                task_id,
+            } => {
+                let open = self.projects.get_mut(&project_id)?;
+                open.missions.remove(&task_id);
+                open.mission_history.remove(&task_id);
+                // A view pointed at a task that is no longer a mission points at nothing.
+                if open.mission_view.selected == Some(task_id) {
+                    open.mission_view.selected = None;
+                }
+                cx.notify();
+            }
+
+            // Sent only to whoever asked. The mission surfaces have no banner of their own yet —
+            // wave 2 draws the panel and nothing that writes — so this is logged and shown on the
+            // one line the work family already reports refusals through.
+            Message::MissionError {
+                project_id,
+                task_id,
+                error,
+            } => {
+                tracing::error!("mission {project_id} {task_id:?}: {error}");
+                self.workbench.work_error = Some(error);
+                cx.notify();
+            }
+
+            // ── Plan family ────────────────────────────────────────────
+            // Answers to `LoadPlan`/`SavePlan`, sent only to whoever asked — the plan modal is
+            // the one place in the tree that holds one, so the reply either lands there or is
+            // stale and dropped.
+            Message::Plan {
+                doc,
+                body,
+                revision,
+            } => {
+                if self
+                    .workbench
+                    .plan
+                    .as_ref()
+                    .is_some_and(|plan| plan.doc == doc)
+                {
+                    // Not an assignment: the answer is read against what the buffer holds, so an
+                    // unsaved edit is kept and reported rather than lost to a race. `revision` is
+                    // the watermark the buffer carries from here on — a buffer that keeps an
+                    // unsaved edit stays behind at the one it was seeded with, which is what the
+                    // save guard asks about. See `DocumentEditor::set_loaded`.
+                    self.plan_body_arrived(body, revision, cx);
+                    self.ask_for_plan_changes();
+                }
+                cx.notify();
+            }
+
+            // Broadcast: a plan may be open for reading in more than one window, so every one of
+            // them hears its own plan go away rather than only the window that deleted it.
+            Message::PlanDeleted { doc } => {
+                if self
+                    .workbench
+                    .plan
+                    .as_ref()
+                    .is_some_and(|plan| plan.doc == doc)
+                {
+                    // A deleted plan reads as "nothing here yet" — and, when the buffer is
+                    // holding an unsaved edit, as that edit over a document that no longer
+                    // exists, which is what keeps the work recoverable by saving it back.
+                    self.plan_body_arrived(String::new(), 0, cx);
+                    if let Some(plan) = self.workbench.plan.as_mut() {
+                        // The annotations went with it — a deleted plan has no blocks to anchor
+                        // to.
+                        plan.set_annotations(crate::state::document::AnnotationsBody::Loaded {
+                            blocks: Vec::new(),
+                            annotations: Vec::new(),
+                            highlights: Vec::new(),
+                        });
+                        // And so did the provenance: a plan that is gone has no lines anybody
+                        // changed.
+                        plan.set_changes(Vec::new(), kubiq_proto::plan::PlanChangeStats::default());
+                        plan.composer = None;
+                        plan.focused = None;
+                    }
+                    self.refresh_document_decor(cx);
+                }
+                cx.notify();
+            }
+
+            Message::PlanExported { doc, rel_path } => {
+                if let Some(plan) = self.workbench.plan.as_mut()
+                    && plan.doc == doc
+                {
+                    plan.notice = Some(crate::state::document::Notice::Ok(format!(
+                        "Exported to {rel_path}."
+                    )));
+                }
+                cx.notify();
+            }
+
+            // Another window's save, or an agent's `write_plan` through `kubiq-plan` — no body
+            // travels with it, so a window showing that plan re-asks with `LoadPlan` rather than
+            // being handed content it may not even have open, `KbChanged`'s own economy.
+            // `revision` and `origin` ride along as two scalars, and the surface reads both before
+            // the body it re-asks for arrives: `origin` is who the stale banner names, and
+            // `revision` is how far behind the buffer's watermark now is.
+            Message::PlanChanged {
+                doc,
+                revision,
+                origin,
+            } => {
+                if let Some(plan) = self.workbench.plan.as_mut()
+                    && plan.doc == doc
+                {
+                    if revision != plan.revision {
+                        plan.stale_origin = Some(origin);
+                    }
+                    self.bus.send(Message::LoadPlan { doc });
+                    cx.notify();
+                }
+            }
+
+            // Where the document was edited since the beginning, and by how much — the answer to
+            // the `ListPlanChanges` every body arrival asks. Sent only to whoever asked, and the
+            // regions are in the current body's line numbers, so the next frame paints them.
+            Message::PlanChanges {
+                doc,
+                regions,
+                stats,
+            } => {
+                if self
+                    .workbench
+                    .plan
+                    .as_ref()
+                    .is_some_and(|plan| plan.doc == doc)
+                {
+                    self.plan_changes_arrived(regions, stats);
+                }
+                cx.notify();
+            }
+
+            // The answer to `ListPlanAnnotations` and to every mutation in the family —
+            // `Message::Plan`'s own discipline, sent only to whoever asked.
+            Message::PlanAnnotations {
+                doc,
+                blocks,
+                annotations,
+                highlights,
+                binding,
+            } => {
+                // Kept for a file document independent of whether the surface stays the one open
+                // below — `AppState::has_annotations()`'s own read once it does not
+                // (T-183): switching a tab to raw source is exactly what closes it
+                // (`close_file_document`), and that is the one place the warning this answers for
+                // is drawn.
+                if let crate::state::document::DocumentHandle::File {
+                    project_id,
+                    rel_path,
+                } = &doc
+                    && let Some(open) = self.projects.get_mut(project_id)
+                {
+                    open.annotation_hints
+                        .insert(rel_path.clone(), !annotations.is_empty());
+                }
+                if let Some(plan) = self.workbench.plan.as_mut()
+                    && plan.doc == doc
+                {
+                    plan.binding = binding;
+                    // The question is answered by the binding it asked for, from any window.
+                    if let Some(conflict) = &self.workbench.doc_conflict
+                        && conflict.doc == doc
+                        && plan.binding.agent == Some(conflict.requester)
+                    {
+                        self.workbench.doc_conflict = None;
+                    }
+                    plan.set_annotations(crate::state::document::AnnotationsBody::Loaded {
+                        blocks,
+                        annotations,
+                        highlights,
+                    });
+                    // The margin follows the threads at once, not on the next frame.
+                    self.refresh_document_decor(cx);
+                }
+                cx.notify();
+            }
+
+            // Where one agent's doc queue stands (`D207`) — kept per agent for the annotation
+            // header's label.
+            Message::DocAgentQueue {
+                agent_id,
+                pending,
+                state,
+                ..
+            } => {
+                if pending.is_empty() {
+                    self.workbench.doc_agent_queues.remove(&agent_id);
+                } else {
+                    self.workbench
+                        .doc_agent_queues
+                        .insert(agent_id, (pending, state));
+                }
+                cx.notify();
+            }
+
+            // An agent was refused a document another owns: ask whether to reassign it.
+            Message::DocOwnershipConflict {
+                doc,
+                requester,
+                requester_name,
+                owner,
+            } => {
+                // Only a window holding the document's project asks, and not again for a pair
+                // the user already refused this session — an MCP retry would otherwise re-raise it.
+                let refused = self
+                    .workbench
+                    .doc_conflict_refused
+                    .iter()
+                    .any(|(d, a)| *d == doc && *a == requester);
+                if self.projects.contains_key(&doc.project_id()) && !refused {
+                    self.workbench.doc_conflict = Some(crate::state::workbench::DocConflict {
+                        doc,
+                        requester,
+                        requester_name,
+                        owner,
+                    });
+                }
+                cx.notify();
+            }
+
+            // Another window's comment, an agent's reply through `kubiq-plan`, or a `SavePlan`
+            // whose block matching orphaned or re-anchored a thread — no body travels with it, so
+            // a window showing that plan's annotations re-asks, `Message::PlanChanged`'s own
+            // economy. This is the seam an agent's MCP reply refreshes an open panel through.
+            Message::PlanAnnotationsChanged { doc } => {
+                self.reload_plan_annotations(&doc);
+                cx.notify();
+            }
+
+            // The host refused this window's save: the plan had moved past the revision the save
+            // named, and nothing was written. Sent only to whoever asked, because it is about one
+            // window's buffer and nobody else's. The edit is kept and the overwrite question is
+            // raised again against the revision named here — the second press names it, and is
+            // refused in turn if somebody moves the copy again first.
+            Message::PlanConflict {
+                doc,
+                revision,
+                origin,
+            } => {
+                if self
+                    .workbench
+                    .plan
+                    .as_ref()
+                    .is_some_and(|plan| plan.doc == doc)
+                {
+                    self.plan_save_refused(revision, origin);
+                }
+                cx.notify();
+            }
+
+            // One error shape for the whole family — a load, a save, an export, or one of the
+            // annotation verbs the host refused. `open_plan` sends `LoadPlan` and
+            // `ListPlanAnnotations` together, so both arrive `Loading` at once and either may
+            // answer first; `Loading` fields are claimed before the failure falls through to the
+            // export, which is the only thing left once both have a body.
+            Message::PlanError {
+                project_id,
+                doc,
+                error,
+            } => {
+                if let Some(plan) = self.workbench.plan.as_mut()
+                    && plan.project_id() == project_id
+                    && doc.as_ref().map(|doc| *doc == plan.doc).unwrap_or(true)
+                {
+                    // A refused save is the one failure that leaves the buffer as it is: the edit
+                    // is still the user's, and the banner says why it did not land.
+                    plan.saving = false;
+                    if matches!(plan.body, crate::state::document::DocumentBody::Loading) {
+                        plan.body = crate::state::document::DocumentBody::Failed(error);
+                    } else if matches!(
+                        plan.annotations,
+                        crate::state::document::AnnotationsBody::Loading
+                    ) {
+                        plan.annotations = crate::state::document::AnnotationsBody::Failed(error);
+                    } else {
+                        plan.notice = Some(crate::state::document::Notice::Err(error));
+                    }
+                }
+                cx.notify();
+            }
+
+            // The project's boards, whole (`T-360`). A board seen for the first time is asked for
+            // its tasks, disabled ones included — the settings list counts them.
+            Message::Boards { project_id, boards } => {
+                let open = self.projects.get_mut(&project_id)?;
+                let fresh: Vec<_> = boards
+                    .iter()
+                    .filter(|b| !b.id.is_default() && !open.board.boards.named.contains_key(&b.id))
+                    .map(|b| b.id.clone())
+                    .collect();
+                if open.board.boards.apply(boards) {
+                    open.board.switch_board(kubiq_proto::work::BoardId::DEFAULT);
+                }
+                for board in fresh {
+                    self.bus.send(Message::OnBoard {
+                        board,
+                        message: Box::new(Message::ListWork { project_id }),
+                    });
+                }
+                if self.project(cx) == Some(project_id) {
+                    self.sync_board_panels(project_id);
+                }
+                cx.notify();
+            }
+
+            // A named board's work, into its own projection. The default board's envelope is the
+            // bare message.
+            Message::OnBoard { board, message } => {
+                if board.is_default() {
+                    return self.receive_work(host, *message, cx);
+                }
+                match *message {
+                    Message::WorkList {
+                        project_id, tasks, ..
+                    } => {
+                        self.workbench.work_error = None;
+                        let open = self.projects.get_mut(&project_id)?;
+                        let work = open
+                            .board
+                            .boards
+                            .named
+                            .entry(board)
+                            .or_insert_with(WorkProjection::empty);
+                        work.replace_all(Vec::new(), Vec::new(), tasks);
+                    }
+                    Message::TaskCreated { project_id, task } => {
+                        self.workbench.work_error = None;
+                        let open = self.projects.get_mut(&project_id)?;
+                        let id = task.id;
+                        let on_screen = open.board.boards.active == board;
+                        open.board
+                            .boards
+                            .named
+                            .entry(board)
+                            .or_insert_with(WorkProjection::empty)
+                            .apply_task(task);
+                        if on_screen && open.board.awaiting_new {
+                            open.board.awaiting_new = false;
+                            open.board.select(id);
+                            if let Some(pending) = open.board.pending.take() {
+                                self.settle_new_task(project_id, id, pending);
+                            }
+                        }
+                    }
+                    Message::TaskChanged { project_id, task } => {
+                        self.workbench.work_error = None;
+                        let open = self.projects.get_mut(&project_id)?;
+                        if open.board.is_moving(task.id) {
+                            open.board.moving = None;
+                        }
+                        let refill =
+                            open.board.selected == Some(task.id) && open.board.editing.is_none();
+                        open.board
+                            .boards
+                            .named
+                            .entry(board)
+                            .or_insert_with(WorkProjection::empty)
+                            .apply_task(task);
+                        if refill {
+                            self.form_filled = None;
+                        }
+                    }
+                    Message::TaskDeleted {
+                        project_id,
+                        task_id,
+                    } => {
+                        self.workbench.work_error = None;
+                        let open = self.projects.get_mut(&project_id)?;
+                        if let Some(work) = open.board.boards.named.get_mut(&board) {
+                            work.forget_task(task_id);
+                        }
+                        if open.board.selected == Some(task_id) {
+                            open.board.selected = None;
+                            open.board.stop_editing();
+                            open.board.confirm_delete = false;
+                        }
+                        if open.board.is_moving(task_id) {
+                            open.board.moving = None;
+                        }
+                    }
+                    Message::WorkError {
+                        project_id,
+                        task_id,
+                        error,
+                    } => {
+                        tracing::error!("work {project_id} {board} {task_id:?}: {error}");
+                        self.workbench.work_error = Some(error);
+                        if let Some(state) = self.board_mut(cx) {
+                            state.stop_editing();
+                            state.moving = None;
+                            state.awaiting_new = false;
+                            state.pending = None;
+                            state.confirm_delete = false;
+                        }
+                        self.form_filled = None;
+                    }
+                    _ => {}
+                }
+                cx.notify();
+            }
+
+            Message::WorkError {
+                project_id,
+                task_id,
+                error,
+            } => {
+                tracing::error!("work {project_id} {task_id:?}: {error}");
+                self.workbench.work_error = Some(error);
+                // A refusal ends whatever asked for it, so the panel goes back to reporting the
+                // task the host still holds rather than sitting in a field that will not commit.
+                if let Some(board) = self.board_mut(cx) {
+                    board.stop_editing();
+                    board.moving = None;
+                    board.awaiting_new = false;
+                    board.pending = None;
+                    board.confirm_delete = false;
+                }
+                self.form_filled = None;
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The conversation family.
+    ///
+    /// A live agent joins the work as any other agent does, so the sidebar and the graph
+    /// find it with no change of their own. What is different is that its record is then
+    /// kept current from the stream rather than from a reply: what the transcript already
+    /// says is what the badge, the ring and the token count are read off, because a round
+    /// trip per token would be a round trip per token.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_conversation(
+        &mut self,
+        host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::ConversationStarted {
+                project_id,
+                agent,
+                session,
+                accepts_input,
+            } => {
+                // Its follow-ups name no project: they go to the host that runs it.
+                self.bus.note_agent(agent.id, host);
+                self.workbench.work_error = None;
+                // The default account (no id) has no accounts-page row to ask for its plan, so the
+                // first conversation on it does — from the host's cache unless nothing is held.
+                if agent.account.is_empty()
+                    && self
+                        .workbench
+                        .agent_type(&agent.harness)
+                        .is_some_and(|info| info.quota.probeable())
+                    && self.workbench.settings.quota(&agent.harness, "").is_none()
+                {
+                    self.bus.send(Message::QueryQuota {
+                        account: String::new(),
+                        harness: agent.harness.clone(),
+                        fresh: false,
+                    });
+                }
+                let open = self.projects.get_mut(&project_id)?;
+                let id = agent.id;
+                let harness = agent.harness.clone();
+                let account = agent.account.clone();
+                // The session first: the sidebar lists agents under one, so an agent applied
+                // before its heading exists is an agent drawn nowhere.
+                open.work.apply_session(session);
+                open.work.apply_agent(*agent);
+                let conversation = open
+                    .conversations
+                    .entry(id)
+                    .or_insert_with(|| Conversation::new(id, harness, account));
+                conversation.accepts_input = accepts_input;
+                // The agents screen draws only what this window can talk to, and this is the one
+                // place a conversation comes into being — see `AgentsView::live`.
+                open.agents.live = open.conversations.keys().copied().collect();
+                open.agents.prune(&open.work);
+                // Teams draws only the agents this window can talk to, so its narrowed work has
+                // to wait for `agents.live` above before the arriving card is in it.
+                open.teams
+                    .absorb_new(&live_work(&open.work, &open.agents.live));
+                // Where it lands is whoever asked. A `+` or a chat header that raised the New
+                // agent form aimed the start at itself — see `AppState::aim_start` — and anything
+                // else comes on the agents screen's field rather than onto the bench: unlike an
+                // agent that merely changed, this one was asked for.
+                match (
+                    self.pending_chat_attach.take(),
+                    std::mem::take(&mut self.pending_chat_open),
+                    std::mem::take(&mut self.sink.messages.pending_attach),
+                ) {
+                    (Some(chat), _, _) => self.attach_chat(chat, Some(id), cx),
+                    // The chat strip's `+`: **this** is where the tab comes into being, so a form
+                    // that was dismissed instead left no empty tab behind.
+                    // A slot band with nothing left in it is not a reason to show nothing: the
+                    // strip's `+` asked for a *new* view and there is no room for one, so the
+                    // conversation takes whatever view the mode can give it instead of vanishing
+                    // (`T-275`).
+                    (None, true, _) => match self.open_chat_tab_now(cx) {
+                        Some(chat) => self.attach_chat(chat, Some(id), cx),
+                        None => self.reveal_agent_for_mode(id, cx),
+                    },
+                    (None, false, true) => self.sink.messages.agent = Some(id),
+                    // Nothing else claimed it — the New agent dialog's own Start, or an
+                    // attach-menu row with no chat asking. `reveal_agent_for_mode` puts it
+                    // wherever the mode on screen can actually show it: the agents columns in
+                    // `RailMode::AGENTS`, a chat panel in the dock otherwise — landing it in the
+                    // columns unconditionally left Start looking like it did nothing in every
+                    // other mode (`T-266`, `T-275`).
+                    (None, false, false) => self.reveal_agent_for_mode(id, cx),
+                }
+                // A launch composed for a mission, or a task assignment's Start, owes one assignment, parked until there is a
+                // `WorkAgent` to assign — see `WorkbenchState::agent_assignments`. Spent here,
+                // once: an agent reassigned later is the user's own move.
+                if let Some((project, task)) = self.workbench.agent_assignments.remove(&id) {
+                    self.bus.send(Message::AssignAgent {
+                        project_id: project,
+                        agent_id: id,
+                        task_id: Some(task),
+                    });
+                }
+                // Annotation mode's *New agent…*: the agent exists now, so the document can be
+                // bound to it. Spent once.
+                if let Some(doc) = self.workbench.doc_binds.remove(&id) {
+                    self.bus.send(Message::SetDocAgent {
+                        doc,
+                        agent_id: Some(id),
+                    });
+                }
+                // A task assignment's name — the task's key. Before the initial prompt: a
+                // conversation renamed before its opening reply is one the host's naming pass
+                // leaves alone.
+                if let Some(name) = self.workbench.agent_names.remove(&id) {
+                    self.bus
+                        .send(Message::RenameConversation { agent_id: id, name });
+                }
+                // The New agent modal's initial prompt, parked by `start_new_agent` until there
+                // was a conversation to say it to. Spent once, like the assignment above.
+                if let Some(text) = self.workbench.agent_initial_prompts.remove(&id) {
+                    match accepts_input {
+                        true => self.send_prompt(id, text),
+                        false => tracing::warn!(
+                            "conversation {id}: the harness takes no input, so the initial \
+                             prompt was not sent"
+                        ),
+                    }
+                }
+                self.settle_window_layout(false, cx);
+                self.refill_columns = true;
+                cx.notify();
+            }
+
+            Message::ConversationUpdate {
+                agent_id,
+                seq,
+                update,
+                ..
+            } => {
+                // The per-token deltas, which are the ones that arrive at the harness's own rate.
+                // Everything else — a title, a usage report, a permission ask, a turn ending —
+                // changes what the sidebar and the lifecycle glyph say and always draws.
+                let streaming = matches!(
+                    update.as_ref(),
+                    kubiq_proto::conversation::ConvUpdate::AgentChunk { .. }
+                        | kubiq_proto::conversation::ConvUpdate::ThoughtChunk { .. }
+                );
+                // What the bell cares about, read off the update before `apply` consumes it:
+                // a permission ask (any conversation, a delegate's own included — the ask
+                // still blocks a turn somebody has to answer) and a turn ending, narrowed to
+                // the main agent below since a delegate's turns are folded into the
+                // transcript rather than answered with their own `TurnEnded`.
+                let wants_permission = matches!(
+                    update.as_ref(),
+                    kubiq_proto::conversation::ConvUpdate::PermissionRequest { .. }
+                );
+                let turn_ended = matches!(
+                    update.as_ref(),
+                    kubiq_proto::conversation::ConvUpdate::TurnEnded { .. }
+                );
+                // Anything that is not a chunk draws whatever is on screen; a chunk draws where
+                // the style reference's bench is reading this conversation. That is the third
+                // surface hosting one, and it picks across every project — so it is asked before
+                // the project holding this one is borrowed.
+                let elsewhere = !streaming || self.sink_agent() == Some(agent_id);
+                let open = self
+                    .projects
+                    .values_mut()
+                    .find(|open| open.conversations.contains_key(&agent_id))?;
+                let conversation = open.conversations.get_mut(&agent_id)?;
+                // Model discovery answers from a thread of its own at a fixed seq 1, so it lands
+                // wherever its probe finishes — after a restore's replayed turns or a fast launch's
+                // first frames. That is not a gap, and saying so would be a false alarm — neither
+                // is seq 2 arriving before it, onto a transcript that has applied nothing yet.
+                let discovery = seq == 1
+                    && matches!(
+                        update.as_ref(),
+                        kubiq_proto::conversation::ConvUpdate::ConfigOptions(_)
+                    );
+                let ahead_of_discovery = seq == 2 && conversation.is_next(1);
+                if !discovery && !ahead_of_discovery && !conversation.is_next(seq) {
+                    tracing::warn!(
+                        "conversation {agent_id}: update {seq} does not follow the last one \
+                             applied, so something was lost between them; applying it anyway"
+                    );
+                }
+                conversation.apply(seq, *update);
+                // A turn that just ended may have prompts typed while it was running, waiting
+                // behind it — the front of the queue goes out now, the same way it would have if
+                // the box had been empty when it was typed.
+                let next_prompt = (conversation.run == Run::Idle)
+                    .then(|| conversation.dequeue_front())
+                    .flatten();
+                refresh_agent_record(open, agent_id);
+                // Whether anything on screen is drawing this conversation: the tab a column has
+                // up, or a chat tab attached to it. A delegate nobody is looking at still folds
+                // its stream into the record — it just stops driving frames while it does.
+                let shown = conversation_shown(open, agent_id);
+                let on_screen = elsewhere || shown;
+                // Read before `open`'s borrow ends below — the bell, per `G198`. A permission ask
+                // is worth the interruption whoever it is for, a delegate included: it still
+                // blocks a turn somebody has to answer. A turn ending is the *main* agent's alone
+                // — a delegate's turns fold into the transcript rather than closing with their
+                // own `TurnEnded`, so `parent` is what tells the two apart — and it is the bell
+                // for the conversation nobody has on screen.
+                let agent_name = open.work.agent(agent_id).map(|a| {
+                    crate::state::work::AgentLabel::of(a, None)
+                        .title
+                        .to_string()
+                });
+                let is_delegate = open
+                    .work
+                    .agent(agent_id)
+                    .is_some_and(|a| a.parent.is_some());
+                if on_screen {
+                    self.draw_conversation(agent_id, streaming, cx);
+                }
+                // A permission ask is raised **whether or not the conversation is on screen**,
+                // and it is the one notification that also leaves the window. Every other bell
+                // here reports something that already happened, so a surface already drawing it
+                // has said it; an ask is a question that blocks the turn until somebody answers,
+                // and the surface drawing it may be behind another window, on another screen, or
+                // scrolled away from the prompt. `shown` says a pane exists, never that the user
+                // is looking at it. A mute rule on `Agents · permission` is how somebody who does
+                // not want this turns it off.
+                if wants_permission {
+                    let mut request = NotificationRequest::warning(
+                        Family::Agents,
+                        "Wants permission to continue.",
+                    )
+                    .with_category("permission")
+                    .with_link(KubiqLink::Agent(agent_id))
+                    .with_os();
+                    if let Some(name) = agent_name.clone() {
+                        request = request.with_actor(name);
+                    }
+                    self.raise_notification(request);
+                }
+                if !shown && turn_ended && !is_delegate {
+                    let mut request =
+                        NotificationRequest::info(Family::Agents, "The turn finished.")
+                            .with_category("turn")
+                            .with_link(KubiqLink::Agent(agent_id));
+                    if let Some(name) = agent_name {
+                        request = request.with_actor(name);
+                    }
+                    self.raise_notification(request);
+                }
+                if let Some(queued) = next_prompt {
+                    self.send_prompt(agent_id, queued.text);
+                }
+            }
+
+            // The harness has gone; the transcript has not. The record stops moving, and the
+            // conversation is kept so what was said is still readable.
+            Message::ConversationEnded {
+                agent_id,
+                stop_reason,
+            } => {
+                let open = self
+                    .projects
+                    .values_mut()
+                    .find(|open| open.conversations.contains_key(&agent_id))?;
+                let conversation = open.conversations.get_mut(&agent_id)?;
+                conversation.ended(stop_reason);
+                refresh_agent_record(open, agent_id);
+                cx.notify();
+            }
+
+            // The harness is gone, but unlike `ConversationEnded` the conversation itself is back
+            // to its pre-launch state: the pickers return, and the next prompt — or a resume —
+            // starts a new process.
+            Message::ConversationUnloaded { agent_id } => {
+                let open = self
+                    .projects
+                    .values_mut()
+                    .find(|open| open.conversations.contains_key(&agent_id))?;
+                let conversation = open.conversations.get_mut(&agent_id)?;
+                conversation.unloaded();
+                refresh_agent_record(open, agent_id);
+                cx.notify();
+            }
+
+            // Delete answered: unlike `ConversationEnded`, which keeps the transcript because the
+            // harness merely stopped, there is nothing left to draw here. The conversation goes,
+            // the agent record goes with it, and **every chat tab that was looking at it is
+            // closed** — a detached tab would be an empty panel the user never asked for, left
+            // where a conversation used to be, and the delete is the one gesture that says there
+            // is nothing to look at. An empty tab is what a fresh `+` produces on request; it is
+            // not what a delete should leave behind.
+            //
+            // Closing goes through `close_chat_tab_in` rather than dropping the `ChatTab` row
+            // here: the dock panel has to leave the tree too, and the composer slot has to be
+            // cleared before it is handed on.
+            Message::ConversationDeleted { agent_id } => {
+                // Gone for good, so nothing will be routed for it again. `ConversationEnded` keeps
+                // its entry: an ended conversation is still deleted or revived through its host.
+                self.bus.forget_agent(agent_id);
+                let open = self
+                    .projects
+                    .values_mut()
+                    .find(|open| open.conversations.contains_key(&agent_id))?;
+                open.conversations.remove(&agent_id);
+                // The row goes from the work projection, which is what the agents columns, the
+                // computed bench and a chat tab's attach list all read — so one removal takes it
+                // off every surface that could still offer it.
+                open.work.remove_agent(agent_id);
+                open.agents.live = open.conversations.keys().copied().collect();
+                open.agents.prune(&open.work);
+                open.teams
+                    .absorb_new(&live_work(&open.work, &open.agents.live));
+                // **Every held project is swept, not only the owning one** (`T-149`). A tab is the
+                // project on screen's even when the Teams window span pointed it at another
+                // project's card, so the tab watching a deleted conversation may sit in a project
+                // that never held it — and a tab left attached to an id nothing answers for is the
+                // empty panel this arm exists to prevent.
+                let watching: Vec<(ProjectId, ChatId)> = self
+                    .projects
+                    .iter()
+                    .flat_map(|(id, open)| {
+                        open.chats
+                            .iter()
+                            .filter(|tab| tab.attached == Some(agent_id))
+                            .map(move |tab| (*id, tab.id))
+                    })
+                    .collect();
+                for (project, tab) in watching {
+                    self.close_chat_tab_in(project, tab, cx);
+                }
+                // The asks went with the conversation, so a dialog standing on one of them has
+                // nothing left to draw — and a modal layer with nothing in it blocks the window.
+                self.settle_ask_dialog(cx);
+                self.settle_window_layout(false, cx);
+                self.refill_columns = true;
+                cx.notify();
+            }
+
+            // A start that failed before a conversation existed still has to say so, which is why
+            // the sentence goes to the workbench as well as onto the transcript: the screen the
+            // user is looking at is the agents screen either way.
+            Message::ConversationError { agent_id, error } => {
+                tracing::error!("conversation {agent_id}: {error}");
+                if let Some(conversation) = self
+                    .projects
+                    .values_mut()
+                    .find_map(|open| open.conversations.get_mut(&agent_id))
+                {
+                    conversation.error = Some(error.clone());
+                } else {
+                    // A start refused before `ConversationStarted` has no transcript to carry the
+                    // sentence, and `work_error` is drawn only by the task form (`T-275`): the
+                    // bell is the one surface every screen has.
+                    self.raise_notification(
+                        NotificationRequest::error(
+                            Family::Agents,
+                            format!("The agent could not start: {error}"),
+                        )
+                        .with_category("start"),
+                    );
+                }
+                self.workbench.work_error = Some(error);
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// Draw the delta just folded into a conversation — at most once a frame while it is
+    /// streaming.
+    ///
+    /// The frame itself is the coalescing window: the first delta of a burst asks for one, and
+    /// every delta after it is already in the record that frame draws, so it asks for nothing.
+    /// `ui::conversation`'s transcript clears the flag as it draws, which is what starts the next
+    /// cycle — see [`Conversation::notify_due`]. Anything that is not a chunk draws immediately:
+    /// those are the updates the sidebar, the lifecycle glyph and the permission strip read.
+    fn draw_conversation(&mut self, agent_id: AgentId, streaming: bool, cx: &mut Context<Self>) {
+        let due = !streaming
+            || self
+                .projects
+                .values()
+                .find_map(|open| open.conversations.get(&agent_id))
+                .is_some_and(Conversation::notify_due);
+        if due {
+            cx.notify();
+        }
+    }
+
+    /// The notification family: the bell's whole state, and each arrival as it is filed.
+    ///
+    /// Both are broadcast to every window, so nothing here is a reply to a request this window
+    /// made — it redraws from what the host says, and never edits the state it was sent.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_notifications(
+        &mut self,
+        _host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            // The whole state, replacing what was held: the list is capped and the host is the
+            // one that keeps it, so half an old state beside half a new one is nobody's bell.
+            Message::NotificationsState { state } => {
+                self.notifications.wire = *state;
+                cx.notify();
+            }
+
+            // One arrival, put at the front because the list is newest first. The host has
+            // already applied the rules, so `muted` is its verdict and not a question: a muted
+            // one only moves the badge, and a loud one is what the bell flashes for.
+            Message::NotificationRaised { notification } => {
+                let (level, link, muted) = (
+                    notification.level,
+                    notification.link.clone(),
+                    notification.muted,
+                );
+                self.notifications.wire.items.insert(0, *notification);
+                self.notifications.wire.items.truncate(HISTORY_CAP);
+                if muted {
+                    cx.notify();
+                } else {
+                    self.flash_bell(level, link, cx);
+                }
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The session family: what the host is, and what can be started on it.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_session(
+        &mut self,
+        host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            // What the host is. The status bar says so when the root is not the usual one.
+            //
+            // Only the local host's answer is taken. Every host greets a new client with this
+            // unsolicited, so a remote's would otherwise arrive on attach and repaint the config
+            // root — and, worse, re-ask for the shells, harnesses, accounts and definitions, whose
+            // answers replace those lists whole. The menus name what can be started on *this*
+            // machine; a remote's belong to a per-host set of them that does not exist yet.
+            Message::HostInfo {
+                ref config_root,
+                is_default,
+                ..
+            } => {
+                if host != HostRef::Local {
+                    self.bus.note_remote_info(host, &message);
+                    return None;
+                }
+                self.workbench.config_root = Some(config_root.clone());
+                self.workbench.config_root_is_default = is_default;
+                // The new-pane menu offers what this machine has, and only the host can say what
+                // that is. Asked on attach so the first menu is not empty, and again on every
+                // open — see `open_new_pane_menu`.
+                self.bus.send(Message::ListShells);
+                self.bus.send(Message::ListAgentTypes);
+                // The identities half of the same question: the New agent menu offers a harness
+                // per account, so an empty account list would offer the harness alone and start
+                // it as nobody in particular.
+                self.bus.send(Message::ListAccounts);
+                // And the setups built on top of them, for the same reason: the menu offers a
+                // row per definition.
+                self.bus.send(Message::ListAgentDefinitions);
+                // And the bell, so a window that has just attached draws the badge the other
+                // windows are already drawing rather than an empty one until something arrives.
+                self.bus.send(Message::ListNotifications);
+                cx.notify();
+            }
+
+            // What can be started here. Replaced whole rather than merged: the host's answer is
+            // the list, and a shell that has been uninstalled has to leave the menu.
+            Message::ShellList { shells } => {
+                self.workbench.shells = shells;
+                cx.notify();
+            }
+
+            // One reading of the host, in answer to one `ListStats`. Replaced whole rather than
+            // merged: every field is a sample taken at the same moment, and half of an old
+            // reading beside half of a new one is a picture of no moment at all.
+            Message::Stats { stats } => {
+                if host != HostRef::Local {
+                    self.bus.note_remote_stats(host, &stats);
+                } else {
+                    self.stats.host = Some(stats);
+                }
+                cx.notify();
+            }
+
+            // Which agent harnesses can be started here. Replaced whole, same as the shell list:
+            // a harness that has been uninstalled has to leave the menu, or read as unavailable.
+            Message::AgentTypes { agent_types } => {
+                self.workbench.agent_types = agent_types;
+                // Which harnesses speak ACP is a fact this list carries, so it is the earliest
+                // moment the capabilities question can be put at all — and the Harnesses page
+                // draws a block per harness that wants the answer. Asked once per harness.
+                if self.workbench.settings.open
+                    && self.workbench.settings.nav == SettingsSection(ext_ids::HARNESSES)
+                {
+                    self.ask_acp_capabilities_all(false);
+                }
+                cx.notify();
+            }
+
+            // What one ACP harness said it can do, in answer to one `ListAcpCapabilities`. `None`
+            // is not an error and writes nothing: it means no handshake on that harness has been
+            // seen, and the surfaces say so in their own words from the absent entry.
+            Message::AcpCapabilities {
+                agent_type,
+                capabilities,
+            } => {
+                match capabilities {
+                    Some(record) => {
+                        self.workbench
+                            .settings
+                            .acp_capabilities
+                            .insert(agent_type, record);
+                    }
+                    None => {
+                        self.workbench.settings.acp_capabilities.remove(&agent_type);
+                    }
+                }
+                cx.notify();
+            }
+
+            // The runnable tools for the new-pane menu: the machine-wide rows, then the
+            // project's. Replaced whole, same as the shell list — a tool deleted in the
+            // settings has to leave the menu.
+            Message::ToolsListed { system, project } => {
+                self.workbench.tools = system.into_iter().chain(project).collect();
+                cx.notify();
+            }
+
+            // A tool run was refused before a pane existed: nothing was announced, so there is
+            // no tab to close and no dot to dim. A log line, the way a refused spawn's
+            // `PaneError` is one.
+            Message::ToolError { project_id, error } => {
+                tracing::error!("tool for project {project_id:?} was not run: {error}");
+            }
+
+            // What a harness offers, for whichever start form asked. Dropped unless it matches
+            // the form's harness *and* identity as they stand now: a probe is slow exactly once
+            // and a slow answer for a harness the user has since changed away from would
+            // overwrite the fresh one it arrived behind.
+            Message::HarnessCatalogue {
+                agent_type,
+                account,
+                models,
+                last_model,
+                last_thinking,
+            } => {
+                let definition_model = self
+                    .new_agent_form()
+                    .and_then(|form| form.model.clone())
+                    .filter(|it| !it.is_empty());
+                let definition_thinking = self
+                    .new_agent_form()
+                    .and_then(|form| form.thinking.clone())
+                    .filter(|it| !it.is_empty());
+                if let Some(form) = self.new_agent_form_mut()
+                    && form.agent_type == agent_type
+                    && form.account == account
+                {
+                    // Preselection, in order of how much it knows: what the form was opened
+                    // holding, then what this harness was last launched with, then the harness's
+                    // own default.
+                    let model = definition_model
+                        .or_else(|| (!last_model.is_empty()).then(|| last_model.clone()))
+                        .or_else(|| models.iter().find(|it| it.default).map(|it| it.id.clone()))
+                        .filter(|id| models.iter().any(|it| it.id == *id));
+                    let thinking = definition_thinking
+                        .or_else(|| (!last_thinking.is_empty()).then(|| last_thinking.clone()))
+                        .or_else(|| {
+                            model.as_ref().and_then(|id| {
+                                models
+                                    .iter()
+                                    .find(|it| it.id == *id)
+                                    .and_then(|it| it.default_level.clone())
+                            })
+                        });
+                    form.models = models;
+                    form.probing = false;
+                    form.model = model;
+                    form.thinking = thinking;
+                }
+                cx.notify();
+            }
+
+            // What the host made of a typed command. Kept on the login modal, and only while it
+            // is still on the harness that was asked about — an answer about the old pick would
+            // read as an answer about the new one.
+            Message::AgentCommandChecked {
+                agent_type,
+                ok,
+                detail,
+            } => {
+                if let Some(login) = &mut self.workbench.settings.login
+                    && let LoginStep::Choosing {
+                        agent_type: Some(chosen),
+                    } = &login.step
+                    && *chosen == agent_type
+                {
+                    login.command_check = Some((ok, detail));
+                }
+                cx.notify();
+            }
+
+            // The ACP registry as this machine sees it. The host re-offers the added agents after
+            // a check and broadcasts `AgentTypes` itself.
+            Message::AcpRegistryChecked { agents, note } => {
+                let view = &mut self.workbench.settings.acp_registry;
+                view.checking = false;
+                view.agents = Some(agents);
+                view.note = note;
+                cx.notify();
+            }
+            Message::AcpAdapterInstalled { id, ok, detail } => {
+                let view = &mut self.workbench.settings.acp_registry;
+                view.installing.remove(&id);
+                view.installed.insert(id, (ok, detail));
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The account family.
+    /// Replaced whole for the same reason as the two lists above: the host's answer is
+    /// the set of identities, and one deleted elsewhere has to leave the screen.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_account(
+        &mut self,
+        host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::Accounts { accounts } => {
+                // Prune whatever `statuses` and `dialog` named that this answer no longer
+                // carries, so a renamed or deleted account cannot leak an entry forever.
+                self.workbench
+                    .settings
+                    .statuses
+                    .retain(|(agent_type, account), _| {
+                        accounts.iter().any(|info| {
+                            info.id == *account && info.logged_in.iter().any(|id| id == agent_type)
+                        })
+                    });
+                // The quota maps are keyed the same way and go stale the same way, so they are
+                // pruned against the same answer.
+                self.workbench
+                    .settings
+                    .quotas
+                    .retain(|(agent_type, account), _| {
+                        // The default identity (empty account) is no catalogue entry, and
+                        // survives every answer.
+                        account.is_empty()
+                            || accounts.iter().any(|info| {
+                                info.id == *account
+                                    && info.logged_in.iter().any(|id| id == agent_type)
+                            })
+                    });
+                self.workbench
+                    .settings
+                    .quota_errors
+                    .retain(|(agent_type, account), _| {
+                        // The default identity (empty account) is no catalogue entry, and
+                        // survives every answer.
+                        account.is_empty()
+                            || accounts.iter().any(|info| {
+                                info.id == *account
+                                    && info.logged_in.iter().any(|id| id == agent_type)
+                            })
+                    });
+                self.workbench.settings.accounts = accounts;
+                // The accounts page is what the answer was asked for: it arrives after the page
+                // is already open, so this is where the readouts are filled rather than in the
+                // open handler, which had no list to walk yet. Cached answers only — a fresh
+                // read is what the refresh control is for.
+                if self.workbench.settings.open
+                    && self.workbench.settings.nav == SettingsSection(ext_ids::HARNESSES)
+                {
+                    self.ask_quotas();
+                }
+                cx.notify();
+            }
+            // How much of one login's plan is left, in answer to one `QueryQuota`. The two
+            // fields are exclusive and each replaces its own entry: a failed refresh writes the
+            // sentence and leaves the last good reading on screen beside it, because a reading
+            // that was true ten minutes ago is still worth more than an empty panel.
+            Message::QuotaRead {
+                account,
+                harness,
+                snapshot,
+                error,
+            } => {
+                let key = (harness, account);
+                match snapshot {
+                    Some(snapshot) => {
+                        self.workbench.settings.quotas.insert(key.clone(), snapshot);
+                        self.workbench.settings.quota_errors.remove(&key);
+                    }
+                    None => {
+                        if let Some(error) = error {
+                            self.workbench.settings.quota_errors.insert(key, error);
+                        }
+                    }
+                }
+                cx.notify();
+            }
+            // The same fact, said without being asked — a running agent pushed a window, or the
+            // host's poll refreshed one. Broadcast to every window, so this is how a surface
+            // showing that account keeps up without polling the host itself.
+            Message::QuotaChanged {
+                account,
+                harness,
+                snapshot,
+            } => {
+                let key = (harness, account);
+                self.workbench.settings.quotas.insert(key.clone(), snapshot);
+                self.workbench.settings.quota_errors.remove(&key);
+                cx.notify();
+            }
+            // The saved setups, replaced whole for the reason the accounts are: the host's
+            // answer is the list. It also closes the form, since an `AgentDefinitions` right after a
+            // `SaveAgentDefinition` is what says the write landed.
+            // Split by scope on arrival rather than at every read: `settings.definitions` is the
+            // global list every surface without a project already draws, and the project-scoped
+            // ones are only ever reached through `definitions_in`.
+            Message::AgentDefinitions { definitions } => {
+                let (scoped, global): (Vec<_>, Vec<_>) =
+                    definitions.into_iter().partition(|it| it.project.is_some());
+                self.workbench.settings.definitions = global;
+                self.workbench.settings.project_definitions = scoped;
+                self.workbench.settings.definition_form = None;
+                self.follow_definition_rename();
+                cx.notify();
+            }
+            // What this build can inject into a harness. Replaced whole, the same way the harness
+            // list is: the host's answer *is* the catalogue, and a server this build no longer
+            // ships has to leave the checklist.
+            Message::Mcps { servers } => {
+                self.workbench.mcps = servers;
+                cx.notify();
+            }
+            // One catalog layer, replaced whole for the reason the definitions are.
+            Message::Catalog {
+                scope,
+                skills,
+                mcps,
+                skill_folders,
+                sources,
+            } => {
+                let layer = crate::state::catalog::CatalogLayer {
+                    skills,
+                    mcps,
+                    skill_folders,
+                    sources,
+                };
+                self.apply_catalog(scope, layer, cx);
+            }
+            Message::SkillSearchResults {
+                query,
+                results,
+                problems,
+            } => self.apply_skill_results(query, results, problems, cx),
+            Message::McpConfigParsed { servers, error } => {
+                self.apply_mcp_parsed(servers, error, cx)
+            }
+            Message::McpRegistryResults {
+                query,
+                servers,
+                next_cursor,
+                error,
+            } => self.apply_registry_results(query, servers, next_cursor, error, cx),
+            Message::CatalogError { error } => self.apply_catalog_error(error, cx),
+            Message::HarnessLoginStarted {
+                pane_id,
+                agent_type,
+                cols,
+                rows,
+            } => {
+                // A login pane belongs to no project, so this is the only place it is ever
+                // recorded as belonging to a host at all.
+                self.bus.note_pane(pane_id, host);
+                self.login_started(pane_id, agent_type, cols, rows, cx);
+            }
+            Message::HarnessHomeSignedIn {
+                agent_type,
+                account,
+            } => {
+                self.login_ended(true, format!("{account} is signed in to {agent_type}."), cx);
+            }
+            Message::HarnessLoginFailed {
+                agent_type,
+                account,
+                error,
+            } => {
+                tracing::info!("sign-in of {account} to {agent_type} did not finish: {error}");
+                self.login_ended(false, error, cx);
+            }
+            Message::HarnessLoginLink { pane_id, url } => {
+                self.login_link(pane_id, url, cx);
+            }
+            Message::HarnessDeviceCode {
+                agent_type,
+                account,
+                verification_url,
+                user_code,
+            } => {
+                self.login_device_code(agent_type, account, verification_url, user_code, cx);
+            }
+            Message::HarnessLoginStatus {
+                agent_type,
+                account,
+                status,
+            } => {
+                self.workbench
+                    .settings
+                    .statuses
+                    .insert((agent_type, account), status);
+                cx.notify();
+            }
+            Message::AccountError { error } => {
+                self.workbench.settings.error = Some(error);
+                // A host that refuses the harness family (a drone) refuses a registry check or
+                // install with this, so neither may be left reading as in flight.
+                self.workbench.settings.acp_registry.checking = false;
+                self.workbench.settings.acp_registry.installing.clear();
+                cx.notify();
+            }
+
+            // The connector family rides here rather than in a family of its own: it answers the
+            // same section's questions and writes the same error field.
+            //
+            // Every flow message is matched against the id the modal holds and discarded
+            // otherwise — the search family's discipline, and the only thing that stops a stage
+            // still in flight from reopening a modal the user has closed.
+            Message::Connections {
+                connections,
+                bundled,
+            } => {
+                self.workbench.settings.bundled = bundled;
+                self.workbench.settings.connection_status = connections
+                    .iter()
+                    .map(|info| (info.connection.id, info.status.clone()))
+                    .collect();
+                self.workbench.settings.host.connections = connections
+                    .into_iter()
+                    .map(|info| info.connection)
+                    .collect();
+                cx.notify();
+            }
+            Message::ConnectPending { connect_id, stage } => {
+                if let Some(connect) = &mut self.workbench.settings.connect
+                    && connect.connect_id == connect_id
+                {
+                    connect.step = match stage {
+                        ConnectStage::Opening => ConnectStep::Opening,
+                        ConnectStage::DeviceCode {
+                            user_code,
+                            verification_url,
+                            expires_in,
+                        } => ConnectStep::DeviceCode {
+                            user_code,
+                            verification_url,
+                            expires_in,
+                        },
+                        ConnectStage::AwaitingCallback { port, url } => {
+                            ConnectStep::AwaitingCallback { port, url }
+                        }
+                        ConnectStage::Exchanging => ConnectStep::Exchanging,
+                        ConnectStage::NeedSecret { prompt } => ConnectStep::NeedSecret { prompt },
+                        ConnectStage::AwaitingCertificate => ConnectStep::AwaitingCertificate,
+                    };
+                    cx.notify();
+                }
+            }
+            Message::ConnectCaptured {
+                connect_id,
+                connection,
+            } => {
+                // The record is written whether or not the modal is still up — a flow the user
+                // walked away from still finished — and only the modal is conditional.
+                let connections = &mut self.workbench.settings.host.connections;
+                let id = connection.connection.id;
+                connections.retain(|existing| existing.id != id);
+                connections.push(connection.connection);
+                self.workbench
+                    .settings
+                    .connection_status
+                    .insert(id, connection.status);
+                if self
+                    .workbench
+                    .settings
+                    .connect
+                    .as_ref()
+                    .is_some_and(|connect| connect.connect_id == connect_id)
+                {
+                    self.workbench.settings.connect = None;
+                    self.workbench.settings.cert = None;
+                }
+                cx.notify();
+            }
+            Message::ConnectFailed { connect_id, error } => {
+                if let Some(connect) = &mut self.workbench.settings.connect
+                    && connect.connect_id == connect_id
+                {
+                    // The fields are left alone: "Try again" is a retry, not a re-type.
+                    connect.step = ConnectStep::Failed { error };
+                    self.workbench.settings.cert = None;
+                    cx.notify();
+                }
+            }
+            Message::ConfirmCertificate {
+                connect_id,
+                origin,
+                cert,
+            } => {
+                if self
+                    .workbench
+                    .settings
+                    .connect
+                    .as_ref()
+                    .is_some_and(|connect| connect.connect_id == connect_id)
+                {
+                    self.workbench.settings.cert = Some(CertPrompt {
+                        connect_id,
+                        origin,
+                        cert,
+                    });
+                    cx.notify();
+                }
+            }
+            Message::ConnectionStatus { connection, status } => {
+                // Patched in place: the answer is about one connection, and replacing the list
+                // would throw away everything the host has not just re-sent.
+                self.workbench
+                    .settings
+                    .connection_status
+                    .insert(connection, status);
+                cx.notify();
+            }
+            Message::ConnectorError { error } => {
+                self.workbench.settings.error = Some(error);
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The search family.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_search(
+        &mut self,
+        _host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::SearchMatches {
+                project_id,
+                search_id,
+                batch,
+            } => {
+                let dominated = self
+                    .search
+                    .active
+                    .as_ref()
+                    .is_some_and(|a| a.search_id == search_id && a.project_id == project_id);
+                if !dominated {
+                    return None;
+                }
+                if let kubiq_proto::search::Batch::Files(file_hits) = batch {
+                    for hit in file_hits {
+                        self.search.total_hits += hit.lines.len();
+                        if let Some(existing) = self
+                            .search
+                            .results
+                            .iter_mut()
+                            .find(|r| r.rel_path == hit.rel_path)
+                        {
+                            existing.hits.extend(hit.lines);
+                            existing.truncated |= hit.truncated;
+                        } else {
+                            self.search.truncated |= hit.truncated;
+                            self.search.results.push(crate::state::search::FileResult {
+                                rel_path: hit.rel_path,
+                                hits: hit.lines,
+                                truncated: hit.truncated,
+                            });
+                        }
+                    }
+                }
+                cx.notify();
+            }
+
+            Message::SearchProgress {
+                project_id,
+                search_id,
+                files_seen,
+            } => {
+                let dominated = self
+                    .search
+                    .active
+                    .as_ref()
+                    .is_some_and(|a| a.search_id == search_id && a.project_id == project_id);
+                if !dominated {
+                    return None;
+                }
+                self.search.files_seen = files_seen;
+                cx.notify();
+            }
+
+            Message::SearchFinished {
+                project_id,
+                search_id,
+                searched: _,
+                truncated,
+            } => {
+                let dominated = self
+                    .search
+                    .active
+                    .as_ref()
+                    .is_some_and(|a| a.search_id == search_id && a.project_id == project_id);
+                if !dominated {
+                    return None;
+                }
+                self.search.truncated |= truncated;
+                self.search.finished = true;
+                self.search.active = None;
+                cx.notify();
+            }
+
+            Message::SearchError {
+                project_id,
+                search_id,
+                error,
+            } => {
+                let dominated = self
+                    .search
+                    .active
+                    .as_ref()
+                    .is_some_and(|a| a.search_id == search_id && a.project_id == project_id);
+                if !dominated {
+                    return None;
+                }
+                self.search.error = Some(error);
+                self.search.finished = true;
+                self.search.active = None;
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// The assist family: whether assistance can run, what one asked-for suggestion came back
+    /// with, and what the host holds for the configured API providers.
+    ///
+    /// Nothing here names a pane, so the family is routed by its variants alone. `Assist` is the
+    /// host's standing answer and is simply kept — a window that has not been told yet draws
+    /// "checking" rather than "unavailable". A suggestion, whole or in chunks, is matched against
+    /// the id the interface is waiting on and discarded otherwise, the search family's discipline
+    /// and for its reason: an answer to a request nobody is waiting for has nowhere to be put.
+    ///
+    /// The provider list arrives here too, and is kept beside the host record rather than in it:
+    /// `ai_providers` on the settings blob is host-mutated, and `has_key` is an answer about a
+    /// record rather than part of one.
+    ///
+    /// Answers with the message when it belongs to another family.
+    fn receive_assist(
+        &mut self,
+        _host: HostRef,
+        message: Message,
+        cx: &mut Context<Self>,
+    ) -> Option<Message> {
+        match message {
+            Message::Assist {
+                available,
+                reason,
+                detail,
+                limits,
+            } => {
+                self.workbench.settings.assist = Some(AssistInfo {
+                    available,
+                    reason,
+                    detail,
+                    limits,
+                });
+                cx.notify();
+            }
+
+            Message::Suggestion { suggest_id, text } => {
+                if self.suggest != Some(suggest_id) {
+                    return None;
+                }
+                tracing::debug!("suggestion for {suggest_id}: {} bytes", text.len());
+                self.suggest = None;
+                // A title written for a card that was created without one goes straight onto the
+                // task; nothing draws it on the way, because there is no field open to draw it in.
+                if self.settle_task_title(suggest_id, &text) {
+                    cx.notify();
+                    return None;
+                }
+                // The whole answer replaces whatever the chunks drew. They concatenate to exactly
+                // this text, so a backend that streamed is not redrawn and one that did not gets
+                // its answer here.
+                if let Some(test) = &mut self.workbench.settings.ai_test
+                    && test.suggest_id == Some(suggest_id)
+                {
+                    test.answer = text;
+                    test.done = true;
+                    test.suggest_id = None;
+                }
+                cx.notify();
+            }
+
+            // Part of an answer, as it arrives. Filtered against the id in flight exactly as the
+            // whole answer is, then appended — a first token on screen instead of a spinner.
+            Message::SuggestChunk { suggest_id, text } => {
+                if self.suggest != Some(suggest_id) {
+                    return None;
+                }
+                if let Some(test) = &mut self.workbench.settings.ai_test
+                    && test.suggest_id == Some(suggest_id)
+                {
+                    test.answer.push_str(&text);
+                }
+                cx.notify();
+            }
+
+            Message::SuggestError { suggest_id, error } => {
+                if self.suggest != Some(suggest_id) {
+                    return None;
+                }
+                tracing::warn!("suggestion {suggest_id} failed: {error}");
+                self.suggest = None;
+                // A title that could not be written is not an error the user asked about: the card
+                // keeps the stand-in cut from its own description, which is what it is already
+                // showing.
+                if self.task_naming.is_some_and(|(id, _, _)| id == suggest_id) {
+                    self.task_naming = None;
+                    return None;
+                }
+                // Chunks already drawn are not a partial answer: they go with the failure.
+                if let Some(test) = &mut self.workbench.settings.ai_test
+                    && test.suggest_id == Some(suggest_id)
+                {
+                    test.answer.clear();
+                    test.error = Some(error);
+                    test.done = true;
+                    test.suggest_id = None;
+                }
+                cx.notify();
+            }
+
+            Message::AiProviders { providers } => {
+                self.workbench.settings.ai_providers = providers;
+                cx.notify();
+            }
+
+            // Kept per provider, because the form's two pickers read the list for the provider
+            // they are editing and nothing else. `refreshed` is only worth a line in the log: the
+            // note under the pickers reads the list's own timestamp.
+            Message::AiModels { list, refreshed } => {
+                tracing::debug!(
+                    "{} models for {} ({})",
+                    list.models.len(),
+                    list.provider_id,
+                    if refreshed { "listed" } else { "cached" }
+                );
+                self.workbench
+                    .settings
+                    .ai_models
+                    .insert(list.provider_id, list);
+                cx.notify();
+            }
+
+            // One line for the assistance section's banner. Nothing was changed on the way to
+            // failing, so there is no list to put back and no dialog to reopen.
+            Message::AiProviderError { provider_id, error } => {
+                tracing::warn!("provider {provider_id:?} refused: {error}");
+                self.workbench.settings.error = Some(error);
+                cx.notify();
+            }
+
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// One path in one project was created, moved, copied or removed.
+    ///
+    /// The request is echoed whole, because the answer arrives long after the click and what to do
+    /// with it is the gesture's: a created file is opened, a moved one takes its tabs with it, a
+    /// removed one closes them. The tabs are settled before anything is re-listed, so a tab on its
+    /// way out is not re-read on the way past.
+    fn path_edited(
+        &mut self,
+        project_id: ProjectId,
+        rel_path: String,
+        to: Option<String>,
+        op: PathOp,
+        cx: &mut Context<Self>,
+    ) {
+        let below = format!("{rel_path}/");
+        let under = |path: &str| path == rel_path || path.starts_with(&below);
+
+        match op {
+            // A tab follows the file it is looking at: the bytes did not move, only the name did,
+            // and re-reading would risk whatever has been typed since.
+            PathOp::Move => {
+                if let Some(to) = &to {
+                    let moved: Vec<(String, String)> = self
+                        .projects
+                        .get(&project_id)
+                        .map(|open| {
+                            open.editor
+                                .open
+                                .iter()
+                                .filter(|file| !file.guest && under(&file.path))
+                                .map(|file| {
+                                    (file.key(), format!("{to}{}", &file.path[rel_path.len()..]))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    for (key, path) in moved {
+                        self.retarget_editor_tab(project_id, &key, &path, cx);
+                    }
+                }
+            }
+            // Nothing is left to draw, and a dirty tab is asked about rather than dropped — which
+            // is `close_editor_tab`'s rule, kept here too.
+            PathOp::Trash | PathOp::Delete => {
+                if self.project(cx) == Some(project_id) {
+                    let doomed: Vec<usize> = self
+                        .projects
+                        .get(&project_id)
+                        .map(|open| {
+                            (0..open.editor.open.len())
+                                .filter(|&ix| under(&open.editor.open[ix].path))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    self.close_editor_tabs_filtered(|ix, _| doomed.contains(&ix), cx);
+                }
+            }
+            PathOp::Create { .. } | PathOp::Copy => {}
+        }
+
+        // What a Copy remembered is only worth remembering while it is still there.
+        if let Some(open) = self.projects.get_mut(&project_id)
+            && let Some(copied) = open.explorer.copied.as_deref()
+            && matches!(op, PathOp::Move | PathOp::Trash | PathOp::Delete)
+            && under(copied)
+        {
+            open.explorer.copied = None;
+        }
+
+        // The watch would get here on its own; asking now is what makes the gesture feel finished.
+        // Only a folder the tree already holds, the same guard the watch's own handler uses: a
+        // listing for one it does not know is thrown away by `merge` anyway.
+        let mut dirs: Vec<String> = vec![explorer::parent_dir(&rel_path)];
+        if let Some(to) = &to {
+            let other = explorer::parent_dir(to);
+            if !dirs.contains(&other) {
+                dirs.push(other);
+            }
+        }
+        for dir in dirs {
+            let listed = self
+                .projects
+                .get(&project_id)
+                .is_some_and(|open| open.explorer.is_folder_listed(&dir));
+            if !listed {
+                continue;
+            }
+            if let Some(open) = self.projects.get_mut(&project_id) {
+                open.explorer.set_loading(&dir, true);
+            }
+            self.bus.send(Message::ProjectTree {
+                project_id,
+                rel_path: dir,
+                depth: EXPAND_DEPTH,
+                prefetch: false,
+            });
+        }
+
+        // A new file opens where the user made it. A new folder has nothing to open.
+        if matches!(op, PathOp::Create { dir: false }) && self.project(cx) == Some(project_id) {
+            self.select_file(rel_path, cx);
+        }
+
+        // An edit changes the working tree, the same as a save does.
+        self.request_git_refresh(project_id);
+        cx.notify();
+    }
+
+    /// Files from outside the project landed in `into` — a drop or a paste of files another
+    /// application copied.
+    ///
+    /// The folder is re-listed so the new rows are there before the watch would bring them, and
+    /// the keyboard goes to the first one that landed, which is what makes the gesture read as
+    /// finished. A source that did not land has no row to be marked on, so it is said in the log.
+    fn paths_imported(
+        &mut self,
+        project_id: ProjectId,
+        into: String,
+        imported: Vec<String>,
+        failed: Vec<(String, String)>,
+        cx: &mut Context<Self>,
+    ) {
+        for (source, reason) in &failed {
+            tracing::warn!("{source} was not brought into {into:?}: {reason}");
+        }
+        let listed = self
+            .projects
+            .get(&project_id)
+            .is_some_and(|open| open.explorer.is_folder_listed(&into));
+        if listed {
+            if let Some(open) = self.projects.get_mut(&project_id) {
+                open.explorer.set_loading(&into, true);
+            }
+            self.bus.send(Message::ProjectTree {
+                project_id,
+                rel_path: into,
+                depth: EXPAND_DEPTH,
+                prefetch: false,
+            });
+        }
+        if let Some(first) = imported.first()
+            && let Some(open) = self.projects.get_mut(&project_id)
+        {
+            open.explorer.set_cursor(first);
+        }
+        if !imported.is_empty() {
+            self.request_git_refresh(project_id);
+        }
+        cx.notify();
+    }
+
+    /// One path in one project failed.
+    ///
+    /// A tab waiting for bytes says why instead of sitting empty; a folder waiting for a listing
+    /// stops spinning. A folder or a file that has gone is the cue to look at the project's own
+    /// health again — the worker that answered does not know the catalogue and cannot say.
+    ///
+    /// A refused *write* is the one that gets a modal. The buffer still holds the edits, and the
+    /// dot on the tab was never able to say that the file on disk is not what is on screen — the
+    /// next keystroke even cleared it. Where the refusal has an answer to offer, the modal asks it
+    /// instead of reporting: a write that named no version and landed on something already there
+    /// means the path is taken, which only the user can settle.
+    /// The open tab a guest write's answer belongs to, if its tab is still open.
+    ///
+    /// `Message::HostFileWritten`/`Message::HostFileError` carry no project id — a guest file
+    /// belongs to no project — so every project this window holds is searched for the tab
+    /// `OpenFile::guest` and this path name, on `open_guest_file`'s own reasoning for why the tab
+    /// key can be the absolute path safely. A closed tab finds nothing, and the answer is dropped
+    /// the same as any other stale arrival.
+    fn guest_file_mut(&mut self, path: &str) -> Option<&mut OpenFile> {
+        self.projects.values_mut().find_map(|open| {
+            open.editor
+                .open
+                .iter_mut()
+                .find(|file| file.guest && file.path == path)
+        })
+    }
+
+    fn file_failed(
+        &mut self,
+        project: ProjectId,
+        rel_path: String,
+        error: FileError,
+        cx: &mut Context<Self>,
+    ) {
+        let reason = describe(&error);
+        tracing::warn!("{project} {rel_path}: {reason}");
+
+        // Two readers of a refusal that have no tab behind them, so neither is reachable by the
+        // editor walk below: the pasted picture whose chip went up before its write was answered,
+        // and the attachment preview, which would otherwise say `Reading…` for as long as it is
+        // up. Both are still worth telling the ordinary path about — a pasted picture can be open
+        // in a tab too.
+        self.pasted_write_settled(project, &rel_path, Some(&reason), cx);
+        self.fail_attachment_preview(project, &rel_path, &reason);
+
+        let mut question = None;
+        let mut cache_freed = false;
+        let mut reread = false;
+        let mut continue_failure = true;
+        if let Some(open) = self.projects.get_mut(&project) {
+            open.explorer.set_loading(&rel_path, false);
+            cache_freed = open.explorer.cache_answered(&rel_path);
+            open.wanted.retain(|wanted| wanted != &rel_path);
+            if let Some(file) = open.editor.find_mut(&rel_path) {
+                match file.is_loading() {
+                    // The read never landed, so the tab has nothing but the reason.
+                    true => file.set_failed(reason.clone()),
+                    // A write failed against a buffer the user still has: it is untouched, and
+                    // still dirty.
+                    false => {
+                        // A markdown tab's save over a file that moved is no question at all
+                        // (`D208`): the file is read again, merged into the buffer, and the save
+                        // goes again from there.
+                        file.follow = false;
+                        if file.is_saving()
+                            && matches!(error, FileError::Conflict)
+                            && file.follows_disk()
+                        {
+                            file.retry_after_merge();
+                            reread = true;
+                            continue_failure = false;
+                        } else if file.is_saving() {
+                            let key = file.key();
+                            // No version to name means the write was a creation, so a conflict
+                            // means the path is taken — the one refusal with a question in it.
+                            question = Some(match (&error, file.version()) {
+                                (FileError::Conflict, None) => FileDialog::OverwriteFile { key },
+                                _ => FileDialog::SaveFailed {
+                                    key,
+                                    reason: reason.clone(),
+                                },
+                            });
+                        }
+                        if continue_failure {
+                            file.save_failed(reason.clone());
+                        }
+                    }
+                }
+            }
+        }
+        if reread {
+            self.bus.send(Message::ReadProjectFile {
+                project_id: project,
+                rel_path: rel_path.clone(),
+                max_bytes: Some(MAX_FILE_BYTES),
+            });
+        }
+        if let Some(dialog) = question {
+            self.workbench.file_dialog = Some(dialog);
+        }
+        // A failed cache listing frees its slot like an answered one, or the crawl would stall.
+        if cache_freed {
+            self.fill_explorer_cache(project);
+        }
+
+        if matches!(error, FileError::Missing | FileError::Denied(_)) {
+            self.send_record(Message::RefreshProject {
+                project_id: project,
+            });
+        }
+        cx.notify();
+    }
+
+    /// A pane's harness has stopped, wherever the pane is: the tab's dot reports it.
+    fn pane_stopped(&mut self, pane_id: PaneId) {
+        for open in self.projects.values_mut() {
+            if let Some(pane) = open.panes.iter_mut().find(|pane| pane.id == pane_id) {
+                pane.running = false;
+                return;
+            }
+        }
+    }
+
+    /// Whether the pane runs a tool with "wait on exit": the exit closes the process, not the tab.
+    fn pane_wait_on_exit(&self, pane_id: PaneId) -> bool {
+        self.projects
+            .values()
+            .flat_map(|open| open.panes.iter())
+            .any(|pane| pane.id == pane_id && pane.wait_on_exit)
+    }
+
+    /// Whether the pane runs a tool with "wait on error": the exit closes the process, not the
+    /// tab, only when the process ended with a non-zero status.
+    fn pane_wait_on_error(&self, pane_id: PaneId) -> bool {
+        self.projects
+            .values()
+            .flat_map(|open| open.panes.iter())
+            .any(|pane| pane.id == pane_id && pane.wait_on_error)
+    }
+
+    /// Draw a workspace the coordinator started: a tab, and an emulator on the pane's stream.
+    ///
+    /// The workspace names its project, which is what makes an answer that arrives after the user
+    /// has switched projects land in the right place rather than on screen.
+    /// Build the emulator for `pane_id` and register it, without deciding where it is drawn.
+    ///
+    /// This is everything a pane *is* on the interface's side: a byte stream in, a byte
+    /// stream out, and a geometry callback that tells the host what the emulator measured.
+    /// Where it appears is a separate question, which is why this is separate from
+    /// [`open_pane`](Self::open_pane) — a login runs in a pane that belongs to no project and
+    /// is drawn in a modal rather than the dock, and it needs all of this and none of that.
+    pub(super) fn open_terminal(
+        &mut self,
+        pane_id: PaneId,
+        cols: u16,
+        rows: u16,
+        font_size: f32,
+        cx: &mut Context<Self>,
+    ) {
+        let (output, reader) = bus::pane_output();
+        let writer = self.bus.input(pane_id);
+        // A second write half for the key handler, which runs behind an `Fn` and so cannot hold
+        // the emulator's own. It is the same pane's stream: bytes out, nothing local named.
+        let paste_input = std::cell::RefCell::new(self.bus.input(pane_id));
+        let config = ui::terminal::config(cols, rows, font_size);
+
+        let to_host = self.bus.sender();
+        let geometry = self.geometry.clone();
+        let app = cx.entity().downgrade();
+        let app_title = app.clone();
+        let view = cx.new(|cx| {
+            TerminalView::new(writer, reader, config, cx)
+                .with_resize_callback(move |cols, rows| {
+                    let (cols, rows) = (cols as u16, rows as u16);
+                    to_host.send(Message::TerminalResize {
+                        pane_id,
+                        cols,
+                        rows,
+                    });
+                    let _ = geometry.send((pane_id, cols, rows));
+                })
+                .with_key_handler(move |event, window, cx| {
+                    // A paste with an image on the board belongs to the harness, not to the
+                    // editor: the window's own paste binding is suppressed in the terminal's
+                    // key context, and this is what the chord means once it arrives.
+                    if let Some(bytes) = super::clipboard::terminal_paste_bytes(
+                        &event.keystroke,
+                        super::clipboard::clipboard_image(cx).is_some(),
+                    ) {
+                        let _ = paste_input.borrow_mut().write_all(&bytes);
+                        return true;
+                    }
+                    if !is_terminal_defocus(&event.keystroke) {
+                        return false;
+                    }
+                    window.blur(cx);
+                    let _ = app.update(cx, |app, cx| app.blur_panes(cx));
+                    true
+                })
+                .with_title_callback(move |_window, cx, title| {
+                    let title = title.to_string();
+                    let _ =
+                        app_title.update(cx, |app, cx| app.pane_title_reported(pane_id, title, cx));
+                })
+        });
+
+        self.terminals.insert(
+            pane_id,
+            PaneTerminal {
+                view,
+                output: Some(output),
+            },
+        );
+    }
+
+    fn open_pane(&mut self, workspace: WorkspaceInfo, cx: &mut Context<Self>) {
+        let pane_id = workspace.id;
+        let project = workspace.project_id;
+        // A harness pane's handle is the host's, minted over the same namespace as its
+        // conversations (T-291). Only a shell, a tool or an older host's pane is named here.
+        let handle = workspace
+            .handle
+            .clone()
+            .unwrap_or_else(|| self.local_pane_handle(&workspace));
+
+        // A pane for a project this window no longer holds has nowhere to be drawn, and a harness
+        // nobody can see is a leak: it is closed rather than kept.
+        if !self.projects.contains_key(&project) {
+            tracing::info!("pane {pane_id} arrived for a project this window no longer holds");
+            self.bus.send(Message::CloseWorkspace { pane_id });
+            return;
+        }
+        let showing = self.project(cx) == Some(project);
+
+        let term_font = theme::content_base();
+        self.open_terminal(pane_id, workspace.cols, workspace.rows, term_font, cx);
+
+        if let Some(open) = self.projects.get_mut(&project) {
+            open.panes.push(PaneState {
+                id: pane_id,
+                harness: workspace.agent_type,
+                rows: workspace.rows,
+                cols: workspace.cols,
+                handle,
+                title: None,
+                running: workspace.running,
+                wait_on_exit: workspace.wait_on_exit,
+                wait_on_error: workspace.wait_on_error,
+                tool: workspace.tool,
+            });
+            // A pane in a background project becomes that project's focused one only if it had
+            // none: the keyboard belongs to whatever is on screen.
+            if showing || open.focused_pane.is_none() {
+                open.focused_pane = Some(pane_id);
+            }
+        }
+        // The pane's panel joins the region terminals live in. It is queued rather than added
+        // here: a panel reaches the dock through a `Window`, and a message does not come with one.
+        self.pending_panels
+            .push(PanelEdit::Open(PanelKind::Terminal(pane_id)));
+
+        if showing {
+            self.pending_focus = Some(pane_id);
+            self.bus.send(Message::Focus { pane_id });
+        }
+        cx.notify();
+    }
+
+    /// The handle for a pane the host did not name — a shell, a tool, a drone's pane, an older
+    /// host's — on the host's own scheme, skipping every handle in the project, panes' and
+    /// conversations' both.
+    fn local_pane_handle(&self, workspace: &WorkspaceInfo) -> String {
+        let taken: Vec<String> = self
+            .projects
+            .get(&workspace.project_id)
+            .map(|open| {
+                open.panes
+                    .iter()
+                    .map(|pane| pane.handle.clone())
+                    .chain(open.work.agents.iter().map(|agent| agent.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // A harness is named after the command it runs (`claude`), as the host names its
+        // conversations; a shell or a tool after itself.
+        let program = self
+            .workbench
+            .agent_types
+            .iter()
+            .find(|agent| agent.id == workspace.agent_type)
+            .map(|agent| agent.command.clone())
+            .unwrap_or_else(|| workspace.agent_type.clone());
+        pane_title(&program, &taken)
+    }
+
+    /// Give the keyboard to whoever asked for it. Focus needs a window, so it waits for one.
+    ///
+    /// Only a pane is ever owed it here. Every other panel takes the keyboard from the dock, which
+    /// focuses whatever panel it has just displayed.
+    pub(super) fn take_focus(&mut self, window: &mut Window, cx: &mut App) {
+        let Some(pane_id) = self.pending_focus.take() else {
+            return;
+        };
+        self.pending_editor_focus = None;
+        let Some(terminal) = self.terminals.get(&pane_id) else {
+            // The turn is taken above whether or not there is anything to give it
+            // to, so a pane whose terminal has not arrived loses the keyboard
+            // silently. Saying so is the difference between that and a pane that
+            // was focused and still hears nothing.
+            tracing::warn!(%pane_id, "focus asked for a pane with no terminal");
+            return;
+        };
+        let handle = terminal.view.read(cx).focus_handle().clone();
+        handle.focus(window, cx);
+        tracing::debug!(
+            %pane_id,
+            focused = handle.is_focused(window),
+            "pane focused"
+        );
+    }
+
+    /// Give the keyboard to the editor the last active file panel asked for.
+    ///
+    /// Focus needs a window, so this waits for the frame like [`Self::take_focus`] does — and it
+    /// needs the file's buffer, which may still be arriving, so a file whose editor has no bytes
+    /// yet keeps its turn until it does.
+    pub(super) fn take_editor_focus(&mut self, window: &mut Window, cx: &mut App) {
+        let Some(key) = self.pending_editor_focus.clone() else {
+            return;
+        };
+        let Some(project) = self.project(cx) else {
+            return;
+        };
+        let Some(open) = self.projects.get_mut(&project) else {
+            return;
+        };
+        let Some(file) = open.editor.active_file() else {
+            return;
+        };
+        if file.key() != key {
+            return;
+        }
+        // Nothing in the tab body to focus — Markdown/Mermaid showing only their preview,
+        // Excalidraw's scene — hands the keyboard to the workbench root instead. Focusing the
+        // buffer's `InputState` here anyway would leave the window's focus on a node this frame
+        // never painted; GPUI's key dispatch then falls back to the window's own root, which
+        // carries none of the app's key contexts, and the whole "Workbench" context — including
+        // `CloseEditor` — goes unreachable until something else takes focus.
+        if !file.viewer.shows_buffer(file.layout) {
+            self.pending_editor_focus = None;
+            // A markdown preview takes the keyboard itself, so Cmd+F works without a click.
+            let md = file.md.clone().filter(|_| {
+                matches!(
+                    file.layout,
+                    crate::state::editor::ViewLayout::Preview
+                        | crate::state::editor::ViewLayout::Annotation
+                )
+            });
+            match md {
+                Some(md) => {
+                    let handle = gpui::Focusable::focus_handle(md.read(cx), cx);
+                    handle.focus(window, cx);
+                }
+                None => self.workbench_focus.focus(window, cx),
+            }
+            return;
+        }
+        let editor = match &file.body {
+            crate::state::FileBody::Text { state, .. } => state.clone(),
+            _ => return,
+        };
+        self.pending_editor_focus = None;
+        editor.read(cx).focus_handle(cx).focus(window, cx);
+    }
+
+    // ── Workbench chrome ────────────────────────────────────────────
+}

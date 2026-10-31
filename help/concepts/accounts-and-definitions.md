@@ -15,8 +15,8 @@ its own service. You can keep several, and choose one each time you start an age
 same harness can then run side by side under different accounts, a personal one and a work one for
 example, and their usage stays apart.
 
-An account points at a credential and never holds it. Ubiq stores no password or token for you: the
-harness keeps its own login, and Ubiq only records which identity to run it under. When an agent's
+An account points at a credential and never holds it. Kubiq stores no password or token for you: the
+harness keeps its own login, and Kubiq only records which identity to run it under. When an agent's
 account resolves to nothing, it runs under your own home configuration, and its info panel says so.
 [Accounts](agents-accounts) covers choosing one.
 
@@ -28,6 +28,6 @@ saved setups and a **Customize** button for changing one for a single start.
 ## Why it works this way
 
 Keeping identity and configuration separate lets you combine them freely: the same agent definition under
-two accounts, or one account used with several agent definitions. Keeping credentials out of Ubiq means
+two accounts, or one account used with several agent definitions. Keeping credentials out of Kubiq means
 signing in, signing out and revoking access all happen where the harness already does them, which
 is part of [keeping your machine yours](philosophy-your-machine).

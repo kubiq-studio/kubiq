@@ -28,7 +28,7 @@ pub struct McpEntry   { pub id: String, pub def: McpServer /* transport, cmd, en
 registry; a missing id (mcp, skill, account, or hook — the same rule across all four lookups) is
 **dropped** rather than failing the run, and a line naming it plus its near matches lands on
 `RunSpec::problems` instead. The CLI prints each as a `warning:` on stderr; a lib-mode embedder
-reads `problems` off the resolved spec and decides how loud to be — Ubiq surfaces it as a
+reads `problems` off the resolved spec and decides how loud to be — Kubiq surfaces it as a
 dismissable notification. `--mcp-as-skill` naming an id outside the run's own injected set, and
 `--safe` naming a preset that does not exist, are still hard errors: both are a flag misused at
 the call site, not a stale reference living in a saved profile.
@@ -151,7 +151,7 @@ A dangling `[[skill]]` or `[[skill_dir]]` (folder gone) is skipped. Dot-prefixed
 `Registry` is read-only. `CatalogStore: Registry` (`registry/manage.rs`) is the write side:
 `link_skill`, `add_skill_dir` / `remove_skill_dir` / `skill_dirs`, `install_skill`, `remove_skill`,
 `put_mcp`, `remove_mcp`, `skill_sources` / `set_skill_sources`. `FsRegistry` implements it and is the
-override point: Ubiq uses one `FsRegistry` per layer, an embedder may bring its own store.
+override point: Kubiq uses one `FsRegistry` per layer, an embedder may bring its own store.
 
 - Ids are `[A-Za-z0-9._-]+` (`registry::valid_id`); anything else is rejected.
 - `catalog.toml` is rewritten through a `toml::Table` (only the edited array changes) and a temp

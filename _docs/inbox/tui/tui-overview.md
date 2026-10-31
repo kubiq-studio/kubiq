@@ -4,7 +4,7 @@ title: The TUI proposal set — how to read it
 kind: inbox
 status: proposal
 summary: "The map of the terminal-interface proposal documents under `inbox/tui/` — the two seeds a branch brought in (a ratatui front end, and many interfaces on one host), re-homed here and renumbered against the current register, and the three new documents that score the workbench's nine modes against a terminal, lay out a first-release scope, and map which widget crate each screen buys. Also carries the delta: what the current tree settled since the seeds were written."
-read_when: you are deciding whether Ubiq gets a second front end, or you are looking for where the terminal-interface proposal work lives and what it assumes
+read_when: you are deciding whether Kubiq gets a second front end, or you are looking for where the terminal-interface proposal work lives and what it assumes
 updated: 2026-09-24
 depends_on: [inbox-tui, inbox-multi-attach]
 ---
@@ -13,7 +13,7 @@ depends_on: [inbox-tui, inbox-multi-attach]
 
 ## Purpose
 
-This folder is home to the proposal that Ubiq gets a second interface: a terminal one, drawn with
+This folder is home to the proposal that Kubiq gets a second interface: a terminal one, drawn with
 ratatui, that attaches to a host as an ordinary client — when the desktop is not the machine the
 hosts run on, which for anyone over SSH is most of the time. Two of the documents came in from the
 branch `claude/ratatui-tui-proposal-vy3x3c`; this folder exists to give that work a current-tree
@@ -50,17 +50,17 @@ and are placed here with three edits only:
 3. **`updated` restamped; `depends_on` verified against current ids.**
 
 No seed prose was rewritten. Every path the seeds describe was re-verified to exist on 2026-09-24 —
-`crates/ubiq-proto/src/bus.rs` still mints a client per attachment and `bus::detached` still exists,
-`crates/ubiq-proto/src/wire.rs` still frames length-prefixed MessagePack, the coordinator still keys
+`crates/kubiq-proto/src/bus.rs` still mints a client per attachment and `bus::detached` still exists,
+`crates/kubiq-proto/src/wire.rs` still frames length-prefixed MessagePack, the coordinator still keys
 its maps by `ClientId` and reaps on `client_gone`, the conversation fold is still window-side state
-in `crates/ubiq/src/state/conversation.rs`, and ratatui 0.30 still resolves through the harness
+in `crates/kubiq/src/state/conversation.rs`, and ratatui 0.30 still resolves through the harness
 library's TUI stub in `crates/agent-manager/src/tui.rs`. What the seeds propose as *unbuilt* is
 still unbuilt, which is the point of a proposal.
 
 ## What the current tree settled since the seeds
 
 - **The windowless build already exists.** `D162` made the GPUI interface a cargo feature `ui`,
-  default-on; `--no-default-features` builds a console-only Ubiq — same host, same `--serve` — and
+  default-on; `--no-default-features` builds a console-only Kubiq — same host, same `--serve` — and
   `just headless` asserts no GPUI crate is in its tree. The seed's §7 "three shapes" is half-built:
   the *no-window* half is done and has nothing to run, and the terminal interface is what would run
   there. A `tui` feature and a second binary target slot onto what exists; the seed's talk of adding

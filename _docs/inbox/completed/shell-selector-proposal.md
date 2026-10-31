@@ -12,11 +12,11 @@ depends_on: [feat-panes, feat-logs, tech-transport]
 # Proposal — OS-aware shell selector on the new-pane control
 
 **Today the "+" on the bottom region's tab bar does one thing: it opens `$SHELL` with no args.**
-`NewPane.run` (`crates/ubiq/src/ui/dock/skin.rs:57`) calls `spawn_pane(None, Vec::new(), cx)`
-(`crates/ubiq/src/app/wire.rs`), which sends `SpawnWorkspace { agent_type: None, .. }`. The
+`NewPane.run` (`crates/kubiq/src/ui/dock/skin.rs:57`) calls `spawn_pane(None, Vec::new(), cx)`
+(`crates/kubiq/src/app/wire.rs`), which sends `SpawnWorkspace { agent_type: None, .. }`. The
 coordinator resolves `None` to `shells::default_program()` — `$SHELL`, or `/bin/sh` — and that is the only program a pane has ever been
 started with from the UI; `agent_type: Some(..)` exists on the message and is exercised only by
-`crates/ubiq-host/tests/coordinator.rs`. There is no way, today, to open a pane running a shell other
+`crates/kubiq-host/tests/coordinator.rs`. There is no way, today, to open a pane running a shell other
 than the user's default one.
 
 Separately, a defect in how that default shell is spawned means most users hit broken shell
@@ -27,12 +27,12 @@ program if the pane spawn path itself did not run each one as its platform expec
 ## Motivation
 
 **The current spawn is not a login shell, so PATH-setting init is silently skipped.** Both
-`pty::spawn` (`crates/ubiq-host/src/pty/mod.rs:49`) and the coordinator's default built the shell with
+`pty::spawn` (`crates/kubiq-host/src/pty/mod.rs:49`) and the coordinator's default built the shell with
 `CommandBuilder::new(program)`. In `portable-pty` 0.9.0, only `CommandBuilder::new_default_prog()`
 takes the branch that prefixes argv0 with `-` (`cmdbuilder.rs:510-517` in the vendored crate source);
 `new(program)` always takes the plain branch. A non-login zsh/bash never sources `.zprofile` /
 `.zlogin` — where Homebrew's `shellenv` and most `pyenv`/`starship`/`nvm` PATH setup lives — so tools
-that are genuinely installed are reported as `command not found` inside Ubiq's panes and work fine in
+that are genuinely installed are reported as `command not found` inside Kubiq's panes and work fine in
 Terminal.app/iTerm. This is a correctness bug independent of the selector, filed in
 [`embedded-shell-env-note.md`](./embedded-shell-env-note.md).
 
@@ -42,7 +42,7 @@ of the default PowerShell pane, has no path to that today short of typing `bash`
 that is already running — which starts a nested, not a fresh, shell.
 
 **The console panel opens on every window whether or not anyone asked for it.**
-`default_layout()` (`crates/ubiq/src/ui/dock/mod.rs:485`) builds `PanelKind::Logs` and installs it in
+`default_layout()` (`crates/kubiq/src/ui/dock/mod.rs:485`) builds `PanelKind::Logs` and installs it in
 the bottom region unconditionally, alongside the centre, explorer and chat panels. This is documented,
 current, deliberate behaviour — [`feat-logs`](../../features/logs.md) states plainly: *"It is always
 present and is never closed... It is drawn in every rail mode and with no project open, which is the
@@ -72,9 +72,9 @@ there. This step alone already fixes the errors in
 
 **3. A small chevron (`v`) sits beside the "+", opening a menu of what else can be spawned here.**
 Reuse the one dropdown mechanism the window already has —
-[`crates/ubiq/src/ui/kit/menu.rs`](../../../crates/ubiq/src/ui/kit/menu.rs), the same trigger-plus-
+[`crates/kubiq/src/ui/kit/menu.rs`](../../../crates/kubiq/src/ui/kit/menu.rs), the same trigger-plus-
 `deferred`-list `Picker`/`Action` pattern `file_tab_menu` uses off `open_file_tab_menu()`
-(`crates/ubiq/src/app/editor.rs`) — rather than introducing a second menu mechanism. The rows:
+(`crates/kubiq/src/app/editor.rs`) — rather than introducing a second menu mechanism. The rows:
 
 - One row per shell **actually present** on the machine, OS-aware:
   - macOS / Linux candidates: `zsh`, `bash`, `fish` (and any others worth a fixed list — not an open
@@ -88,7 +88,7 @@ Reuse the one dropdown mechanism the window already has —
   taken).
 
 **4. (Under discussion — see Motivation) Stop installing the console panel in `default_layout()`.**
-If this proceeds, `crates/ubiq/src/ui/dock/mod.rs:485` and its `install()` call for
+If this proceeds, `crates/kubiq/src/ui/dock/mod.rs:485` and its `install()` call for
 `Region::Bottom` drop out of the startup path, the menu's `Logs` row becomes the panel's only way to
 appear on a fresh arrangement, and `feat-logs.md`'s Behaviour section is edited to match. A window
 restoring a *saved* arrangement that already has the console open is unaffected either way — this
@@ -98,12 +98,12 @@ only changes what a brand-new window starts with.
 
 **The UI may not decide which shells exist.** `AGENTS.md`'s architecture rules are explicit: *"The
 UI never assumes the pseudo-terminal is local. No path, no process handle, no file descriptor crosses
-into UI code."* Checking `/opt/homebrew/bin/fish` or walking `PATH` from `crates/ubiq` would violate
+into UI code."* Checking `/opt/homebrew/bin/fish` or walking `PATH` from `crates/kubiq` would violate
 that outright — it is exactly the kind of host-side fact the UI is not allowed to know for itself.
 
-So shell discovery is `ubiq-host`'s job, answered over the bus like everything else the UI cannot
+So shell discovery is `kubiq-host`'s job, answered over the bus like everything else the UI cannot
 read on its own. The nearest existing shape is `Message::HostInfo`
-(`crates/ubiq-proto/src/messages.rs:85`), sent once per window at attach; either that message grows
+(`crates/kubiq-proto/src/messages.rs:85`), sent once per window at attach; either that message grows
 an `available_shells: Vec<ShellInfo>` field (name, program, `is_default`), or a new
 request/response pair is added following `ListProjects`/`ProjectList`'s shape if the list should be
 re-probed rather than sent once (e.g. a shell installed after the window opened). Which of the two is
@@ -113,7 +113,7 @@ were not built to be extended with a list.
 
 ## What does not change
 
-- `SpawnWorkspace`'s shape (`crates/ubiq-proto/src/messages.rs:64`) already carries `agent_type:
+- `SpawnWorkspace`'s shape (`crates/kubiq-proto/src/messages.rs:64`) already carries `agent_type:
   Option<String>` and `args: Vec<String>` — picking a menu row is `spawn_pane(Some(program),
   Vec::new(), cx)`, the same call `NewPane.run` already makes with `None`. No transport change needed
   for the spawn itself, only for the shell list (see above).
@@ -143,9 +143,9 @@ were not built to be extended with a list.
 
 ## Status (2026-09-02)
 
-Items 1, 2 and 3 landed: the login-shell fix in `crates/ubiq-host/src/pty/mod.rs`, shell discovery
-in `crates/ubiq-host/src/shells.rs` behind `ListShells`/`ShellList`, and the chevron menu in
-`crates/ubiq/src/ui/new_pane_menu.rs`. The behaviour is
+Items 1, 2 and 3 landed: the login-shell fix in `crates/kubiq-host/src/pty/mod.rs`, shell discovery
+in `crates/kubiq-host/src/shells.rs` behind `ListShells`/`ShellList`, and the chevron menu in
+`crates/kubiq/src/ui/new_pane_menu.rs`. The behaviour is
 [`../features/panes-and-terminals.md`](../../features/panes-and-terminals.md)'s and the trade is `D49`.
 Item 4 landed too, asked for directly: the console is not in a fresh window's arrangement, it closes
 like any other panel, and the menu's `Logs` row is what puts it on screen. What the proposal did not

@@ -4,14 +4,14 @@ title: Proposal — project search
 kind: proposal
 status: proposal
 summary: Content search across a whole project — a shared query with its four options, a second host worker that walks the tree through the project's own ignore rules, a streamed and cancellable answer carrying the first search id on the wire, and a dock tab that draws the hits as places to go.
-read_when: you are deciding how Ubiq searches the contents of a project, where that work runs, or how a long streamed answer is correlated and cancelled
+read_when: you are deciding how Kubiq searches the contents of a project, where that work runs, or how a long streamed answer is correlated and cancelled
 updated: 2026-09-04
 depends_on: [tech-architecture, tech-transport, feat-workbench, inbox-find, inbox-routing]
 ---
 
 # Proposal — project search
 
-Ubiq can filter the file tree by name and can search inside the one file that is open. It cannot
+Kubiq can filter the file tree by name and can search inside the one file that is open. It cannot
 answer *where is this string in this project*, which is the question a user asks between those two
 and the one an agent's output invites constantly — a symbol named in a pane, a path in a diff, an
 error in a log. This proposes that search: one query, run by the host over the project's files,
@@ -32,22 +32,22 @@ its rows open files.** Everything below is the design; this is the gap between i
 later session does not re-derive it. §1 is the state before any of this landed, kept for its
 reasoning rather than as a report.
 
-In the tree: the contract (`crates/ubiq-proto/src/search.rs`, the six message variants); the worker
-(`crates/ubiq-host/src/search/`, answered in `coordinator.rs`, with `tests/search.rs` covering §8's
+In the tree: the contract (`crates/kubiq-proto/src/search.rs`, the six message variants); the worker
+(`crates/kubiq-host/src/search/`, answered in `coordinator.rs`, with `tests/search.rs` covering §8's
 ceilings, §5's interrupt and the filter refusals); the panel (`PanelKind::Search`, with a home
-region, an availability rule and a saved key, drawn by `crates/ubiq/src/ui/search.rs`); and the
+region, an availability rule and a saved key, drawn by `crates/kubiq/src/ui/search.rs`); and the
 trigger — `AppState::run_project_search` mints the `SearchId`, cancels whatever it supersedes, and
 sends `SearchProject`, fired by Enter on the query field. The three options are `toggle_pill`s that
 apply to the next search rather than re-running the current one, a `SearchError` is drawn in the
 status bar with the results it had left standing, both the group header and each hit row open the
-file, and closing a project cancels its search. `crates/ubiq/tests/search.rs` drives the field's
+file, and closing a project cancels its search. `crates/kubiq/tests/search.rs` drives the field's
 Enter rather than the mutator, so the subscription is what is under test.
 
 Where the tree is ahead of this document:
 
 - **The titlebar's command field's Enter is now a second entry point into project search**,
   switching to the IDE, handing its text to the panel's query field, revealing it and running the
-  search — see `crates/ubiq/src/app/git.rs`'s `submit_header_search`. §9 reserves that field for the
+  search — see `crates/kubiq/src/app/git.rs`'s `submit_header_search`. §9 reserves that field for the
   `⌘K` navigator and says "`⌘K` is not an entry point" for this search; nothing currently binds
   `⌘K` on it, so in practice the field had no contract yet and this is what a direct product
   decision put there instead. Reconciling the two — a fast navigator whose Enter also happens to
@@ -77,23 +77,23 @@ Where the tree is behind it:
 ## 1. Where it stands
 
 **The titlebar has two search affordances and neither does anything.** `command_field` in
-`crates/ubiq/src/ui/titlebar.rs:94-120` draws an `Input` over `AppState.command_input`
-(`crates/ubiq/src/app/mod.rs`) with the placeholder *Search files, or run a
+`crates/kubiq/src/ui/titlebar.rs:94-120` draws an `Input` over `AppState.command_input`
+(`crates/kubiq/src/app/mod.rs`) with the placeholder *Search files, or run a
 command…* and a `⌘K` hint; nothing subscribes to it — the field is declared, constructed, assigned
 and never read again. Beside it, `titlebar.rs:73` draws a search icon whose handler is `|_, _, _| {}`.
 That is `G16`.
 
 **The one filter that works matches names, not contents.** `ExplorerState::rows(&filter)`
-(`crates/ubiq/src/state/explorer/filter.rs`) does a case-insensitive substring test against a row's
+(`crates/kubiq/src/state/explorer/filter.rs`) does a case-insensitive substring test against a row's
 whole path (`:353`), fed from `workbench.file_filter`. It is a *go to file* field, and it is the
 thing users mistake for search.
 
 **The host reads one file at a time, and never looks inside more than one.** The file family is
-`ProjectTree`, `ReadProjectFile` and `WriteProjectFile` (`crates/ubiq-proto/src/messages.rs:159-215`);
-`crates/ubiq-host/src/files/mod.rs` answers all three on one worker thread. Nothing walks a project
+`ProjectTree`, `ReadProjectFile` and `WriteProjectFile` (`crates/kubiq-proto/src/messages.rs:159-215`);
+`crates/kubiq-host/src/files/mod.rs` answers all three on one worker thread. Nothing walks a project
 for content, and nothing in the workspace could: no `grep-*` crate is in `Cargo.lock` at all, and
 `ignore` and `regex` are present only transitively — `regex 1.12.4` and `aho-corasick 1.1.4` through
-`gpui`, `ignore 0.4.32` through `rust-i18n`'s `globwalk`. No Ubiq crate declares any of them.
+`gpui`, `ignore 0.4.32` through `rust-i18n`'s `globwalk`. No Kubiq crate declares any of them.
 
 **The walk that exists cannot be pointed at a whole project.** `files::listing()` is breadth-first
 and clamped — `MAX_DEPTH = 3`, `MAX_ENTRIES = 2_000` per directory, `MAX_REPLY_ENTRIES = 10_000` per
@@ -124,7 +124,7 @@ is the whole of what the two share, and §3 is that sharing made concrete.
 
 ## 3. What a query is
 
-**One record, in a `search` module beside the others in `crates/ubiq-proto/src/`, used by both
+**One record, in a `search` module beside the others in `crates/kubiq-proto/src/`, used by both
 searches.**
 
 ```rust
@@ -141,7 +141,7 @@ boundary on either side of whatever the other two produced, `case_sensitive` off
 no fifth, and in particular no *search in selection* and no *preserve case on replace* — both are
 find-in-file's business if they ever exist, and neither belongs on the wire.
 
-**The record lives in `ubiq-proto` even though find-in-file never sends it.** Not because the bus
+**The record lives in `kubiq-proto` even though find-in-file never sends it.** Not because the bus
 needs it there, but because the four options must mean the same thing in both places: a user who
 ticks `Aa` and `.*` in the editor's find bar and then presses *Search in project* must get the same
 matches from the host as they were getting from the buffer. One record, one meaning, and the
@@ -191,7 +191,7 @@ does not own.
 
 **The later sources are cheap for a reason worth stating.** A task search is a scan of
 `Work`'s in-memory records, which the host already holds and which are small; the knowledge base is
-`RailMode::Kb`, which draws an empty page today (`G11`), and it will be Ubiq's own store rather than
+`RailMode::Kb`, which draws an empty page today (`G11`), and it will be Kubiq's own store rather than
 the user's folder. Neither is a walk of a disk, so neither needs the worker in §5 — they answer on
 the coordinator's thread the way the work family already does. **Only the files are expensive**, and
 that is why the files are what the design is shaped around.
@@ -202,7 +202,7 @@ that is why the files are what the design is shaped around.
 FIFO queue, and `G36` is the cost: a request behind a slow one waits. A search is seconds where a
 listing is milliseconds, so putting a search in that queue would stall every folder expand and every
 file open behind it — a user who searches while a file loads would see the file arrive when the
-search finished. So `crates/ubiq-host/src/search/`, one thread, and the shape `files::Files` proved
+search finished. So `crates/kubiq-host/src/search/`, one thread, and the shape `files::Files` proved
 copied rather than reinvented: a `Job { project_id, search_id, root, query, scope, reply_to: Mailbox }`,
 an unbounded `flume` queue, a coordinator that looks the project's root up in memory and submits.
 
@@ -226,7 +226,7 @@ answering prefixes.
 
 ## 6. The dependency
 
-**The ripgrep libraries, in `ubiq-host`, and nothing hand-rolled.** Three crates, each doing the part
+**The ripgrep libraries, in `kubiq-host`, and nothing hand-rolled.** Three crates, each doing the part
 that is genuinely hard:
 
 `ignore 0.4` walks the tree and applies the project's own rules — `.gitignore`, `.ignore`, nested
@@ -237,12 +237,12 @@ not a function.
 
 `grep-regex 0.1` builds the matcher, and its builder is the option matrix in §3 exactly:
 `case_insensitive`, `fixed_strings` and `word` are three flags on `RegexMatcherBuilder`, so all four
-of Ubiq's options are one construction with no special cases and no pattern rewriting of Ubiq's own.
+of Kubiq's options are one construction with no special cases and no pattern rewriting of Kubiq's own.
 
 `grep-searcher 0.1` reads the files — line numbers, memory maps for large ones, a heap limit, and
 `BinaryDetection::quit` so a search does not print an object file's bytes into the interface.
 
-**Ubiq gains `regex` as a direct dependency of the interface too**, for the validation in §3. It is
+**Kubiq gains `regex` as a direct dependency of the interface too**, for the validation in §3. It is
 already in the build graph through `gpui`, so this costs a line in a manifest and no compile time.
 
 **This does not change the file tree's walk.** `NOT_DESCENDED` stays where it is, and `G33` is
@@ -276,7 +276,7 @@ and needs nothing more: one request, one answer, one FIFO queue. A search breaks
 assumptions — one request produces many answers, an answer can arrive after the user has moved on,
 and `(project, query)` is not an identity because the same query re-run over a changed tree is a
 different search whose old batches must not be drawn into the new list. So the interface mints a
-`SearchId` with `ulid_id!` (`crates/ubiq-proto/src/ids.rs:43-92`) and **the interface discards every
+`SearchId` with `ulid_id!` (`crates/kubiq-proto/src/ids.rs:43-92`) and **the interface discards every
 message naming a search it is not holding.** That is the same discipline the generation counter buys
 in [`../tech/version-control.md`](../../tech/version-control.md), reached from the other direction.
 
@@ -291,7 +291,7 @@ seen, which also tells the user their ignore rules are working.
 
 **Every reply is addressed to the asker, not broadcast.** A project is open in one window, so the
 rule the file family already follows applies unchanged (`Reply::Asker`,
-`crates/ubiq-host/src/reply.rs:9-13`).
+`crates/kubiq-host/src/reply.rs:9-13`).
 
 **No absolute path crosses.** Every hit is a project-relative path, which is architecture rule 2
 applied to search: nothing in a result says which machine answered.
@@ -317,7 +317,7 @@ the root gone, the query bad, the walk refused at the top.
 
 ## 9. Where it appears
 
-**A third dock tab.** `DockTab` is `Pane | Logs` (`crates/ubiq/src/app/mod.rs`), and search is the
+**A third dock tab.** `DockTab` is `Pane | Logs` (`crates/kubiq/src/app/mod.rs`), and search is the
 third: a query bar with the four option toggles, then results grouped by file, each group collapsible,
 each line one row. The dock is right because a result list is a place the user returns to while
 working through it — a modal closes on the first click, and the explorer panel is too narrow for a
@@ -383,13 +383,13 @@ different promises, and neither may be changed to match the other by accident.
 
 ## 12. Phases
 
-1. **The query and the contract** — *done.* The `search` module in `crates/ubiq-proto/src/` —
+1. **The query and the contract** — *done.* The `search` module in `crates/kubiq-proto/src/` —
    `Query`, `Scope`, `Source`, `Batch`, `FileHit`, `LineHit`, `SearchError` — the six message
    variants, the `SearchId`, and the
    contract document's fifth family. Nothing runs; find-in-file can already use `Query`.
-2. **The worker** — *done.* `crates/ubiq-host/src/search/`, the three dependencies, the
+2. **The worker** — *done.* `crates/kubiq-host/src/search/`, the three dependencies, the
    parallel walk, the matcher, the batching, the ceilings, the interrupt flag and supersession,
-   tested against a fixture tree in `crates/ubiq-host/tests/search.rs`. The filter and the external
+   tested against a fixture tree in `crates/kubiq-host/tests/search.rs`. The filter and the external
    fallback landed with it and are §0's first list.
 3. **The panel** — *done, bar the one thing §0 names.* The query bar and its option toggles, the
    grouped results, the progress and truncation readouts, the trigger, `⌘⇧F` and the titlebar icon,

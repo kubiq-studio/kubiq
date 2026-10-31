@@ -1,15 +1,15 @@
 ---
 id: workbench-file-dialogs
 title: File dialogs and the file picker
-summary: The questions Ubiq asks about files — create, rename, move, delete, save — and choosing files or folders with the picker.
+summary: The questions Kubiq asks about files — create, rename, move, delete, save — and choosing files or folders with the picker.
 keywords: [new file, rename, delete, trash, move, save as, overwrite, unsaved, choose folder, picker, browse, attach]
 order: 150
 status: current
 related: [workbench-explorer, workbench-editor, projects]
 ---
 
-When you create, rename, move, delete or save a file, Ubiq asks in a small dialog in the middle of the
-window. **Enter** answers the question and **Esc** cancels it. A separate file picker opens where Ubiq
+When you create, rename, move, delete or save a file, Kubiq asks in a small dialog in the middle of the
+window. **Enter** answers the question and **Esc** cancels it. A separate file picker opens where Kubiq
 needs you to choose files or folders, such as attaching to a task or picking a folder on a remote
 machine. The [file explorer](workbench-explorer) raises most of the questions.
 

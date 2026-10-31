@@ -3,7 +3,7 @@ id: inbox-isol8-upstream
 title: isol8 — what this tree owes upstream
 kind: note
 status: proposal
-summary: Six findings against isol8 v0.4.0 that belong in mdnmdn/isol8 rather than here — sockets denied outright on Windows because the file hook has no device exemption, a denial log that is named but never written, a path-policy tie-break that silently drops a widening grant, the missing ConPTY seam that the confine re-invocation exists to work around, a confined shell that hangs the moment it forks, and a Windows spec that inherits a hundred macOS-shaped grants — each with the evidence that produced it and what closing it would change in Ubiq.
+summary: Six findings against isol8 v0.4.0 that belong in mdnmdn/isol8 rather than here — sockets denied outright on Windows because the file hook has no device exemption, a denial log that is named but never written, a path-policy tie-break that silently drops a widening grant, the missing ConPTY seam that the confine re-invocation exists to work around, a confined shell that hangs the moment it forks, and a Windows spec that inherits a hundred macOS-shaped grants — each with the evidence that produced it and what closing it would change in Kubiq.
 read_when: you are raising an issue against isol8, reading `isolate::confine_entrypoint` and wondering why it exists, or deciding whether to move the isol8 pin
 updated: 2026-09-18
 depends_on: [tech-agent-manager, backlog]
@@ -14,7 +14,7 @@ depends_on: [tech-agent-manager, backlog]
 Windows pane confinement was built against **isol8 v0.4.0**, pinned in
 `crates/agent-manager/Cargo.toml` at `rev = 14a87bd50e8062442859fd4ee85cdd94f99b5de5`. That
 revision is upstream `main` and the `v0.4.0` tag; no branch or pull request in the repository
-carries ConPTY work. **Nothing here asks for a pin move, and nothing here blocks Ubiq.** Windows
+carries ConPTY work. **Nothing here asks for a pin move, and nothing here blocks Kubiq.** Windows
 confinement works today against v0.4.0 exactly as pinned — see `tech/agent-manager.md`. These are
 the six things found while building it that are isol8's to fix, collected so they can be raised
 on their own schedule.
@@ -35,7 +35,7 @@ relocated home, opened the server and the browser every time. A confined process
 not use the network under any policy, full stop, and nothing in the policy or the grants said so
 until the detour itself was read.
 
-**What Ubiq did about it.** `WINDOWS_DEVICE_RW` (`crates/agent-manager/src/isolate.rs`) grants
+**What Kubiq did about it.** `WINDOWS_DEVICE_RW` (`crates/agent-manager/src/isolate.rs`) grants
 `\Device\Afd` and `\Device\Nsi` read-write to every confined login and every confined run, naming
 the two devices Winsock and name resolution open. It is a workaround grafted onto a path policy
 that was never meant to carry it, not a fix: granting a device path says nothing about which host
@@ -84,7 +84,7 @@ grant first, which the type does not hint at.
 the API refuses a duplicate path loudly. Any of the three is predictable; the current behaviour is
 the only one that is not.
 
-## 4. There is no ConPTY seam, and Ubiq's confine re-invocation is the shape of its absence
+## 4. There is no ConPTY seam, and Kubiq's confine re-invocation is the shape of its absence
 
 isol8's pty seam is `cfg(unix)` at every public point: `Backend::spawn_with_stdio`
 (`crates/isol8-core/src/backends/mod.rs:63`), `Sandbox::spawn_pty`, `Sandbox::spawn_with_stdio`,
@@ -92,7 +92,7 @@ isol8's pty seam is `cfg(unix)` at every public point: `Backend::spawn_with_stdi
 opened a pseudoconsole therefore has no way to hand it to isol8, and nothing to exec either — the
 macOS answer, rendering a policy that `sandbox-exec` applies in place, has no Windows equivalent.
 
-Ubiq works around this rather than waiting for it. isol8's Windows backend calls `CreateProcessW`
+Kubiq works around this rather than waiting for it. isol8's Windows backend calls `CreateProcessW`
 with no console-creation flag (`backends/windows.rs:96-109`: no `CREATE_NEW_CONSOLE`, no
 `DETACHED_PROCESS`, no `CREATE_NO_WINDOW`, a zeroed `STARTUPINFOW` with no `STARTF_USESTDHANDLES`),
 so a process it spawns attaches to whatever console its caller already has. `confined_launch` puts
@@ -107,7 +107,7 @@ against a pseudoconsole opened at exactly that size.
 (`STARTUPINFOEX` plus `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`). `refs/isol8-pty-seam-update.md`, in
 isol8's own tree, specifies the unix seam and says ConPTY is separate work.
 
-**What Ubiq would delete.** The `isolate::CONFINE_ARG`/`confine_entrypoint` re-invocation, the
+**What Kubiq would delete.** The `isolate::CONFINE_ARG`/`confine_entrypoint` re-invocation, the
 `ConfinePayload` contract and its file under `<state_dir>/confine/`, and the `win32job` dependency
 carried only for the confined process's job object. `confined_launch` would render a launch on
 Windows the way it does on macOS, and one process per confined pane would go away.
@@ -139,7 +139,7 @@ spawning bash passes confined, so the second hop and the injection are not broke
 incompatibility is specific to msys2's own `fork` emulation, not to Windows process creation or to
 this hook's presence alone.
 
-**What it costs Ubiq.** A confined pane on Windows has no working POSIX shell: `bash -lc` and any
+**What it costs Kubiq.** A confined pane on Windows has no working POSIX shell: `bash -lc` and any
 pipeline hang rather than fail, so Claude Code's `Bash` tool run inside an isolated Windows pane
 never returns. The only workaround today is turning `isolate_agents` off for the whole machine —
 there is no per-pane escape. Tracked as `G301`.
@@ -165,7 +165,7 @@ zeros every other platform-scoped one. `crates/agent-manager/src/isolate.rs`'s o
 an empty shell rather than dropped" — and that assumption is exactly what fails for these two
 files: the filter is not merely non-matching, it is not there to be read at all.
 
-**What it costs.** Nothing functional — Ubiq's naming logic is correct, and a grant for a path that
+**What it costs.** Nothing functional — Kubiq's naming logic is correct, and a grant for a path that
 does not exist on the host is inert. It is cosmetic: `isol8 --show-policies` on a confined Windows
 run reads longer and stranger than the policy that is actually enforced, which is exactly the kind
 of noise that makes a real denial harder to spot by eye.

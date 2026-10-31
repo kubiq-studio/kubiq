@@ -4,21 +4,21 @@ title: Proposal — on-device models for the small namings
 kind: proposal
 status: proposal
 summary: A tiny text generation the host can perform without a harness, an account or a network — the OS's own on-device model behind a backend trait with a stub for every platform that lacks one, reached by a message family in which the interface names a subject and never a prompt, off by default and switched on in settings only where the OS says the model is there.
-read_when: you are deciding whether Ubiq may call a model directly, where an AI-suggested name comes from, or how a macOS-only capability is made optional without leaking into the interface
+read_when: you are deciding whether Kubiq may call a model directly, where an AI-suggested name comes from, or how a macOS-only capability is made optional without leaking into the interface
 updated: 2026-09-07
 depends_on: [tech-architecture, tech-transport, tech-agent-manager, feat-chat, feat-workbench, feat-sessions, inbox-config, inbox-editions]
 ---
 
 # Proposal — on-device models for the small namings
 
-**Ubiq calls no model.** Every model interaction in the tree goes through a spawned harness —
-`Agents::compose_run` in `crates/ubiq-host/src/agent.rs` composes either a passthrough pane or a
+**Kubiq calls no model.** Every model interaction in the tree goes through a spawned harness —
+`Agents::compose_run` in `crates/kubiq-host/src/agent.rs` composes either a passthrough pane or a
 structured conversation, and there is no "run one prompt, give me a string" path anywhere. There is
 no HTTP model client either: the three crates that depend on `ureq` use it for MCP, for connector
-OAuth and for Ubiq's own loopback doc server.
+OAuth and for Kubiq's own loopback doc server.
 
 That is the right default for anything a user reads as work. It is the wrong shape for the
-half-sentence namings Ubiq does mechanically today:
+half-sentence namings Kubiq does mechanically today:
 
 > A conversation is called `claude 3`, a session is called after its project, a chat tab that is
 > attached to nothing is called `New chat`, and the commit box has no consumer at all.
@@ -26,7 +26,7 @@ half-sentence namings Ubiq does mechanically today:
 Spawning a harness to name a conversation is absurd — it costs a process, a credential and a
 round-trip to a paid endpoint for eleven characters. But an operating system that ships a small
 model on the machine makes the same naming free, private and accountless, which is exactly the
-property that lets it sit inside Ubiq rather than beside it. `refs/app-ly` already proves the
+property that lets it sit inside Kubiq rather than beside it. `refs/app-ly` already proves the
 integration end to end in a Tauri shell; its shape, its availability discipline and its build
 gotchas are borrowed here wholesale.
 
@@ -41,30 +41,30 @@ Four naming surfaces, all mechanical:
 
 | Surface | Where the name comes from | Owner |
 |---|---|---|
-| Conversation | `unique_name()` — the harness label plus a per-project counter | `crates/ubiq-host/src/coordinator.rs` |
-| Session | The project's name, or the literal `session` | `crates/ubiq-host/src/coordinator.rs` |
-| Chat tab | The attached agent's name, or the literal `New chat` | `crates/ubiq/src/ui/dock/mod.rs` |
-| Task | The user types it; `Work::create()` refuses an empty one | `crates/ubiq-host/src/work/mod.rs` |
+| Conversation | `unique_name()` — the harness label plus a per-project counter | `crates/kubiq-host/src/coordinator.rs` |
+| Session | The project's name, or the literal `session` | `crates/kubiq-host/src/coordinator.rs` |
+| Chat tab | The attached agent's name, or the literal `New chat` | `crates/kubiq/src/ui/dock/mod.rs` |
+| Task | The user types it; `Work::create()` refuses an empty one | `crates/kubiq-host/src/work/mod.rs` |
 
-A harness may name its own conversation and Ubiq plumbs it through —
+A harness may name its own conversation and Kubiq plumbs it through —
 `AgentEvent::SessionInfoUpdate` becomes a `ConvUpdate::Title` in
-`crates/ubiq-host/src/conversation.rs`, and `refresh_agent_record()` in `crates/ubiq/src/app/mod.rs`
+`crates/kubiq-host/src/conversation.rs`, and `refresh_agent_record()` in `crates/kubiq/src/app/mod.rs`
 turns it into the name a reader sees. That function is the seam, and its own comment says so: a
-conversation the harness has not named keeps the registration default. Ubiq never generates one.
+conversation the harness has not named keeps the registration default. Kubiq never generates one.
 
-The commit box is blanker still. `commit_box()` in `crates/ubiq/src/ui/git/changes.rs` is a bound
+The commit box is blanker still. `commit_box()` in `crates/kubiq/src/ui/git/changes.rs` is a bound
 `Textarea`, an amend checkbox and a disabled button, and its module header states that nothing there
 commits — the box keeps what is typed so the thought is not lost.
 
-**Settings are built and two-layered.** `SettingsLayer` in `crates/ubiq-proto/src/settings.rs`
+**Settings are built and two-layered.** `SettingsLayer` in `crates/kubiq-proto/src/settings.rs`
 splits an opaque `Ui` blob the host stores verbatim from a `Host` record the host parses and acts
 on; they land in `ui-settings.toml` and `host-settings.toml` via `FileSettingsStore`. The governing
 rule is in that file's own comment — the half that mutates a field owns it. A toggle is five edits,
-and `toggle_isolate_agents` in `crates/ubiq/src/app/settings.rs` is the host-layer precedent.
+and `toggle_isolate_agents` in `crates/kubiq/src/app/settings.rs` is the host-layer precedent.
 
 **`crates/agent-manager` cannot help here, and that is the point.** An `Account` in
 `crates/agent-manager/src/account.rs` carries credential *references* only — env-var names, a
-gateway URL, a helper command it never runs. There is no notion of a provider Ubiq could call. An
+gateway URL, a helper command it never runs. There is no notion of a provider Kubiq could call. An
 OS-provided model needs no account, no key, no keychain entry and no credential path, so it
 sidesteps that boundary entirely instead of straining it.
 
@@ -89,13 +89,13 @@ name exactly as it is today.
 
 ## 3. The message family
 
-A new family, `assist`, in `crates/ubiq-proto/src/messages.rs`, following the search family's shape:
+A new family, `assist`, in `crates/kubiq-proto/src/messages.rs`, following the search family's shape:
 the interface mints the id and discards every reply naming a request it is not holding.
 
 ```rust
 /// Ask whether on-device assistance can run here. Answered with [`Message::Assist`].
 GetAssist,
-/// Ask for a short suggested text for something Ubiq already holds. The interface names the
+/// Ask for a short suggested text for something Kubiq already holds. The interface names the
 /// subject; the prompt is the host's. Answered with [`Message::Suggestion`].
 Suggest { suggest_id: SuggestId, subject: SuggestSubject },
 /// Abandon a suggestion. Best effort: the model may already be running.
@@ -131,7 +131,7 @@ choice, so it gets a row in `tech/decisions.md`.
 
 ## 4. The backends
 
-Host-side, in a new `crates/ubiq-host/src/assist/`. One trait, one gate, expressed once — the
+Host-side, in a new `crates/kubiq-host/src/assist/`. One trait, one gate, expressed once — the
 structure `refs/app-ly` arrived at, where every caller is platform-free and both backends produce
 the same boxed trait object from one constructor:
 
@@ -142,11 +142,11 @@ mod apple;
 mod stub;
 ```
 
-The FFI belongs here and not in `crates/ubiq`, even though `objc2` and `objc2-foundation` are
-already linked there for the dock icon in `crates/ubiq/src/ui/ribbon.rs`. The coordinator renders
+The FFI belongs here and not in `crates/kubiq`, even though `objc2` and `objc2-foundation` are
+already linked there for the dock icon in `crates/kubiq/src/ui/ribbon.rs`. The coordinator renders
 nothing and the interface reaches around nothing; a capability the host performs is a host
 dependency, under `[target.'cfg(target_os = "macos")'.dependencies]`, beside the existing
-`#[cfg(target_os = "macos")]` in `crates/ubiq-host/src/cli_shortcut.rs`.
+`#[cfg(target_os = "macos")]` in `crates/kubiq-host/src/cli_shortcut.rs`.
 
 **macOS.** Apple's FoundationModels is a Swift-only API — `objc2` has no binding for it and cannot,
 since there is no Objective-C metadata to consume. Two crates wrap it through a Swift bridge they
@@ -159,22 +159,22 @@ silicon — Intel Macs are excluded outright — Apple Intelligence switched on,
 7 GB free, and a device language among the sixteen the model supports. Availability is not inferred
 — it is asked, via `SystemLanguageModel::availability()`, whose three unavailable reasons
 (`deviceNotEligible`, `appleIntelligenceNotEnabled`, `modelNotReady`) map one-to-one onto
-`AssistReason`. There is no OS-version check in Ubiq's code; `OsTooOld` comes from the framework.
+`AssistReason`. There is no OS-version check in Kubiq's code; `OsTooOld` comes from the framework.
 
 Three framework limits shape the host side. The context window is 4,096 tokens per session, read at
 runtime rather than hard-coded, which means the material a subject gathers is **truncated to a
 budget the host owns** — the first user turn, not the transcript; the diff stat, not every hunk. A
 session refuses concurrent requests, so it is one session per request, as app-ly's backend comments
 already conclude. And both the prompt and the output are screened, so a `guardrailViolation` on
-terminal output Ubiq did not author is an ordinary outcome rather than a bug — which is the second
+terminal output Kubiq did not author is an ordinary outcome rather than a bug — which is the second
 argument for the advisory rule, after the first.
 
 **One build gotcha, load-bearing.** The Swift concurrency runtime is referenced as
 `@rpath/libswift_Concurrency.dylib` and a Rust link emits no `LC_RPATH`, so the app dies at launch
 with `dyld: Library not loaded`. The fix is one line — `cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift`
 — and `cargo:rustc-link-arg` does not propagate to dependents, so it must be emitted by the *binary*
-crate. In Ubiq that means a `build.rs` in `crates/ubiq-app`, gated on target and feature, and
-`crates/ubiq-app` is already the only crate that names both halves.
+crate. In Kubiq that means a `build.rs` in `crates/kubiq-app`, gated on target and feature, and
+`crates/kubiq-app` is already the only crate that names both halves.
 
 **Windows: not yet, and the trait is the preparation.** `Microsoft.Windows.AI.Text.LanguageModel` is
 the right API and `TextSummarizer` is literally this use case, but three gates disqualify it for a
@@ -190,7 +190,7 @@ by Aion Instruct in retail in November 2026, keeping the `LanguageModel` API, dr
 requirement and running on CPU. If that holds, the remaining cost is MSIX identity plus generating
 bindings with `windows-bindgen` against the App SDK winmd — which windows-rs's own Windows Reactor
 does in-tree, so it is tractable. Until then the Windows backend is the stub, and the stub is not a
-failure mode. It is the supported way to build Ubiq without an AI toolchain.
+failure mode. It is the supported way to build Kubiq without an AI toolchain.
 
 **Bundling a model is out of scope, and if it ever is not, it is `candle`.** A 0.5B model handles a
 five-word title comfortably, and three routes exist. `candle`'s CPU backend is pure Rust — no cmake,
@@ -198,7 +198,7 @@ no libclang, no redistributable library — and loads GGUF directly, which makes
 build cost is nothing; `llama-cpp-2` is faster and needs MSVC, cmake and libclang on every machine
 and every CI runner; Microsoft's `foundry-local-sdk` is a real Rust crate that adds about 20 MB and
 downloads NuGet packages at build time under non-OSS terms. All three then cost a 100–500 MB model
-download and a model-management surface Ubiq has no other use for. Detecting a local Ollama or LM
+download and a model-management surface Kubiq has no other use for. Detecting a local Ollama or LM
 Studio on loopback costs nothing and works everywhere; it is also a network client, a port, a trust
 question and a second availability story. Each is a backlog row behind the same trait, not part of
 this.
@@ -210,10 +210,10 @@ Off by default, and the toggle is host-layer, because the host is the half that 
 | | |
 |---|---|
 | Field | `assist_on_device: bool`, `#[serde(default)]`, default `false` |
-| Struct | `HostSettings` in `crates/ubiq-proto/src/settings.rs` |
+| Struct | `HostSettings` in `crates/kubiq-proto/src/settings.rs` |
 | Schema | `HOST_SETTINGS_SCHEMA` moves 7 → 8, with the reason in its doc comment beside the others |
 | Section | A new `SettingsSection::Assist`, labelled *Assistance* |
-| Handler | `toggle_assist_on_device` beside `toggle_isolate_agents` in `crates/ubiq/src/app/settings.rs` |
+| Handler | `toggle_assist_on_device` beside `toggle_isolate_agents` in `crates/kubiq/src/app/settings.rs` |
 
 The setting is checked before the backend, so a user who switches it off gets
 `disabled-by-setting` and no FFI call is made at all — app-ly's `availability()` does exactly this,
@@ -257,7 +257,7 @@ empty one. Worth it only as a suggestion offered while the field is empty.
 | A suggestion takes too long | The host drops it after a deadline and answers `SuggestError`. app-ly times only tool calls and has no generation deadline; a naming that hangs is worse than a mechanical name, so this one has one |
 | Cancelled | The reply is discarded. Inference may still be running — the flag stops forwarding, it does not stop the model |
 | The model refuses | A guardrail can fire on terminal output nobody wrote for it. `SuggestError`, mechanical name, no retry |
-| Rate limited | Backoff. Apple limits a process that is in the background on battery, which Ubiq's foreground window is not, so this is a correctness case rather than a common one |
+| Rate limited | Backoff. Apple limits a process that is in the background on battery, which Kubiq's foreground window is not, so this is a correctness case rather than a common one |
 | The material is too long | The host truncates to its own budget before the model sees it. A subject that cannot be summarized within the context window is not asked about |
 | The model returns something useless | It lands in an editable field the user was going to type in anyway |
 
@@ -279,22 +279,22 @@ empty one. Worth it only as a suggestion offered while the field is empty.
    `unsupported-platform`, the setting, the settings section drawing disabled. No FFI, every
    platform, fully testable. Nothing user-visible generates anything yet.
 2. **The Apple backend.** The `assist-apple` feature, the crate, the `build.rs` rpath line in
-   `crates/ubiq-app`, the availability mapping and its no-vendor-names test.
+   `crates/kubiq-app`, the availability mapping and its no-vendor-names test.
 3. **The commit message.** One button, one call site, nothing on the wire that phase 1 did not add.
 4. **Conversation naming.** The rename message (`G119`), then the suggestion behind it.
 5. **Session note and task title.** Needs the `WorkSession` description field (`G81`) first.
 
 Phase 1 stands alone and is worth landing alone: it is the whole of the optionality, and after it a
-platform with no model is a platform Ubiq already handles. Phases 3 through 5 are independent of
+platform with no model is a platform Kubiq already handles. Phases 3 through 5 are independent of
 each other.
 
 ## What this asks to be decided
 
-- Ubiq may call a model directly, for tiny namings only, when the operating system provides one and
+- Kubiq may call a model directly, for tiny namings only, when the operating system provides one and
   it costs no account, no key and no network.
 - The interface never sends prompt text. A generic prompt message is refused now rather than
   regretted later.
-- The setting defaults to off, so the tree's current behaviour — Ubiq calls no model — is what an
+- The setting defaults to off, so the tree's current behaviour — Kubiq calls no model — is what an
   existing user still gets after upgrading.
 - macOS-only with a documented Windows hole and a dated re-evaluation trigger is acceptable, as
   `G90` already established for confinement on Linux.

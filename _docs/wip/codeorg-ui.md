@@ -1,6 +1,6 @@
-# Code organisation audit — `crates/ubiq` (GPUI interface)
+# Code organisation audit — `crates/kubiq` (GPUI interface)
 
-Read-only survey, 2026-10-05. Paths are relative to `crates/ubiq/` unless noted. Counts are from
+Read-only survey, 2026-10-05. Paths are relative to `crates/kubiq/` unless noted. Counts are from
 grep/wc and approximate where marked `~`. Inline-test counts include `#[cfg(test)]` modules.
 
 ---------------------------------------------------------------------------------------------------
@@ -102,7 +102,7 @@ older big screens are monoliths (`ui/settings.rs`, `ui/new_agent.rs`).
 **Visibility.** Everything is `pub`: 3,461 `pub fn`, 371 `pub struct`, 202 `pub enum`, 236 `pub mod`;
 0 `pub(crate) fn`, 0 `pub(crate) mod`. `pub(super)` 285 uses (almost all in `app/` — 248 restricted
 fns vs 1,254 `pub fn` there), `pub(crate)` 77. `AppState` has 217 fields, 160 of them `pub`. Only the
-`ubiq` -> `ubiq-app` boundary matters for `pub` in practice, so `pub` gives no signal of intended
+`kubiq` -> `kubiq-app` boundary matters for `pub` in practice, so `pub` gives no signal of intended
 API vs internal helper.
 
 ## A2. State and event flow
@@ -124,7 +124,7 @@ state lives in `src/state/<feature>.rs` structs owned as fields of `AppState`; `
 rebuilt every frame from `AppState`; one `cx.notify()` repaints everything (1,228 `cx.notify()`
 calls in ui/app/state; 868 `cx.listener`; 183 `ui::handler(` bridges, `ui/mod.rs:83`).
 
-**Host messages.** `app/hosts.rs` wraps `ubiq_proto` clients (`client.send(message)` at
+**Host messages.** `app/hosts.rs` wraps `kubiq_proto` clients (`client.send(message)` at
 `app/hosts.rs:336`); inbound messages are drained and passed to `AppState::receive(host, message, cx)`
 (`app/wire.rs:522`), a chain of `receive_<family>` fns: pane, project, file, git, kb, work,
 conversation, notifications, session, account, search, assist in `wire.rs` (3,661 lines) plus
@@ -164,7 +164,7 @@ destination, furniture, side_furniture, on_enter...), `SettingsSectionSpec`, `Me
 | A document kind (centre tab) | `PanelKind` variant + `state/<x>.rs` + `app/<x>.rs` attach/settle fn in `render` + `ui/dock` arm + persistence in `state/layout.rs` (1,903). `DocumentBody` (`state/document.rs:49`) covers only the annotation surface. |
 | A settings section | `ext/settings.rs` spec + `ext/ids.rs` + `ui/settings.rs` body fn (6,052-line file) + `app/settings.rs` handler (3,042) + `state/settings.rs`; tests in `tests/settings.rs` |
 | A bar menu block | `ext/menu.rs` registration + `ui/menus.rs` builder (data-driven, see A3) |
-| A bus message family | `ubiq-proto` + new `receive_<family>` + chain entry in `wire.rs:522` |
+| A bus message family | `kubiq-proto` + new `receive_<family>` + chain entry in `wire.rs:522` |
 | A modal/overlay | new `ui/<x>.rs` fn + field + open/close flags on `AppState` + hook into `ui/shell.rs:29` stack (580-line fn); 10+ distinct `overlay()` fns today |
 
 ## A3. Styling vs logic
@@ -269,7 +269,7 @@ How errors reach the user: **no common mechanism**. Roughly 6 field families lik
 `project_error: Option<String>`, `*_error`, `notice` on `workbench`/`settings`/`kb`/`catalog`/
 `tasksrc`/`web_panel`/`teamsim` (~150 error-ish assignments in `app/`), each rendered by its own panel
 as a red line or banner. The bell (`state/notifications.rs`, host-owned list) is for host-originated
-notifications, not for UI-side operation failures. `ubiq_proto::log::logs()` is the sink for logs.
+notifications, not for UI-side operation failures. `kubiq_proto::log::logs()` is the sink for logs.
 Discarded results (`let _ =`, `.ok();`, 100+) are mostly channel sends and clipboard writes; no policy
 documented.
 
@@ -330,7 +330,7 @@ row labels. Everything is English; `locale` is not read.
 | 2 | High | **`AppState::for_project` is a 2,048-line constructor** building 90 inputs and every substate | `app/boot.rs:9-2057`, 111 placeholder strings in it | Each feature owns `Feature::new(window, cx)`; boot only composes |
 | 3 | High | **Menus: six unrelated mechanisms**, two of them (context, picker) resolve picks by *index into a list the handler rebuilds* — draw/pick drift risk, no keyboard nav, hand-set layer priorities | A3 table; `kit/menu.rs:22,29,929-1039`; `mission/menu.rs`; `project_menu.rs:121-660`; `deferred(` 15 files | Make `MenuEntry` (action-carrying, `ui/menus.rs`) the one model; build `context_menu`/`Picker` bodies on it (or on gpui-component `PopupMenu` as the reuse proposal says) and delete index matching |
 | 4 | High | **God files in the UI**: 6,052-line `settings.rs`, 4,160-line `conversation/mod.rs`, 3,661 `wire.rs`, 3,042 `app/settings.rs`, 2,317 `sink/project.rs` — each with zero or few tests | A1 tables | Split by section into `ui/settings/<section>.rs` (one per `SettingsSectionSpec`); same for wire by family |
-| 5 | High | **Layering inversions and a single crate hiding them**: `state` -> `ui` (11 files) and `state` -> `app` (13); `ui` and `app` mutually dependent | A1 "Layering" | Move view-bound types (`MdView`, `PlanState`, `GridDelegate`) behind traits/ids in `state`; consider `ubiq-state` crate to enforce |
+| 5 | High | **Layering inversions and a single crate hiding them**: `state` -> `ui` (11 files) and `state` -> `app` (13); `ui` and `app` mutually dependent | A1 "Layering" | Move view-bound types (`MdView`, `PlanState`, `GridDelegate`) behind traits/ids in `state`; consider `kubiq-state` crate to enforce |
 | 6 | Medium-High | **Adding a panel/document kind touches 6-13 files** (closed `PanelKind` enum, ~26 variants; 129 refs in `state/dock.rs`); rail modes are registry-driven but their panels are not | A2 table | Extend the `ext` registry to `PanelSpec { title, icon, render, persist, region_rule }` and replace matches by lookup |
 | 7 | Medium-High | **Sizes untokenised and unscaled**: 1,566 `px()` (≈1,050 non-zero), row heights hand-typed at 5 values (30/26/28/24/22), module-local consts duplicated; raw `px` ignores `ui_scale` while rem spacing scales | A3 stats | Add `theme::{row_h(Row::Compact/Normal/Tall), gap, pad}` + `min_w_0()` helper (476 `px(0.)`); sweep kit first |
 | 8 | Medium | **Render-time mutation**: ~20 order-dependent `settle_*/attach_*/fill_*` calls at top of `render` | `app/shell.rs:1671-1700`; refactor-plan "deliberately not done" | Move to message/event handlers or a typed `PendingWork` drain with explicit phases |
@@ -338,7 +338,7 @@ row labels. Everything is English; `locale` is not read.
 | 10 | Medium | **Demo/sink in production paths**: `ext_demo` rail mode registered in `base_registry()`; sink fixtures live in `state/` (`sink.rs` 1,671, `teamsim.rs` 1,493); 7.4k-line `ui/sink` always compiled | `ext/rail.rs:187`; A4 | Gate behind a feature/`cfg(debug_assertions)` and move fixtures next to `ui/sink` |
 | 11 | Medium | **No unified error surface**: ~6 ad-hoc `*_error: Option<String>` fields, each with its own banner; 100+ silent `let _ =/.ok();` | A5 | One `UiError`/toast channel on the root (gpui-component `Root` notification layer already live) |
 | 12 | Medium | **Test blind spots where risk is**: 125/150 ui files, wire, boot, settings, dock, menus untested; tests mount ad-hoc harnesses not real screens | A6 | Table-driven smoke test that renders each rail mode/panel kind in `TestAppContext`; menu draw-vs-pick consistency test |
-| 13 | Medium | **Everything `pub`**: no `pub(crate)` for crate-internal APIs, 3,461 `pub fn` | A1 visibility | Default to `pub(crate)`; `pub` only for `ubiq-app`/Studio seams (`ext`, `ui::menus`, `theme`) |
+| 13 | Medium | **Everything `pub`**: no `pub(crate)` for crate-internal APIs, 3,461 `pub fn` | A1 visibility | Default to `pub(crate)`; `pub` only for `kubiq-app`/Studio seams (`ext`, `ui::menus`, `theme`) |
 | 14 | Low-Med | **Duplicate helpers/consts**: `MAX_CELL_CHARS` x2, spin 2,400 ms x3, `fn row` x14 / `fn header` x13, 3 modal/dialog frames, 10+ `overlay()` fns | A4, A7 | Move shared consts to `theme`/kit; fold copies into `kit::{row, section_header, modal}` |
 | 15 | Low-Med | **Boot-time constants/user strings inline**: placeholders, timers (120 ms/150 ms/4 s), animation durations | `app/boot.rs`, `ui/conversation/mod.rs` | Named consts in the owning module; strings via a `ui/strings.rs` if i18n is ever wanted |
 | 16 | Low | **No i18n path** | A8 | Not worth acting on until a second language is planned; keep strings next to their `label()`/spec |

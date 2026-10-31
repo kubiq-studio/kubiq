@@ -12,7 +12,7 @@ depends_on: [wip-agent-setup, wip-agent-vocabulary, inbox-agent-graph-final, fea
 # Proposal — the dimensions of an agent, and a standard/advanced interface over them
 
 "Agent" already names three different things in this tree: a reusable definition to spawn from, a
-live running instance, and a harness's own internal subagent that Ubiq only hears about. Each is
+live running instance, and a harness's own internal subagent that Kubiq only hears about. Each is
 real and each is needed. The risk is not that the word is overloaded — `agent-graph-final.md`
 already resolves the running-instance sense — it is that the *properties* of an agent get invented
 one at a time, on whichever screen needs them next, and drift into an interface that a newcomer
@@ -31,7 +31,7 @@ A **profile** is a reusable, named bundle: the harness, the account, the model, 
 where this proposal extends what is landed — the prompt, skills and MCP servers a run is composed
 from. Nothing is running. An **agent** (today's `Workspace`, per `inbox-agent-graph-final` §1's
 rename) is one spawn of a profile, or of no profile at all: a live pseudo-terminal, a live process,
-a working directory. `crates/ubiq-host/src/agent.rs`'s `ProfileInfo { id, agent_type, account,
+a working directory. `crates/kubiq-host/src/agent.rs`'s `ProfileInfo { id, agent_type, account,
 model, mode }` is today's profile, already landed (`wip-agent-setup` P4); it carries no prompt, no
 skills, no MCP — that gap is `G122`, and closing it is what turns a profile into the fuller **role**
 `inbox-agent-graph-final` §6 proposes (a profile plus a tool policy: `may_spawn`, `may_write`,
@@ -45,7 +45,7 @@ internal — and it does not hold up: a "child" can itself talk to the user or n
 is not a property of the bucket. What actually varies is two independent facts, both already present
 in the design in different words:
 
-- **`has_own_process`** — hosted (its own harness, its own pseudo-terminal, Ubiq owns and can kill
+- **`has_own_process`** — hosted (its own harness, its own pseudo-terminal, Kubiq owns and can kill
   it) or internal (shares its parent's process — a harness's own subagent, Claude Code's Task tool
   and its kin). This is exactly `inbox-agent-graph-final` §3's Hosted/Reported split. An internal
   agent has no pane of its own, no MCP connection of its own, and ends only when its parent says so
@@ -72,10 +72,10 @@ the process/parentage dimension is what made the three-way enum leak in the firs
 `may_spawn`, a second policy checkbox, independent of Voice and independent of whether *this* agent
 is itself a child. It answers one question only: may this agent create new **hosted** children of
 its own through `agents.spawn`? It says nothing about internal subagents — a harness's own Task-tool
-mechanism spawns inside the harness's own process, outside Ubiq's policy surface entirely, and no
-flag Ubiq holds can permit or refuse it. A role that forbids `may_spawn` still cannot stop its
-harness from spawning internal subagents; it can only stop Ubiq from letting it ask for hosted ones.
-That is the distinction worth keeping sharp when this checkbox is read: it governs delegation *Ubiq
+mechanism spawns inside the harness's own process, outside Kubiq's policy surface entirely, and no
+flag Kubiq holds can permit or refuse it. A role that forbids `may_spawn` still cannot stop its
+harness from spawning internal subagents; it can only stop Kubiq from letting it ask for hosted ones.
+That is the distinction worth keeping sharp when this checkbox is read: it governs delegation *Kubiq
 can see and kill*, not delegation the harness does on its own.
 
 Two fields travel with it once it is on: `max_children`, a budget rather than a boolean (per-task
@@ -134,7 +134,7 @@ is proposed now because retrofitting provenance onto instances after the fact is
 | "Just code," today's product | none or a saved profile | hosted, no parent | yes | no | Resume only | either | user |
 | A crew coordinator | a role | hosted, parent optional | policy-decided | yes, with a budget | Resume only | ephemeral identity unless its role is a saved definition | user or agent |
 | A crew member | a role | hosted, parent set | policy-decided | usually no | Resume only | ephemeral identity unless its role is a saved definition | agent (`agents.spawn`) |
-| A harness's own subagent | none — inherits the parent's | internal, parent set | usually no | n/a — not Ubiq's to grant | tied to parent | n/a — no separate process | agent (internal to harness) |
+| A harness's own subagent | none — inherits the parent's | internal, parent set | usually no | n/a — not Kubiq's to grant | tied to parent | n/a — no separate process | agent (internal to harness) |
 | A standing project assistant | a saved profile/role | hosted, no parent | yes | policy-decided | Resume + flagged instance-persistent | persistent identity + persistent record | user |
 
 No row needed an eighth dimension. That is the check this model has to pass: every scenario raised
@@ -189,7 +189,7 @@ proposed `AgentInfo`). What this document adds on top:
 - Promoting `may_spawn` out of `inbox-agent-graph-final` §6's policy table into a named dimension
   (Delegation) alongside Voice, and drawing the line it and Voice share: both are checkboxes on the
   *role*, both are independent of parentage, and Delegation's line is specifically that it can only
-  ever govern hosted children — an internal subagent is never something Ubiq's policy can grant or
+  ever govern hosted children — an internal subagent is never something Kubiq's policy can grant or
   refuse.
 - The standard/advanced framing in §3, which none of the existing documents state as a rule — they
   describe the pieces; this says which door a newcomer never has to open.

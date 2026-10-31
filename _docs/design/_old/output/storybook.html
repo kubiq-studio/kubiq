@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ubiq — Design System Storybook</title>
-<script>(function(){var m=localStorage.getItem('ubiq-theme-mode'),t=localStorage.getItem('ubiq-theme');var e=m==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):(m||t||'dark');document.documentElement.dataset.theme=e==='light'?'light':'dark';})();</script>
-<link rel="stylesheet" href="css/ubiq.css">
+<title>Kubiq — Design System Storybook</title>
+<script>(function(){var m=localStorage.getItem('kubiq-theme-mode'),t=localStorage.getItem('kubiq-theme');var e=m==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):(m||t||'dark');document.documentElement.dataset.theme=e==='light'?'light':'dark';})();</script>
+<link rel="stylesheet" href="css/kubiq.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
 <style>
-/* ---- storybook scaffold only (everything below uses ubiq.css classes) ---- */
+/* ---- storybook scaffold only (everything below uses kubiq.css classes) ---- */
 html,body{height:auto;overflow:auto}
 body{background:var(--bg)}
 .sb-top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:13px 26px;background:color-mix(in oklab,var(--surface) 86%,transparent);backdrop-filter:saturate(1.6) blur(10px);border-bottom:1px solid var(--border)}
@@ -44,9 +44,9 @@ code.tok{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);bo
 </head>
 <body>
   <header class="sb-top">
-    <span class="mark">◇</span><b>Ubiq Design System</b>
+    <span class="mark">◇</span><b>Kubiq Design System</b>
     <span class="pill">storybook</span>
-    <span class="kbd-tip">single source · css/ubiq.css + js/ubiq.js</span>
+    <span class="kbd-tip">single source · css/kubiq.css + js/kubiq.js</span>
     <div class="spacer"></div>
     <div class="seg" id="themeSeg"><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="system">System</button></div>
     <button class="icon-btn" id="themeBtn" title="Toggle theme">
@@ -155,7 +155,7 @@ code.tok{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);bo
         <div class="sb-row" style="align-items:flex-start">
           <input class="input" placeholder="Text input">
           <select class="sel"><option>Select…</option><option>claude</option><option>gemini</option></select>
-          <input class="input mono" value="~/.ubiq/worktrees">
+          <input class="input mono" value="~/.kubiq/worktrees">
         </div>
         <div class="sb-h3">Toggle &amp; segmented</div>
         <div class="sb-row">
@@ -220,7 +220,7 @@ code.tok{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);bo
       <!-- TERMINAL -->
       <section class="sb-sec" id="terminal">
         <h2>Terminal card</h2>
-        <p class="desc">Agent terminals are real xterm.js instances created through <code class="tok">Ubiq.makeTerm()</code> — palette and theme-sync are centralized.</p>
+        <p class="desc">Agent terminals are real xterm.js instances created through <code class="tok">Kubiq.makeTerm()</code> — palette and theme-sync are centralized.</p>
         <div class="term-card" style="height:190px;flex:none">
           <div class="term-head"><span class="agent-chip"><span class="sw" style="background:var(--c-claude)"></span>claude-sonnet</span><span style="color:var(--faint)">·</span><span>pid 48213</span><div class="spacer"></div><span style="color:var(--ok)">● live</span></div>
           <div class="mini-mount" id="sb-term"></div>
@@ -258,7 +258,7 @@ code.tok{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);bo
         <p class="desc">Every screen is <code class="tok">.titlebar</code> → <code class="tok">.body</code> ( <code class="tok">.sidebar</code> + <code class="tok">.main</code> → <code class="tok">.topbar</code> + content ). The collapse control lives in <code class="tok">.brand</code> on every sidebar.</p>
         <div class="sb-mock">
           <aside class="sidebar" style="flex:0 0 200px;width:200px">
-            <div class="brand"><span class="mark">◇</span><b>Ubiq</b><span class="ver">v0.4.2</span>
+            <div class="brand"><span class="mark">◇</span><b>Kubiq</b><span class="ver">v0.4.2</span>
               <button class="collapse-btn" id="collapseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M14 6l-6 6 6 6"/></svg></button></div>
             <div class="side-pad"><button class="btn primary full"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">New</span></button></div>
             <div class="sec-label">Sessions</div>
@@ -272,7 +272,7 @@ code.tok{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);bo
             <div style="flex:1;display:grid;place-items:center;color:var(--faint);font-family:var(--mono);font-size:12px">.main content region</div>
           </main>
         </div>
-        <p class="sb-note">Try the chevron in the mock — collapse is shared via Ubiq.initSidebar().</p>
+        <p class="sb-note">Try the chevron in the mock — collapse is shared via Kubiq.initSidebar().</p>
       </section>
 
     </main>
@@ -297,7 +297,7 @@ code.tok{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);bo
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
-<script src="js/ubiq.js"></script>
+<script src="js/kubiq.js"></script>
 <script>
 /* token swatch tiles */
 function tiles(elId, items){
@@ -310,9 +310,9 @@ tiles("sw-agent",[["--c-claude","claude"],["--c-opencode","opencode"],["--c-gemi
 
 /* demo terminal */
 const C={dim:"\x1b[2m",r:"\x1b[0m",b:"\x1b[1m",g:"\x1b[32m",y:"\x1b[33m",blu:"\x1b[38;5;111m",gr:"\x1b[90m"};
-const term=Ubiq.makeTerm("sb-term",{fontSize:11,scrollback:200});
-Ubiq.writeLines(term,[
-  [`${C.dim}$ ubiq run --agent claude${C.r}`],
+const term=Kubiq.makeTerm("sb-term",{fontSize:11,scrollback:200});
+Kubiq.writeLines(term,[
+  [`${C.dim}$ kubiq run --agent claude${C.r}`],
   [`${C.blu}●${C.r} ${C.b}claude-sonnet${C.r}  ${C.gr}backend-refactor@main${C.r}`],
   [`${C.g}✓${C.r} mapped 3 modules · 6 import sites`],
   [`${C.y}●${C.r} writing src/auth/verify.ts  ${C.g}done${C.r}`],

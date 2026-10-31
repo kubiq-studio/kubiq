@@ -3,7 +3,7 @@ id: inbox-message-queue-steering
 title: Problem — a turn in flight can only be queued behind or cancelled, never steered
 kind: proposal
 status: proposal
-summary: Everything Ubiq does with a prompt typed during a running turn happens in the interface — `Conversation::queued` holds it and the turn ending sends the front of the queue. No bridge carries a mid-turn message, because the ACP client refuses a second `session/prompt` outright while the Claude Code bridge could write one but is never asked to, leaving the harness's own queue and its `cancel_queued` interrupt unused. This is what each layer does today and what steering would cost.
+summary: Everything Kubiq does with a prompt typed during a running turn happens in the interface — `Conversation::queued` holds it and the turn ending sends the front of the queue. No bridge carries a mid-turn message, because the ACP client refuses a second `session/prompt` outright while the Claude Code bridge could write one but is never asked to, leaving the harness's own queue and its `cancel_queued` interrupt unused. This is what each layer does today and what steering would cost.
 read_when: you are changing how a prompt is held or sent while a turn is running, wiring mid-turn injection, or asking why Enqueue waits for the turn to end
 updated: 2026-09-14
 depends_on: [feat-chat, ref-acp-protocol, tech-agent-manager, tech-transport]
@@ -11,7 +11,7 @@ depends_on: [feat-chat, ref-acp-protocol, tech-agent-manager, tech-transport]
 
 # Problem — a turn in flight can only be queued behind or cancelled
 
-A user watching an agent go the wrong way has two moves in Ubiq: **Stop**, which throws the turn
+A user watching an agent go the wrong way has two moves in Kubiq: **Stop**, which throws the turn
 away, or **Enqueue**, which waits politely for the wrong turn to finish. There is no third — no way
 to say "keep going, but use the existing helper" and have it reach the model before the next tool
 call. Every harness this matters for has a mechanism for it. None of them is wired.
@@ -21,7 +21,7 @@ the smallest honest version of steering would cost.
 
 ## 1. Where it stands
 
-**The queue is interface state, and only interface state.** Nothing below `crates/ubiq` knows a
+**The queue is interface state, and only interface state.** Nothing below `crates/kubiq` knows a
 prompt was held.
 
 | Layer | What it does with a prompt typed mid-turn |
@@ -117,6 +117,6 @@ panes observe one conversation. It should not be approached as a steering featur
   into the transcript on write, as a sent prompt does today?
 - If a harness accepts mid-turn input, is Enqueue still offered at all, or does the control collapse
   back to Send with the queue reserved for harnesses that cannot take one?
-- Claude Code's queue is uuid-stamped and cancellable per message. Ubiq's queue ids are a local
+- Claude Code's queue is uuid-stamped and cancellable per message. Kubiq's queue ids are a local
   counter with no relation to it. If the client's queue drains into the harness's, which one does a
   queue row's delete control address?

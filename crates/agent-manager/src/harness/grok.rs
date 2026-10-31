@@ -276,7 +276,7 @@ impl Harness for Grok {
         cmd.arg("models");
         cmd.current_dir(super::shared::probe_cwd());
         // Headless model-list probe: nothing reads a window, and the app has already freed its own
-        // console (`ubiq_app::detach_console`), so a console-subsystem child would otherwise flash one.
+        // console (`kubiq_app::detach_console`), so a console-subsystem child would otherwise flash one.
         #[cfg(windows)]
         super::shared::no_window(&mut cmd);
         let output = cmd

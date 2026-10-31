@@ -3,7 +3,7 @@ id: inbox-chat-resume
 title: Proposal — resume and fork a chat through the harness's own session
 kind: proposal
 status: proposal
-summary: A conversation survives a restart and forks onto a second agent by handing the harness back its own session id, not by replaying a Ubiq-owned record — the resume token is already on disk in `SessionMeta.harness_session_id` keyed by the `AgentId`, five of six structured bridges already replay the whole transcript on resume, the remaining costs are a window that remembers its tab attachments and a closing window that stops deleting them, and compaction enters as a boundary the transcript has to draw rather than as a mechanism Ubiq has to build.
+summary: A conversation survives a restart and forks onto a second agent by handing the harness back its own session id, not by replaying a Kubiq-owned record — the resume token is already on disk in `SessionMeta.harness_session_id` keyed by the `AgentId`, five of six structured bridges already replay the whole transcript on resume, the remaining costs are a window that remembers its tab attachments and a closing window that stops deleting them, and compaction enters as a boundary the transcript has to draw rather than as a mechanism Kubiq has to build.
 read_when: you are building restart survival, a fork control or a compaction control for a chat tab, deciding whether a conversation record has to exist first, or asking why the resume plumbing that is already built resumes nothing
 updated: 2026-09-09
 depends_on: [backlog, tech-agent-manager, tech-architecture, tech-transport, feat-chat, feat-sessions, ref-acp-protocol, inbox-conversation-record]
@@ -11,7 +11,7 @@ depends_on: [backlog, tech-agent-manager, tech-architecture, tech-transport, fea
 
 # Proposal — resume and fork a chat through the harness's own session
 
-Two capabilities are asked for: a chat that comes back after Ubiq quits, and a chat cloned onto a
+Two capabilities are asked for: a chat that comes back after Kubiq quits, and a chat cloned onto a
 second agent **of the same harness**. This proposes both, and proposes them without building a
 conversation record first.
 
@@ -25,11 +25,11 @@ carrier**, and the build is roughly a tenth the size. §7 states the divergence 
 
 Four facts, none of them obvious from the backlog rows:
 
-- **The `AgentId` is minted by the interface**, not the host — `crates/ubiq/src/app/new_agent.rs:372`
-  and `crates/ubiq/src/state/layout.rs:808`. The window chooses the identity; the host adopts it.
+- **The `AgentId` is minted by the interface**, not the host — `crates/kubiq/src/app/new_agent.rs:372`
+  and `crates/kubiq/src/state/layout.rs:808`. The window chooses the identity; the host adopts it.
 - **That same id names the durable record.** `Agents::archive` writes
-  `<ubiq root>/sessions/<agent id>/meta.json` with `meta.id` set from the key
-  (`crates/ubiq-host/src/agent.rs:937`).
+  `<kubiq root>/sessions/<agent id>/meta.json` with `meta.id` set from the key
+  (`crates/kubiq-host/src/agent.rs:937`).
 - **The resume token is already in it.** `SessionMeta.harness_session_id`
   (`crates/agent-manager/src/session.rs:32`) holds the harness's own session id, captured off
   `AgentEvent::SessionStarted`. It is written at teardown *and* by `Agents::sweep` at boot after a
@@ -45,8 +45,8 @@ working resume already consumes one. What is missing is the read: nothing loads 
 launch, which is what `G97` means by "nothing reads that store back".
 
 The in-memory half is the part everybody sees. `PendingConversation.resume`
-(`crates/ubiq-host/src/coordinator.rs:266`) holds the token for the process's lifetime, fed from
-`ConvUpdate::Started.session_id` (`crates/ubiq-proto/src/conversation.rs:430`), whose own comment
+(`crates/kubiq-host/src/coordinator.rs:266`) holds the token for the process's lifetime, fed from
+`ConvUpdate::Started.session_id` (`crates/kubiq-proto/src/conversation.rs:430`), whose own comment
 already calls it "the one a resume needs". It dies with the process — `G95`.
 
 ## 2. What each harness can actually do
@@ -70,7 +70,7 @@ Two exceptions, each with an answer:
 - **Claude Code's native bridge** restores memory silently. Its transcript is on disk in a format
   the tree already parses: `Harness::transcripts` names `<config dir>/projects/*/*.jsonl`
   (`crates/agent-manager/src/harness/claude.rs:155`, the only implementation), `Agents::archive`
-  copies those files to `<ubiq root>/sessions/<id>/harness/` (`crates/ubiq-host/src/agent.rs:1004`),
+  copies those files to `<kubiq root>/sessions/<id>/harness/` (`crates/kubiq-host/src/agent.rs:1004`),
   and `crates/agent-manager/src/io/jsonl.rs` is a parser for exactly that wire. Replay is that
   parser over a file instead of a pipe.
 - **Codex's native app-server** cannot resume at all — `CodexBridge::new` takes `(child, cwd)` and
@@ -81,21 +81,21 @@ Two exceptions, each with an answer:
 ## 3. Restart resume — three changes
 
 **One. Stop destroying it.** `Coordinator::client_gone` calls `end_conversation` for every agent the
-departing client owned (`crates/ubiq-host/src/coordinator.rs:852`), which retires the run directory;
+departing client owned (`crates/kubiq-host/src/coordinator.rs:852`), which retires the run directory;
 the user-driven `UnloadConversation` keeps all of it. A closing window has to take the unload path,
 not the end path. This is `G207` unchanged, and it is the only prerequisite this proposal shares
 with the record proposal.
 
 **Two. The window remembers its attachments.** `ChatTab.attached: Option<AgentId>`
-(`crates/ubiq/src/state/chat.rs:16`) is already the whole binding, and `ViewPrefs`
-(`crates/ubiq/src/state/prefs.rs:130`) is already a per-project blob written through
-`crates/ubiq-host/src/atomic.rs`. Chat tabs and their attached ids go in it. `features/chat.md`'s
+(`crates/kubiq/src/state/chat.rs:16`) is already the whole binding, and `ViewPrefs`
+(`crates/kubiq/src/state/prefs.rs:130`) is already a per-project blob written through
+`crates/kubiq-host/src/atomic.rs`. Chat tabs and their attached ids go in it. `features/chat.md`'s
 own next-step asks for this at `_docs/features/chat.md:490`, and the comment presently declining it
 gives the reason it can be reversed: a chat id is reminted every run *because* an attachment points
 at nothing. Once an attachment resolves, the tab is worth writing down.
 
 **Three. `StartConversation` accepts the token.** The message
-(`crates/ubiq-proto/src/messages.rs:1077`) carries every launch pick and no resume field. Adding one
+(`crates/kubiq-proto/src/messages.rs:1077`) carries every launch pick and no resume field. Adding one
 — populated by the host from `sessions/<agent id>/meta.json` when the requested id already has a
 record — is what turns the existing plumbing on. The host reads the record; the window supplies only
 the id it remembers.
@@ -112,7 +112,7 @@ harness operation:
 - **Claude Code**: `claude --resume <src> --fork-session` continues the source's context under a new
   session id, leaving the original untouched — exact, immediate, no replay. The cost is a `fork`
   flag on `RunSpec` and one argv branch beside the `--resume` at `harness/claude.rs:377`. The CLI
-  also offers `--session-id <uuid>`, which would let Ubiq assign the token rather than capture it;
+  also offers `--session-id <uuid>`, which would let Kubiq assign the token rather than capture it;
   worth noting, not needed.
 - **Every ACP harness**: `session/fork` exists only in the unstable draft schema
   (`_docs/references/acp-protocol.md:1585`) and `AcpBridge` does not implement it. `session/load`
@@ -124,7 +124,7 @@ Until then the honest fallback is the one the record proposal's §6 already iden
 composed preamble into a new agent's first turn. A summary-seeded fork works today, for every
 harness, and is a different and weaker thing than a fork — the control should say which one it gave.
 
-In the interface, this is `Target` in `crates/ubiq/src/state/new_agent.rs:27` gaining a third
+In the interface, this is `Target` in `crates/kubiq/src/state/new_agent.rs:27` gaining a third
 variant naming a source `AgentId`, with the source's harness fixed rather than chosen. §6 of
 The record proposal works out that dialog, and none of it changes
 here beyond one constraint being liftable: a native fork **can** promise continuation, where a
@@ -135,35 +135,35 @@ compacted replay cannot.
 Compaction is three different things wearing one word, and separating them is most of the work.
 
 **Shrinking the harness's context** is the harness's own job, and it already does it. Claude Code
-takes `--autocompact <auto|tokens>` at launch, so the threshold is a provision-time flag Ubiq could
+takes `--autocompact <auto|tokens>` at launch, so the threshold is a provision-time flag Kubiq could
 set from a profile with no wire work at all. A native resume then inherits whatever the harness
 compacted, which is the whole reason §1's design needs no seed.
 
-**A Ubiq-side automatic trigger is redundant, and provably so.** Firing at a threshold needs
+**A Kubiq-side automatic trigger is redundant, and provably so.** Firing at a threshold needs
 occupancy; `G96` records that only Claude reports a context window, and `UsageRecord::context_pct`
-(`crates/ubiq-proto/src/conversation.rs:376`) answers `None` for everyone else. So for the one
-harness where Ubiq could decide, the harness already decides — better, because it knows its own
-model — and for every harness where Ubiq would add something, it has no denominator to decide with.
+(`crates/kubiq-proto/src/conversation.rs:376`) answers `None` for everyone else. So for the one
+harness where Kubiq could decide, the harness already decides — better, because it knows its own
+model — and for every harness where Kubiq would add something, it has no denominator to decide with.
 There is no configuration of this feature that is worth its code.
 
 **A manual control is the part that adds something**, and its discovery is already built.
 `AgentEvent::AvailableCommandsUpdate` (`crates/agent-manager/src/io/model.rs:742`) carries "every
 slash command the session has", parsed for every ACP harness by
 `crates/agent-manager/src/io/acp.rs:502` and routed through `crates/agent-manager/src/io/acp_client.rs:1745`.
-The harness states whether it has a `/compact`; Ubiq draws the control where one is offered and
+The harness states whether it has a `/compact`; Kubiq draws the control where one is offered and
 draws nothing where none is. Sending it needs no new input variant either —
 `crates/agent-manager/src/io/jsonl.rs:264` writes prompt text verbatim and no part of the crate
 inspects a leading slash. This is cheaper than the `compact_command` on `Harness` that the record
-proposal's §4 assumes, and it keeps that document's own rule — Ubiq never spells the command —
+proposal's §4 assumes, and it keeps that document's own rule — Kubiq never spells the command —
 by construction rather than by discipline. Claude Code's native bridge is the one that would need
 work: it reports `slash_commands` on `init` and `jsonl.rs` does not read the field.
 
-**What actually matters for persistence is the boundary.** A compaction is invisible to Ubiq: ACP
+**What actually matters for persistence is the boundary.** A compaction is invisible to Kubiq: ACP
 has no notification for it, no capability, and no `StopReason` for a context that ran out
 (`_docs/references/acp-protocol.md:724`). The only evidence is `used` falling, which a fresh turn
 does too — `crates/agent-manager/src/io/model.rs:776` says as much. The interface is already honest
 about this at the ring, where the tooltip reads "A level, not a total: it falls when the
-conversation is compacted", and `crates/ubiq/src/ui/kit/controls.rs:230` redraws smaller with no
+conversation is compacted", and `crates/kubiq/src/ui/kit/controls.rs:230` redraws smaller with no
 high-water mark.
 
 The transcript is not honest about it, and persistence is what turns that from cosmetic into wrong.
@@ -185,7 +185,7 @@ transcript to redraw a resumed tab, and that file holds pre-compaction history t
 carries — so the replay is only honest once the boundary is mapped. The boundary comes first.
 
 **`G116` is not this problem despite sharing the word.** `Conversation::blocks`
-(`crates/ubiq/src/state/conversation.rs:197`) grows unbounded in the window's memory, holding whole
+(`crates/kubiq/src/state/conversation.rs:197`) grows unbounded in the window's memory, holding whole
 diff bodies, with no eviction anywhere. That is a client memory bound answered by paging, and it is
 independent of what the model carries. Persistence makes it worse — longer-lived conversations, and
 a restored tab that starts full rather than empty — so it is worth naming here, and it is not a
@@ -194,7 +194,7 @@ prerequisite.
 ## 6. What is deliberately not built
 
 - **No host-owned `ConvUpdate` record.** The harness holds the transcript; on ACP it hands it back.
-- **No compaction Ubiq drives on its own.** §5: the harness compacts itself, a threshold Ubiq could
+- **No compaction Kubiq drives on its own.** §5: the harness compacts itself, a threshold Kubiq could
   fire on exists for one harness only, and a manual control draws from the command list the harness
   already reports. Record compaction, the record proposal's §4, has nothing to fold and stays unbuilt.
 - **No cross-harness fork.** Forking Claude onto Codex needs the record, and the record is what §7
@@ -271,7 +271,7 @@ cheap, both are independently useful, and neither blocks a tab from coming back.
   the tab should say the harness no longer has it.
 - **Does the record survive a config directory that is gone?** `am session resume` errors when
   `SessionMeta.config_dir` no longer exists (`crates/agent-manager/src/cli/session.rs`), and
-  `G182` records that the home mode is not on the record at all. A Ubiq resume rebuilds the run
+  `G182` records that the home mode is not on the record at all. A Kubiq resume rebuilds the run
   directory from the recipe, so it may not need the old one — unverified.
 - **Is a fork's source shown in the child?** A forked conversation whose transcript starts mid-thought
   is confusing without a marker naming what it came from.
@@ -285,7 +285,7 @@ cheap, both are independently useful, and neither blocks a tab from coming back.
   than for trimming.
 - **Should `--session-id` replace token capture for Claude Code?** Assigning the id at launch makes
   the mapping deterministic and removes the dependency on `SessionStarted` arriving. It also means
-  Ubiq naming something inside the harness's own store, which no other harness would accept.
+  Kubiq naming something inside the harness's own store, which no other harness would accept.
 
 ## Related docs
 
@@ -296,6 +296,6 @@ cheap, both are independently useful, and neither blocks a tab from coming back.
   the persistence its next steps ask for
 - [`features/sessions-and-workspaces.md`](../features/sessions-and-workspaces.md) — unload against
   delete, and the record that outlives the run directory
-- [`tech/agent-manager.md`](../tech/agent-manager.md) — the library's session against Ubiq's
+- [`tech/agent-manager.md`](../tech/agent-manager.md) — the library's session against Kubiq's
 - [`references/acp-protocol.md`](../references/acp-protocol.md) — `session/load`, and the draft
   methods `session/fork` sits among

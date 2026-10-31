@@ -4,16 +4,16 @@ title: Proposal — a terminal interface, on ratatui
 kind: proposal
 status: proposal
 summary: A second interface crate drawn with ratatui that attaches to a host as an ordinary client over the transport the remote listener already speaks, covering the Control readings, a reduced IDE and the agents screen — three areas of the workbench and not the fourth, because a terminal already has git; what it may share with the GPUI interface, why a pane inside a pane is the expensive part, the ownership rule that decides whether it can watch the window's panes or only its own, the host record that lets either interface attach to whichever one is running, and the three shapes the application builds in.
-read_when: you are deciding whether Ubiq gets a second front end, what a non-GPUI client may reuse, how a front end finds a host that is already running, or how a terminal reaches a host on another machine
+read_when: you are deciding whether Kubiq gets a second front end, what a non-GPUI client may reuse, how a front end finds a host that is already running, or how a terminal reaches a host on another machine
 updated: 2026-09-24
 depends_on: [tech-architecture, tech-transport, tech-structure, tech-decisions, feat-stats, feat-workbench, feat-chat, feat-panes, inbox-drone]
 ---
 
 # Proposal — a terminal interface, on ratatui
 
-Ubiq's interface is a GPU-drawn desktop window, and the machine a developer's agents run on is
+Kubiq's interface is a GPU-drawn desktop window, and the machine a developer's agents run on is
 often not the machine in front of them: an SSH session into a build box, a container, a rented GPU
-node, a laptop reached from a phone. The host is reachable from any of those — `ubiq-app --serve`
+node, a laptop reached from a phone. The host is reachable from any of those — `kubiq-app --serve`
 binds a listener and speaks the whole contract over it — but the only thing that can dial it is
 another desktop window on another desktop.
 
@@ -29,19 +29,19 @@ replaceable, the claim has never been tested, and the test is worth more than it
 
 ## 1. Where it stands
 
-**The bus was built for many clients.** `crates/ubiq-proto/src/bus.rs` mints a `ClientId` per
+**The bus was built for many clients.** `crates/kubiq-proto/src/bus.rs` mints a `ClientId` per
 attachment out of a process-wide counter and routes to `To::Client(id)` or `To::Everyone`; the
 window is one client, and each remote session is another. `bus::detached` mints a client with no
 hub behind it, for a socket pump to drive — that is the seam a second process attaches through.
 
-**The wire exists and is in use.** `crates/ubiq-proto/src/wire.rs` frames messages as a four-byte
+**The wire exists and is in use.** `crates/kubiq-proto/src/wire.rs` frames messages as a four-byte
 length prefix over MessagePack, chosen for self-description so two differently-built binaries can
-disagree about field order and still talk. `crates/ubiq-host/src/remote.rs` binds a listener,
+disagree about field order and still talk. `crates/kubiq-host/src/remote.rs` binds a listener,
 answers `GET /attach?token=` with a protocol upgrade and pumps frames into `Hub::connect`;
-`crates/ubiq/src/app/remote_connect.rs` is the dialling half. Neither names a message family: a
+`crates/kubiq/src/app/remote_connect.rs` is the dialling half. Neither names a message family: a
 remote connection is an ordinary client.
 
-**The coordinator is keyed by client, not by window.** `crates/ubiq-host/src/coordinator.rs` holds
+**The coordinator is keyed by client, not by window.** `crates/kubiq-host/src/coordinator.rs` holds
 `watchers`, `owners`, `focused` and `conversation_owners` as maps from `ClientId`, and `client_gone`
 reaps what one client owned. There is no `WindowId` anywhere in the host, and two attached clients
 already have two focus states, neither more focused than the other.
@@ -53,7 +53,7 @@ under `vendor/gpui-terminal/`, and the grid holder in `vendor/gpui-terminal/src/
 no drawing crate at all.
 
 **And the interface's state layer is renderer-agnostic by construction.** Across the 46 files of
-`crates/ubiq/src/state/` there are nine mentions of the GPUI crate and no rendering context at all;
+`crates/kubiq/src/state/` there are nine mentions of the GPUI crate and no rendering context at all;
 the exceptions are two widget-state fields and a handful of scroll offsets. That is not an accident
 — it is `D17`'s split between state and the functions that draw it, and it is what makes this
 proposal a rendering question rather than a rewrite.
@@ -87,7 +87,7 @@ stating flat, because each one is a decision someone would otherwise make by acc
 | IDE | The explorer tree with its filter and its git letter badges, the file picker, project search with its result list, and a read-only text viewer with syntax colour | Every viewer that is not monospace text: Markdown and Mermaid previews, images, the diagram scene, the web panels. Editing, in the first cut |
 | Agents | The agents screen as columns, the transcript with its tool blocks and folds, the composer, the permission prompts and the "needs you" strip, the lifecycle glyph, the context and token readouts, the delegate list | Drag-to-group, hover, inline links. Every gesture becomes a key |
 | Panes | A real terminal per pane, with focus, resize and a leader key | Nothing, and this is the expensive one — see §5 |
-| Git | — | All of it. Refs, history, the change lists, the diff, the lane engine. The terminal the interface runs in already has a git client, and it is better than the one Ubiq would draw in eighty columns |
+| Git | — | All of it. Refs, history, the change lists, the diff, the lane engine. The terminal the interface runs in already has a git client, and it is better than the one Kubiq would draw in eighty columns |
 | Orchestration, tasks, connectors, capture, settings | — | Out of the first three releases. A graph, a board and an OAuth flow each need their own argument |
 
 The drops are the proposal's honest half. A terminal interface that tried to be the window would be
@@ -98,8 +98,8 @@ text-shaped, and the fourth is dropped because its replacement is already instal
 
 The state layer is the only candidate, and it is a real one: the explorer's tree merge, the
 conversation fold, the search result model, the picker and the Control state hold about eighteen
-thousand lines that name no drawing crate. Two exceptions matter — `crates/ubiq/src/state/editor.rs`
-and `crates/ubiq/src/state/search.rs` each hold a widget's own state as the model, deliberately, and
+thousand lines that name no drawing crate. Two exceptions matter — `crates/kubiq/src/state/editor.rs`
+and `crates/kubiq/src/state/search.rs` each hold a widget's own state as the model, deliberately, and
 neither travels.
 
 **The recommendation is to share nothing on the first two phases and to extract exactly one module
@@ -110,7 +110,7 @@ which is precisely the kind of duplication that produces two products that disag
 agent said.
 
 So: phases 0 to 2 duplicate small state (a tree, a table, a query) and answer to the host for
-everything else. Phase 3 moves `crates/ubiq/src/state/conversation.rs` into a crate both interfaces
+everything else. Phase 3 moves `crates/kubiq/src/state/conversation.rs` into a crate both interfaces
 depend on — a move, not a copy — and the window's own tests come with it. Anything else is shared
 only when a second consumer has proved the shape.
 
@@ -118,7 +118,7 @@ only when a second consumer has proved the shape.
 
 This is the part that decides whether the proposal is a month or a quarter.
 
-**The emulator is the window's, not a new one.** `D1` says Ubiq integrates a terminal emulator
+**The emulator is the window's, not a new one.** `D1` says Kubiq integrates a terminal emulator
 rather than writing one, and `D2` says a pane is a terminal. Both hold here. The grid holder under
 `vendor/gpui-terminal/` wraps `alacritty_terminal` with no drawing crate in its logic, so the
 terminal interface feeds bytes into the same emulator the window feeds and walks the resulting grid
@@ -143,7 +143,7 @@ intercepted gestures becomes a closed set of leader-prefixed ones. Anything not 
 goes to the pane as bytes.
 
 *The outer terminal's capabilities are not the window's.* Colour depth, double-width characters,
-bracketed paste, mouse reporting and the clipboard are all properties of a terminal Ubiq does not
+bracketed paste, mouse reporting and the clipboard are all properties of a terminal Kubiq does not
 control. The clipboard in particular has one answer over SSH — the escape sequence that asks the
 outer terminal to set it — and no other.
 
@@ -155,7 +155,7 @@ must not stall the harness applies here exactly as it does in the window.
 ## 6. The panes it cannot see, and the conversations either
 
 The finding that most shapes the design: **everything the host streams, it streams to one client.**
-The reader thread in `crates/ubiq-host/src/pty/mod.rs` forwards each chunk to the owning client's
+The reader thread in `crates/kubiq-host/src/pty/mod.rs` forwards each chunk to the owning client's
 mailbox and stops when nobody is listening; ownership is fixed at spawn; and the host keeps no
 scrollback, because `D6` keeps the bytes opaque and nothing stores what it does not parse. A
 conversation is the same shape for a different reason: its updates are addressed to the client that
@@ -183,9 +183,9 @@ actually wants.
 
 ## 7. How it is built: three shapes
 
-**One crate for the interface**, `crates/ubiq-tui/`, holding its own state, its own frame loop and
+**One crate for the interface**, `crates/kubiq-tui/`, holding its own state, its own frame loop and
 its own draw functions. It depends on the contract crate and on ratatui, and on nothing else of
-Ubiq's.
+Kubiq's.
 
 **One composition root, still.** The binary crate stays the only place that names both halves. It
 grows a second binary target and two features, each interface an optional dependency behind its own,
@@ -194,12 +194,12 @@ fewer binary rather than failing to compile.
 
 | Build | Features | Produces | For |
 |---|---|---|---|
-| Both | the default | `ubiq` and `ubiq-tui` | The desktop install: a window, and a terminal that attaches to the same host |
-| Window only | `--no-default-features --features gui` | `ubiq` | A packaged desktop application that has no business shipping a second command |
-| Terminal only | `--no-default-features --features tui` | `ubiq-tui` | A server, a container, a build box: no drawing crate anywhere in the tree, no GPU, no font stack, no display |
+| Both | the default | `kubiq` and `kubiq-tui` | The desktop install: a window, and a terminal that attaches to the same host |
+| Window only | `--no-default-features --features gui` | `kubiq` | A packaged desktop application that has no business shipping a second command |
+| Terminal only | `--no-default-features --features tui` | `kubiq-tui` | A server, a container, a build box: no drawing crate anywhere in the tree, no GPU, no font stack, no display |
 
 The terminal-only build is the one that has to be defended, because it is the reason the features
-exist rather than a runtime flag: a machine with no display must be able to compile and run Ubiq
+exist rather than a runtime flag: a machine with no display must be able to compile and run Kubiq
 without GPUI in its dependency graph at all. On-device assistance is a default feature and drops out
 of a narrowed build alongside the rest; the host answers from its stub backend, which every call
 site already reads correctly.
@@ -214,7 +214,7 @@ meant for a machine with none.
 **A host belongs to a config root, and a front end asks the root before it starts one.**
 
 Two mechanisms come close to answering that today and neither does. The single-instance lock in
-`crates/ubiq-app/src/handoff.rs` is per *application*: its socket is named from the hash of the
+`crates/kubiq-app/src/handoff.rs` is per *application*: its socket is named from the hash of the
 running executable, so a relaunch of the window hands its paths to the running window and exits,
 while a differently-named binary never meets it at all — and it is Unix-only. A served run
 advertises to the network, and nothing local is told it exists.
@@ -232,7 +232,7 @@ Every front end then starts the same way:
    is proved stale by connecting to it: a record whose address refuses is removed, and the front end
    owns a host instead.
 3. **Attach and draw.** For the window this is the path it has rather than a new one — the bus
-   wrapper in `crates/ubiq/src/app/hosts.rs` already multiplexes a local client and dialled ones.
+   wrapper in `crates/kubiq/src/app/hosts.rs` already multiplexes a local client and dialled ones.
 
 **It runs in both directions.** A terminal started while a window runs attaches to the window's host:
 the same projects, the same agent roster, the same readings — and its own panes and its own
@@ -251,7 +251,7 @@ to read.
 windowed application is not a second window; a second terminal in a second tmux pane is a second
 client on purpose. It reads the record, attaches, and never binds that socket.
 
-The cost is a loopback listener and a token file for every running Ubiq, where a listener exists
+The cost is a loopback listener and a token file for every running Kubiq, where a listener exists
 today only when asked for. Loopback only, a port the kernel picks, a file inside a root that already
 holds the catalogue and the account references — and a preference for anyone who wants no listening
 socket at all, which costs them the duality and nothing else.
@@ -322,7 +322,7 @@ If accepted, two decision rows and five backlog rows:
 - **`D165` — a host advertises itself in its config root, and a front end attaches before it starts
   one.** Owning a coordinator means binding loopback and writing a record; finding a live record
   means attaching to it, whichever interface wrote it. Cost: a listening socket and a token file for
-  every running Ubiq, and one more piece of state in the config root that a crash can leave behind.
+  every running Kubiq, and one more piece of state in the config root that a crash can leave behind.
 - **`G340`** — every streamed resource routes to one client and the host keeps no history of either
   kind, so a second interface can watch neither the window's panes nor its transcripts; the fan-out
   and the hand-over are unspecified, and `inbox-multi-attach` is where they are argued.

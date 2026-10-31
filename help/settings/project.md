@@ -21,7 +21,7 @@ opens **General** alone: name the project and create it, and the other sections 
 | **General**: **Color**, **Project name**, **Description** | The project's colour on the title chip and rail, its name, and the text given to every agent as context |
 | **General**: **Project path**, **Rail initials** | The folder, which cannot be changed here, and up to three letters for the rail badge |
 | **General**: **Modes** | Which of the project's destinations the rail shows; the last one on cannot be turned off |
-| **General**: **Project data** | Keeps the project's tasks and settings in **Ubiq's config folder** or **In the project (.ubiq/)**, moving them when you switch |
+| **General**: **Project data** | Keeps the project's tasks and settings in **Kubiq's config folder** or **In the project (.kubiq/)**, moving them when you switch |
 | **General**: **Keep an index**, **Mission term**, **Search excludes**, **Repositories** | This project's own index level, word for a mission and search skips, each overriding the application's, and the git repositories found inside it |
 | **Tools** | Commands run in this project's folder, on top of the machine-wide ones; see [Tools and command line](settings-tools) |
 | **Agent definitions** | Which saved setups a start in this project is offered, or **Use the global agents** only |

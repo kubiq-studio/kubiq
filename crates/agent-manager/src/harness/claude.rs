@@ -1109,7 +1109,7 @@ fn discover_models_via_jsonl() -> Result<Vec<ModelInfo>> {
 /// How long a `/usage` probe may take before it is killed.
 ///
 /// Generous, because it pays for a cold `claude` start and one round trip to the provider — but
-/// bounded, because the host runs every account's probe on one thread (`ubiq-host`'s
+/// bounded, because the host runs every account's probe on one thread (`kubiq-host`'s
 /// `quota::Quota`) and a `claude` that never exits would otherwise stall every reading behind it.
 const USAGE_TIMEOUT: Duration = Duration::from_secs(60);
 

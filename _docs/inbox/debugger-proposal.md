@@ -4,18 +4,18 @@ title: Proposal — agentic multi-language debugging through DAP
 kind: proposal
 status: proposal
 summary: One Debug Adapter Protocol client in Rust with one adapter per language (debugpy, delve, js-debug, CodeLLDB, netcoredbg, java-debug), a debug worker in the host, a Debug message family, a built-in MCP server so agents drive the same session the human sees, the IDE-mode UI it needs, a phased build order, the decisions it would add and the open questions.
-read_when: you are deciding how Ubiq debugs code, how an agent gets breakpoints and stepping, which DAP adapters to support and how they install, or what the IDE mode needs for breakpoints
+read_when: you are deciding how Kubiq debugs code, how an agent gets breakpoints and stepping, which DAP adapters to support and how they install, or what the IDE mode needs for breakpoints
 updated: 2026-10-26
 depends_on: [feat-workbench-ide, feat-workbench, tech-architecture, tech-transport, tech-decisions, inbox-hitl-dialogs, inbox-policy-registry, inbox-acp-client, inbox-plugin-system]
 ---
 
-**Ubiq would embed one DAP client in Rust and one adapter per language, so that a human and an
+**Kubiq would embed one DAP client in Rust and one adapter per language, so that a human and an
 agent debug the same session: the human through breakpoint glyphs and a call-stack panel, the agent
-through a Ubiq-hosted MCP server whose tools are the same requests.** An agent that today runs `pdb`
+through a Kubiq-hosted MCP server whose tools are the same requests.** An agent that today runs `pdb`
 or `dlv` in a terminal is blind and spends tokens on prompts and screen scrape; a structured,
 budgeted debugger is the cheaper and the safer way to let it inspect a running program.
 
-## 1. Why DAP, and why in Ubiq
+## 1. Why DAP, and why in Kubiq
 
 DAP is the protocol VS Code speaks to every debugger: Content-Length framed JSON, requests,
 responses and events, and one adapter process per language. Adding a language is installing an
@@ -41,27 +41,27 @@ every message carries an id, and the UI never assumes the debuggee is local.
 
 | Piece | Where | What it is |
 |---|---|---|
-| `ubiq-dap` | new leaf crate, precedent `crates/ubiq-db` | Default feature: the model. A host-only feature: process and socket transport. DAP framing, request, response and event types, the session state machine, the launch-config model, the launch.json parser |
-| Debug worker | `crates/ubiq-host/src/watch/mod.rs` is the pattern | Job plus mailbox, start a job and get a handle, as the Files, Git, Search and Index workers do. Owns adapter processes, sockets and reverse requests. Feature-gated like `db` |
-| Debug family | a new debug module in ubiq-proto, precedent `crates/ubiq-proto/src/db.rs` | Messages plus a `DebugSessionId` from `ulid_id!` in `crates/ubiq-proto/src/ids.rs` |
-| MCP server | `crates/ubiq-host/src/mcp/catalogue.rs`, `crates/ubiq-host/src/mcp/server.rs` | A new built-in row, served by the existing loopback listener, dispatched by a module like `crates/ubiq-host/src/mcp/sql/` |
+| `kubiq-dap` | new leaf crate, precedent `crates/kubiq-db` | Default feature: the model. A host-only feature: process and socket transport. DAP framing, request, response and event types, the session state machine, the launch-config model, the launch.json parser |
+| Debug worker | `crates/kubiq-host/src/watch/mod.rs` is the pattern | Job plus mailbox, start a job and get a handle, as the Files, Git, Search and Index workers do. Owns adapter processes, sockets and reverse requests. Feature-gated like `db` |
+| Debug family | a new debug module in kubiq-proto, precedent `crates/kubiq-proto/src/db.rs` | Messages plus a `DebugSessionId` from `ulid_id!` in `crates/kubiq-proto/src/ids.rs` |
+| MCP server | `crates/kubiq-host/src/mcp/catalogue.rs`, `crates/kubiq-host/src/mcp/server.rs` | A new built-in row, served by the existing loopback listener, dispatched by a module like `crates/kubiq-host/src/mcp/sql/` |
 
 ### The messages
 
 UI to host: launch, attach, stop, set breakpoints, continue, step, pause, stack trace, variables,
 evaluate. Host to UI: started, stopped, continued, output, terminated, and the responses. A new row
 goes in the [transport contract](../tech/transport-contract.md), with a dispatch arm in the
-coordinator, a receiver in `crates/ubiq/src/app/wire.rs` and an arm in the id mapping in
-`crates/ubiq/src/app/hosts.rs`. The pane id rule is met by the session carrying the pane id of the
+coordinator, a receiver in `crates/kubiq/src/app/wire.rs` and an arm in the id mapping in
+`crates/kubiq/src/app/hosts.rs`. The pane id rule is met by the session carrying the pane id of the
 terminal that holds the debuggee, or the project's pane when it has none.
 
 ### Reverse requests
 
 DAP lets the adapter ask the client to do things. Two matter.
 
-| Request | What Ubiq does |
+| Request | What Kubiq does |
 |---|---|
-| `runInTerminal` | The debuggee gets a real pty pane. `SpawnWorkspace` in `crates/ubiq-proto/src/messages.rs` takes a shell or harness name, not an argv, so this needs a new spawn message carrying project id, argv, cwd, env and a title. Answered with the process id |
+| `runInTerminal` | The debuggee gets a real pty pane. `SpawnWorkspace` in `crates/kubiq-proto/src/messages.rs` takes a shell or harness name, not an argv, so this needs a new spawn message carrying project id, argv, cwd, env and a title. Answered with the process id |
 | `startDebugging` | js-debug children and debugpy subprocesses. Becomes a child session under one parent, shown as a tree |
 
 The client advertises `supportsRunInTerminalRequest` and `supportsStartDebuggingRequest` in
@@ -70,15 +70,15 @@ The client advertises `supportsRunInTerminalRequest` and `supportsStartDebugging
 ### The adapter catalogue
 
 Where the knowledge of how to launch an adapter lives is a real question, because the base rule is
-that Ubiq never hard-codes how to launch a harness and `crates/agent-manager` owns that. An adapter
+that Kubiq never hard-codes how to launch a harness and `crates/agent-manager` owns that. An adapter
 is not a harness, but the shape is the same: a name, a launch command, a transport, a probe.
-The recommendation is a data table inside `ubiq-dap`, because agent-manager has no UI dependency
+The recommendation is a data table inside `kubiq-dap`, because agent-manager has no UI dependency
 and no reason to know about debuggers; the table would be data, not branching code, so it can move
 later. Open question 2.
 
 ### The MCP server
 
-A new built-in server (`UBIQ_DEBUG`, next to `UBIQ_ASK` and `UBIQ_SQL_READ` in the catalogue),
+A new built-in server (`KUBIQ_DEBUG`, next to `KUBIQ_ASK` and `KUBIQ_SQL_READ` in the catalogue),
 injected through `StartConversation.mcps` like the others. Answers are TOON, like the SQL server's.
 Section 4 lists the tools.
 
@@ -105,11 +105,11 @@ have not been run here.
 
 ### Managed install
 
-Adapters that Ubiq installs go under `<config root>/dap/<adapter>/`, so an install never touches
+Adapters that Kubiq installs go under `<config root>/dap/<adapter>/`, so an install never touches
 the user's global environment. The flow copies the ACP adapter install: the settings page lists
 each adapter as detected, installed or downloadable, and an install button runs it. The messages to
 copy are `AcpRegistryStatus::Downloadable` and `AcpAdapterInstalled` in
-`crates/ubiq-proto/src/messages.rs`, and the probe is what `CheckAgentCommand` does for a harness.
+`crates/kubiq-proto/src/messages.rs`, and the probe is what `CheckAgentCommand` does for a harness.
 Auto-install versus detect-only is open question 3.
 
 ### Python: debugpy
@@ -196,7 +196,7 @@ server; there is no standalone mode.
 - **Flow.** Start jdtls over stdio with `initializationOptions.bundles` set to the jar, then send
   `workspace/executeCommand` with `vscode.java.startDebugSession`. It returns a port, and DAP runs
   over TCP to it. The commands that resolve the classpath, main class and Java executable are used
-  for the launch config. Ubiq therefore needs a minimal LSP client for jdtls.
+  for the launch config. Kubiq therefore needs a minimal LSP client for jdtls.
 - **Config.** Type `java`: `mainClass`, `projectName`, `args`, `vmArgs`, `cwd`, `env`, `classPaths`,
   `modulePaths`, `console`. Attach takes `hostName` and `port`, against a JVM started with
   `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005`.
@@ -231,7 +231,7 @@ Design rules:
 - **HITL gates** on launch, attach, evaluate and setVariable, because each runs code or changes a
   running program. No general policy registry exists ([policy registry](./policy-registry-proposal.md)),
   so the gate is an ask-style registered dialog ([HITL dialogs](./hitl-registered-dialogs.md)); the
-  precedent is `crates/ubiq-host/src/mcp/ask.rs`.
+  precedent is `crates/kubiq-host/src/mcp/ask.rs`.
 - **A guide.** Server `initialize` instructions or a guide tool teach the loop above. The spike skill
   has the precedent for an agent-facing server that does this.
 
@@ -241,12 +241,12 @@ What exists, and what has to be added. See [the IDE workbench](../features/workb
 
 ### The editor
 
-The editor is gpui-component's `EditorState`, built in `crates/ubiq/src/app/boot.rs`. No gutter
+The editor is gpui-component's `EditorState`, built in `crates/kubiq/src/app/boot.rs`. No gutter
 click or breakpoint-marker API was found (verify against the pinned version).
 
 | Option | Cost |
 |---|---|
-| Upstream change to gpui-component: gutter markers and click events | Preferred; slowest, and Ubiq pins a version |
+| Upstream change to gpui-component: gutter markers and click events | Preferred; slowest, and Kubiq pins a version |
 | An overlay element drawn over the gutter | Works now; fragile against scrolling, folding and wrapping |
 | Abuse diagnostics, as DB mode does through `diagnostics_mut` | Gets a glyph on a line; cannot take a click or tell kinds apart |
 
@@ -255,13 +255,13 @@ click to toggle; a current-execution-line highlight; inline values (later); hove
 a hover provider, with the completion provider set through `lsp_mut` in `boot.rs` as the precedent.
 
 Stopping on a breakpoint has to open the file at the line. No such API exists; the only cursor call
-is `set_cursor_position` in `crates/ubiq/src/app/picker.rs`, so an open-file-at-line helper is a
+is `set_cursor_position` in `crates/kubiq/src/app/picker.rs`, so an open-file-at-line helper is a
 prerequisite of phase 3.
 
 ### Panels
 
-`PanelKind` in `crates/ubiq/src/state/dock.rs` gets new variants, each with its class, home and name
-and an arm in the dock's body function in `crates/ubiq/src/ui/dock/mod.rs`.
+`PanelKind` in `crates/kubiq/src/state/dock.rs` gets new variants, each with its class, home and name
+and an arm in the dock's body function in `crates/kubiq/src/ui/dock/mod.rs`.
 
 | Panel | Kind | Notes |
 |---|---|---|
@@ -276,20 +276,20 @@ and an arm in the dock's body function in `crates/ubiq/src/ui/dock/mod.rs`.
 | Item | Where |
 |---|---|
 | Debug toolbar: continue, pause, step, restart, stop; a session picker when several | The title bar, or floating over the editor |
-| Key bindings F5, Shift-F5, F9, F10, F11, Shift-F11 | `crates/ubiq/src/app/mod.rs`; only f1 and shift-f1 are bound today, and the context is "Workbench" |
+| Key bindings F5, Shift-F5, F9, F10, F11, Shift-F11 | `crates/kubiq/src/app/mod.rs`; only f1 and shift-f1 are bound today, and the context is "Workbench" |
 | Navigator commands: start a config, toggle a breakpoint | The command palette |
-| Status indicator | `crates/ubiq/src/ui/status_bar.rs`, a closed function today |
-| Settings section for adapters: detected, installed, paths, install buttons | Through `SettingsSectionSpec` in `crates/ubiq/src/ext/settings.rs` |
-| Theme tokens: breakpoint, current line, stopped-frame | `crates/ubiq/src/theme.rs`, a value in both palettes |
+| Status indicator | `crates/kubiq/src/ui/status_bar.rs`, a closed function today |
+| Settings section for adapters: detected, installed, paths, install buttons | Through `SettingsSectionSpec` in `crates/kubiq/src/ext/settings.rs` |
+| Theme tokens: breakpoint, current line, stopped-frame | `crates/kubiq/src/theme.rs`, a value in both palettes |
 
-A "Debug" rail mode through `RailModeSpec` in `crates/ubiq/src/ext/rail.rs` is possible. The
+A "Debug" rail mode through `RailModeSpec` in `crates/kubiq/src/ext/rail.rs` is possible. The
 recommendation is panels inside the IDE mode first: a debug session is a view of the code, not a
 separate place.
 
 ### Closing, attribution
 
 - **Tab close.** A debug session owns a process, so it follows D103 and D130: its own `debug_close`
-  setting, Hide or Close, next to `TabClose` in `crates/ubiq/src/state/settings.rs`. Would add a
+  setting, Hide or Close, next to `TabClose` in `crates/kubiq/src/state/settings.rs`. Would add a
   decision.
 - **Attribution.** Each breakpoint, step and evaluate shows who made it, the human or which agent.
   When an agent is driving, the toolbar shows it, and a human step either takes over or is refused.
@@ -297,8 +297,8 @@ separate place.
 
 ### Seams
 
-Dock panels, MCP servers, commands and status items are closed in `ubiq_app::Contributions`
-(`crates/ubiq-app/src/lib.rs`); only rail modes, settings sections, bar menus, runner kinds,
+Dock panels, MCP servers, commands and status items are closed in `kubiq_app::Contributions`
+(`crates/kubiq-app/src/lib.rs`); only rail modes, settings sections, bar menus, runner kinds,
 viewers, task providers and runner sources are open. A Studio-only version would need those seams
 opened in the base first. Open question 1.
 
@@ -307,7 +307,7 @@ opened in the base first. Open question 1.
 | Phase | Scope | Rough cost |
 |---|---|---|
 | 0 | A spike under `spike/debug` (the spike skill): Python and Go, the MCP tools, minimal panels | 1 to 2 weeks |
-| 1 | `ubiq-dap`, the host worker, the Debug family, Python and Go, the managed install | 3 weeks |
+| 1 | `kubiq-dap`, the host worker, the Debug family, Python and Go, the managed install | 3 weeks |
 | 2 | Node with child sessions, Rust, launch.json import | 2 to 3 weeks |
 | 3 | The editor gutter, open-at-line, hover evaluation | 2 to 4 weeks, depending on the upstream answer |
 | 4 | .NET | 1 week |
@@ -319,13 +319,13 @@ panels.
 
 ## 7. Decisions this would add
 
-- Debugging is DAP, with one client in `ubiq-dap` and the adapter as the per-language part, rather
-  than a bridge that spawns its own adapter. **Cost:** Ubiq owns the session state machine and the
+- Debugging is DAP, with one client in `kubiq-dap` and the adapter as the per-language part, rather
+  than a bridge that spawns its own adapter. **Cost:** Kubiq owns the session state machine and the
   reverse requests.
 - The agent and the human share one debug session, and the MCP server is a client of it, not a
   second one. **Cost:** attribution and handoff become required, not optional.
 - A debug session's close behaviour is its own setting, following D103 and D130.
-- Adapters install under `<config root>/dap/` and are never installed globally. **Cost:** Ubiq
+- Adapters install under `<config root>/dap/` and are never installed globally. **Cost:** Kubiq
   carries a download and a probe per adapter.
 - Debugger launch and evaluate are gated by a registered dialog. **Cost:** an agent cannot debug
   unattended until the policy registry exists.
@@ -335,7 +335,7 @@ panels.
 1. Whether this lands in the base or in Studio. Studio would need the dock, MCP and command seams
    opened in the base first.
 2. Where the adapter catalogue lives: `crates/agent-manager`, which owns launch knowledge for
-   harnesses, or a data table in `ubiq-dap`. The latter is recommended.
+   harnesses, or a data table in `kubiq-dap`. The latter is recommended.
 3. Auto-install versus detect-only, per adapter. A 50 MB download the user did not ask for is not
    free.
 4. Who drives when the agent and the human both act: a lock, a handoff, or last writer wins.

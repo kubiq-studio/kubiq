@@ -9,11 +9,11 @@ related: [agents-accounts, settings-connectors]
 
 ## What is the difference between an account and a connector?
 
-An account is the login a harness such as Claude Code or Codex runs under. A connector is you signed in at a code host such as GitHub or GitLab, which Ubiq uses to list and clone your repositories and to reach issues and pull requests. They are set up in different places: [Accounts](agents-accounts) under **Harnesses**, and [Connectors](settings-connectors) under their own section.
+An account is the login a harness such as Claude Code or Codex runs under. A connector is you signed in at a code host such as GitHub or GitLab, which Kubiq uses to list and clone your repositories and to reach issues and pull requests. They are set up in different places: [Accounts](agents-accounts) under **Harnesses**, and [Connectors](settings-connectors) under their own section.
 
-## Does Ubiq store my harness password or token?
+## Does Kubiq store my harness password or token?
 
-No. An account points at where the harness keeps its own login, and Ubiq never holds a password or a token for it. An agent that names no account runs under your own home configuration. See [Accounts](agents-accounts).
+No. An account points at where the harness keeps its own login, and Kubiq never holds a password or a token for it. An agent that names no account runs under your own home configuration. See [Accounts](agents-accounts).
 
 ## How do I run two agents as two different identities?
 

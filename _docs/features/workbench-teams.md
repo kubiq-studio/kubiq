@@ -7,7 +7,7 @@ summary: The rail's graph mode — `Teams`, over a project or the whole window, 
 read_when: you are changing the Teams screen — its graph, how it arranges itself, a card or a delegate row, the span, the filters or the tasks drawer
 updated: 2026-10-25
 verified: 2026-10-09
-code_anchors: [crates/ubiq/src/app/teams.rs, crates/ubiq/src/app/teams_span.rs, crates/ubiq/src/state/teams.rs, crates/ubiq/src/ui/teams/mod.rs, crates/ubiq/src/ui/teams/graph.rs, crates/ubiq/src/ui/teams/status.rs, crates/ubiq/src/ui/teams/tasks.rs, crates/ubiq/src/ui/kit/menu.rs, crates/ubiq/tests/teams.rs, crates/ubiq/tests/teams_view.rs, crates/ubiq/src/state/layout.rs, crates/ubiq/src/state/shapes.rs, crates/ubiq/src/ui/sink/teamsim.rs, crates/ubiq/src/state/teamsim.rs]
+code_anchors: [crates/kubiq/src/app/teams.rs, crates/kubiq/src/app/teams_span.rs, crates/kubiq/src/state/teams.rs, crates/kubiq/src/ui/teams/mod.rs, crates/kubiq/src/ui/teams/graph.rs, crates/kubiq/src/ui/teams/status.rs, crates/kubiq/src/ui/teams/tasks.rs, crates/kubiq/src/ui/kit/menu.rs, crates/kubiq/tests/teams.rs, crates/kubiq/tests/teams_view.rs, crates/kubiq/src/state/layout.rs, crates/kubiq/src/state/shapes.rs, crates/kubiq/src/ui/sink/teamsim.rs, crates/kubiq/src/state/teamsim.rs]
 depends_on: [feat-workbench, tech-ui]
 review_cycle: monthly
 ---
@@ -283,7 +283,7 @@ not done, not waiting on the reader, the three restful readings a moving core wo
 beside the mark** — it is the card's own bottom-right corner badge, pinned past the footer's flow —
 but it reads the same pair: `status_chip` carries the glyph ahead of the compact word
 (`Status::chip`), and `Status::label` is the precise pair the tooltip says. `Writing` and `Tools`
-wear `UbiqIcon::PaneWriting` and `UbiqIcon::PaneTools`, drawn in the registry's `pane` set for
+wear `KubiqIcon::PaneWriting` and `KubiqIcon::PaneTools`, drawn in the registry's `pane` set for
 exactly these readings. **An agent card and a delegate card go through the same two functions** —
 since the dictionaries were unified there is nothing left at that layer to tell them apart. A
 delegate's
@@ -307,7 +307,7 @@ means an empty project, never a filter the user cannot find their way back out o
 control puts every filter back at once (`T-258`) — each is already undone where it is set, and the
 one that did that drew and vanished mid-typing, shoving every control to its right sideways under
 the pointer. `AppState::clear_teams_filters` and `TeamsView::filtered` stay, because
-`crates/ubiq/tests/teams.rs` pins the state behaviour they name.
+`crates/kubiq/tests/teams.rs` pins the state behaviour they name.
 
 **The tasks drawer is a flat list of tasks.** A task that is not ready wears the same `waits on`
 mark the board draws.
@@ -419,7 +419,7 @@ has never seen, so a new task takes the next container slot in the same flow-and
 agent the next offset inside its task, with nothing already placed moving and no second geometry to
 keep in step. `CARD_WIDTH`, `CARD_HEIGHT`, `GROUP_PAD` and `GROUP_LABEL` live there because the
 outlines, the connectors and the hit testing work from them. Both are tested without a frame in
-`crates/ubiq/tests/teams_view.rs`, which asserts no position against the fixture — it has none.
+`crates/kubiq/tests/teams_view.rs`, which asserts no position against the fixture — it has none.
 
 `AppState` carries the span as `teams_span`, the window span's own `TeamsView` as `teams_window` —
 beside the per-project ones in `OpenProject::teams` — and the merged owner map as `teams_owner`.

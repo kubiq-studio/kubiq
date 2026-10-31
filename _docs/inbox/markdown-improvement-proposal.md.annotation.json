@@ -519,7 +519,7 @@
     {
       "id": "01M3850B1CJA3D4JP034W69J7X",
       "kind": "paragraph",
-      "text": "On top of the markdown viewer add a button that open a popover config panel where the user could customize the rendering, eg: full wide/80/90 column,  compact regular,  slider for base font size selector, font (not a dropdown 2-3 choiches) , othes? add an options \"make default for all document\" so this decide this  is the default or only for this view (remember in memory for this file /project session  -  reset on ubiq/project close)"
+      "text": "On top of the markdown viewer add a button that open a popover config panel where the user could customize the rendering, eg: full wide/80/90 column,  compact regular,  slider for base font size selector, font (not a dropdown 2-3 choiches) , othes? add an options \"make default for all document\" so this decide this  is the default or only for this view (remember in memory for this file /project session  -  reset on kubiq/project close)"
     }
   ],
   "annotations": [],

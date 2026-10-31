@@ -1,0 +1,1010 @@
+use super::*;
+
+impl AppState {
+    /// The Git screen's view of the project on screen. Absent with no project, which is what keeps
+    /// the screen from drawing an empty repository.
+    pub fn git_view(&self, cx: &App) -> Option<&GitView> {
+        self.open_project(cx).map(|open| &open.git_view)
+    }
+
+    pub fn git_view_mut(&mut self, cx: &App) -> Option<&mut GitView> {
+        let id = self.project(cx)?;
+        self.projects.get_mut(&id).map(|open| &mut open.git_view)
+    }
+
+    /// Every path the last working-tree map had something to say about. **Absent is "nothing has
+    /// been read"** and empty is "nothing has changed", which are two different screens.
+    ///
+    /// Only the selected repository's paths: the merged map the explorer draws from holds every
+    /// repository's, and mixing them here would stage one repository's file into another's index.
+    pub fn git_entries(&self, cx: &App) -> Option<&[GitEntry]> {
+        let open = self.open_project(cx)?;
+        // A nested repository's paths ride on the project's working tree, so they are on screen
+        // the moment it is selected rather than once its own overview answers.
+        (open.git_overview().is_some() || !open.git_repo.is_empty())
+            .then_some(open.git_screen_entries.as_slice())
+    }
+
+    /// The overview of the repository the Git screen is showing: the project's own, or the nested
+    /// one selected in the Repositories section. `open.git` stays the project's own, which is what
+    /// the status bar and the explorer read.
+    pub fn git_overview(&self, cx: &App) -> Option<&RepoOverview> {
+        self.open_project(cx)?.git_overview()
+    }
+
+    /// The repository the Git screen is showing, for a project this window holds. Empty is the
+    /// project's own.
+    pub fn git_repo_of(&self, project_id: ProjectId) -> String {
+        self.projects
+            .get(&project_id)
+            .map(|open| open.git_repo.clone())
+            .unwrap_or_default()
+    }
+
+    /// Point the Git screen at another repository of the project on screen.
+    pub fn select_git_repo(&mut self, repo: String, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        self.apply_git_repo(project_id, repo);
+        cx.notify();
+    }
+
+    /// Switch the repository a project's Git screen shows: drop everything that belonged to the
+    /// old one and ask for the new one's overview, refs and first page of history. A no-op when
+    /// it is already the one.
+    pub(super) fn apply_git_repo(&mut self, project_id: ProjectId, repo: String) {
+        let Some(open) = self.projects.get_mut(&project_id) else {
+            return;
+        };
+        if open.git_repo == repo {
+            return;
+        }
+        open.git_repo = repo.clone();
+        open.git_nested = None;
+        open.git_view.reset_repo();
+        open.refilter_git();
+        open.git_view.log_inflight = Some(None);
+        self.bus.send(Message::ProjectGit {
+            project_id,
+            repo: repo.clone(),
+        });
+        self.bus.send(Message::ProjectGitRefs {
+            project_id,
+            repo: repo.clone(),
+            with_tracking: true,
+        });
+        self.request_git_log(project_id, None);
+    }
+
+    /// The working tree, the project's own overview and — while a nested repository is on screen —
+    /// that repository's overview, asked again. What a change on disk or in the repository's
+    /// plumbing sets off.
+    pub(super) fn request_git_refresh(&mut self, project_id: ProjectId) {
+        self.bus.send(Message::RefreshProjectGit {
+            project_id,
+            full: true,
+        });
+        let repo = self.git_repo_of(project_id);
+        if !repo.is_empty() {
+            self.bus.send(Message::ProjectGit { project_id, repo });
+        }
+    }
+
+    /// Ask for the repository again: the overview, the working tree, the refs and the first page
+    /// of history. What the readout in the status bar does, from the screen that is about it.
+    pub fn refresh_git(&mut self, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        let repo = self.git_repo_of(project_id);
+        self.bus.send(Message::ProjectGit {
+            project_id,
+            repo: repo.clone(),
+        });
+        self.bus.send(Message::RefreshProjectGit {
+            project_id,
+            full: true,
+        });
+        self.bus.send(Message::ProjectGitRefs {
+            project_id,
+            repo,
+            with_tracking: true,
+        });
+        if let Some(git) = self.git_view_mut(cx) {
+            // A fresh first page, not a page appended to whatever the last project on screen left
+            // behind. `log_inflight` is what tells `receive_git` this request's reply apart from
+            // a stale one still in flight from before.
+            git.log_cursor = None;
+            git.log_inflight = Some(None);
+            git.pending = Some(GitPending::Refresh);
+        }
+        self.send_git_log(None, cx);
+        cx.notify();
+    }
+
+    /// Stage one path in the project's repository.
+    pub fn stage_git_path(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.write_git(
+            GitWriteOp::Stage {
+                rel_path: path.to_string(),
+            },
+            false,
+            cx,
+        );
+    }
+
+    /// Take one path out of the index.
+    pub fn unstage_git_path(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.write_git(
+            GitWriteOp::Unstage {
+                rel_path: path.to_string(),
+            },
+            false,
+            cx,
+        );
+    }
+
+    /// Put every project-relative change in the index.
+    pub fn stage_all_git(&mut self, cx: &mut Context<Self>) {
+        self.write_git(GitWriteOp::StageAll, false, cx);
+    }
+
+    /// Restore the index to HEAD for every path in the project's scope.
+    pub fn unstage_all_git(&mut self, cx: &mut Context<Self>) {
+        self.write_git(GitWriteOp::UnstageAll, false, cx);
+    }
+
+    /// Commit what is staged, with the message in the commit box. A blank message is a no-op.
+    pub fn commit_git(&mut self, cx: &mut Context<Self>) {
+        let message = self.git_message.read(cx).value().trim().to_string();
+        if message.is_empty() {
+            return;
+        }
+        let amend = self.git_view(cx).is_some_and(|git| git.amend);
+        self.write_git(GitWriteOp::Commit { message, amend }, true, cx);
+    }
+
+    pub fn fetch_all_git(&mut self, cx: &mut Context<Self>) {
+        self.write_git(GitWriteOp::FetchAll, true, cx);
+    }
+
+    pub fn pull_git(&mut self, cx: &mut Context<Self>) {
+        self.write_git(GitWriteOp::Pull, true, cx);
+    }
+
+    pub fn push_git(&mut self, cx: &mut Context<Self>) {
+        self.write_git(GitWriteOp::Push, true, cx);
+    }
+
+    /// Stash the uncommitted changes, untracked files included.
+    pub fn stash_git(&mut self, cx: &mut Context<Self>) {
+        self.write_git(GitWriteOp::Stash, true, cx);
+    }
+
+    /// Soft-reset the last commit: its changes go back to the index.
+    pub fn undo_git_commit(&mut self, cx: &mut Context<Self>) {
+        self.write_git(GitWriteOp::UndoCommit, true, cx);
+    }
+
+    /// The one path every checkout affordance takes — the toolbar button, a double-click on a
+    /// branch row, and the ref menu's `Checkout` entry — so the rule lives in one place.
+    ///
+    /// **Always unforced.** `git checkout` carries a modification that does not collide across a
+    /// branch switch, and so does the host's `force: false`; asking before it, on nothing better
+    /// than "the tree is dirty", would turn every switch into a discard. The question is asked
+    /// from the *refusal* instead: `checkout_in_flight` remembers the rev, and a `GitError`
+    /// naming a checkout conflict is what raises [`GitConfirm::Checkout`] — see
+    /// `AppState::receive` and [`crate::state::git::checkout_conflict`].
+    pub fn checkout_git_ref(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(rev) = self
+            .git_view(cx)
+            .and_then(|git| git.refs.get(index))
+            .map(|row| row.name.clone())
+        else {
+            return;
+        };
+        self.write_git(
+            GitWriteOp::Checkout {
+                rev: rev.clone(),
+                force: false,
+            },
+            true,
+            cx,
+        );
+        if let Some(git) = self.git_view_mut(cx) {
+            git.checkout_in_flight = Some(rev);
+        }
+    }
+
+    /// The toolbar's `Checkout` button: whatever is selected in the refs panel. A no-op with
+    /// nothing selected, which is what leaves the button faint.
+    pub fn checkout_selected_git_ref(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.git_view(cx).and_then(|git| git.selected_ref) else {
+            return;
+        };
+        self.checkout_git_ref(index, cx);
+    }
+
+    /// Dismiss the confirm dialog without acting.
+    pub fn cancel_git_confirm(&mut self, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.cancel_confirm();
+        }
+        cx.notify();
+    }
+
+    /// The confirm dialog's accept: send the write it was raised for, forced where that is what
+    /// the question was.
+    pub fn confirm_git_action(&mut self, cx: &mut Context<Self>) {
+        let Some(confirm) = self.git_view_mut(cx).and_then(|git| git.confirm.take()) else {
+            return;
+        };
+        match confirm {
+            GitConfirm::Checkout { rev } => {
+                self.write_git(GitWriteOp::Checkout { rev, force: true }, true, cx);
+            }
+            GitConfirm::Discard { rel_path } => {
+                self.write_git(GitWriteOp::Discard { rel_path }, false, cx);
+            }
+            GitConfirm::Reset { sha, mode } => {
+                self.write_git(GitWriteOp::Reset { sha, mode }, true, cx);
+            }
+            // Forced: the dialog already said the branch and its unmerged commits go, and an
+            // unforced delete would be refused behind a question that has been answered.
+            GitConfirm::DeleteRef { name } => {
+                self.write_git(GitWriteOp::DeleteRef { name, force: true }, true, cx);
+            }
+            GitConfirm::RestoreFile { rel_path, rev } => {
+                self.write_git(GitWriteOp::RestoreFile { rel_path, rev }, false, cx);
+            }
+        }
+    }
+
+    /// Create a branch at HEAD and check it out. A blank name is a no-op.
+    pub fn create_git_branch(&mut self, name: String, cx: &mut Context<Self>) {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        self.write_git(GitWriteOp::CreateBranch { name }, true, cx);
+    }
+
+    /// Raise the `Branch` popover with an empty name field, focused.
+    pub fn open_git_branch_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_menu(MenuId::GitNewBranch, cx);
+        let field = self.git_branch_name.clone();
+        field.update(cx, |state, cx| {
+            state.set_value("", window, cx);
+            state.focus(window, cx);
+        });
+    }
+
+    /// Enter or `Create` in the `Branch` popover: create the branch and close it.
+    pub fn submit_git_branch(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.git_branch_name.read(cx).value().to_string();
+        self.close_menu(cx);
+        self.create_git_branch(name, cx);
+    }
+
+    fn write_git(&mut self, op: GitWriteOp, refresh_history: bool, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        if let Some(git) = self.git_view_mut(cx) {
+            // Any write answers whatever checkout was outstanding: the next failure is this
+            // write's, and reading it as the checkout's would offer to force one nobody asked
+            // for. `checkout_git_ref` re-arms the slot after this.
+            git.checkout_in_flight = None;
+            git.pending = Some(match &op {
+                GitWriteOp::Stage { .. } => GitPending::Stage,
+                GitWriteOp::Unstage { .. } => GitPending::Unstage,
+                GitWriteOp::StageAll => GitPending::StageAll,
+                GitWriteOp::UnstageAll => GitPending::UnstageAll,
+                GitWriteOp::Commit { .. } => GitPending::Commit,
+                GitWriteOp::FetchAll => GitPending::FetchAll,
+                GitWriteOp::Pull => GitPending::Pull,
+                GitWriteOp::Push => GitPending::Push,
+                GitWriteOp::CreateBranch { .. } => GitPending::CreateBranch,
+                GitWriteOp::Stash => GitPending::Stash,
+                GitWriteOp::UndoCommit => GitPending::Undo,
+                GitWriteOp::Checkout { .. } => GitPending::Checkout,
+                GitWriteOp::Merge { .. } => GitPending::Merge,
+                GitWriteOp::DeleteRef { .. } => GitPending::DeleteRef,
+                GitWriteOp::Discard { .. } => GitPending::Discard,
+                GitWriteOp::RestoreFile { .. } => GitPending::RestoreFile,
+                GitWriteOp::CherryPick { .. } => GitPending::CherryPick,
+                GitWriteOp::RevertCommit { .. } => GitPending::RevertCommit,
+                GitWriteOp::Reset { .. } => GitPending::Reset,
+            });
+        }
+        let repo = self.git_repo_of(project_id);
+        self.bus.send(Message::WriteProjectGit {
+            project_id,
+            repo: repo.clone(),
+            op,
+        });
+        if refresh_history {
+            self.bus.send(Message::ProjectGitRefs {
+                project_id,
+                repo,
+                with_tracking: true,
+            });
+            if let Some(git) = self.git_view_mut(cx) {
+                git.log_cursor = None;
+                git.log_inflight = Some(None);
+            }
+            self.send_git_log(None, cx);
+        }
+        cx.notify();
+    }
+
+    /// Ask for the next page of history — what a "load more" trigger at the bottom of the list
+    /// sends. A no-op with a page already in flight or nothing left to page in, on the same
+    /// `log_inflight`/`log_done` bookkeeping `refresh_git` and `receive_git` already keep.
+    pub fn load_more_git_log(&mut self, cx: &mut Context<Self>) {
+        let Some(git) = self.git_view(cx) else {
+            return;
+        };
+        if git.log_done || git.log_inflight.is_some() {
+            return;
+        }
+        let cursor = git.log_cursor.clone();
+        self.send_git_log(cursor, cx);
+        cx.notify();
+    }
+
+    /// Ask for a page of history, walking `GitView::branch_filter` when one is set.
+    fn send_git_log(&mut self, cursor: Option<String>, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        self.request_git_log(project_id, cursor);
+    }
+
+    /// [`Self::send_git_log`] for any project this window holds, against the repository it shows.
+    fn request_git_log(&mut self, project_id: ProjectId, cursor: Option<String>) {
+        let Some(open) = self.projects.get_mut(&project_id) else {
+            return;
+        };
+        let repo = open.git_repo.clone();
+        let rev = open.git_view.branch_filter.clone();
+        if cursor.is_none() {
+            open.git_view.log_cursor = None;
+        }
+        open.git_view.log_inflight = Some(cursor.clone());
+        self.bus.send(Message::ProjectGitLog {
+            project_id,
+            repo,
+            cursor,
+            count: 100,
+            rel_path: None,
+            first_parent: false,
+            rev,
+        });
+    }
+
+    pub fn toggle_git_section(&mut self, section: RefSection, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.toggle_section(section);
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_git_repos(&mut self, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.toggle_repos();
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_git_change_section(&mut self, section: ChangeSection, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.toggle_change_section(section);
+        }
+        cx.notify();
+    }
+
+    pub fn select_git_ref(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.selected_ref = Some(index);
+        }
+        self.pending_panels
+            .push(PanelEdit::Reveal(PanelKind::GitHistory));
+        cx.notify();
+    }
+
+    /// Bring the history to the named ref's commit: select it and scroll it into view, keeping
+    /// the history's filters. Only when that row is not drawn under them are the filters cleared
+    /// (and the log asked again if the branch filter was one), and when the commit is not in the
+    /// loaded pages the jump waits for them — see [`Self::settle_git_jump`].
+    pub fn jump_to_git_ref(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.select_git_ref(index, cx);
+        if self.scroll_to_git_ref(index, cx) {
+            return;
+        }
+        let Some(git) = self.git_view_mut(cx) else {
+            return;
+        };
+        let reload = git.branch_filter.is_some();
+        git.clear_filters();
+        git.jump_ref = Some(index);
+        if reload {
+            self.send_git_log(None, cx);
+            cx.notify();
+        } else if !self.scroll_to_git_ref(index, cx) {
+            self.load_more_git_log(cx);
+        }
+    }
+
+    /// Select the ref's commit and scroll to its row if that row is drawn. Returns whether it was.
+    fn scroll_to_git_ref(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+        let Some((commit, slot)) = self.git_view(cx).and_then(|git| {
+            let commit = git.commit_index_for_ref(index)?;
+            let slot = git
+                .visible_commits()
+                .iter()
+                .position(|(held, _)| *held == commit)?;
+            Some((commit, slot))
+        }) else {
+            return false;
+        };
+        self.select_git_commit(Some(commit), cx);
+        if let Some(git) = self.git_view_mut(cx) {
+            git.jump_ref = None;
+        }
+        self.git_scroll
+            .scroll_to_item(slot, gpui::ScrollStrategy::Top);
+        cx.notify();
+        true
+    }
+
+    /// Finish a pending [`Self::jump_to_git_ref`] after a log page landed: scroll if the commit is
+    /// there now, ask for the next page if not, give up when the history has no more.
+    pub fn settle_git_jump(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.git_view(cx).and_then(|git| git.jump_ref) else {
+            return;
+        };
+        if self.scroll_to_git_ref(index, cx) {
+            return;
+        }
+        if self.git_view(cx).is_some_and(|git| git.log_done) {
+            if let Some(git) = self.git_view_mut(cx) {
+                git.jump_ref = None;
+            }
+        } else {
+            self.load_more_git_log(cx);
+        }
+    }
+
+    pub fn toggle_git_folder(&mut self, section: RefSection, path: String, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.toggle_folder(section, &path);
+        }
+        cx.notify();
+    }
+
+    pub fn set_git_branch_filter(&mut self, name: Option<String>, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.branch_filter = name;
+        }
+        self.send_git_log(None, cx);
+        self.close_menu(cx);
+        cx.notify();
+    }
+
+    /// Point the screen at a commit, or at the working tree. `None` is the uncommitted row, which
+    /// is a selection like any other rather than nothing selected. Any comparison in progress
+    /// drops: a plain click asks a new question, not a third end to the old one.
+    pub fn select_git_commit(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.selected_commit = index;
+            git.compare_commit = None;
+            git.range_from = None;
+            git.range_to = None;
+            git.range_files.clear();
+            git.range_inflight = false;
+        }
+        self.ask_git_commit_files(cx);
+        cx.notify();
+    }
+
+    /// Ask the host for the files the single selected commit changed: its first parent against it,
+    /// or the empty tree for a root commit. Rides the range comparison's own request and reply, so
+    /// a file picked from the list diffs the same way a compared one does. Nothing is sent for the
+    /// uncommitted row or while two commits are being compared.
+    fn ask_git_commit_files(&mut self, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        let (from, to) = {
+            let Some(git) = self.git_view_mut(cx) else {
+                return;
+            };
+            let Some(commit) = git
+                .selected_commit()
+                .filter(|_| git.compare_commit.is_none())
+            else {
+                return;
+            };
+            let ends = (commit.parents.first().cloned(), commit.id.clone());
+            git.range_from = ends.0.clone();
+            git.range_to = Some(ends.1.clone());
+            git.range_files.clear();
+            git.range_inflight = true;
+            ends
+        };
+        let repo = self.git_repo_of(project_id);
+        self.bus.send(Message::ProjectGitChanged {
+            project_id,
+            repo,
+            from,
+            to,
+        });
+    }
+
+    /// The uncommitted row was clicked: select the working tree and bring the Changes panel
+    /// forward, opening its region if it is shut.
+    pub fn show_git_changes(&mut self, cx: &mut Context<Self>) {
+        self.select_git_commit(None, cx);
+        self.pending_panels
+            .push(PanelEdit::Reveal(PanelKind::GitChanges));
+        cx.notify();
+    }
+
+    /// Cmd/ctrl-click on a commit: the second end of a range comparison, or dropping the one
+    /// already set. A pair asks the host for the paths between them; breaking the pair clears
+    /// what it asked without asking again.
+    pub fn toggle_git_compare(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        let request = {
+            let Some(git) = self.git_view_mut(cx) else {
+                return;
+            };
+            if git.toggle_compare(index) {
+                let Some((from, to)) = git.compare_ids() else {
+                    return;
+                };
+                git.range_from = Some(from.clone());
+                git.range_to = Some(to.clone());
+                git.range_inflight = true;
+                git.range_files.clear();
+                git.selected_path = None;
+                git.diff = None;
+                Some((from, to))
+            } else {
+                git.range_from = None;
+                git.range_to = None;
+                git.range_files.clear();
+                git.range_inflight = false;
+                None
+            }
+        };
+        self.ask_git_commit_files(cx);
+        if let Some((from, to)) = request {
+            let repo = self.git_repo_of(project_id);
+            self.bus.send(Message::ProjectGitChanged {
+                project_id,
+                repo,
+                from: Some(from),
+                to,
+            });
+        }
+        cx.notify();
+    }
+
+    /// Raise a Git screen context menu at the pointer: a changed path, a commit, or a ref.
+    pub fn open_git_menu(&mut self, kind: GitMenuKind, at: (f32, f32), cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.open_menu(kind, at.0, at.1);
+        }
+        cx.notify();
+    }
+
+    pub fn dismiss_git_menu(&mut self, epoch: u64, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.close_menu(epoch);
+        }
+        cx.notify();
+    }
+
+    /// Answer a pick from the Git screen's context menu. Every row does something now; a
+    /// disabled one still routes here on a click and is turned away by `entry.enabled`.
+    pub fn pick_git_menu_action(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(menu) = self.git_view(cx).and_then(|git| git.menu.clone()) else {
+            return;
+        };
+        let (stageable, unstageable) = match &menu.kind {
+            GitMenuKind::Change { path, .. } => self
+                .git_entries(cx)
+                .unwrap_or(&[])
+                .iter()
+                .find(|entry| &entry.rel_path == path)
+                .map(|entry| (can_stage(entry), can_unstage(entry)))
+                .unwrap_or((false, false)),
+            _ => (false, false),
+        };
+        let refs = self
+            .git_view(cx)
+            .map(|git| git.refs.clone())
+            .unwrap_or_default();
+        let commit_selected = self
+            .git_view(cx)
+            .is_some_and(|git| git.selected_commit.is_some());
+        let Some(entry) = menu
+            .entries(stageable, unstageable, &refs, commit_selected)
+            .get(index)
+            .copied()
+        else {
+            return;
+        };
+        let epoch = menu.epoch;
+        if !entry.enabled {
+            self.dismiss_git_menu(epoch, cx);
+            return;
+        }
+
+        match (&menu.kind, entry.action) {
+            (GitMenuKind::Change { path, .. }, GitAction::Stage) => {
+                self.stage_git_path(path, cx);
+            }
+            (GitMenuKind::Change { path, .. }, GitAction::Unstage) => {
+                self.unstage_git_path(path, cx);
+            }
+            (GitMenuKind::Change { path, .. }, GitAction::Discard) => {
+                if let Some(git) = self.git_view_mut(cx) {
+                    git.ask_confirm(GitConfirm::Discard {
+                        rel_path: path.clone(),
+                    });
+                }
+            }
+            (GitMenuKind::Change { path, .. }, GitAction::Open) => {
+                self.select_file(path.clone(), cx);
+            }
+            // Behind a confirm: what it overwrites in the working tree was never committed, so
+            // unlike every other write on this menu it cannot be read back out of the history.
+            (GitMenuKind::Change { path, .. }, GitAction::RevertToCommit) => {
+                if let Some(rev) = self
+                    .git_view(cx)
+                    .and_then(|git| git.selected_commit())
+                    .map(|commit| commit.id.clone())
+                    && let Some(git) = self.git_view_mut(cx)
+                {
+                    git.ask_confirm(GitConfirm::RestoreFile {
+                        rel_path: path.clone(),
+                        rev,
+                    });
+                }
+            }
+            (GitMenuKind::Change { path, .. }, GitAction::CopyPath) => {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(path.clone()));
+            }
+            (GitMenuKind::Commit { index }, GitAction::CopySha) => {
+                if let Some(id) = self
+                    .git_view(cx)
+                    .and_then(|git| git.commits.get(*index))
+                    .map(|commit| commit.id.clone())
+                {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(id));
+                }
+            }
+            (GitMenuKind::Commit { index }, GitAction::CherryPick) => {
+                if let Some(sha) = self
+                    .git_view(cx)
+                    .and_then(|git| git.commits.get(*index))
+                    .map(|commit| commit.id.clone())
+                {
+                    self.write_git(GitWriteOp::CherryPick { sha }, true, cx);
+                }
+            }
+            (GitMenuKind::Commit { index }, GitAction::Revert) => {
+                if let Some(sha) = self
+                    .git_view(cx)
+                    .and_then(|git| git.commits.get(*index))
+                    .map(|commit| commit.id.clone())
+                {
+                    self.write_git(GitWriteOp::RevertCommit { sha }, true, cx);
+                }
+            }
+            (GitMenuKind::Commit { index }, GitAction::ResetSoft) => {
+                self.reset_git_commit(*index, GitResetMode::Soft, cx);
+            }
+            (GitMenuKind::Commit { index }, GitAction::ResetMixed) => {
+                self.reset_git_commit(*index, GitResetMode::Mixed, cx);
+            }
+            (GitMenuKind::Commit { index }, GitAction::ResetHard) => {
+                if let Some(sha) = self
+                    .git_view(cx)
+                    .and_then(|git| git.commits.get(*index))
+                    .map(|commit| commit.id.clone())
+                    && let Some(git) = self.git_view_mut(cx)
+                {
+                    git.ask_confirm(GitConfirm::Reset {
+                        sha,
+                        mode: GitResetMode::Hard,
+                    });
+                }
+            }
+            (GitMenuKind::Ref { index }, GitAction::Checkout) => {
+                self.checkout_git_ref(*index, cx);
+            }
+            (GitMenuKind::Ref { index }, GitAction::Merge) => {
+                if let Some(rev) = self
+                    .git_view(cx)
+                    .and_then(|git| git.refs.get(*index))
+                    .map(|row| row.name.clone())
+                {
+                    self.write_git(GitWriteOp::Merge { rev }, true, cx);
+                }
+            }
+            (GitMenuKind::Ref { index }, GitAction::Delete) => {
+                if let Some(name) = self
+                    .git_view(cx)
+                    .and_then(|git| git.refs.get(*index))
+                    .map(|row| row.name.clone())
+                    && let Some(git) = self.git_view_mut(cx)
+                {
+                    git.ask_confirm(GitConfirm::DeleteRef { name });
+                }
+            }
+            (GitMenuKind::Ref { index }, GitAction::CopyName) => {
+                if let Some(name) = self
+                    .git_view(cx)
+                    .and_then(|git| git.refs.get(*index))
+                    .map(|row| row.name.clone())
+                {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(name));
+                }
+            }
+            _ => {}
+        }
+        self.dismiss_git_menu(epoch, cx);
+    }
+
+    /// `Reset (soft)`/`Reset (mixed)` from the commit menu: no confirm, on the same reasoning
+    /// `undo_git_commit` (itself a soft reset) already applies — the working tree is untouched.
+    fn reset_git_commit(&mut self, index: usize, mode: GitResetMode, cx: &mut Context<Self>) {
+        if let Some(sha) = self
+            .git_view(cx)
+            .and_then(|git| git.commits.get(index))
+            .map(|commit| commit.id.clone())
+        {
+            self.write_git(GitWriteOp::Reset { sha, mode }, true, cx);
+        }
+    }
+
+    pub fn toggle_git_mine(&mut self, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.mine_only = !git.mine_only;
+        }
+        cx.notify();
+    }
+
+    // ── Project search ──────────────────────────────────────────────
+
+    /// Run what is in the query field over the project's files.
+    ///
+    /// The search id is minted here and held on `SearchState::active`: every reply is discarded
+    /// unless it names it, which is what makes superseding a search a cancel and a replacement
+    /// rather than two answers interleaving.
+    pub fn run_project_search(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        let text = self.search.query.read(cx).value().trim().to_string();
+        // An empty query is not a search and not an error — nothing is sent and what is drawn
+        // stays as it was.
+        if text.is_empty() {
+            return;
+        }
+
+        if let Some(active) = self.search.active.as_ref() {
+            self.bus.send(Message::CancelSearch {
+                project_id: active.project_id,
+                search_id: active.search_id,
+            });
+        }
+
+        let query = kubiq_proto::search::Query {
+            text,
+            case_sensitive: self.search.case_sensitive,
+            whole_word: self.search.whole_word,
+            regex: self.search.regex,
+        };
+        self.search.reset();
+        let search_id = SearchId::generate();
+        self.search.active = Some(ActiveSearch {
+            search_id,
+            project_id,
+        });
+        self.bus.send(Message::SearchProject {
+            project_id,
+            search_id,
+            query,
+            scope: kubiq_proto::search::Scope::Files,
+            filter: kubiq_proto::search::Filter::default(),
+        });
+        cx.notify();
+    }
+
+    /// The titlebar's command field, on Enter: switch to the IDE, hand the typed text to the
+    /// search panel's own query field, reveal it and run the search — then clear the field it
+    /// came from, the way a command palette clears once its command has fired. A no-op with
+    /// nothing open, on the same guard `run_project_search` already applies.
+    pub fn submit_header_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.command_input.read(cx).value().trim().to_string();
+        self.search_for(text, window, cx);
+    }
+
+    /// The same search, for a term the field no longer holds — the navigator's own search row
+    /// carries it, and pressing that row is what runs this.
+    pub fn search_for(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.project(cx).is_none() {
+            return;
+        }
+        if text.is_empty() {
+            return;
+        }
+        self.set_rail_mode(RailMode::IDE, cx);
+        let query = self.search.query.clone();
+        query.update(cx, |state, cx| state.set_value(&text, window, cx));
+        self.reveal_search(window, cx);
+        self.run_project_search(window, cx);
+        let command_input = self.command_input.clone();
+        command_input.update(cx, |state, cx| state.set_value("", window, cx));
+    }
+
+    /// The three query options. A flip applies to the next search, never re-running this one:
+    /// re-searching under the pointer would throw away the list the user is working through.
+    pub fn toggle_search_case(&mut self, cx: &mut Context<Self>) {
+        self.search.case_sensitive = !self.search.case_sensitive;
+        cx.notify();
+    }
+
+    pub fn toggle_search_whole_word(&mut self, cx: &mut Context<Self>) {
+        self.search.whole_word = !self.search.whole_word;
+        cx.notify();
+    }
+
+    pub fn toggle_search_regex(&mut self, cx: &mut Context<Self>) {
+        self.search.regex = !self.search.regex;
+        cx.notify();
+    }
+
+    /// Point the diff pane at a changed path, and ask the host for the comparison. Nothing is sent
+    /// when the selection did not move: a second click on the row already being compared is not a
+    /// second question.
+    pub fn select_git_path(&mut self, side: GitSide, path: &str, cx: &mut Context<Self>) {
+        let Some(git) = self.git_view_mut(cx) else {
+            return;
+        };
+        if git.select_path(side, path) {
+            self.ask_git_diff(cx);
+            self.pending_panels
+                .push(PanelEdit::Reveal(PanelKind::GitDiff));
+        }
+        cx.notify();
+    }
+
+    /// Flip "Ignore line endings" and ask the host for the selected path's comparison again.
+    pub fn toggle_git_ignore_eol(&mut self, cx: &mut Context<Self>) {
+        let Some(git) = self.git_view_mut(cx) else {
+            return;
+        };
+        git.ignore_eol = !git.ignore_eol;
+        git.diff = None;
+        self.ask_git_diff(cx);
+        cx.notify();
+    }
+
+    /// Ask the host for the diff of the git pane's selected path, with its base and flag.
+    fn ask_git_diff(&mut self, cx: &mut Context<Self>) {
+        let Some(project_id) = self.project(cx) else {
+            return;
+        };
+        let Some(git) = self.git_view_mut(cx) else {
+            return;
+        };
+        let Some(rel_path) = git.path().map(str::to_string) else {
+            return;
+        };
+        let base = git.base;
+        let ignore_eol = git.ignore_eol;
+        let (old, new) = if base == DiffBase::Commits {
+            (git.range_from.clone(), git.range_to.clone())
+        } else {
+            (None, None)
+        };
+        self.bus.send(Message::DiffProjectFile {
+            project_id,
+            rel_path,
+            base,
+            old,
+            new,
+            ignore_eol,
+        });
+    }
+
+    pub fn set_git_split(&mut self, split: bool, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.split = split;
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_git_diff_pane(&mut self, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.diff_open = !git.diff_open;
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_git_amend(&mut self, cx: &mut Context<Self>) {
+        if let Some(git) = self.git_view_mut(cx) {
+            git.amend = !git.amend;
+        }
+        cx.notify();
+    }
+
+    /// The Git screen's four fields hold the project on screen's text, on the explorer filter's
+    /// rule: mirrored from the frame after a project swings in, and never while it is being typed
+    /// into.
+    pub fn sync_git_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((search, message, ref_search, change_search)) = self.git_view(cx).map(|git| {
+            (
+                git.search.clone(),
+                git.message.clone(),
+                git.ref_search.clone(),
+                git.change_search.clone(),
+            )
+        }) else {
+            return;
+        };
+
+        if !self.git_search.read(cx).focus_handle(cx).is_focused(window)
+            && self.git_search.read(cx).value() != search.as_str()
+        {
+            let field = self.git_search.clone();
+            field.update(cx, |state, cx| state.set_value(search, window, cx));
+        }
+
+        if !self
+            .git_ref_query
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window)
+            && self.git_ref_query.read(cx).value() != ref_search.as_str()
+        {
+            let field = self.git_ref_query.clone();
+            field.update(cx, |state, cx| state.set_value(ref_search, window, cx));
+        }
+
+        if !self
+            .git_change_query
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window)
+            && self.git_change_query.read(cx).value() != change_search.as_str()
+        {
+            let field = self.git_change_query.clone();
+            field.update(cx, |state, cx| state.set_value(change_search, window, cx));
+        }
+
+        // The commit box is the one field that is also mirrored while it is focused, and only
+        // to empty it: a commit clears the draft it was written from, and the caret is
+        // usually still in the box when its reply lands.
+        if (message.is_empty()
+            || !self
+                .git_message
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window))
+            && self.git_message.read(cx).value() != message.as_str()
+        {
+            let field = self.git_message.clone();
+            field.update(cx, |state, cx| state.set_value(message, window, cx));
+        }
+    }
+}

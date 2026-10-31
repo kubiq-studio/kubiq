@@ -25,7 +25,7 @@ back to a mode finds it as you left it.
 | **Teams** | How the project's agents are arranged, and which task each serves; see [Teams](teams-overview) |
 | **KB** | The project's [documents](kb-overview), read from wherever they live |
 | **Tasks** | A board of cards, one column per status; see [Tasks](tasks-overview) |
-| **Control** | What Ubiq is doing and what your agents have spent, across every project; see [The Control screen](workbench-control) |
+| **Control** | What Kubiq is doing and what your agents have spent, across every project; see [The Control screen](workbench-control) |
 | **All Teams** | Every open project's agents on one canvas, with the same screen as **Teams** |
 
 **IDE** is the mode a project opens in. While a file is open it fills the centre; with none open, the

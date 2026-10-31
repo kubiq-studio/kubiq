@@ -3,7 +3,7 @@ id: inbox-shell
 title: Proposal — operating-system shell integration
 kind: proposal
 status: proposal
-summary: The four gestures that connect Ubiq to the desktop around it — a file dropped on the window or the app icon, a folder dropped the same way, copy and paste between the explorer and itself, and copy, paste and drag between the explorer and the operating system — the one seam an absolute path is allowed to cross, and the file-family messages that none of it can be built without.
+summary: The four gestures that connect Kubiq to the desktop around it — a file dropped on the window or the app icon, a folder dropped the same way, copy and paste between the explorer and itself, and copy, paste and drag between the explorer and the operating system — the one seam an absolute path is allowed to cross, and the file-family messages that none of it can be built without.
 read_when: you are deciding what a drop on the window does, how a dropped file or folder becomes a tab or a project, what the explorer's clipboard means, or which host messages create, move, copy or remove a path
 updated: 2026-09-03
 depends_on: [tech-architecture, tech-transport, feat-workbench, inbox-omni]
@@ -11,10 +11,10 @@ depends_on: [tech-architecture, tech-transport, feat-workbench, inbox-omni]
 
 # Proposal — operating-system shell integration
 
-Ubiq is a desktop application that cannot be handed a file. Dragging one onto the window does
+Kubiq is a desktop application that cannot be handed a file. Dragging one onto the window does
 nothing; dragging a folder onto the window does nothing; dropping either on the dock icon does
 nothing, because the bundle declares no document types at all. The explorer copies a path *as text*
-and cannot paste one. The only piece of Ubiq that has ever accepted a dropped file is the vendored
+and cannot paste one. The only piece of Kubiq that has ever accepted a dropped file is the vendored
 terminal, which quotes it and types it into the pseudo-terminal
 (`vendor/gpui-terminal/src/view.rs:909`).
 
@@ -25,15 +25,15 @@ that three of the four gestures are blocked on.
 ## 1. Where it stands
 
 **The interface has drag and drop, and none of it is external.** `on_drag`, `on_drag_move` and
-`on_drop` are used for the tasks board (`crates/ubiq/src/ui/board/mod.rs:245`), the agents columns
-(`crates/ubiq/src/ui/agents/column.rs:89`), the orchestration graph
-(`crates/ubiq/src/ui/orchestration/graph.rs:176`) and the dock's own panel tabs
-(`crates/ubiq/src/ui/dock/skin.rs:420`) — every payload an in-process Rust type. `ExternalPaths`
-appears nowhere in `crates/ubiq`. **The explorer and the editor have no drop handler of any kind.**
+`on_drop` are used for the tasks board (`crates/kubiq/src/ui/board/mod.rs:245`), the agents columns
+(`crates/kubiq/src/ui/agents/column.rs:89`), the orchestration graph
+(`crates/kubiq/src/ui/orchestration/graph.rs:176`) and the dock's own panel tabs
+(`crates/kubiq/src/ui/dock/skin.rs:420`) — every payload an in-process Rust type. `ExternalPaths`
+appears nowhere in `crates/kubiq`. **The explorer and the editor have no drop handler of any kind.**
 
 **The clipboard is write-only and text-only.** `cx.write_to_clipboard(ClipboardItem::new_string(…))`
-is called three times — *Copy path*, *Copy full path* on an explorer row (`crates/ubiq/src/app/explorer.rs`)
-and the same on a file tab. There is no `read_from_clipboard` in `crates/ubiq` at
+is called three times — *Copy path*, *Copy full path* on an explorer row (`crates/kubiq/src/app/explorer.rs`)
+and the same on a file tab. There is no `read_from_clipboard` in `crates/kubiq` at
 all, so no paste of any kind exists outside the terminal's own `arboard` path.
 
 **Nothing on the bus creates, moves, copies or removes a path.** The file family is
@@ -46,11 +46,11 @@ the family**, and every gesture below except opening a dropped file waits on it.
 
 **The bundle declares no documents.** `_tools/Info.plist` carries a bundle id, a name, an icon and a
 minimum system version — no `CFBundleDocumentTypes`, no `LSItemContentTypes`, no
-`UTImportedTypeDeclarations`. macOS therefore refuses a drop on the dock icon, greys Ubiq out of
-*Open With*, and never sends the application an open event. `just bundle` assembles `target/Ubiq.app`
+`UTImportedTypeDeclarations`. macOS therefore refuses a drop on the dock icon, greys Kubiq out of
+*Open With*, and never sends the application an open event. `just bundle` assembles `target/Kubiq.app`
 by hand from that plist and does not sign it.
 
-**No application-level open hook is installed.** `crates/ubiq-app/src/lib.rs` opens a window and
+**No application-level open hook is installed.** `crates/kubiq-app/src/lib.rs` opens a window and
 nothing else; `cx.on_open_urls` and `cx.on_reopen` are unused, and `argv` is not read.
 
 **The toolkit is not the obstacle.** At the pinned revision (`gpui` 0.2.2, rev `6840b8d`) everything
@@ -67,7 +67,7 @@ the four gestures need is present and public:
 
 **And one fact that decides section 3: the interface already builds absolute paths.** *Copy full
 path* and *Open in Finder* join `snap.record.path` with the row's `rel_path` and hand the result to
-the clipboard or to `open -R` (`crates/ubiq/src/app/explorer.rs`). The project root
+the clipboard or to `open -R` (`crates/kubiq/src/app/explorer.rs`). The project root
 travels in `ProjectRecord`, so the rule as
 [`architecture.md`](../../tech/architecture.md) states it — no path crosses into UI code — is already
 narrower in the tree than in the prose: what holds is that *no path the interface composes is ever
@@ -84,12 +84,12 @@ path.
 | D | Copy, paste and drag between the explorer and the operating system | both | the host file family (§9) |
 
 A and B are one entry point with an `is_dir` branch, and that is the whole of their relationship. C
-is Ubiq talking to itself; D is C with the system clipboard and a native drag on the other end.
+is Kubiq talking to itself; D is C with the system clipboard and a native drag on the other end.
 
 ## 3. The one seam an absolute path crosses
 
 A dropped path is absolute, and it arrives in the interface. There is no arranging around that: the
-operating system hands `ExternalPaths` to the window, and the window is `crates/ubiq`. So the design
+operating system hands `ExternalPaths` to the window, and the window is `crates/kubiq`. So the design
 question is not whether an absolute path can be in UI code — it is there the instant the drop lands
 — but **what the interface is allowed to do with it.**
 
@@ -125,7 +125,7 @@ read-only guest tab has no save to protect and so needs none of it.
 It also risked forking the editor, which the reversal answers rather than accepts: a savable second
 kind of open file would need a second shape wherever `OpenFile` is resolved, saved or tinted. A guest
 tab needs none, having no save path — the same `OpenFile`, `tab_key` and `PanelKind::File`
-(`crates/ubiq/src/state/editor.rs`), with one `guest: bool` field.
+(`crates/kubiq/src/state/editor.rs`), with one `guest: bool` field.
 
 **What was actually wanted — a file opened without ceremony, with no project created, no catalogue
 row and no explorer — costs none of that.** §4 keeps the host round trip first proposed here; the
@@ -222,7 +222,7 @@ would refuse the drop draws nothing at all rather than a red state. **Every colo
 overlay that already exist. `Exited` and `Ended` clear it, and `Ended` is what covers a drag the
 system cancelled while the pointer is outside.
 
-**An import is a copy, and the modifier says otherwise.** Dragging from outside Ubiq copies —
+**An import is a copy, and the modifier says otherwise.** Dragging from outside Kubiq copies —
 anything else silently moves a file out of a folder the user was not looking at. Within the same
 project, dragging in the explorer moves, because that is what a file manager does and what the tree
 shows. `⌥` forces a copy and `⌘` forces a move on macOS, `Ctrl` and `Shift` elsewhere; the overlay
@@ -235,19 +235,19 @@ Three entry points that are one function.
 **The bundle has to declare documents.** `_tools/Info.plist` gains `CFBundleDocumentTypes` with two
 entries: `public.folder` (`LSHandlerRank: Alternate`, role `Editor`) and `public.data` /
 `public.plain-text` (rank `Alternate`, role `Editor`). This is what makes the dock icon accept a
-drop, puts Ubiq in *Open With*, and lets the user set it as a handler. `LSHandlerRank: Alternate` is
-deliberate — Ubiq should be offered, never seize the default handler for every text file on the
+drop, puts Kubiq in *Open With*, and lets the user set it as a handler. `LSHandlerRank: Alternate` is
+deliberate — Kubiq should be offered, never seize the default handler for every text file on the
 machine.
 
 **The application installs the hook before the first window.** `cx.on_open_urls` in
-`crates/ubiq-app/src/lib.rs`, next to the existing `gpui_component::init` call, converting each
+`crates/kubiq-app/src/lib.rs`, next to the existing `gpui_component::init` call, converting each
 `file://` URL to a path. `cx.on_reopen` covers a dock click with no window open, which today does
 nothing. Both must survive arriving **before the host is ready and before a window exists**: paths
 queue in a small global, and the queue is drained when the first window has a client. This is the
 same shape the bus already has and is the one piece of §7 that is easy to get wrong.
 
-**`argv` is the third door**, and the cheapest: `ubiq .` and `ubiq path/to/file` are what a terminal
-user will try first, and `open -a Ubiq <path>` on macOS routes through the same handler. One
+**`argv` is the third door**, and the cheapest: `kubiq .` and `kubiq path/to/file` are what a terminal
+user will try first, and `open -a Kubiq <path>` on macOS routes through the same handler. One
 `deliver_paths(paths, window_hint)` takes the drop, the URL event and `argv` alike, and its whole
 body is the message from §4 or the project flow from §5.
 
@@ -262,7 +262,7 @@ platform for `argv` is honest about what `just bundle` produces.
 
 **Copy and paste inside the explorer (C).** `⌘C`, `⌘X`, `⌘V`, `⌘D` and the context-menu rows the
 menu already draws. The cut or copied set is **an in-window value — project id and relative paths —
-not the system clipboard**, so a cut inside Ubiq cannot be pasted into Finder by accident and a stale
+not the system clipboard**, so a cut inside Kubiq cannot be pasted into Finder by accident and a stale
 cut cannot outlive the project. A cut row draws at reduced opacity until it is pasted or the cut is
 cleared by `escape`. Paste into a folder with a name collision offers *Replace*, *Keep both* — which
 appends ` copy`, then ` copy 2` — or *Cancel*, one dialog for the whole set with an *apply to all*.
@@ -308,7 +308,7 @@ the folder. Answering with a fresh `DirListing` for every affected parent means 
 `rel_path` — is what lets an open tab follow its file instead of going stale. When a real watcher
 lands, it delivers the same listings unsolicited, which the merge already accepts.
 
-**`ImportPaths` is the only message in Ubiq that carries an absolute path**, and it is always a path
+**`ImportPaths` is the only message in Kubiq that carries an absolute path**, and it is always a path
 the operating system handed the interface during the gesture being processed. Everything in §3
 exists to keep that sentence true and checkable by grep.
 
@@ -368,7 +368,7 @@ internal explorer copy, cut, paste, duplicate, rename and delete.
 | d | Copy or move, when dragging from outside? | **Copy**, with `⌘` to move. Within the project, **move**, with `⌥` to copy. |
 | e | Does *Delete* trash or unlink? | **Trash**, and `Refused` where there is no trash. |
 | f | Is a macOS package a project or a document? | **A document** — a loose tab on its folder. Reversible if it proves annoying. |
-| g | Does Ubiq claim any default file association? | **No.** `LSHandlerRank: Alternate` only. |
+| g | Does Kubiq claim any default file association? | **No.** `LSHandlerRank: Alternate` only. |
 | h | Does the pinned gpui write file paths to the macOS pasteboard in a form Finder pastes? | **Unverified.** The one API risk; the string entry is the fallback and is today's behaviour. |
 
 ## 13. Rules this adds
@@ -385,10 +385,10 @@ internal explorer copy, cut, paste, duplicate, rename and delete.
 
 | Id | Row |
 |---|---|
-| G100 | Nothing accepts a dropped file or folder: no `ExternalPaths` handler exists in `crates/ubiq`, and only the vendored terminal has one |
-| G101 | `_tools/Info.plist` declares no `CFBundleDocumentTypes`, so the dock icon refuses drops and Ubiq is absent from *Open With* |
-| G102 | `argv` is ignored and `on_open_urls`/`on_reopen` are not installed, so `ubiq .` and `open -a Ubiq <path>` do nothing |
-| G103 | The clipboard is write-only and text-only in `crates/ubiq`; no `read_from_clipboard` and no `ClipboardEntry::ExternalPaths` in either direction |
+| G100 | Nothing accepts a dropped file or folder: no `ExternalPaths` handler exists in `crates/kubiq`, and only the vendored terminal has one |
+| G101 | `_tools/Info.plist` declares no `CFBundleDocumentTypes`, so the dock icon refuses drops and Kubiq is absent from *Open With* |
+| G102 | `argv` is ignored and `on_open_urls`/`on_reopen` are not installed, so `kubiq .` and `open -a Kubiq <path>` do nothing |
+| G103 | The clipboard is write-only and text-only in `crates/kubiq`; no `read_from_clipboard` and no `ClipboardEntry::ExternalPaths` in either direction |
 | G104 | The explorer cannot drag a file out to the operating system, though `external_drag_payload` and `FileDragPaths` are available at the pinned gpui revision |
 
 `G70` already records the dead context-menu rows and is what §9 closes.

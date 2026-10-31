@@ -1,5 +1,5 @@
 {
-  "format": "ubiq.teamsim/1",
+  "format": "kubiq.teamsim/1",
   "name": "chain",
   "note": "a six-link hand-off chain — one card per depth, so the container is a tall column",
   "viewport": { "w": 1600, "h": 1000 },

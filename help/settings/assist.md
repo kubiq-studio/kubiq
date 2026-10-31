@@ -8,7 +8,7 @@ status: current
 related: [settings, agents-chat, concepts-conversations]
 ---
 
-**Assistance** is where you let Ubiq write a short line of text for you, such as a commit message from
+**Assistance** is where you let Kubiq write a short line of text for you, such as a commit message from
 what is staged, or a title for a conversation's tab. It is off by default and only ever suggests: a
 suggestion fills a field you can edit. The section is part of [Settings](settings); a chip at the top
 says whether this machine can answer at all.

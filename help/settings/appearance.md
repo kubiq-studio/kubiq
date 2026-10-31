@@ -27,7 +27,7 @@ dark and light without opening Settings.
 | **Cache token ring** | Draws a second ring beside the total-token readout, comparing cached tokens with the total |
 | **Teams arrangement** | How a Teams canvas lays itself out when it first opens, in projects opened from now on |
 | **Modes** | One tile per application destination, such as **Control** and **All Teams**; click one to show or hide it on the rail, and the last one on cannot be turned off |
-| **Preset** | Jumps to a saved pair of sizes; four ship with Ubiq, plus any you saved |
+| **Preset** | Jumps to a saved pair of sizes; four ship with Kubiq, plus any you saved |
 | **Interface size** | How big the whole window is drawn: every row, icon and its text |
 | **Text size** | How big text is drawn inside the window, leaving the rest as it is |
 | **Saved presets** | Rename or forget a preset; the four that ship cannot be deleted, and forgetting one you saved over restores it |

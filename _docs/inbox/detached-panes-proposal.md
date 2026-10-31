@@ -4,7 +4,7 @@ title: Notes — what detaching a pane does not cover
 kind: proposal
 status: proposal
 summary: In-session detach landed as D103 — closing a terminal panel keeps the harness running and reattaching picks its live emulator back up. These are the two larger things it deliberately does not do, and what each would cost — reattaching from a different window, and outliving the application.
-read_when: you are asked why a detached pane dies with its window, or whether a harness can outlive Ubiq
+read_when: you are asked why a detached pane dies with its window, or whether a harness can outlive Kubiq
 updated: 2026-09-10
 depends_on: [feat-panes, feat-sessions, feat-chat, tech-architecture, tech-decisions]
 ---
@@ -44,7 +44,7 @@ panel close, not a shutdown. Recording why it is more than one more step, in cas
 
 **It is not a pane feature.** An application that keeps running with no window needs a posture — a
 menu-bar presence, a dock-only life, a preference — and a way back in that is not launching it
-again. That is a decision about what Ubiq is.
+again. That is a decision about what Kubiq is.
 
 **It would break the reason in-session detach was cheap.** Keeping the emulator alive works because
 the window is still there to hold it. A harness that outlives every window has no emulator, so the

@@ -9,7 +9,7 @@ related: [workbench-titlebar, settings-tools, settings-project, workbench-panels
 ---
 
 A tool is a named command that runs in a terminal pane in the project's folder: a build, a watcher, a
-shell with flags. Ubiq lists the ones you define and the ones it finds in the project's `Makefile`,
+shell with flags. Kubiq lists the ones you define and the ones it finds in the project's `Makefile`,
 `justfile` and `mise` config. The play button in the [title bar](workbench-titlebar) runs the first
 one, and the chevron beside it opens the list.
 

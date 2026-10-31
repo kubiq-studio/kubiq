@@ -263,7 +263,7 @@ pub struct RunSpec {
     /// is simply dropped from the resolved spec rather than failing the whole run — a typo in one
     /// entry of a profile must not be the reason nothing launches. Empty (the default) is the
     /// common case: nothing was wrong. The caller decides how loud to be about a non-empty list;
-    /// `am`'s CLI prints it, and an embedder like Ubiq surfaces it as a dismissable notification.
+    /// `am`'s CLI prints it, and an embedder like Kubiq surfaces it as a dismissable notification.
     pub problems: Vec<String>,
 }
 

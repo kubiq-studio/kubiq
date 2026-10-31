@@ -35,6 +35,6 @@ That tab kind's setting is **Close**. Set it to **Hide** under **Settings**, the
 
 Its source may be silenced. Open the list, look under **Silenced**, and press **Turn this back on**. See [Notifications](workbench-notifications).
 
-## Where can I see what Ubiq has been doing?
+## Where can I see what Kubiq has been doing?
 
-In the Logs panel, opened from the chevron beside **New terminal**. It is not kept after Ubiq quits. See [Find the logs](how-to-find-the-logs).
+In the Logs panel, opened from the chevron beside **New terminal**. It is not kept after Kubiq quits. See [Find the logs](how-to-find-the-logs).

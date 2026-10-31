@@ -4,7 +4,7 @@ title: Proposal — A2UI, and the tool call that draws one
 kind: proposal
 status: proposal
 summary: Rendering agent-authored A2UI component trees inside a conversation as the result of an MCP tool call, using the in-process MCP server the harness library already ships — display-only first, buttons second, and the text-input machinery the interface does not have deferred until something needs it.
-read_when: you are deciding whether an agent may draw its own interface inside Ubiq, how a harness that speaks no A2UI would emit one anyway, or what a dynamic component tree costs in a GPUI transcript
+read_when: you are deciding whether an agent may draw its own interface inside Kubiq, how a harness that speaks no A2UI would emit one anyway, or what a dynamic component tree costs in a GPUI transcript
 updated: 2026-09-12
 depends_on: [ref-a2ui-protocol, ref-a2ui-catalog, feat-workbench, feat-chat, tech-transport, tech-architecture, tech-decisions]
 ---
@@ -16,18 +16,18 @@ prompt it does not control. [A2UI](../references/a2ui-protocol.md) is a wire for
 third shape — the agent sends a declarative component tree, the client draws it in native widgets,
 and the user's answer comes back as data rather than as a sentence to be parsed.
 
-This proposes the smallest path to that inside Ubiq, and argues that the smallest path is not a
+This proposes the smallest path to that inside Kubiq, and argues that the smallest path is not a
 renderer for the protocol but **a renderer for one message of it, delivered as a tool result**.
 
 ## 1. The blocker, stated first
 
-**No harness Ubiq hosts emits A2UI.** Not Claude Code, not Codex, not Gemini CLI, not opencode, not
+**No harness Kubiq hosts emits A2UI.** Not Claude Code, not Codex, not Gemini CLI, not opencode, not
 Copilot CLI. The protocol's shipped SDKs are Python, Swift, Dart, Kotlin and two web renderers;
 there is no Rust implementation of either half, and no harness in the catalogue speaks it.
 
 A renderer with no producer draws nothing. Any proposal that starts with "parse the envelope set"
 is proposing to build the second half of a bridge whose first half nobody has poured. So the
-question this document answers is not *how does Ubiq render A2UI* — that part is cheap — but **what
+question this document answers is not *how does Kubiq render A2UI* — that part is cheap — but **what
 makes an agent send some**.
 
 ## 2. The shape — one MCP tool, not a protocol port
@@ -44,10 +44,10 @@ And the mechanism to host that tool exists in this workspace. `crates/agent-mana
 defines `McpService` — an embedder-provided tool set, `tools()` plus `call()` — and
 `crates/agent-manager/src/mcp/server.rs` hosts one on a loopback HTTP MCP endpoint behind the
 `inproc-mcp` feature. `provision()` turns an `McpRef::InProcess` into an ordinary inline http server
-in the spec before the harness ever sees it. The module header names the Ubiq multiplexer as the
+in the spec before the harness ever sees it. The module header names the Kubiq multiplexer as the
 embedder it was written for.
 
-**Nothing in `crates/ubiq-host` implements `McpService` today.** That is the first piece of work,
+**Nothing in `crates/kubiq-host` implements `McpService` today.** That is the first piece of work,
 and it is the piece that pays for itself: once the host is an `McpService`, `render_ui` is one
 `ToolDef` on it, and so is the next tool anyone wants.
 
@@ -87,15 +87,15 @@ a human clicks **blocks every other in-process tool call from that harness for a
 prompt is on screen.** That is acceptable for a tool whose entire purpose is to wait for a human,
 and unacceptable as a general property of the server. Either the wait is bounded by a timeout that
 returns a "no answer" action, or the server learns to handle requests concurrently. This is the one
-piece of the proposal that is not free, and it belongs to the harness library rather than to Ubiq.
+piece of the proposal that is not free, and it belongs to the harness library rather than to Kubiq.
 
 ## 3. What it touches
 
-**The wire.** `ConvUpdate` in `crates/ubiq-proto/src/conversation.rs` is a closed enum and holds no
-variant for a component tree. `ConvBlock` in `crates/ubiq/src/state/conversation.rs` is closed the
+**The wire.** `ConvUpdate` in `crates/kubiq-proto/src/conversation.rs` is a closed enum and holds no
+variant for a component tree. `ConvBlock` in `crates/kubiq/src/state/conversation.rs` is closed the
 same way — `User`, `Agent`, `Thought`, `Tool`. Each needs one variant, and the answer needs one
 client-to-host message carrying the surface id and the action, shaped exactly like
-`AnswerPermission` in `crates/ubiq-proto/src/messages.rs`.
+`AnswerPermission` in `crates/kubiq-proto/src/messages.rs`.
 
 There is a cheaper seam worth weighing against a new variant. `ToolCallRecord` already carries
 `content: Vec<ToolContent>` — the structured-tool-output slot, today `Text` and `Diff`. A third
@@ -105,7 +105,7 @@ argument against is that `ToolContent` is ACP's vocabulary and a component tree 
 argument for is that a surface with no tool call to belong to has no way back to the agent anyway.
 **This proposal takes the `ToolContent` seam** and files the disagreement rather than settling it.
 
-**The drawing.** `crates/ubiq/src/ui/conversation/mod.rs` is the one view both the chat panel and
+**The drawing.** `crates/kubiq/src/ui/conversation/mod.rs` is the one view both the chat panel and
 the agents columns share, so a render arm added there reaches every surface at once. It already
 builds heterogeneous children from runtime-length data in several places, which is the only
 question that matters about GPUI here: `permission()` maps a harness-supplied `Vec<PermissionOption>`
@@ -170,8 +170,8 @@ rest is more useful than one that refuses the payload.
 
 **Text inputs, and they are expensive for a structural reason rather than a drawing one.**
 
-Every field in Ubiq is a named `Entity<InputState>` allocated once during startup in
-`crates/ubiq/src/app/boot.rs` — the file picker's, the commit search's, the task title's, twenty of
+Every field in Kubiq is a named `Entity<InputState>` allocated once during startup in
+`crates/kubiq/src/app/boot.rs` — the file picker's, the commit search's, the task title's, twenty of
 them — each held as a named field and each with its subscription parked in the state's
 `_subscriptions`. The convention is one field, one name, one allocation, for the lifetime of the
 window.
@@ -185,11 +185,11 @@ mechanism rather than reusing one.
 Three smaller things travel with it:
 
 - **Focus.** Exactly one thing takes keystrokes, and the composer wants them. A form inside a
-  transcript competing with the composer for focus is unspecified territory in every screen Ubiq
+  transcript competing with the composer for focus is unspecified territory in every screen Kubiq
   has today.
 - **Scrolling.** A surface tall enough to scroll inside a transcript that already scrolls needs its
   own id and tracked scroll state, which is a known GPUI sharp edge rather than a discovery.
-- **Trust.** A button in Ubiq today calls a hand-written closure. A button in an agent-authored
+- **Trust.** A button in Kubiq today calls a hand-written closure. A button in an agent-authored
   tree calls whatever the tree says, and the tree came from a model. The answer is that it calls
   nothing — it produces an action that becomes a tool result and reaches no state mutator — but
   that has to stay true as the renderer grows, which makes it a rule rather than an implementation
@@ -226,7 +226,7 @@ exists that needs it, which is to say not on the strength of this document.
 
 ## 7. What this proposes not to do
 
-**No new crate.** Not a `ubiq-a2ui`. The payload types are `serde` structs that belong beside the
+**No new crate.** Not a `kubiq-a2ui`. The payload types are `serde` structs that belong beside the
 conversation vocabulary they arrive through, and the renderer is a module in the interface's
 conversation view. A crate is a boundary, and there is no boundary here to draw.
 

@@ -7,7 +7,7 @@ summary: One sink every subsystem writes its diagnostics to, and the console pan
 read_when: you are adding a log event, adding or renaming a subsystem, changing what the console shows or where it sits, or chasing why something the application did left no trace
 updated: 2026-10-01
 verified: 2026-09-27
-code_anchors: [crates/ubiq-proto/src/log.rs, crates/ubiq/src/state/logs.rs, crates/ubiq/src/ui/logs.rs, crates/ubiq/src/state/dock.rs, crates/ubiq-app/src/lib.rs]
+code_anchors: [crates/kubiq-proto/src/log.rs, crates/kubiq/src/state/logs.rs, crates/kubiq/src/ui/logs.rs, crates/kubiq/src/state/dock.rs, crates/kubiq-app/src/lib.rs]
 depends_on: [tech-architecture, feat-panes]
 review_cycle: monthly
 ---
@@ -16,13 +16,13 @@ review_cycle: monthly
 
 ## Purpose
 
-Ubiq runs several things at once that can fail independently: a window, a coordinator per window,
+Kubiq runs several things at once that can fail independently: a window, a coordinator per window,
 a pseudo-terminal and a reader thread per pane, and the harness library composing a run underneath
 all of it. When one of them misbehaves, the question is always the same — what did the others say
 while it happened. The log system answers it in one place: every subsystem's diagnostics land in one
 ring, and the console reads that ring with the two controls the question needs, which subsystem and
 how loud. It sits where the user puts it: a panel in the window's dock, beside a terminal, in a
-group of its own, or wherever it has been dragged to. `UBIQ_LOG_FILE` gives the same records a
+group of its own, or wherever it has been dragged to. `KUBIQ_LOG_FILE` gives the same records a
 second home that outlives the process — see below.
 
 ## Behaviour
@@ -30,18 +30,18 @@ second home that outlives the process — see below.
 **A subsystem logs with `tracing` and nothing else.** There is no sink to acquire, no handle to
 thread through a signature and no registration step. `tracing::info!` from anywhere in the process
 is collected, which is what makes the system central rather than a convention: a crate that has
-never heard of Ubiq — the harness library, the emulator, the framework — is collected on the same
-terms as Ubiq's own modules.
+never heard of Kubiq — the harness library, the emulator, the framework — is collected on the same
+terms as Kubiq's own modules.
 
 **A record's subsystem is derived, not declared.** The event's target is the emitting module's path,
 and the map from module to subsystem lives in one function. Nine subsystems: **UI** for the window,
 its screens, the state they draw and the emulator; **Coordinator** for the coordinator, the
 conversation bridge and the bus; **PTY** for pseudo-terminals; **Harness** for the embedded library
-and, in this crate, `ubiq_host::agent` — the seam where Ubiq composes a run, signs an account's
-config home in, and retires a run directory; **MCP** for the surface Ubiq exposes to the agents it
+and, in this crate, `kubiq_host::agent` — the seam where Kubiq composes a run, signs an account's
+config home in, and retires a run directory; **MCP** for the surface Kubiq exposes to the agents it
 hosts; **Search** for the file search worker and the project watcher; **Database** (`Subsystem::Db`) for
-the database engine's statement log (`ubiq_db`, under the target `ubiq_db::sql`) and the host's
-sessions (`ubiq_host::db`), whose lines carry the project, connection, session, elapsed time and
+the database engine's statement log (`kubiq_db`, under the target `kubiq_db::sql`) and the host's
+sessions (`kubiq_host::db`), whose lines carry the project, connection, session, elapsed time and
 row count but never a connection string or a password; **Web** for a web panel's
 vendor bundle fetch, its loopback server, its bridge and the embedded browser; and **External** for
 everything else that logs. Nothing falls through — an unrecognised target is External, not missing.
@@ -59,20 +59,20 @@ that silently loses its beginning is a console that lies.
 the point: two windows mean two coordinators, and a question about one of them is usually asked from
 the other. Clearing empties it for all of them at once.
 
-**What reaches the ring is `RUST_LOG`'s decision.** With nothing set, Ubiq's own modules and the
+**What reaches the ring is `RUST_LOG`'s decision.** With nothing set, Kubiq's own modules and the
 harness library are collected down to debug and everything else only when it complains —
-`ubiq=debug,ubiq_app=debug,ubiq_host=debug,ubiq_proto=debug,ubiq_db=debug,agent_manager=debug,gpui_terminal=debug,warn`.
+`kubiq=debug,kubiq_app=debug,kubiq_host=debug,kubiq_proto=debug,kubiq_db=debug,agent_manager=debug,gpui_terminal=debug,warn`.
 The same filter feeds a writer on standard error, so a run from a terminal reports without the
 console being open — and a headless `--serve` run, which opens no window at all, has that writer as
 its only report. A double-clicked run has no such report at all: `detach_console` in
-`crates/ubiq-app/src/lib.rs` points its standard error at `NUL` once the launch is alone in its
+`crates/kubiq-app/src/lib.rs` points its standard error at `NUL` once the launch is alone in its
 console, so that writer's output goes nowhere and the ring, read through this console panel, is the
 whole of what such a run can show. [`../tech/operations.md`](../tech/operations.md) owns the
 commands that set the filter and `detach_console`'s own mechanism.
 
-**`UBIQ_LOG_FILE` gives the diagnostics a third home that outlives the process.** The ring is
+**`KUBIQ_LOG_FILE` gives the diagnostics a third home that outlives the process.** The ring is
 emptied by `clear()` and gone at the next restart; standard error is gone the moment the terminal
-that held it closes. Naming a path in `UBIQ_LOG_FILE` opens it — created if missing — and appends
+that held it closes. Naming a path in `KUBIQ_LOG_FILE` opens it — created if missing — and appends
 the same formatted lines a terminal would have seen, under the same filter, for as long as the
 process runs. It is append-only and unrotated: a long investigation grows one file, on purpose,
 rather than losing its beginning to a rotation policy. It holds no secrets, for the same reason the
@@ -80,11 +80,11 @@ ring does not — see below. A path that cannot be opened is not a reason to fai
 file layer is simply not added, and the ring and standard error report exactly as they would
 without it.
 
-**A panic always leaves a trace, with or without `UBIQ_LOG_FILE`.** `install()` chains a panic hook
+**A panic always leaves a trace, with or without `KUBIQ_LOG_FILE`.** `install()` chains a panic hook
 in front of the existing one: on any thread it appends a timestamp, the thread name, the message,
-the location and a forced backtrace to `crash.log` (`log::crash_log_path()` — `~/Library/Logs/Ubiq`
-on macOS, `%LOCALAPPDATA%\Ubiq\Logs` on Windows, `$XDG_STATE_HOME/ubiq` or `~/.local/state/ubiq`
-elsewhere), emits the same text as an `error` record (so the ring and `UBIQ_LOG_FILE` get it), then
+the location and a forced backtrace to `crash.log` (`log::crash_log_path()` — `~/Library/Logs/Kubiq`
+on macOS, `%LOCALAPPDATA%\Kubiq\Logs` on Windows, `$XDG_STATE_HOME/kubiq` or `~/.local/state/kubiq`
+elsewhere), emits the same text as an `error` record (so the ring and `KUBIQ_LOG_FILE` get it), then
 runs the previous hook so standard error still reports. Both binaries and the drone mode reach it
 through `install()`. The file is append-only and unrotated; a directory that cannot be created is
 skipped silently.
@@ -95,7 +95,7 @@ decodes into an event is a `debug` record naming the event, and every raw frame,
 directions, is a `trace` record naming the direction and the line. The events are what a transcript
 that draws nothing is diagnosed from; the raw frames are what a mapping that drops something is.
 The host's own side of the same conversation logs under Coordinator, because that is where
-`crates/ubiq-host/src/conversation.rs` lives.
+`crates/kubiq-host/src/conversation.rs` lives.
 
 **Raw frames are asked for by name.** A prompt and the contents of every file a harness reads travel
 in them, so the default filter's `agent_manager=debug` collects the decoded events and leaves the
@@ -150,7 +150,7 @@ what stops a record emitted while drawing from redrawing the frame that emitted 
 ## Contract
 
 No transport message. The sink is process-wide and both halves write to it directly, which is the
-one thing in Ubiq that crosses the UI/coordinator line without the bus, and the reason it is
+one thing in Kubiq that crosses the UI/coordinator line without the bus, and the reason it is
 recorded as a decision rather than left as an exception. When the coordinator becomes its own
 process, its records need the transport like everything else; that is filed in
 [`../backlog.md`](../backlog.md).
@@ -162,21 +162,21 @@ panel sits in, and the focus rule it takes part in, belong to
 
 ## Implementation
 
-`crates/ubiq-proto/src/log.rs` is the sink. `install()`, called from the binary before the window and the
+`crates/kubiq-proto/src/log.rs` is the sink. `install()`, called from the binary before the window and the
 host exist, puts two or three layers behind one `EnvFilter`: the ring, a plain writer on standard
-error, and — when `UBIQ_LOG_FILE` names a path that opens — `file_layer()`'s writer on that file,
+error, and — when `KUBIQ_LOG_FILE` names a path that opens — `file_layer()`'s writer on that file,
 append-only, `with_ansi(false)` since a file has no terminal to colour. `file_layer()` returns
 `None` when the variable is unset or the path cannot be opened, and `install()` folds that `None`
 into the same `.with(...)` chain rather than branching on it, so a bad path costs nothing beyond
 the file layer it did not add. The ring layer turns an event into a `LogRecord` — sequence number,
 timestamp, level, subsystem, target, and the message with its fields — and pushes it into a
 `VecDeque` of shared records under a mutex. `Subsystem::of` is the module-to-subsystem map, and it
-tests the specific prefixes first, because `ubiq_host::pty` is also `ubiq_host`, and the bare
-`ubiq` arm is last because every one of Ubiq's crates starts with it. A target is the emitting
-module's path, so it carries the crate name: the map is `ubiq_host::pty`, `ubiq_host::coordinator`,
-`ubiq_host::conversation`, `ubiq_proto::bus`, `ubiq_host::mcp`, `ubiq_host::search`,
-`ubiq_host::watch`, and — tested before the bare `ubiq` arm — `ubiq_host::web_assets`,
-`ubiq::web_export`, `ubiq::app::web_panel` and `ubiq::ui::web_view` for Web, and `ubiq_host::agent`
+tests the specific prefixes first, because `kubiq_host::pty` is also `kubiq_host`, and the bare
+`kubiq` arm is last because every one of Kubiq's crates starts with it. A target is the emitting
+module's path, so it carries the crate name: the map is `kubiq_host::pty`, `kubiq_host::coordinator`,
+`kubiq_host::conversation`, `kubiq_proto::bus`, `kubiq_host::mcp`, `kubiq_host::search`,
+`kubiq_host::watch`, and — tested before the bare `kubiq` arm — `kubiq_host::web_assets`,
+`kubiq::web_export`, `kubiq::app::web_panel` and `kubiq::ui::web_view` for Web, and `kubiq_host::agent`
 for Harness, and a crate renamed without the map following it files every record under External
 while compiling perfectly.
 
@@ -186,11 +186,11 @@ record readout and `loudest()` the tab's dot; `clear()` empties both; `subscribe
 channel a window is nudged through, and a listener whose window has gone is dropped on the next
 push.
 
-`crates/ubiq/src/state/logs.rs` holds `LogState`: the chosen subsystem, the level floor, the follow
+`crates/kubiq/src/state/logs.rs` holds `LogState`: the chosen subsystem, the level floor, the follow
 flag, and the index arithmetic the two selectors are drawn and answered with. It holds no records —
 those belong to the sink, which is why the console's state is a default rather than a fixture.
 
-`crates/ubiq/src/ui/logs.rs` draws the panel. `render()` is the whole of it, a toolbar row over the
+`crates/kubiq/src/ui/logs.rs` draws the panel. `render()` is the whole of it, a toolbar row over the
 records; `actions()` is that toolbar — the two selectors, the record readout, the follow switch and
 `Clear` — and `body()` is a lazy uniform list of rows on a surface like a pane's. `level_colour()`
 is what a level is reported in, on a row and on the tab's dot alike.
@@ -206,9 +206,9 @@ killed, a pseudo-terminal opened at a size, a pane's stream ending, a pane exiti
 that arrived at the half that may only send it. The harness library's own are all under
 `crates/agent-manager/src/io/`, one per bridge.
 
-`crates/ubiq-proto/tests/log_sink.rs` drives the sink the way a subsystem does — real `tracing`
+`crates/kubiq-proto/tests/log_sink.rs` drives the sink the way a subsystem does — real `tracing`
 events, read back through `snapshot()` — and covers the classification, the two filters composing,
-the nudge and the clear. `crates/ubiq/tests/logs.rs` covers the two pickers on the indexing the
+the nudge and the clear. `crates/kubiq/tests/logs.rs` covers the two pickers on the indexing the
 console draws them with. No window is needed for either.
 
 ## Failure
@@ -222,7 +222,7 @@ console draws them with. No window is needed for either.
 | A record is emitted while the window draws | Coalesced behind the settling delay, so it cannot drive the frame that emitted it |
 | A window closes | Its listener is dropped on the next push; the ring and every other console are untouched |
 | `RUST_LOG` names a filter that excludes a subsystem | That subsystem's records never reach the ring, and the console cannot show what was not collected |
-| `UBIQ_LOG_FILE` names a path that cannot be opened | `install()` proceeds without the file layer; the ring and standard error report exactly as they would with the variable unset |
+| `KUBIQ_LOG_FILE` names a path that cannot be opened | `install()` proceeds without the file layer; the ring and standard error report exactly as they would with the variable unset |
 
 ## Related docs
 

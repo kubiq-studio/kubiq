@@ -7,7 +7,7 @@ summary: The living table of every interface area, the help page that covers it,
 read_when: you are choosing which help page to write next, or recording that one is written
 updated: 2026-10-25
 verified: 2026-10-25
-code_anchors: [help/manifest.toml, _tools/helpbundle.py, crates/ubiq/src/state/ui_id.rs]
+code_anchors: [help/manifest.toml, _tools/helpbundle.py, crates/kubiq/src/state/ui_id.rs]
 depends_on: [wip-help]
 ---
 
@@ -33,37 +33,37 @@ This table is also the screenshot-rot index: when an interface area changes, its
 | dock.right | §4.1 | workbench/panels | — | done | — |
 | dock.bottom | §4.1 | workbench/panels | — | done | — |
 | status-bar | §4.1 | workbench/status-bar | — | done | — |
-| outline | §4.1 | workbench/outline | panel.ubiq.outline | done | — |
+| outline | §4.1 | workbench/outline | panel.kubiq.outline | done | — |
 | terminal | §4.1 (instance) | concepts/panes | — | done | — |
-| editor.file | §4.1 (instance) | workbench/editor | panel.ubiq.file | done | — |
-| viewer.diff | §4.1 | git/diff | panel.ubiq.git.diff | done | guides/review-and-commit |
-| explorer | §4.2 | workbench/explorer | panel.ubiq.explorer | done | guides/first-project-and-agent |
-| explorer.toolbar | §4.2 | workbench/explorer | panel.ubiq.explorer | done | — |
+| editor.file | §4.1 (instance) | workbench/editor | panel.kubiq.file | done | — |
+| viewer.diff | §4.1 | git/diff | panel.kubiq.git.diff | done | guides/review-and-commit |
+| explorer | §4.2 | workbench/explorer | panel.kubiq.explorer | done | guides/first-project-and-agent |
+| explorer.toolbar | §4.2 | workbench/explorer | panel.kubiq.explorer | done | — |
 | explorer.bookmarks | §4.2 | workbench/bookmarks | — | done | — |
-| explorer.tree | §4.2 | workbench/explorer | panel.ubiq.explorer | done | guides/first-project-and-agent |
-| search | §4.2 | workbench/search | panel.ubiq.search | done | — |
-| search.results | §4.2 | workbench/search | panel.ubiq.search | done | — |
+| explorer.tree | §4.2 | workbench/explorer | panel.kubiq.explorer | done | guides/first-project-and-agent |
+| search | §4.2 | workbench/search | panel.kubiq.search | done | — |
+| search.results | §4.2 | workbench/search | panel.kubiq.search | done | — |
 | git.toolbar | §4.2 | git/overview | rail.git | done | — |
-| git.refs.repositories | §4.2 | git/refs | panel.ubiq.git.refs | done | — |
-| git.refs | §4.2 | git/refs | panel.ubiq.git.refs | done | — |
-| git.history | §4.2 | git/history | panel.ubiq.git.history | done | guides/review-and-commit |
-| git.changes | §4.2 | git/changes | panel.ubiq.git.changes | done | guides/review-and-commit |
-| git.changes.commit-box | §4.2 | git/changes | panel.ubiq.git.changes | done | guides/review-and-commit |
-| git.changes.commit | §4.2 | git/changes | panel.ubiq.git.changes | done | guides/review-and-commit |
+| git.refs.repositories | §4.2 | git/refs | panel.kubiq.git.refs | done | — |
+| git.refs | §4.2 | git/refs | panel.kubiq.git.refs | done | — |
+| git.history | §4.2 | git/history | panel.kubiq.git.history | done | guides/review-and-commit |
+| git.changes | §4.2 | git/changes | panel.kubiq.git.changes | done | guides/review-and-commit |
+| git.changes.commit-box | §4.2 | git/changes | panel.kubiq.git.changes | done | guides/review-and-commit |
+| git.changes.commit | §4.2 | git/changes | panel.kubiq.git.changes | done | guides/review-and-commit |
 | git.changes.range | §4.2 | git/compare-commits | — | done | — |
-| git.diff | §4.2 | git/diff | panel.ubiq.git.diff | done | guides/review-and-commit |
-| git.diff.header | §4.2 | git/diff | panel.ubiq.git.diff | done | guides/review-and-commit |
-| kb | §4.2 | kb/overview | rail.kb, panel.ubiq.kb.explorer | done | — |
-| kb.tree | §4.2 | kb/overview | rail.kb, panel.ubiq.kb.explorer | done | guides/knowledge-base |
-| kb.centre | §4.2 | kb/documents | panel.ubiq.kb.doc | done | guides/knowledge-base |
-| kb.document | §4.2 | kb/documents | panel.ubiq.kb.doc | done | guides/knowledge-base |
+| git.diff | §4.2 | git/diff | panel.kubiq.git.diff | done | guides/review-and-commit |
+| git.diff.header | §4.2 | git/diff | panel.kubiq.git.diff | done | guides/review-and-commit |
+| kb | §4.2 | kb/overview | rail.kb, panel.kubiq.kb.explorer | done | — |
+| kb.tree | §4.2 | kb/overview | rail.kb, panel.kubiq.kb.explorer | done | guides/knowledge-base |
+| kb.centre | §4.2 | kb/documents | panel.kubiq.kb.doc | done | guides/knowledge-base |
+| kb.document | §4.2 | kb/documents | panel.kubiq.kb.doc | done | guides/knowledge-base |
 | kb.source-form | §4.2 | kb/sources | — | done | guides/knowledge-base |
-| db | §4.1 (rail; not in §4), added | db/overview | rail.db, panel.ubiq.db.explorer, panel.ubiq.db.table, panel.ubiq.db.sql | done | — |
-| db.connection-form | added | db/overview | rail.db, panel.ubiq.db.explorer, panel.ubiq.db.table, panel.ubiq.db.sql | done | guides/query-a-database |
-| db.sql | added | db/overview | rail.db, panel.ubiq.db.explorer, panel.ubiq.db.table, panel.ubiq.db.sql | done | guides/query-a-database |
-| logs | §4.2 | workbench/logs | panel.ubiq.logs | done | — |
-| logs.toolbar | §4.2 | workbench/logs | panel.ubiq.logs | done | — |
-| logs.body | §4.2 | workbench/logs | panel.ubiq.logs | done | — |
+| db | §4.1 (rail; not in §4), added | db/overview | rail.db, panel.kubiq.db.explorer, panel.kubiq.db.table, panel.kubiq.db.sql | done | — |
+| db.connection-form | added | db/overview | rail.db, panel.kubiq.db.explorer, panel.kubiq.db.table, panel.kubiq.db.sql | done | guides/query-a-database |
+| db.sql | added | db/overview | rail.db, panel.kubiq.db.explorer, panel.kubiq.db.table, panel.kubiq.db.sql | done | guides/query-a-database |
+| logs | §4.2 | workbench/logs | panel.kubiq.logs | done | — |
+| logs.toolbar | §4.2 | workbench/logs | panel.kubiq.logs | done | — |
+| logs.body | §4.2 | workbench/logs | panel.kubiq.logs | done | — |
 | control | §4.2 | workbench/control | rail.control | done | — |
 | control.general | §4.2 | workbench/control | rail.control | done | — |
 | control.usage | §4.2 | workbench/control | rail.control | done | — |
@@ -75,9 +75,9 @@ This table is also the screenshot-rot index: when an interface area changes, its
 | agents.header | §4.3 | agents/starting | rail.agents | done | — |
 | agents.columns | §4.3 | agents/starting | rail.agents | done | guides/two-agents-side-by-side |
 | agents.column.header | §4.3 | agents/starting | rail.agents | done | guides/two-agents-side-by-side |
-| agents.column.footer | §4.3 | agents/columns | panel.ubiq.agents.explorer | done | — |
-| agents.column.thread | §4.3 | agents/columns | panel.ubiq.agents.explorer | done | — |
-| agents.sidebar | §4.3 | agents/columns | panel.ubiq.agents.explorer | done | — |
+| agents.column.footer | §4.3 | agents/columns | panel.kubiq.agents.explorer | done | — |
+| agents.column.thread | §4.3 | agents/columns | panel.kubiq.agents.explorer | done | — |
+| agents.sidebar | §4.3 | agents/columns | panel.kubiq.agents.explorer | done | — |
 | chat.tab.header | §4.3 | agents/chat | view.chat | done | guides/first-project-and-agent |
 | conversation.header | §4.3 | agents/conversation | — | done | — |
 | conversation.transcript | §4.3 | agents/chat | view.chat | done | guides/first-project-and-agent |
@@ -92,15 +92,15 @@ This table is also the screenshot-rot index: when an interface area changes, its
 | tasks.screen | §4.3 | tasks/overview | rail.tasks | done | guides/tasks-board |
 | tasks.toolbar | §4.3 | tasks/overview | rail.tasks | done | — |
 | tasks.columns | §4.3 | tasks/overview | rail.tasks | done | guides/tasks-board |
-| tasks.detail | §4.3 | tasks/detail | panel.ubiq.task | done | guides/tasks-board |
+| tasks.detail | §4.3 | tasks/detail | panel.kubiq.task | done | guides/tasks-board |
 | teams.screen | §4.3 | teams/overview | rail.teams, rail.teamsall | done | — |
 | teams.toolbar | §4.3 | teams/overview | rail.teams, rail.teamsall | done | — |
 | teams.canvas | §4.3 | teams/overview | rail.teams, rail.teamsall | done | — |
 | teams.card | §4.3 (was teams.inspector) | teams/inspector | — | done | — |
 | teams.tasks-drawer | §4.3 (was teams.tasks) | teams/inspector | — | done | — |
 | tools.panel | §4.3 | workbench/tools | — | done | — |
-| help | §4.4 | workbench/help | panel.ubiq.help | done | — |
-| help.target | §4.4 | workbench/help | panel.ubiq.help | done | — |
+| help | §4.4 | workbench/help | panel.kubiq.help | done | — |
+| help.target | §4.4 | workbench/help | panel.kubiq.help | done | — |
 | settings | §4.4 | settings/overview | — (rung 1) | done | — |
 | settings.appearance | §4.4 | settings/appearance | — (rung 1) | done | — |
 | settings.size | §4.4 | settings/appearance | — (rung 1) | done | — |

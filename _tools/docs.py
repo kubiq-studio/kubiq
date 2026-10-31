@@ -3,7 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["pyyaml", "rich"]
 # ///
-"""Documentation maintenance for Ubiq's _docs/ — lint, index, drift, touched, graph.
+"""Documentation maintenance for Kubiq's _docs/ — lint, index, drift, touched, graph.
 
 Run it through `just`: `just docs-lint`, `docs-index`, `docs-drift`, `docs-touched`, `docs-graph`.
 """
@@ -30,18 +30,18 @@ DOCS = REPO / "_docs"
 
 # The Cargo workspace. `crates/agent-manager/` carries its own `_docs/`, so its files are
 # scanned for symbols and named in prose, but never queued as unanchored here.
-# Ubiq is four crates: the protocol both halves share, the host, the interface, and the binary
+# Kubiq is four crates: the protocol both halves share, the host, the interface, and the binary
 # that is the only thing naming more than one of them.
-UBIQ_ROOTS = (
-    "crates/ubiq-proto/src",
-    "crates/ubiq-host/src",
-    "crates/ubiq/src",
-    "crates/ubiq-app/src",
+KUBIQ_ROOTS = (
+    "crates/kubiq-proto/src",
+    "crates/kubiq-host/src",
+    "crates/kubiq/src",
+    "crates/kubiq-app/src",
 )
-SOURCE_ROOTS = (*UBIQ_ROOTS, "crates/agent-manager/src")
-ANCHORABLE_ROOTS = UBIQ_ROOTS
+SOURCE_ROOTS = (*KUBIQ_ROOTS, "crates/agent-manager/src")
+ANCHORABLE_ROOTS = KUBIQ_ROOTS
 # The tree `tech/code-map.md` draws. agent-manager draws its own in `crates/agent-manager/AGENTS.md`.
-TREE_ROOTS = UBIQ_ROOTS
+TREE_ROOTS = KUBIQ_ROOTS
 SOURCE_SUFFIXES = {".rs"}
 IGNORED_DIRS = {".git", "target", "refs", "node_modules", ".venv", "__pycache__", ".serena"}
 
@@ -931,7 +931,7 @@ def render_anchors(docs: list[Doc]) -> str:
         "",
         "## Unanchored",
         "",
-        "No document's `code_anchors` names these. Restricted to Ubiq's own crates.",
+        "No document's `code_anchors` names these. Restricted to Kubiq's own crates.",
         "",
         "| File |",
         "|---|",

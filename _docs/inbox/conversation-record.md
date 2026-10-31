@@ -21,8 +21,8 @@ Nothing in the tree replays anything, and `G120` names why.
 
 ## 1. The gap, stated once
 
-`Conversation` in `crates/ubiq/src/state/conversation.rs` holds `blocks`, the drawn transcript. It
-has no host-side counterpart. The pump in `crates/ubiq-host/src/conversation.rs` maps each
+`Conversation` in `crates/kubiq/src/state/conversation.rs` holds `blocks`, the drawn transcript. It
+has no host-side counterpart. The pump in `crates/kubiq-host/src/conversation.rs` maps each
 `AgentEvent` to a `ConvUpdate`, sends it to the owning window and keeps nothing; when no window is
 listening the send fails and the pump ends. `Coordinator` keeps `Conversation` and
 `PendingConversation` — a launch recipe and a sequence counter, bookkeeping that makes the *next*
@@ -32,7 +32,7 @@ So a transcript exists in one place, the requesting window's process memory, for
 window and that host process are both alive. Everything else follows from that.
 
 What is durable is a different thing: `Agents::archive` copies the harness's own transcript files,
-named by `Harness::transcripts`, into `<ubiq root>/sessions/<id>/harness/` beside a `SessionMeta`.
+named by `Harness::transcripts`, into `<kubiq root>/sessions/<id>/harness/` beside a `SessionMeta`.
 `features/sessions-and-workspaces.md` states the limit plainly — the record is data, not a resume.
 Nothing parses it back, and only Claude Code implements `transcripts` at all.
 
@@ -64,7 +64,7 @@ hosts is what answers it.
 Everything host-resident about a conversation is bound to its machine. The run directory under
 `runs/<id>/`, the harness's relocated configuration directory, its native session file, the
 project's folder, the `workarea` string, and the credentials — `D65` holds that no path and no
-credential crosses. Ids do not relocate either: `HostId` in `crates/ubiq/src/app/hosts.rs` never
+credential crosses. Ids do not relocate either: `HostId` in `crates/kubiq/src/app/hosts.rs` never
 serialises, `D81` holds that no host can learn another exists, and `Bus` keys its routing maps by
 bare `PaneId` and `ProjectId`, so the same id arriving from two hosts overwrites rather than
 disambiguates.
@@ -74,7 +74,7 @@ by Claude Code alone; opencode and Copilot keep their history in a database; Gro
 sessions under the real home directory even when the library relocates `HOME`. A machine-bound,
 harness-specific, largely unimplemented artifact cannot be what a conversation travels as.
 
-**The record is Ubiq's own `ConvUpdate` log.** It already serialises — it crosses the bus as
+**The record is Kubiq's own `ConvUpdate` log.** It already serialises — it crosses the bus as
 MessagePack — it is already sequenced by `ConversationUpdate`'s `seq`, and it is harness-neutral by
 construction. It teleports because it is only frames. That single choice makes all four features
 draw on one store and keeps `crates/agent-manager` out of the mechanism entirely.
@@ -98,8 +98,8 @@ Two layers, which a surface must not conflate:
   and Copilot document `PreCompact` and `PostCompact` hooks, which observe compaction rather than
   ask for it. Driving it means a command string the library owns — a `compact_command` beside
   `io_support` on `Harness` — and a capability on `AgentTypeInfo` so a surface can hide the control
-  for a harness that has none. Ubiq never spells the command itself.
-- **Record compaction** folds Ubiq's own log into a seed. It is harness-agnostic, so it serves Grok
+  for a harness that has none. Kubiq never spells the command itself.
+- **Record compaction** folds Kubiq's own log into a seed. It is harness-agnostic, so it serves Grok
   and Copilot too, and it is what makes fork and teleport affordable rather than merely correct.
 
 Occupancy cannot drive either one generally: `G96` records that only Claude Code reports a context
@@ -126,7 +126,7 @@ it; that contract is only half-reachable while the host answers no one but the s
 
 ## 6. Fork in the New agent dialog
 
-`crates/ubiq/src/state/new_agent.rs`'s `Target` is already the dialog's first, gating answer — a
+`crates/kubiq/src/state/new_agent.rs`'s `Target` is already the dialog's first, gating answer — a
 harness signed into an account, or a saved profile. A fork is a third variant naming a source
 `AgentId`, with its rows drawn from the project's live agents rather than from
 `WorkbenchState::harness_choices`, and with harness, account, model and mode prefilled from the
@@ -188,7 +188,7 @@ Dependency order, and the first three touch no harness code.
 
 - [`backlog.md`](../backlog.md) — `G97`, `G116`, `G120`, `G164`, `G183`, `G208`, `G96`, `Q10`
 - [`tech/agent-manager.md`](../tech/agent-manager.md) — where a run's record is kept, and the
-  library's session against Ubiq's
+  library's session against Kubiq's
 - [`features/sessions-and-workspaces.md`](../features/sessions-and-workspaces.md) — unload against
   delete, and the record that outlives the run directory
 - [`features/chat.md`](../features/chat.md) — a tab as a view onto a host-owned conversation

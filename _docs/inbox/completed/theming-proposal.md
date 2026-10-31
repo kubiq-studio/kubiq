@@ -3,7 +3,7 @@ id: inbox-theming
 title: Problem — the palette is an enum with two variants, the accent is a literal, and 363 call sites pick their own type size
 kind: proposal
 status: proposal
-summary: Ubiq's theme is `ThemeId::{Dark, Light}` and two functions that spell out every token by hand, so a third palette is a third function and a different accent is not expressible at all. Type size is worse — one knob (`ui_font_size`) scales the editor, the panes and the tree, and every other surface carries a hand-picked `text_size(px(N))`, 363 of them across ten distinct values. The proposal keeps the layout and the design rules untouched and splits the theme into four independent axes — a palette registry keyed by slug, an accent derived from one seed, a text scale of named roles over three independently sized surface families, and one density factor — so N palettes × M accents cost N + M declarations instead of N × M.
+summary: Kubiq's theme is `ThemeId::{Dark, Light}` and two functions that spell out every token by hand, so a third palette is a third function and a different accent is not expressible at all. Type size is worse — one knob (`ui_font_size`) scales the editor, the panes and the tree, and every other surface carries a hand-picked `text_size(px(N))`, 363 of them across ten distinct values. The proposal keeps the layout and the design rules untouched and splits the theme into four independent axes — a palette registry keyed by slug, an accent derived from one seed, a text scale of named roles over three independently sized surface families, and one density factor — so N palettes × M accents cost N + M declarations instead of N × M.
 read_when: you are adding a palette, an accent, a colour token or a type size, wiring an Appearance control, or asking why a surface cannot be resized on its own
 updated: 2026-09-09
 depends_on: [tech-ui, tech-decisions, feat-workbench]
@@ -14,7 +14,7 @@ depends_on: [tech-ui, tech-decisions, feat-workbench]
 Three facts about the tree today, all of them in one file and its call sites.
 
 **A theme is an enum variant, and its colours are seventy hex literals.** `ThemeId` has exactly two
-members (`crates/ubiq/src/theme.rs:185`); `dark()` and `light()` (lines 434 and 508) each write out
+members (`crates/kubiq/src/theme.rs:185`); `dark()` and `light()` (lines 434 and 508) each write out
 every token by hand; `palette_for` (582) is a two-arm match; `ThemeId::toggled` (217) is what the
 titlebar's one control needs. `InterfacePrefs.theme` (`state/prefs.rs:88`) stores the variant. A
 third palette is a third seventy-line function, and nothing in the shape says which of those seventy
@@ -30,7 +30,7 @@ would duplicate the other sixty-four values.
 (`state/prefs.rs:163`) is per project, moves the editor, the terminal panes and the explorer tree
 together (`app/shell.rs:538–608`), and is offered as an eleven-entry ladder in the status bar
 (`ui/status_bar.rs:260`). Every other surface is frozen: `363` `text_size(px(N))` call sites across
-`crates/ubiq/src/ui/`, clustered on ten values — `11.0` at 114 sites, `12.5` at 70, `11.5` at 54,
+`crates/kubiq/src/ui/`, clustered on ten values — `11.0` at 114 sites, `12.5` at 70, `11.5` at 54,
 `10.5` at 31, `13.0` at 23, then a long tail. `ui/conversation/mod.rs` alone holds 38 of them and
 `ui/settings.rs` 29. `kit::mono` (`ui/kit/controls.rs:48`) is the only shared starting point and half
 its callers override the size on the next line. So the chat cannot be read at a comfortable size
@@ -56,7 +56,7 @@ groups and their names all stand. What changes is how many values can fill them,
 
 Each is independent, and a `Theme` is the resolved product of all four — still one `Copy` value in
 the thread-local, still read through the accessors, so **no call site learns that any of this
-happened**. `theme::set_mode` stays the single point that switches, which is what keeps Ubiq's tokens
+happened**. `theme::set_mode` stays the single point that switches, which is what keeps Kubiq's tokens
 and the component library's own theme from drifting apart.
 
 ## 2. A palette is a registry entry keyed by a slug
@@ -170,7 +170,7 @@ family, because that one is the project's.
 
 ## 7. Order of work
 
-1. **Hand the component library Ubiq's palette** (`G211`'s blocking task). Nothing else can land on
+1. **Hand the component library Kubiq's palette** (`G211`'s blocking task). Nothing else can land on
    top of a `Mode` that only says dark or light.
 2. **Palette registry and the slug `ThemeId`,** with the two current palettes as its first entries
    and the prefs alias. Behaviour identical; the titlebar toggle follows `counterpart`.
@@ -187,7 +187,7 @@ Steps 2, 3 and 5 are independent of each other and each is shippable alone.
 
 ## Next steps
 
-- Every step is implemented — the component library wears Ubiq's palette, the palette registry
+- Every step is implemented — the component library wears Kubiq's palette, the palette registry
   ships six palettes in three families, the accent derives from one seed, density scales the grid
   half of the constant table, and every type size in the interface comes from
   `theme::font(Family, Role)` with `just ui` rejecting a literal one.

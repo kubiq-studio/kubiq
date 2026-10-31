@@ -23,7 +23,7 @@ harness**. You run `am claude --mcps postgres,figma --skills web-designer` and
 it composes the run — pulling skills/MCPs from a catalog, selecting an account,
 seeding instructions — into a throwaway config directory, then launches the real
 harness against it. It has two modes: a **CLI** for the terminal and a **library**
-for embedding in bigger tools (e.g. the Ubiq multiplexer).
+for embedding in bigger tools (e.g. the Kubiq multiplexer).
 
 ## Why
 
@@ -53,7 +53,7 @@ real config untouched.
 
 ## Non-goals
 
-- Being a terminal multiplexer / emulator (that's Ubiq — `am` is a library it
+- Being a terminal multiplexer / emulator (that's Kubiq — `am` is a library it
   embeds).
 - Being a secrets manager (accounts inject *references*, not secret material).
 - Being an MCP server/client of its own (except hosting an embedder's
@@ -160,7 +160,7 @@ There is no `src/bin/`: Windows confinement re-invokes the embedder's own binary
 shipping a second one. `isolate::CONFINE_ARG` is the argv word that means "this run is a confine
 run", and `isolate::confine_entrypoint()` is what an embedder calls first, before any other
 startup — it reads a `ConfinePayload`, lets isol8 spawn the harness from inside the caller's own
-console, and returns the confine run's exit code, or `None` for an ordinary run. `crates/ubiq-app`
+console, and returns the confine run's exit code, or `None` for an ordinary run. `crates/kubiq-app`
 and `crates/agent-manager/src/main.rs` both call it.
 
 The library in `src/lib.rs` owns all real logic; `src/main.rs` is a thin shim.

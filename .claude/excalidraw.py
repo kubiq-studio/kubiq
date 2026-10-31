@@ -48,7 +48,7 @@ except ImportError:  # pragma: no cover - surfaced to user
 # Constants & mappings
 # --------------------------------------------------------------------------- #
 
-SOURCE = "https://github.com/ubiq/excalidraw-tool"
+SOURCE = "https://github.com/kubiq/excalidraw-tool"
 SPEC_VERSION = 1
 
 # Native element types we emit, keyed by the alias used in the simple format.
@@ -1048,7 +1048,7 @@ def _arrowhead(draw, p_from, p_to, color, size):
 
 SIMPLE_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://github.com/ubiq/excalidraw-tool/simple-excalidraw.schema.json",
+    "$id": "https://github.com/kubiq/excalidraw-tool/simple-excalidraw.schema.json",
     "title": "Simple Excalidraw Document",
     "type": "object",
     "required": ["elements"],

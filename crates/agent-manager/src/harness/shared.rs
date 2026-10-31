@@ -81,7 +81,7 @@ pub(crate) use harness_identity;
 
 /// Every harness's version/discovery probes are headless: a `--version` or `models` shell-out
 /// whose only output anyone reads is its stdout. Windows would still pop a console window for one
-/// — the embedding app frees its own console at boot (`ubiq_app::detach_console`), and a
+/// — the embedding app frees its own console at boot (`kubiq_app::detach_console`), and a
 /// console-subsystem child with no console to inherit gets a brand-new one — so every probe spawn
 /// asks for none.
 #[cfg(windows)]

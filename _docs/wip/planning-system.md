@@ -7,7 +7,7 @@ summary: What is still undecided about the planning flow — missions, plans and
 read_when: you are picking up T-85, or deciding whether a mission should inherit anything from its parent, or whether `require plan` should gate anything
 updated: 2026-09-25
 verified: 2026-09-25
-code_anchors: [crates/ubiq/src/state/document.rs, crates/ubiq-host/src/store/plan.rs, crates/ubiq-host/src/plan/mod.rs, crates/ubiq-host/src/plan/service.rs, crates/ubiq-proto/src/plan.rs]
+code_anchors: [crates/kubiq/src/state/document.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/plan/service.rs, crates/kubiq-proto/src/plan.rs]
 depends_on: [feat-workbench, tech-transport, tech-decisions, wip-kb]
 ---
 
@@ -15,7 +15,7 @@ depends_on: [feat-workbench, tech-transport, tech-decisions, wip-kb]
 
 The planning flow this file once proposed — a mission task type, parent/child and task-to-task
 references, task attachments, a plan document with human-and-agent annotations, the plan editor,
-the `ubiq-plan` MCP surface, the new-mission dialog and a `mission assistant` agent definition flag, and
+the `kubiq-plan` MCP surface, the new-mission dialog and a `mission assistant` agent definition flag, and
 project-scoped agent definitions — is built, across all seven staged slices plus the edit-provenance and
 `PlanConflict` work that followed. What each piece is and how it works now lives in
 [`features/workbench-tasks.md`](../features/workbench-tasks.md) (behaviour and implementation),
@@ -33,7 +33,7 @@ What remains is one blocked card and two open questions.
   is decided and built (`D161`).** A project's markdown file is annotated in place: the body is the
   file, and the sidecar is `<file>.md.annotation.json` beside it, inside the repository — a
   deliberate, narrow exception to `D30`. The handle moved into the contract as
-  `ubiq_proto::plan::DocumentHandle` and grew its second variant, `File { project_id, rel_path }`,
+  `kubiq_proto::plan::DocumentHandle` and grew its second variant, `File { project_id, rel_path }`,
   so the whole family is keyed by a document rather than by `(project_id, task_id)`; the block
   matcher, the orphaning rule, the conflict arbitration and the provenance layer are the plan's,
   unchanged. A plan keeps its own `<TaskId>.annotations.json` under the config root — two spellings
@@ -43,11 +43,11 @@ What remains is one blocked card and two open questions.
   `crate::state::plan::file_document` is called from `AppState::open_file_document`, and the
   surface a tab draws there is the plan editor's own — `ui/document.rs`, with `ui/plan.rs` reduced
   to the dialog frame around it. Agent integration for a file document's annotations is still an
-  explicitly later card: in plan mode they feed the agents through `ubiq-plan`, for a file they
+  explicitly later card: in plan mode they feed the agents through `kubiq-plan`, for a file they
   only sit there.
 - **T-85 — what a knowledge-base attachment becomes in a chat prompt.** Three candidates: a
   resolved temp file the prompt names by path, an inlined excerpt of the document's text folded
-  into the prompt directly, or a reference the `ubiq-kb` MCP server resolves when the agent asks
+  into the prompt directly, or a reference the `kubiq-kb` MCP server resolves when the agent asks
   for it. Chat attachments never cross the bus today — `Conversation::attached` is interface state
   folded into `PromptAgent { text }` at send — and picking from the knowledge base is not wired
   into the composer's file picker at all yet, which is a KB-aware picker for whichever answer this

@@ -49,7 +49,7 @@ kind, label, blurb, optional help page and optional alias. Everything the tool s
 **Help content — the page frontmatter.** `targets:` lists, read with the same frontmatter reader
 `helpbundle.py` uses. No second parser.
 
-**Rust — `crates/ubiq/src/`.** This is the hard one, and the honest answer is that a script cannot
+**Rust — `crates/kubiq/src/`.** This is the hard one, and the honest answer is that a script cannot
 extract ids from Rust reliably. Three ways to try:
 
 | Approach | Gets | Misses |
@@ -95,7 +95,7 @@ Eight rules, all exact, all failures:
 - Every row has a `label` and a `blurb`. An id with no sentence is an id the inspector cannot show.
 - Every `help` page id on a row resolves, and every `targets:` entry on a help page resolves to a
   declared id or to a live alias.
-- Every marking call in `crates/ubiq/src/` takes a string literal, and its id is declared.
+- Every marking call in `crates/kubiq/src/` takes a string literal, and its id is declared.
 
 Deliberately not failures: an unused id, an area with low coverage, an id with no help page.
 
@@ -166,7 +166,7 @@ wholesale and stops meaning anything.
 used. Proving reachability needs the running app, which is what `--from-runtime` samples and does not
 prove.
 
-**It picks up test and fixture literals.** Scanning `crates/ubiq/src/` includes inline test modules.
+**It picks up test and fixture literals.** Scanning `crates/kubiq/src/` includes inline test modules.
 This is the right answer anyway: an id a test names is an id, and requiring it to be declared is
 correct.
 

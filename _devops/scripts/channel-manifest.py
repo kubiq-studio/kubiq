@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 
 # artifact file name -> platform key. The updater downloads these two.
 PLATFORMS = {
-    "Ubiq-macos-arm64.zip": "macos-aarch64",
-    "Ubiq-Setup-x86_64.exe": "windows-x86_64",
+    "Kubiq-macos-arm64.zip": "macos-aarch64",
+    "Kubiq-Setup-x86_64.exe": "windows-x86_64",
 }
 
 

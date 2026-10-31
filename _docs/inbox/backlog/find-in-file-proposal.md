@@ -3,7 +3,7 @@ id: inbox-find
 title: Proposal — find and replace in a file
 kind: proposal
 status: proposal
-summary: The editor's find bar, which the component library already draws and Ubiq has never claimed — the four options it owes the user, why whole word and regex have to come from upstream rather than from a second find bar beside the first, and what replace means to a buffer whose file the host owns.
+summary: The editor's find bar, which the component library already draws and Kubiq has never claimed — the four options it owes the user, why whole word and regex have to come from upstream rather than from a second find bar beside the first, and what replace means to a buffer whose file the host owns.
 read_when: you are deciding how a file is searched, what the find bar's options mean, or what a replace does to a buffer the host will be asked to write
 updated: 2026-09-01
 depends_on: [feat-workbench, tech-ui, inbox-omni]
@@ -11,7 +11,7 @@ depends_on: [feat-workbench, tech-ui, inbox-omni]
 
 # Proposal — find and replace in a file
 
-**Ubiq's editor already has find and replace, and nothing in Ubiq knows it.** `⌘F` opens a panel
+**Kubiq's editor already has find and replace, and nothing in Kubiq knows it.** `⌘F` opens a panel
 over the buffer with a query field, a case toggle, a match counter, previous and next, and — under
 `⌘⇧F` — a replacement field with *Replace* and *Replace All*. All of it belongs to the component
 library, none of it was asked for, and no affordance anywhere in the window says it is there.
@@ -24,12 +24,12 @@ replace that cannot make edits the user is unable to save, and a hand-off to
 ## 1. Where it stands
 
 **The find bar is live in the tree today.** `attach_file` builds each buffer with `EditorState::new`
-(`crates/ubiq/src/app/editor.rs`), and that constructor sets `searchable = true` itself — the flag
+(`crates/kubiq/src/app/editor.rs`), and that constructor sets `searchable = true` itself — the flag
 defaults to `false` for every other input and the code-editor mode overrides it. The `Search` and
 `Replace` actions and their `cmd-f` / `cmd-shift-f` bindings are registered by
-`gpui_component::init`, which `crates/ubiq-app/src/lib.rs`'s `run` calls at startup, in the `"Input"` key
-context the component sets on its own rendered element. Nothing in `crates/ubiq/` had to opt in, and
-nothing in `crates/ubiq/` can tell you it happened.
+`gpui_component::init`, which `crates/kubiq-app/src/lib.rs`'s `run` calls at startup, in the `"Input"` key
+context the component sets on its own rendered element. Nothing in `crates/kubiq/` had to opt in, and
+nothing in `crates/kubiq/` can tell you it happened.
 
 **What it does.** The matcher is a single-literal `aho-corasick` automaton rebuilt on every query
 change, over the buffer's rope. It tracks every match, wraps forward and backward, reports `n/m`, and
@@ -42,32 +42,32 @@ else: a query for `straße` and a buffer holding `STRASSE` do not meet, and neit
 Those are the three gaps between what the tree has and what this document asks for.
 
 **Nothing in the interface mentions it.** The editor's tab strip has no find affordance, the
-titlebar's search icon is `|_, _, _| {}` (`crates/ubiq/src/ui/titlebar.rs:73`), and the `⌘K` field
+titlebar's search icon is `|_, _, _| {}` (`crates/kubiq/src/ui/titlebar.rs:73`), and the `⌘K` field
 says *Search files, or run a command…* which is neither this nor implemented (`G16`). A keystroke
 that only works if you already guessed it is not a feature the product has.
 
 **Each buffer has its own search session, because each buffer is its own state.** `FileBody::Text`
-holds one `EditorState` per open file (`crates/ubiq/src/state/editor.rs:60-79`), which is the right
+holds one `EditorState` per open file (`crates/kubiq/src/state/editor.rs:60-79`), which is the right
 shape and has the consequence that `⌘F` in a second tab starts from an empty query.
 
 **A truncated read is already unsavable.** `FileBody::Text` carries `truncated`, and `savable()`
-(`crates/ubiq/src/state/editor.rs:162-168`) refuses the save, because writing a prefix back over a
+(`crates/kubiq/src/state/editor.rs:162-168`) refuses the save, because writing a prefix back over a
 file is data loss. The find bar does not know that, so *Replace All* in such a buffer is a pile of
 edits the user cannot commit.
 
 ## 2. What this decides
 
-Not whether to build a find bar. Whether Ubiq **owns** the one it has:
+Not whether to build a find bar. Whether Kubiq **owns** the one it has:
 
 - the option set — §3;
 - who does the matching, and at what cost — §4;
-- the parts that are Ubiq's regardless of that answer — §5;
+- the parts that are Kubiq's regardless of that answer — §5;
 - and what a replace means when the file belongs to the host — §6.
 
 ## 3. The four options
 
 **One record, four options, shared with project search.** It is `Query` in a `search` module in
-`crates/ubiq-proto/src/`, defined and argued in
+`crates/kubiq-proto/src/`, defined and argued in
 [`omni-search-proposal.md`](../completed/omni-search-proposal.md) §3, and this document is its second user.
 
 | Option | Means | In the tree |
@@ -84,7 +84,7 @@ on matches `fooo` standing alone and not the `fooo` inside `xfooo`.
 **The find bar's options and project search's options are the same options.** Not similar — the same
 record, the same order of composition, the same meaning. A user who ticks two boxes in the editor and
 then asks the same question of the project must not get a different answer because two engines
-disagreed about what a word boundary is. That is the entire reason `Query` lives in `ubiq-proto`
+disagreed about what a word boundary is. That is the entire reason `Query` lives in `kubiq-proto`
 rather than in the interface.
 
 ## 4. Where whole word and regex come from
@@ -102,15 +102,15 @@ Everything downstream of match production consumes `Vec<Range<usize>>` and needs
 the painting is engine-agnostic. `regex` is already a dependency of the crate that holds the matcher,
 so the change adds an import and no dependency.
 
-**Route B — a second find bar, Ubiq's own.** The public surface is real: the buffer's rope, a
+**Route B — a second find bar, Kubiq's own.** The public surface is real: the buffer's rope, a
 `RopeExt` trait with offset/line/column conversion and a word-range helper, the selected range as a
 setter, and `TextDecoration` for painting arbitrary ranges. It is also not enough. There is **no
 public scroll-to-offset** — the offset-based scroll is crate-private, so *next match* would mean
 computing pixel offsets from a line height by hand — and **no public replace-of-an-arbitrary-range**:
 a replace is select-then-replace-the-selection, one match at a time, with undo entries to match.
-Decorations paint a text style, not the boxed match the component draws, so Ubiq's find bar would
+Decorations paint a text style, not the boxed match the component draws, so Kubiq's find bar would
 look unlike the editor it sits in. And the component's own bar would still be there on `⌘F`, unless
-Ubiq turned `searchable` off and paid for everything twice.
+Kubiq turned `searchable` off and paid for everything twice.
 
 **Route A, and this is what the convention already says.** `../tech/ui-and-design.md` puts
 gpui-component first, and a private matcher is exactly the case that rule exists for. The cost is
@@ -122,7 +122,7 @@ class of problem — the dependency is already pinned to a commit rather than a 
 goes through `regex`, case-insensitivity is Unicode case folding rather than the ASCII range, and the
 `straße` case stops being a bug nobody filed.
 
-## 5. What Ubiq owns either way
+## 5. What Kubiq owns either way
 
 Four things, none of which the component can decide.
 
@@ -135,12 +135,12 @@ replacement carried into the wrong file is how a user destroys something quietly
 
 **The entry point is visible.** A find affordance in the editor's tab strip, and the titlebar's dead
 search icon given the one meaning it can have — which is project search, not this (project search's
-§9). Ubiq owns the discoverability of a keystroke the component only owns the behaviour of.
+§9). Kubiq owns the discoverability of a keystroke the component only owns the behaviour of.
 
 **Replace moves off `⌘⇧F`.** The component binds it to replace-in-file in the key context a focused
 editor sits in, and project search wants it for the reason every editor a user arrives from gives it:
 that is what it means. So replace-in-file becomes `⌘⌥F` and `⌘⇧F` goes to the dock's search tab.
-Ubiq owns which keystroke means what, even where the behaviour behind it is the component's — and a
+Kubiq owns which keystroke means what, even where the behaviour behind it is the component's — and a
 shortcut that means two things depending on where the caret is belongs to nobody.
 
 **Selection seeds the query.** `⌘F` with a selection searches for the selection. This is the one
@@ -154,7 +154,7 @@ line, and it is the reason the two proposals are written as halves of one thing.
 
 **A replace edits the buffer. It does not write the file.** The buffer is the interface's; the file is
 the host's, reached only by `WriteProjectFile` with the version the read came with
-(`crates/ubiq-proto/src/messages.rs:179-184`). So *Replace All* makes the tab dirty, exactly as typing
+(`crates/kubiq-proto/src/messages.rs:179-184`). So *Replace All* makes the tab dirty, exactly as typing
 does, and nothing reaches the disk until a save. This falls out of the architecture rather than being
 designed: the interface has no path to the file, which is what makes replace safe by construction.
 
@@ -205,7 +205,7 @@ alone.**
 **A buffer that cannot be saved cannot be replaced in.** Whatever makes a save dishonest makes a bulk
 edit dishonest first.
 
-**A component behaviour Ubiq relies on is a behaviour Ubiq makes visible.** An undiscoverable feature
+**A component behaviour Kubiq relies on is a behaviour Kubiq makes visible.** An undiscoverable feature
 inherited from a dependency is not a feature the product has — and it is not documented by the
 dependency's changelog either.
 
@@ -214,7 +214,7 @@ dependency's changelog either.
 1. **Claim what exists.** The find affordance in the tab strip, selection-seeds-query, the window's
    remembered query seeded into a new buffer's session, and replace turned off for a truncated read.
    No dependency change, and it is most of the user-visible gap.
-2. **The shared query.** `Query` in `ubiq-proto` — landing with project search's phase 1 — and the
+2. **The shared query.** `Query` in `kubiq-proto` — landing with project search's phase 1 — and the
    find bar's state expressed in it rather than in the component's two flags.
 3. **Whole word and regex, upstream.** The matcher's mode, the session's flags, the panel's two
    toggles, the pull request, and the fork pin until it merges. Unicode case folding arrives with it,
@@ -230,11 +230,11 @@ dependency on somebody else's repository, which is why it is not first.
 
 Six decision rows:
 
-- The editor's find and replace is the component library's, and Ubiq's job is the option set, the
+- The editor's find and replace is the component library's, and Kubiq's job is the option set, the
   entry points and the guards — not a second implementation beside it.
 - Whole word and regex arrive by extending the component upstream, with a fork pin in the interim,
   rather than by building a parallel find bar over the public decoration and selection APIs.
-- The four options are one record in `ubiq-proto`, shared with project search, composed in one stated
+- The four options are one record in `kubiq-proto`, shared with project search, composed in one stated
   order.
 - The last query and its options belong to the window and are carried into each buffer's session; the
   replacement text is not.
@@ -243,14 +243,14 @@ Six decision rows:
 - Find in file crosses no bus, and replace reaches the disk only through the save path that already
   exists, with the version the read came with.
 
-Backlog rows this leaves open: whether a Ubiq-side binding registered after
+Backlog rows this leaves open: whether a Kubiq-side binding registered after
 `gpui_component::init` overrides one of the component's own, which decides whether the `⌘⇧F` move
 can happen before phase 3 and which nothing here has checked against GPUI's precedence rules; the
 case folding, which stays ASCII-only until phase 3 lands; a
 refused write's recovery, which `⌘S` needs before *Replace All* makes it likely; the keyboard path to
 save, which is `G51`; find within a selection, and preserve-case replace, both deliberately absent
 from the option set; a match count that is exact in a fifty-thousand-line buffer, which the
-component's rebuild-on-every-keystroke matcher decides and not Ubiq; and whether the find bar should
+component's rebuild-on-every-keystroke matcher decides and not Kubiq; and whether the find bar should
 appear in a viewer that is not an editor at all, which waits on
 [`file-viewers-proposal.md`](../completed/file-viewers-proposal.md).
 

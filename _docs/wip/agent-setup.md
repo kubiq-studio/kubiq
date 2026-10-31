@@ -7,7 +7,7 @@ summary: The protocol, the library work and the order of packages behind a real 
 read_when: you are picking up the next agent-integration package, or judging whether a proposed conversation message belongs on the wire
 updated: 2026-10-02
 verified: 2026-10-02
-code_anchors: [crates/ubiq-host/src/agent.rs, crates/ubiq-host/src/coordinator.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/src/io/model.rs, crates/agent-manager/src/io/jsonl.rs, crates/ubiq-proto/src/work.rs, crates/ubiq/src/ui/conversation/mod.rs, crates/ubiq/src/state/conversation.rs, crates/agent-manager/src/profile.rs]
+code_anchors: [crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/coordinator.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/src/io/model.rs, crates/agent-manager/src/io/jsonl.rs, crates/kubiq-proto/src/work.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/state/conversation.rs, crates/agent-manager/src/profile.rs]
 depends_on: [tech-agent-manager, feat-workbench, feat-chat]
 review_cycle: monthly
 ---
@@ -19,7 +19,7 @@ review_cycle: monthly
 A workspace is composed by the library and confined by default: `RunSpec` → provision → `Launch` →
 pseudo-terminal, and a pane shows the harness's own screen. That is the **passthrough** half. The
 conversation half runs too: a Claude conversation streams end to end (P1), an identity can be
-signed in from inside Ubiq and saved into a named definition that a conversation starts from (P4 and
+signed in from inside Kubiq and saved into a named definition that a conversation starts from (P4 and
 P5), the model, the reasoning level and the mode are picked before the harness launches (P3), and
 the chat panel and the agents column draw one conversation through one component. P3's ordering has
 since been pushed one step earlier: `ListHarnessCatalogue` answers what a harness offers without
@@ -30,7 +30,7 @@ remains is the thinking level and permissions (P7).
 
 **Two corrections to earlier notes in this tree, both load-bearing.**
 
-`_docs/wip/agent-login-note.md` concluded that a Ubiq run receives no login, and that a captured
+`_docs/wip/agent-login-note.md` concluded that a Kubiq run receives no login, and that a captured
 one has to be wired through to reach it. `D193` and `D194` answer both by removing the capture:
 a run that names an account runs *from* that account's fixed config home, where the harness itself
 keeps and refreshes the login, and a run that names none runs against the user's own config in
@@ -61,11 +61,11 @@ false are deleted rather than annotated: this is what is true now.
 | `IoBridge` is two methods, both `&mut self`, and `next_event` **blocks** | The host needs one pump thread per structured workspace; `send` and `next_event` cannot be called concurrently without splitting the bridge |
 | All five harnesses accept a second turn on the same process (`IoSupport::multi_turn`) — opencode and Copilot joined Claude, Codex and Grok once both moved to an ACP launch (`opencode acp` / `copilot --acp`) instead of a one-shot argv prompt | Nothing left to reconcile between the two kinds; the coordinator's one-shot path (`finish_one_shot_turn`, relaunching with the harness's own session id on the next prompt via `RunSpec::resume`) has no harness exercising it, but stays in place for a future harness that needs it |
 | **Only Codex auto-approves.** Its reader auto-accepts every approval RPC. Claude, Grok, opencode and Copilot all ask: Claude's `control_request` and the three ACP harnesses' `session/request_permission` (`AcpBridge` parks it by request id) both wait for an `AgentInput::AnswerPermission`. Grok is the one that can be told not to ask: launched under `bypassPermissions` or `dontAsk` it carries `--always-approve` and raises no request at all | A permission prompt in the UI is theatre only for Codex — the tool has already run. This is the one item with a security consequence, and it gates any "ask me first" feature |
-| **Model discovery is implemented for all five harnesses** — `Harness::discover_models` (`harness/mod.rs:501`) is overridden by every one. But it takes **no account and no directory**, so a list is per harness rather than per identity, and Claude's probe reads the *ambient* login; discovery **is** cached now — `FileHarnessCache` (`crates/ubiq-host/src/store/harness.rs`) writes `<config root>/cache/harness-models.toml`, keyed on `(harness, account, version)`, with `version` read off the harness binary's own `--version` — so a hit skips the probe outright and a harness whose version cannot be read bypasses the cache in both directions. `ListHarnessCatalogue` reaches the same probe and the same cache with no conversation in the picture | A model picker is available before a start as well as after one, and its list is the same whichever account was chosen. Per-account lists need the trait signature to change. The catalogue can go stale until the harness binary's version string changes |
+| **Model discovery is implemented for all five harnesses** — `Harness::discover_models` (`harness/mod.rs:501`) is overridden by every one. But it takes **no account and no directory**, so a list is per harness rather than per identity, and Claude's probe reads the *ambient* login; discovery **is** cached now — `FileHarnessCache` (`crates/kubiq-host/src/store/harness.rs`) writes `<config root>/cache/harness-models.toml`, keyed on `(harness, account, version)`, with `version` read off the harness binary's own `--version` — so a hit skips the probe outright and a harness whose version cannot be read bypasses the cache in both directions. `ListHarnessCatalogue` reaches the same probe and the same cache with no conversation in the picture | A model picker is available before a start as well as after one, and its list is the same whichever account was chosen. Per-account lists need the trait signature to change. The catalogue can go stale until the harness binary's version string changes |
 | **A thinking / reasoning-effort catalog exists in Rust for four of five harnesses.** `Harness::discover_thinking` (`harness/mod.rs`) returns `BTreeMap<String, ModelThinking>` (`ModelThinking { levels: Vec<ThinkingLevel>, default_level }`, `ThinkingLevel { value, label, description }`), defaulted to empty; `Claude` scrapes `claude --help`'s `--effort` parenthetical and applies it to every model, `Codex` reads `supported_reasoning_levels`/`default_reasoning_level` off the same `codex debug models --bundled` value `discover_models` already parses, `Opencode` reads each model's `variants` map, and `Grok` states its own four efforts — `xhigh`, `high`, `medium`, `low`, default `high` — against every model, a fixed CLI/API enum rather than a probe. Copilot CLI alone answers the empty default: it exposes no reasoning concept a command can read. `ConfigCategory::ThoughtLevel` is a *label on an option* rather than a reading of this catalog | The catalog reaches the interface through `HarnessCatalogue`, which folds each model's levels into the `CatalogueModel` beside it, so the New agent form draws a level picker and an agent definition can pin one. The one harness with no reasoning concept draws no level row at all, which is the honest shape of an empty catalog |
 | **`AcpBridge` is the one producer of `ConfigOptionUpdate`, and the one bridge that accepts `SetConfigOption`.** It publishes the pickers a `session/new` result names — a standards-compliant agent's `configOptions` and `modes`, or the vendor `models` and `x.ai/sessionConfig` blocks Grok sends instead — and routes a set back through the method that option's `ConfigSource` names: `session/set_model`, `session/set_mode` or `session/set_config_option`. The native `jsonl` and `codex` bridges reject a set with an error naming the option. `Message::SetAgentConfig` is plumbed host-side through `coordinator.rs` | A model or a reasoning effort chosen at launch works everywhere; changing one mid-conversation works for an ACP harness and for no other |
 | `Policy` carries an opaque `permission_mode` string, passed through per harness. Claude's `init` event already reports `permissionMode`, and the bridge surfaces it as `SessionStarted.mode` | The mode is the one item of the three that is free — it is already on the wire as `ConvUpdate::Started` |
-| **Ubiq writes a session record of its own.** `crates/ubiq-host/src/agent.rs` calls `agent_manager::session::save` the moment a run is composed, into `<ubiq root>/sessions` — a directory it passes explicitly, so `AM_SESSIONS` cannot redirect a user's Ubiq transcripts — and copies the harness's own transcript in at teardown. Ubiq's sessions and agents are otherwise in-memory (`ubiq-host/src/work/mod.rs`), and only tasks persist | A run's record and the harness's own file outlive the run directory. `am session ls` reads the library's store and so does not list Ubiq's runs; and the record is metadata plus a harness file, not an `AgentEvent` transcript. The live conversation state still does not survive a restart |
+| **Kubiq writes a session record of its own.** `crates/kubiq-host/src/agent.rs` calls `agent_manager::session::save` the moment a run is composed, into `<kubiq root>/sessions` — a directory it passes explicitly, so `AM_SESSIONS` cannot redirect a user's Kubiq transcripts — and copies the harness's own transcript in at teardown. Kubiq's sessions and agents are otherwise in-memory (`kubiq-host/src/work/mod.rs`), and only tasks persist | A run's record and the harness's own file outlive the run directory. `am session ls` reads the library's store and so does not list Kubiq's runs; and the record is metadata plus a harness file, not an `AgentEvent` transcript. The live conversation state still does not survive a restart |
 | `to_acp` is a **stateless one-event mapper** that drops `ApprovalRequest`, `Usage`, `Result` and `SessionStarted`, and emits no JSON-RPC envelope, no session id and no turn brackets | There is no ACP *server* today. `io/acp_client.rs` is the client half, with the envelope and the session table it owns; the outbound projection stays a projection |
 | `WorkAgent.thread` is `Vec<Turn>` of `{ from, text }`, replaced whole on every `AgentChanged` | A token stream would re-send the entire conversation per token |
 | The library cannot kill a process **group** — it is `#![forbid(unsafe_code)]` with no `libc` | A cancelled turn can leave grandchildren. multica solves this with process groups; we cannot copy that directly |
@@ -84,8 +84,8 @@ collapse onto one library type: a **`Profile`** (`crates/agent-manager/src/profi
 `{ id, extends, account, harness, defaults: { mcps, skills, model, hooks, instructions }, isolate,
 mode }`. Today's pair is a library `Profile` with `harness` and `account` set; tomorrow's agent is the same
 `Profile` with `defaults.instructions` filled. So the split, when it comes, is a rename in
-`crates/ubiq` and no migration — and the persistence and the resolution are the library's, through
-`FsProfileStore::save` and `resolve`, with Ubiq holding only the form over them.
+`crates/kubiq` and no migration — and the persistence and the resolution are the library's, through
+`FsProfileStore::save` and `resolve`, with Kubiq holding only the form over them.
 
 ## The shape: one workspace, two faces
 
@@ -104,7 +104,7 @@ that.
 
 ## Decision 1 — ACP-shaped, not ACP-transported
 
-**The vocabulary is ACP's. The transport stays the in-memory bus.** `D9` says Ubiq embeds the
+**The vocabulary is ACP's. The transport stays the in-memory bus.** `D9` says Kubiq embeds the
 library rather than shelling out to `am`; putting JSON-RPC between two halves of one process would
 undo that for no gain. But the *names* and the *event shapes* should be ACP's, in three places: the
 library's neutral event model, the bus family, and the mapper that already exists.
@@ -124,14 +124,14 @@ model picker is core ACP expressed as a config option whose `category` is `model
 mechanism for the model, the mode, its parameters and the thinking level, and what
 `session/set_mode` was deprecated in favour of. And ACP's `terminal/*` is a side-channel for the
 agent to run a command and read its output — no method types into it and none resizes it, so it is
-not a pane and cannot host an interactive harness. That stays Ubiq's job, along with which pane a
+not a pane and cannot host an interactive harness. That stays Kubiq's job, along with which pane a
 conversation is drawn in, which project it belongs to, and the arrangement over it.
 
 ## Decision 2 — discovered vocabularies, never a flattened enum
 
 Models, thinking levels and modes are **lists a harness advertises**, each entry an id, a label and
 an optional description. Not enums, not a shared taxonomy, and not the four constants
-`crates/ubiq/src/state/chat.rs` holds today.
+`crates/kubiq/src/state/chat.rs` holds today.
 
 multica wrote the reason down: Claude's effort levels are `low|medium|high|xhigh|max` and Codex's
 are `none|minimal|low|medium|high|xhigh`, `xhigh` is Opus-only, `max` is session-only, and
@@ -161,7 +161,7 @@ turn framing so `RunState` is driven rather than guessed, chunks that are unambi
 is the block's coloured verb, a status, the paths touched, and content that is either text or a
 diff carrying old and new), and a `PermissionRequest` that embeds the whole tool call because the
 dialog has to show *what* is being authorised. Mapping a harness's raw tool JSON into that shape is
-*harness knowledge*, which is why it lives in the library rather than in `crates/ubiq-host`.
+*harness knowledge*, which is why it lives in the library rather than in `crates/kubiq-host`.
 
 `AgentParams` never became real, and does not need to: the config-option mechanism (Decision 2)
 subsumed the model, mode and thinking level into one list, and `AgentInput::SetConfigOption` is the
@@ -187,7 +187,7 @@ Three consequences worth stating plainly:
 
 - **The context ring is computable and currently wrong.** `context_pct` is
   `(input + cache_read + cache_creation) / contextWindow`, and `contextWindow` arrives per model —
-  200 000 for Sonnet, 1 000 000 for the Opus variant this probe ran on. `crates/ubiq/src/state/chat.rs`
+  200 000 for Sonnet, 1 000 000 for the Opus variant this probe ran on. `crates/kubiq/src/state/chat.rs`
   hard-codes a 200 000 constant, so a million-token model would draw a ring four fifths full at the
   start.
 - **Subagents are attributable, and the UI already has the shape for it.** A `Task` tool call is the
@@ -202,7 +202,7 @@ Three consequences worth stating plainly:
   the code and its test both faithfully implement it.
 - **The persistent, stdin-driven session this probe did not test never echoes the prompt back.**
   This table was built against a one-shot `claude -p "prompt" --output-format stream-json`
-  invocation; Ubiq drives a different shape — `-p --input-format stream-json`, prompts delivered as
+  invocation; Kubiq drives a different shape — `-p --input-format stream-json`, prompts delivered as
   NDJSON `{"type":"user",...}` lines on stdin (`io/jsonl.rs`'s `write_input`), the same process kept
   alive across turns. A live two-turn check against that exact shape
   (`io::jsonl::tests::live_two_turn_structured_session_when_claude_available`) found stdout carries
@@ -232,7 +232,7 @@ is not `init` falls through the mapper. `rate_limit_event` is no longer one of t
 (`io/jsonl.rs`'s `map_rate_limit`) to `AgentEvent::RateLimitUpdate` → `ConvUpdate::RateLimit` →
 `Conversation::rate_limit`, drawn in the footer next to cost and the context ring.
 
-### Ubiq side
+### Kubiq side
 
 A **conversation family** on the wire, beside the work family, obeying four rules that already
 exist as rules elsewhere. **The host is the only writer** — nothing writes into a transcript, and a
@@ -309,10 +309,10 @@ its configuration directory, which the library relocates into the throwaway run 
 deletes on close, so the record has to be copied out before that deletion. It is, and the whole
 mechanism — `Harness::transcripts` as the harness's own answer to which files are the record,
 `session::save` for the metadata at composition, `Agents::archive` for the files at teardown, and
-the three ownership answers that are Ubiq's rather than the library's — is stated once in
+the three ownership answers that are Kubiq's rather than the library's — is stated once in
 [`../tech/agent-manager.md`](../tech/agent-manager.md).
 
-Nothing on the wire changed — no message, no `ubiq-proto` type, no coordinator or conversation
+Nothing on the wire changed — no message, no `kubiq-proto` type, no coordinator or conversation
 code. The record is a host-side file, and the surfaces that would read it are what comes next.
 
 **What this unblocks and does not deliver.** A conversation's record survives closing its pane,
@@ -324,15 +324,15 @@ conversation holding prompts, file contents and tool output (`G164`).
 
 Two changes that together are what made an identity reachable at all.
 
-**`compose_run` calls `resolve`.** `crates/ubiq-host/src/agent.rs` no longer hand-sets five fields
+**`compose_run` calls `resolve`.** `crates/kubiq-host/src/agent.rs` no longer hand-sets five fields
 of a `RunSpec`; it calls `agent_manager::resolve::resolve` and overrides only the four answers that
-are Ubiq's — see [`../tech/agent-manager.md`](../tech/agent-manager.md), which owns that division and
+are Kubiq's — see [`../tech/agent-manager.md`](../tech/agent-manager.md), which owns that division and
 the stores behind it. Everything else comes from the agent definition, so an account reaches a pane without
 `agent.rs` learning what an account is. An unknown id fails the spawn with the fuzzy suggestions
 `resolve` already produces, because a misconfigured account must say so rather than starting
 unauthenticated.
 
-**One conversation view, two surfaces.** `crates/ubiq/src/ui/conversation` was already the shared
+**One conversation view, two surfaces.** `crates/kubiq/src/ui/conversation` was already the shared
 transcript, composer and footer for an agents column; the chat panel draws it too, and its own
 transcript, composer and fixture status strip are gone — the shared footer already reports the real
 run state, context ring and cost. The panel lists the project's conversations, the same set the
@@ -351,7 +351,7 @@ composer as dead code, rather than staying until P3 could fill them from a real 
 **The ordering is forced, and it is cheaper than the obvious one.** A model reaches a harness only
 as a launch flag, so it must be answered before the process exists. `discover_models` needs no
 running agent — it spawns its own probe — so discovery happens *instead of* starting the agent, not
-after it. `crates/ubiq-host/src/coordinator.rs` keeps that ordering as two stages: a conversation
+after it. `crates/kubiq-host/src/coordinator.rs` keeps that ordering as two stages: a conversation
 the window asked for sits in `pending_conversations` until its harness actually launches, moving
 into `conversations` — where a live pump exists — only then.
 
@@ -369,11 +369,11 @@ into `conversations` — where a live pump exists — only then.
 
 **The window mints the `agent_id` and draws the pending conversation.**
 `StartConversation`'s only caller, `AppState::start_new_agent`
-(`crates/ubiq/src/app/new_agent.rs`), generates it with `AgentId::generate()` before sending. `Conversation`
+(`crates/kubiq/src/app/new_agent.rs`), generates it with `AgentId::generate()` before sending. `Conversation`
 carries a `launched` flag, `false` from `Conversation::new` until `ConvUpdate::Started` sets it, and
 a `chosen: BTreeMap<String, String>` (keyed by `config_id`) the composer's own pickers write to,
 since the host does not echo a `SetAgentConfig` sent before launch. While `launched` is false,
-`composer()` (`crates/ubiq/src/ui/conversation/mod.rs`) draws one `Picker` chip per option present
+`composer()` (`crates/kubiq/src/ui/conversation/mod.rs`) draws one `Picker` chip per option present
 in `conversation.config` — or a "Discovering models…" note before any has arrived — instead of the
 footer's read-only pills, and a pick sends `AppState::pick_agent_config`. P3 generalised this from a
 single hard-coded `model` picker to any of the (up to) three ids the host may mint — see
@@ -386,7 +386,7 @@ Copilot's ids come out of `copilot help config`; opencode prints one per line; G
 file it only writes once authenticated. Three of the five need the harness authenticated, so one
 that cannot answer must offer "whatever it defaults to" rather than an empty picker. `ModelInfo` is
 not `Serialize`; the host maps it into a `ConfigOption` itself
-(`crates/ubiq-host/src/coordinator.rs`'s `model_config_option`) rather than adding a `ubiq-proto`
+(`crates/kubiq-host/src/coordinator.rs`'s `model_config_option`) rather than adding a `kubiq-proto`
 counterpart.
 
 **Thinking effort was not in this package** — there was no catalog to read at the time. The mode
@@ -406,7 +406,7 @@ the mode picker opens on so the interface never guesses which id means "ask noth
 
 ### P4 — Agent definitions — **landed**
 
-**The identity half.** The settings overlay's Harnesses section lists the accounts Ubiq holds, each
+**The identity half.** The settings overlay's Harnesses section lists the accounts Kubiq holds, each
 showing which harnesses it can start; `+ Add harness` signs a new one in. Starting a conversation
 offers one row per harness *and identity* — `HarnessChoice`, a flat list because the kit has no
 submenu and a pick is an index, read wherever a target is offered so one question has one answer.
@@ -430,8 +430,8 @@ one lever it does have, `--always-approve`.
 — documented in [`../tech/transport-contract.md`](../tech/transport-contract.md). `account` stays
 beside `agent definition` on `StartConversation` rather than being folded into it: a bare harness row starts
 with no agent definition at all, and `resolve` puts `flags.account` above the agent definition's, which is the "the
-user picked this one" rule. Host-side, `crates/ubiq-host/src/agent.rs` grows `definitions()` and
-`save_definition()` over an `FsProfileStore` rooted at `<ubiq root>/agent-definitions` — a
+user picked this one" rule. Host-side, `crates/kubiq-host/src/agent.rs` grows `definitions()` and
+`save_definition()` over an `FsProfileStore` rooted at `<kubiq root>/agent-definitions` — a
 definition that pins no harness is skipped, since a row with no `agent_type` names nothing that can
 be started — and `compose` and `converse` thread the id through to `RunFlags.profile`. The pane path passes
 `None`: P4 is conversation-only.
@@ -466,7 +466,7 @@ real list before the first turn. No `thinking`, because `resolve` has no agent d
 ### P5 — Credentials, through a login modal — **landed**
 
 > **Rekeyed and de-captured 2026-09-27 by `D193` and `D194`.** What survives is the insight and
-> the modal: a login is an interactive subprocess that needs a real terminal, and Ubiq spawns it
+> the modal: a login is an interactive subprocess that needs a real terminal, and Kubiq spawns it
 > in one. What goes is everything below about capture — `LoginPlan`, the credential files to
 > capture, the mtime stamp that decided the outcome, `capture_login`, `Account.home`,
 > `login_confined` and its hand-named layer stack, and `HarnessLoginCaptured`. A sign-in runs
@@ -479,9 +479,9 @@ real list before the first turn. No `thinking`, because `resolve` has no agent d
 > [`../features/workbench.md`](../features/workbench.md).
 
 The insight that made it cheap: **a login is an interactive subprocess that needs a real terminal,
-and Ubiq already owns terminals.** `Harness::login` answers a `LoginPlan` — a launch plus the
-credential files to capture — and `ubiq_host::pty::Program` mirrors `Launch` field for field, so
-Ubiq spawns it exactly as it spawns a harness. The browser OAuth flow is the harness's own,
+and Kubiq already owns terminals.** `Harness::login` answers a `LoginPlan` — a launch plus the
+credential files to capture — and `kubiq_host::pty::Program` mirrors `Launch` field for field, so
+Kubiq spawns it exactly as it spawns a harness. The browser OAuth flow is the harness's own,
 unmodified. It runs in a modal rather than a tab because an OAuth flow wants the whole of the
 user's attention for the half-minute it takes, and a login that scrolled away behind a pane is a
 login nobody finishes.
@@ -525,7 +525,7 @@ one.
 
 ### P7 — Real permissions
 
-Gated on library work, and worth stating plainly: **until the bridges stop auto-approving, Ubiq must
+Gated on library work, and worth stating plainly: **until the bridges stop auto-approving, Kubiq must
 not draw a permission prompt.** A dialog that appears after the tool ran is worse than no dialog,
 because it teaches the user that the dialog means something. So P7 is: make each bridge hold the
 approval, surface it with its options, and answer it from the input side — then, and only then, the
@@ -537,9 +537,9 @@ UI asks. Honour ACP's four option kinds (allow once, allow always, reject once, 
 ### P6 — The default agent home — **done**
 
 **A defined agent gets a persistent home keyed by its definition, an ad-hoc run gets an ephemeral
-one**, under Ubiq's config root and never in a project (`D30`). The mechanism is `isolate::HomeMode`:
+one**, under Kubiq's config root and never in a project (`D30`). The mechanism is `isolate::HomeMode`:
 `Ephemeral` sets `ephemeral_home`, `Managed(id)` sets `home` to `@managed/<id>`, which isol8 resolves
-to `<ubiq root>/isol8/homes/<id>` and creates at spawn time, since `agent.rs` hands `IsolateOptions`
+to `<kubiq root>/isol8/homes/<id>` and creates at spawn time, since `agent.rs` hands `IsolateOptions`
 a state directory of `<root>/isol8`.
 
 `HomeMode` is a *sandboxed*-run feature — `isolate::plan` answers `None` for `Isolation::None`, so an
@@ -563,11 +563,11 @@ writing one `.claude.json` — and it is a second persistence mechanism real P6 
 
 **Done when** a defined agent's second run finds its own cache warm, and an ad-hoc run still starts
 clean. The rendered policy's home path is what the test asserts for both
-(`crates/ubiq-host/src/agent.rs`).
+(`crates/kubiq-host/src/agent.rs`).
 
 ## Deferred, deliberately
 
-Instructions, hooks and isolation on the wire (`G89`); Ubiq's own MCP surface so a hosted agent can
+Instructions, hooks and isolation on the wire (`G89`); Kubiq's own MCP surface so a hosted agent can
 call back into the window (`G7`, with the library's in-process MCP as the mechanism); agents on
 remote hosts. None block P1 to P7. Resuming a conversation after a restart has its record — P2c
 wrote it — and waits only on the replay that hands it to a fresh harness (`G120`).
@@ -611,7 +611,7 @@ wrote it — and waits only on the replay that hands it to a fresh harness (`G12
   filled renders as a small empty box that reads as a value the interface failed to show. Every
   footer pill is now guarded; new ones must be.
 - **A surviving transcript is not a resumable conversation.** P2c leaves the harness's own record
-  under `<ubiq root>/sessions/<id>/harness/`, but nothing replays it: a restart, and a resume under
+  under `<kubiq root>/sessions/<id>/harness/`, but nothing replays it: a restart, and a resume under
   the same `agent_id`, both start a harness that remembers nothing. The record is the input a
   replay needs, not the replay — `G120`.
 - **A confined structured run is not possible yet.** `--isolate` with `--io structured` is refused,

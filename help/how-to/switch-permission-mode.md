@@ -7,7 +7,7 @@ order: 10
 related: [agents-permissions, agents-starting]
 ---
 
-Use this when you want an agent to ask more or less often. Each harness names its modes itself, and Ubiq shows those names.
+Use this when you want an agent to ask more or less often. Each harness names its modes itself, and Kubiq shows those names.
 
 1. To start an agent on a mode, press **New agent**, choose what to run, and pick the **Mode** row's value. **The harness's own** leaves the choice to the harness.
 2. To change the mode of an agent already on screen, open the mode chip beside **Send** under its composer, and pick another. Its tooltip reads the mode's name and `permission mode`.

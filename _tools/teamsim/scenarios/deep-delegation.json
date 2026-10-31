@@ -1,5 +1,5 @@
 {
-  "format": "ubiq.teamsim/1",
+  "format": "kubiq.teamsim/1",
   "name": "deep-delegation",
   "note": "three cards carrying six to eight delegates each, two of them dragged into a human's tower",
   "viewport": { "w": 1600, "h": 1000 },

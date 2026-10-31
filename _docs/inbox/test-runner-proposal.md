@@ -3,14 +3,14 @@ id: inbox-test-runner
 title: Proposal — a multi-stack test runner with a test explorer, debug-a-test and agent tools
 kind: proposal
 status: proposal
-summary: An agent writes a per-project test recipe (commands, placeholders, output format) and Ubiq owns a closed set of parsers and a host test worker, so tests for Python, Node and TypeScript, Java, .NET, Go and Rust become one structured event stream; a Test message family, an explorer, results and dashboard UI in IDE mode, debug-a-test through the debugger proposal, a built-in MCP server for running and for recipe setup, watch mode and coverage, with a phased build order, the decisions it would add and the open questions.
-read_when: you are deciding how Ubiq discovers and runs tests, how an agent gets structured test results, how a test is debugged, or what the IDE mode needs for a test explorer
+summary: An agent writes a per-project test recipe (commands, placeholders, output format) and Kubiq owns a closed set of parsers and a host test worker, so tests for Python, Node and TypeScript, Java, .NET, Go and Rust become one structured event stream; a Test message family, an explorer, results and dashboard UI in IDE mode, debug-a-test through the debugger proposal, a built-in MCP server for running and for recipe setup, watch mode and coverage, with a phased build order, the decisions it would add and the open questions.
+read_when: you are deciding how Kubiq discovers and runs tests, how an agent gets structured test results, how a test is debugged, or what the IDE mode needs for a test explorer
 updated: 2026-10-26
 depends_on: [inbox-debugger, feat-panes, feat-workbench-ide, feat-workbench, tech-architecture, tech-transport, tech-decisions]
 ---
 
-**Ubiq would run tests as structured events instead of terminal text: one test worker in the host,
-a per-project recipe that an agent writes and Ubiq validates, a closed set of parsers that Ubiq owns,
+**Kubiq would run tests as structured events instead of terminal text: one test worker in the host,
+a per-project recipe that an agent writes and Kubiq validates, a closed set of parsers that Kubiq owns,
 and one model that the explorer, the results view, the dashboard and an MCP server all read.** An agent that today
 runs `pytest` or `go test` in a pane gets a screenful of text and a process exit code, and spends
 tokens guessing which test failed and why; a tree of tests with a status each, a failure with its
@@ -21,10 +21,10 @@ message and location, and a rerun-failed button is cheaper for the agent and cle
 ## 1. What exists, what is missing
 
 **A run today is a pseudo-terminal pane and an exit code.** `ToolDef` in
-`crates/ubiq-proto/src/tools.rs` carries a command, arguments, environment and a starting folder;
+`crates/kubiq-proto/src/tools.rs` carries a command, arguments, environment and a starting folder;
 `RunTool` starts it in a pane ([the pane flow](../features/panes-and-terminals.md), `D101`). The
 only results are the raw `TerminalOutput` bytes and `PaneExited.code`. Runner sources
-(`RunnerSource` in `crates/ubiq-host/src/runners/mod.rs`; just, make and mise) discover named
+(`RunnerSource` in `crates/kubiq-host/src/runners/mod.rs`; just, make and mise) discover named
 targets for the run picker (`D197`), but a target is a command line, not a test.
 
 | Want | Today |
@@ -44,10 +44,10 @@ a subset of it, and a stream of events.
 | Noun | Meaning |
 |---|---|
 | Test item | A node: workspace, project or package, file, suite or class, test, parameter case. Carries a name, a location (file, line) and the stable id below |
-| Test id | Stable per stack and per project: pytest node id, Go `package/TestX/sub`, Rust `binary::path::name`, .NET fully qualified name, Java `pkg.Class#method`, a Node `file > describe > test` path. The parser owns the format; the rest of Ubiq treats it as an opaque string |
+| Test id | Stable per stack and per project: pytest node id, Go `package/TestX/sub`, Rust `binary::path::name`, .NET fully qualified name, Java `pkg.Class#method`, a Node `file > describe > test` path. The parser owns the format; the rest of Kubiq treats it as an opaque string |
 | Profile | Run, Debug or Coverage |
 | Selector | Data, not a command: items, files, a name pattern, failed-only, tags. The recipe's placeholders turn it into that project's flags |
-| `TestRunId` | A `ulid_id!` in `crates/ubiq-proto/src/ids.rs`, one per run |
+| `TestRunId` | A `ulid_id!` in `crates/kubiq-proto/src/ids.rs`, one per run |
 | Run event | Discovered, RunStarted, TestStarted, TestPassed, TestFailed, TestSkipped, Output, RunFinished |
 
 A failed event carries the duration, the message, expected and actual when the framework gives them,
@@ -62,37 +62,37 @@ and the UI never assumes the tests run locally.
 
 | Piece | Where | What it is |
 |---|---|---|
-| Test crate | a new leaf crate, called `ubiq-test` here (no existing crate has that name), precedent `crates/ubiq-db` | Small and closed: the model, the recipe schema and placeholder expansion, the parsers. No process code in the default feature; spawning behind a host-only feature, as the debugger proposal does for `ubiq-dap` |
-| Test worker | `crates/ubiq-host/src/watch/mod.rs` is the pattern | Job plus mailbox, a thread per run. Spawns the test command with pipes, not a pty; owns the process tree and cancellation |
-| Test family | a new module in ubiq-proto, precedent `crates/ubiq-proto/src/db.rs` | Messages plus `TestRunId` |
-| Presets and parsers registry | `runner_sources` on `ubiq_app::Contributions` (`crates/ubiq-app/src/lib.rs`) is the pattern | An open seam for presets, so Studio or a spike can add one without touching the base |
-| MCP server | `crates/ubiq-host/src/mcp/catalogue.rs` | A new built-in row, section 6 |
+| Test crate | a new leaf crate, called `kubiq-test` here (no existing crate has that name), precedent `crates/kubiq-db` | Small and closed: the model, the recipe schema and placeholder expansion, the parsers. No process code in the default feature; spawning behind a host-only feature, as the debugger proposal does for `kubiq-dap` |
+| Test worker | `crates/kubiq-host/src/watch/mod.rs` is the pattern | Job plus mailbox, a thread per run. Spawns the test command with pipes, not a pty; owns the process tree and cancellation |
+| Test family | a new module in kubiq-proto, precedent `crates/kubiq-proto/src/db.rs` | Messages plus `TestRunId` |
+| Presets and parsers registry | `runner_sources` on `kubiq_app::Contributions` (`crates/kubiq-app/src/lib.rs`) is the pattern | An open seam for presets, so Studio or a spike can add one without touching the base |
+| MCP server | `crates/kubiq-host/src/mcp/catalogue.rs` | A new built-in row, section 6 |
 
-### The split: the agent writes the recipe, Ubiq parses
+### The split: the agent writes the recipe, Kubiq parses
 
 **How to run a project's tests is project-specific and variable; reading the result is
 deterministic.** Monorepos, custom scripts, docker or compose wrappers, Makefile targets and flag
-combinations differ per project and per month, so Ubiq does not hard-code them, which is also the
-base rule for launching harnesses. An agent inspects the project and writes a **recipe**; Ubiq owns
+combinations differ per project and per month, so Kubiq does not hard-code them, which is also the
+base rule for launching harnesses. An agent inspects the project and writes a **recipe**; Kubiq owns
 a small closed set of parsers and does the running, streaming and display.
 
 ### The recipe
 
-A per-project file, a `tests` manifest in the project's Ubiq config (where it lives is open
+A per-project file, a `tests` manifest in the project's Kubiq config (where it lives is open
 question 1). It declares one or more **test targets** (a monorepo has several):
 
 | Field | Meaning |
 |---|---|
 | Label, working directory, environment | Framework label for the icon and grouping; where and with what |
 | Commands | Argv templates for discover, run all, run selection, rerun failed, coverage |
-| Placeholders | `{ids}`, `{files}`, `{pattern}`, expanded by Ubiq from the selector (the crate does only this) |
+| Placeholders | `{ids}`, `{files}`, `{pattern}`, expanded by Kubiq from the selector (the crate does only this) |
 | Output format | One parser per command, from the closed set below |
 | Debug template | A DAP launch or attach template per the [debugger proposal](./debugger-proposal.md), naming its adapters |
-| Shim | Optionally a Ubiq-shipped reporter shim by name, for stacks with no native stream |
+| Shim | Optionally a Kubiq-shipped reporter shim by name, for stacks with no native stream |
 
 The closed parser set: go `test2json`, libtest and nextest `libtest-json`, JUnit XML, TRX, TAP, and
-the Ubiq NDJSON event schema that the reporter shims emit. The recipe picks one per command. Shims
-are Ubiq-shipped assets under `<config root>/tests/<stack>/`, referenced by name and loaded by flag
+the Kubiq NDJSON event schema that the reporter shims emit. The recipe picks one per command. Shims
+are Kubiq-shipped assets under `<config root>/tests/<stack>/`, referenced by name and loaded by flag
 or environment variable, **never written into the user's project**.
 
 A few **presets** give a zero-agent default for the common cases (`go test -json`, nextest, pytest
@@ -102,17 +102,17 @@ given, not a set of hard-coded adapters.
 ### The setup flow
 
 A skill or agent definition plus MCP tools (section 6). The agent inspects the project, drafts the
-recipe, then **validates it through Ubiq**: runs discover and a sample run and checks the parser
+recipe, then **validates it through Kubiq**: runs discover and a sample run and checks the parser
 received events. The user reviews and approves the recipe through a registered dialog
 ([HITL dialogs](./hitl-registered-dialogs.md)) before it is saved, because its commands run
-arbitrary code. When a recipe later breaks, Ubiq says so: a parse failure or zero discovered tests
+arbitrary code. When a recipe later breaks, Kubiq says so: a parse failure or zero discovered tests
 is a **recipe stale** signal, and the UI offers "ask an agent to fix it", which reopens the flow
 with the failing output attached.
 
 ### The worker and the messages
 
 A run spawns the command with `Stdio::piped`, reads lines on a thread and sends events in batches,
-the shape of the search fallback in `crates/ubiq-host/src/search/fallback.rs`. The pty is kept out
+the shape of the search fallback in `crates/kubiq-host/src/search/fallback.rs`. The pty is kept out
 of it because a pty merges stdout and stderr and adds colour and line wrapping that a parser must
 undo. The raw output is still wanted by a human, so the worker mirrors it into a console view
 (optionally a pty-less log pane, open question 5).
@@ -123,14 +123,14 @@ undo. The raw output is still wanted by a human, so the worker mirrors it into a
 | Host to UI | tests discovered, run event batches, run finished, results |
 
 A new row goes in the [transport contract](../tech/transport-contract.md), with a dispatch arm in
-the coordinator, a receiver in `crates/ubiq/src/app/wire.rs` and an arm in the id mapping in
-`crates/ubiq/src/app/hosts.rs`. The pane id rule is met as the debugger proposal does: the run
+the coordinator, a receiver in `crates/kubiq/src/app/wire.rs` and an arm in the id mapping in
+`crates/kubiq/src/app/hosts.rs`. The pane id rule is met as the debugger proposal does: the run
 carries the pane id of its console, or the project's pane when it has none. The worker, the process
 and the files are all on the host's side, so a remote host works unchanged.
 
 ### Reporter shims
 
-Most stacks have no stable live stream in their default output. The shims Ubiq would ship: a pytest
+Most stacks have no stable live stream in their default output. The shims Kubiq would ship: a pytest
 plugin through `-p` and `PYTHONPATH`, a vitest or jest reporter file, a Gradle init script with a
 test listener, a JUnit Platform listener jar for Maven, a VSTest logger assembly. Each writes one
 JSON object per line. Without a shim the recipe uses the framework's file report (JUnit XML or
@@ -139,26 +139,26 @@ TRX) read at the end, which loses live status but keeps the tree. Open question 
 ### Discovery
 
 A recipe's discover command, or, for a stack with no listing command, a static parse. The outline in
-`crates/ubiq/src/ui/outline.rs` extracts names and lines through tree-sitter but not attributes or
+`crates/kubiq/src/ui/outline.rs` extracts names and lines through tree-sitter but not attributes or
 decorators, so it cannot tell a test from a function; a static parse needs its own queries (Java
 `@Test`, `describe` and `it` calls, `t.Run` literals).
 
 ## 4. Per stack: the setup agent's reference
 
 This section is what the setup agent is given and what the presets are cut from; it is not code
-Ubiq hard-codes. Commands and flags came from reading documentation, and every one marked (verify)
+Kubiq hard-codes. Commands and flags came from reading documentation, and every one marked (verify)
 has not been run here. Parsers must be tolerant of output schemas: ignore unknown fields.
 
 | Stack | Detect | Discover | Select a subset | Live results | Debug | Coverage | Watch |
 |---|---|---|---|---|---|---|---|
-| Python, pytest | pytest.ini, `[tool.pytest.ini_options]`, conftest, dependency | `pytest --collect-only -q` | node id, `-k`, `-m`, `--lf` | injected plugin; `--junitxml` fallback | debugpy | pytest-cov to lcov | Ubiq-side |
+| Python, pytest | pytest.ini, `[tool.pytest.ini_options]`, conftest, dependency | `pytest --collect-only -q` | node id, `-k`, `-m`, `--lf` | injected plugin; `--junitxml` fallback | debugpy | pytest-cov to lcov | Kubiq-side |
 | Node, vitest | config file, dependency | `vitest list --json` | file plus `-t` | custom reporter | js-debug | v8 or istanbul lcov | native |
 | Node, jest | config file, dependency | `--listTests` (files only) plus static parse | `-t` | custom reporter | js-debug | lcov | native |
 | Node, node:test | `node --test` scripts | none; static parse | `--test-name-pattern` | custom reporter | js-debug | `--experimental-test-coverage` (verify) | `--watch` |
 | Java | Gradle or Maven plus JUnit | static parse, or JUnit Console Launcher | `--tests`, `-Dtest` | init script or listener jar; XML fallback | java-debug attach | JaCoCo XML | `--continuous` |
 | .NET | test project with a test SDK or framework package | `dotnet test --list-tests` | `--filter` | VSTest logger; TRX fallback | netcoredbg | coverlet cobertura | `dotnet watch test` |
-| Go | go.mod plus `_test.go` | `go test -list` | `-run` | `go test -json` | delve test mode | `-coverprofile` | Ubiq-side |
-| Rust | Cargo.toml | nextest list JSON, or libtest `--list` | nextest filterset, or name `--exact` | nextest libtest-json-plus; libtest text | CodeLLDB | `cargo llvm-cov` lcov | Ubiq-side |
+| Go | go.mod plus `_test.go` | `go test -list` | `-run` | `go test -json` | delve test mode | `-coverprofile` | Kubiq-side |
+| Rust | Cargo.toml | nextest list JSON, or libtest `--list` | nextest filterset, or name `--exact` | nextest libtest-json-plus; libtest text | CodeLLDB | `cargo llvm-cov` lcov | Kubiq-side |
 
 ### Python
 
@@ -230,12 +230,12 @@ The best stream of any stack.
   is nightly-only (RFC 3558), so plain libtest means pretty text; nextest can write JUnit at the end.
 - **Debug.** `cargo test --no-run --message-format=json` gives the executable; run it under CodeLLDB
   with `[name, --exact, --nocapture, --test-threads=1]`, cwd the crate root, cargo environment
-  (`CARGO_MANIFEST_DIR`). **Coverage.** `cargo llvm-cov --lcov`. **Watch.** Ubiq-side.
+  (`CARGO_MANIFEST_DIR`). **Coverage.** `cargo llvm-cov --lcov`. **Watch.** Kubiq-side.
 
 ## 5. Debug a test
 
 Per the debugger proposal, the recipe's debug template expands, with the selection, into a
-`ubiq-dap` launch or attach config and the session is an ordinary `DebugSessionId` in the debug
+`kubiq-dap` launch or attach config and the session is an ordinary `DebugSessionId` in the debug
 worker; the test runner adds no debugger code, and the setup agent writes the template. What makes
 a test debuggable:
 
@@ -252,7 +252,7 @@ can debug the failure and still see it on the tree.
 
 ## 6. The agent surface
 
-A new built-in server, `UBIQ_TESTS`, slug `ubiq-tests`. The slug `test` already exists in the
+A new built-in server, `KUBIQ_TESTS`, slug `kubiq-tests`. The slug `test` already exists in the
 catalogue; it is the wiring proof, not a test runner, hence the new name. Answers are TOON. The
 recommendation is to add it to `WORKER_MCPS`, the set every worker agent gets.
 
@@ -293,14 +293,14 @@ prerequisites here too.
 
 ### Panels
 
-`PanelKind` in `crates/ubiq/src/state/dock.rs` gets new variants, with arms in
-`crates/ubiq/src/ui/dock/mod.rs`.
+`PanelKind` in `crates/kubiq/src/state/dock.rs` gets new variants, with arms in
+`crates/kubiq/src/ui/dock/mod.rs`.
 
 | Panel | Kind | Notes |
 |---|---|---|
-| Test explorer | edge, like Outline | A tree with a status icon per node, a filter, run and debug buttons on each node, group by file or suite, show only failed. The tree widget in `crates/ubiq/src/ui/explorer.rs` is the default for every tree; `crates/ubiq/src/ui/db/plan.rs` is the precedent for a collapsible tree with a hot node |
-| Test results | bottom tab, like Logs | The selected test: message, expected against actual diff, stack with clickable frames (needs open-at-line), captured output. A filtered console as in `crates/ubiq/src/ui/logs.rs` |
-| Test dashboard | centre panel, or a section of the Control screen | Pass, fail and skip counts, duration, slowest tests, flaky tests from history, a per-run timeline, coverage percentage. The precedent is `crates/ubiq/src/ui/stats.rs`; a table can reuse `crates/ubiq/src/ui/db/grid.rs` |
+| Test explorer | edge, like Outline | A tree with a status icon per node, a filter, run and debug buttons on each node, group by file or suite, show only failed. The tree widget in `crates/kubiq/src/ui/explorer.rs` is the default for every tree; `crates/kubiq/src/ui/db/plan.rs` is the precedent for a collapsible tree with a hot node |
+| Test results | bottom tab, like Logs | The selected test: message, expected against actual diff, stack with clickable frames (needs open-at-line), captured output. A filtered console as in `crates/kubiq/src/ui/logs.rs` |
+| Test dashboard | centre panel, or a section of the Control screen | Pass, fail and skip counts, duration, slowest tests, flaky tests from history, a per-run timeline, coverage percentage. The precedent is `crates/kubiq/src/ui/stats.rs`; a table can reuse `crates/kubiq/src/ui/db/grid.rs` |
 
 ### Editor, chrome and input
 
@@ -309,22 +309,22 @@ prerequisites here too.
 | Run and debug glyphs above a test, pass and fail markers, a coverage gutter | The editor gutter, with the debugger proposal's options. Until it exists, the explorer plus navigator commands are the fallback |
 | "Test at cursor" | tree-sitter queries per language, the same ones static discovery uses |
 | Navigator commands: run test at cursor, run file, rerun failed, debug test at cursor | The command palette |
-| Key bindings | Chosen next to the debugger's F-keys; `crates/ubiq/src/app/mod.rs` binds under the "Workbench" context and no clash has been checked (verify) |
-| Status bar counts | `crates/ubiq/src/ui/status_bar.rs`, a closed function today |
-| Run picker | Whether discovered suites appear beside just and make targets in `crates/ubiq/src/ui/run_tool_menu.rs` and `crates/ubiq/src/state/run_picker.rs` (`D197`); open question 10 |
-| Settings section per test target: enable, recipe status and "edit with an agent", watch on save | `SettingsSectionSpec` in `crates/ubiq/src/ext/settings.rs` |
-| Theme tokens: pass, fail, skip, covered, uncovered | `crates/ubiq/src/theme.rs`, a value in both palettes |
+| Key bindings | Chosen next to the debugger's F-keys; `crates/kubiq/src/app/mod.rs` binds under the "Workbench" context and no clash has been checked (verify) |
+| Status bar counts | `crates/kubiq/src/ui/status_bar.rs`, a closed function today |
+| Run picker | Whether discovered suites appear beside just and make targets in `crates/kubiq/src/ui/run_tool_menu.rs` and `crates/kubiq/src/state/run_picker.rs` (`D197`); open question 10 |
+| Settings section per test target: enable, recipe status and "edit with an agent", watch on save | `SettingsSectionSpec` in `crates/kubiq/src/ext/settings.rs` |
+| Theme tokens: pass, fail, skip, covered, uncovered | `crates/kubiq/src/theme.rs`, a value in both palettes |
 
-Dock panels, MCP servers, commands and status items are closed in `ubiq_app::Contributions`; only
+Dock panels, MCP servers, commands and status items are closed in `kubiq_app::Contributions`; only
 rail modes, settings sections, bar menus, runner kinds, viewers, task providers and runner sources
 are open. The presets registry would be a new open seam, with an icon and label per framework
-following `crates/ubiq/src/ext/runner.rs`.
+following `crates/kubiq/src/ext/runner.rs`.
 
 ### Watch mode and coverage
 
 **Watch.** A framework's own watch (vitest, jest, `gradle --continuous`, `dotnet watch test`) is a
-run that never finishes until cancelled. For the rest, Ubiq subscribes to `ProjectFilesChanged`,
-which `crates/ubiq-host/src/watch/mod.rs` already coalesces (150 ms quiet, 1.2 s cap), and reruns the
+run that never finishes until cancelled. For the rest, Kubiq subscribes to `ProjectFilesChanged`,
+which `crates/kubiq-host/src/watch/mod.rs` already coalesces (150 ms quiet, 1.2 s cap), and reruns the
 failed set plus the tests in changed test files; mapping a source file to its tests is a heuristic.
 
 **Coverage.** The recipe names a report file and its format (lcov, JaCoCo, cobertura, Go profile).
@@ -350,7 +350,7 @@ explorer; only the presets are zero-agent.
 - Tests are a run model of their own (items, selector, structured events), not a `ToolDef` in a pane.
   **Cost:** a second way to run a command exists beside `RunTool`.
 - How to run a project's tests is a per-project recipe that an agent writes and the user approves;
-  Ubiq hard-codes no stack's command line, and owns only a closed set of parsers. **Cost:** a
+  Kubiq hard-codes no stack's command line, and owns only a closed set of parsers. **Cost:** a
   project has no tests until a recipe exists, except where a preset applies.
 - Recipe approval is a registered dialog, and a changed recipe is re-approved. **Cost:** an agent
   cannot reconfigure tests unattended.
@@ -367,7 +367,7 @@ explorer; only the presets are zero-agent.
 ## 10. Open questions
 
 1. Where the recipe lives: committed in the repository, so a team shares it and a clone just works,
-   or in Ubiq's project store, so the repository is untouched. Committed is shareable but puts
+   or in Kubiq's project store, so the repository is untouched. Committed is shareable but puts
    commands that run arbitrary code in front of every clone, which makes approval matter more.
 2. Whether this lands in the base or in Studio. The same seam argument as the debugger proposal: the
    dock, MCP and command seams are closed.

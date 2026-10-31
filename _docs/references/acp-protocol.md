@@ -3,7 +3,7 @@ id: ref-acp-protocol
 title: Agent Client Protocol (ACP)
 kind: reference
 status: current
-summary: The JSON-RPC wire reference for the Agent Client Protocol — initialisation, session setup and loading, the streaming update vocabulary, tool-call reporting, permission prompts, the client-side filesystem and terminal callbacks, and the Rust SDK Ubiq reads.
+summary: The JSON-RPC wire reference for the Agent Client Protocol — initialisation, session setup and loading, the streaming update vocabulary, tool-call reporting, permission prompts, the client-side filesystem and terminal callbacks, and the Rust SDK Kubiq reads.
 read_when: you are wiring a harness that speaks ACP, adding a session update variant, asking what a client may send while a turn is running, or checking what the protocol says before assuming it
 updated: 2026-09-14
 verified: 2026-09-03
@@ -14,7 +14,7 @@ verified: 2026-09-03
 ## What this is
 
 The **Agent Client Protocol (ACP)** is a JSON-RPC 2.0 protocol that lets a *Client* (an editor, IDE,
-or any UI — Zed, Ubiq, Neovim plugins, Emacs packages) drive an *Agent* (an AI coding harness —
+or any UI — Zed, Kubiq, Neovim plugins, Emacs packages) drive an *Agent* (an AI coding harness —
 Gemini CLI, Claude Code adapters, custom agents) running as a subprocess. It standardises session
 setup, streaming model output, tool-call reporting, permission prompts, and the callbacks an agent
 makes back into the editor for file reads/writes and command execution.
@@ -249,7 +249,7 @@ consequences for a client:
   request; a second prompt on the same session in v1 is undescribed, and a client that sends one
   has to be able to say which response belongs to which turn.
 
-Ubiq's client takes the first move and refuses the second: the ACP bridge holds one turn id per
+Kubiq's client takes the first move and refuses the second: the ACP bridge holds one turn id per
 session and errors on a `Prompt` arriving while it is occupied, and the prompt is held in the
 interface instead. [`../inbox/message-queue-and-steering.md`](../inbox/message-queue-and-steering.md)
 is where that sits and what changing it would cost.
@@ -267,7 +267,7 @@ v2 explicitly decouples work from the turn:
 > indicate when it is "idle", or ready to receive new inputs.
 
 This enables queueing, steering mid-turn, background work reporting, and **multiple clients
-observing one session**. If Ubiq ever wants two panes viewing the same agent conversation, that is a
+observing one session**. If Kubiq ever wants two panes viewing the same agent conversation, that is a
 v2 affordance, not a v1 one — and so is steering without a per-harness extension: v2 is the
 protocol's own answer to the subsection above.
 
@@ -358,7 +358,7 @@ Request:
       "fs": { "readTextFile": true, "writeTextFile": true },
       "terminal": true
     },
-    "clientInfo": { "name": "ubiq", "title": "Ubiq", "version": "0.1.0" }
+    "clientInfo": { "name": "kubiq", "title": "Kubiq", "version": "0.1.0" }
   }
 }
 ```
@@ -1423,13 +1423,13 @@ Lifecycle: `terminal/create` → poll `terminal/output` and/or block on `termina
 optionally `terminal/kill` → **`terminal/release`** to free the handle. A terminal embedded into a
 tool call via `ToolCallContent { type: "terminal" }` must be embedded **before** release.
 
-> **An ACP terminal is not a Ubiq pane.** This is the one place where ACP's model brushes against
-> Ubiq's, and the shapes do not match. An ACP terminal is a **one-shot command execution with
+> **An ACP terminal is not a Kubiq pane.** This is the one place where ACP's model brushes against
+> Kubiq's, and the shapes do not match. An ACP terminal is a **one-shot command execution with
 > byte-capped captured output and an exit status**. There is no `terminal/write` and no
 > `terminal/resize` — no way to send keystrokes, no PTY geometry, no alternate-screen semantics, no
 > raw byte stream. It is closer to `Command::spawn` plus output capture than to a pseudo-terminal.
 > An agent asking for `terminal/create` wants to run `cargo test` and read the result; it does not
-> want an interactive terminal. Implementing `terminal/*` on top of Ubiq's PTY layer is possible but
+> want an interactive terminal. Implementing `terminal/*` on top of Kubiq's PTY layer is possible but
 > is a *narrowing* — do not model an ACP terminal as a pane, and do not expose ACP terminals as
 > panes to the user without deciding deliberately what a resize or a keystroke would mean.
 

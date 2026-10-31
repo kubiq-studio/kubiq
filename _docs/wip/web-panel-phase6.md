@@ -7,20 +7,20 @@ summary: Phase 6 of the web-panel proposal as built — the container moves from
 read_when: you are touching the embedded webview, the mark-and-sweep in `ui/web_view.rs`, the `Editor` `ViewLayout`, the web panel's save path, or the explorer's `New Excalidraw` row
 updated: 2026-09-17
 verified: 2026-10-06
-code_anchors: [crates/ubiq/Cargo.toml, crates/ubiq-app/Cargo.toml, crates/ubiq/src/state/editor.rs, crates/ubiq/src/ui/web_view.rs, crates/ubiq/src/ui/viewer/web.rs, crates/ubiq/src/ui/viewer/mod.rs, crates/ubiq/src/ui/shell.rs, crates/ubiq/src/app/web_panel.rs, crates/ubiq/src/app/editor.rs, crates/ubiq/src/app/shell.rs, crates/ubiq/src/web_export/bridge.rs, crates/ubiq/src/app/explorer.rs, crates/ubiq/src/state/explorer/mod.rs, crates/ubiq/src/state/explorer/menu.rs, crates/ubiq/src/ui/file_dialog.rs, crates/ubiq/src/state/workbench.rs, crates/ubiq/src/state/diagrams.rs, crates/ubiq/src/ui/viewer/diagram.rs, crates/ubiq-host/src/files/mod.rs, crates/ubiq-host/tests/files.rs]
+code_anchors: [crates/kubiq/Cargo.toml, crates/kubiq-app/Cargo.toml, crates/kubiq/src/state/editor.rs, crates/kubiq/src/ui/web_view.rs, crates/kubiq/src/ui/viewer/web.rs, crates/kubiq/src/ui/viewer/mod.rs, crates/kubiq/src/ui/shell.rs, crates/kubiq/src/app/web_panel.rs, crates/kubiq/src/app/editor.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/web_export/bridge.rs, crates/kubiq/src/app/explorer.rs, crates/kubiq/src/state/explorer/mod.rs, crates/kubiq/src/state/explorer/menu.rs, crates/kubiq/src/ui/file_dialog.rs, crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/diagrams.rs, crates/kubiq/src/ui/viewer/diagram.rs, crates/kubiq-host/src/files/mod.rs, crates/kubiq-host/tests/files.rs]
 depends_on: [wip-web-panel-phase2, wip-web-panel-phase3, wip-web-panel-phase45, feat-workbench, tech-decisions]
 ---
 
 # Web panels — the embedded browser
 
 Phase 6 of [`../inbox/web-panel-proposal.md`](../inbox/web-panel-proposal.md), and the unit that
-moves the container itself. Phase 5 shipped Excalidraw editable in a browser window beside Ubiq's
+moves the container itself. Phase 5 shipped Excalidraw editable in a browser window beside Kubiq's
 own; this puts that browser inside the panel, on the two platforms where the binding for it is
 ready.
 
 ## The container moves into the window
 
-`crates/ubiq/Cargo.toml` gains three dependencies under
+`crates/kubiq/Cargo.toml` gains three dependencies under
 `[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]`: `gpui-wry`
 (gpui-component's own wry binding), `wry` (published as `lb-wry` 0.53.3) and `raw-window-handle`.
 Every other platform compiles none of it and keeps the external browser phase 5 shipped —
@@ -29,7 +29,7 @@ Every other platform compiles none of it and keeps the external browser phase 5 
 Adding a fourth dependency from the `longbridge/gpui-component` git source forced Cargo to
 re-resolve that source to its current head, where `gpui-component-assets` no longer exists. All
 four dependencies drawn from that repository — `gpui-component` and `gpui-component-assets` in both
-`crates/ubiq/Cargo.toml` and `crates/ubiq-app/Cargo.toml`, plus the two new ones in `crates/ubiq` —
+`crates/kubiq/Cargo.toml` and `crates/kubiq-app/Cargo.toml`, plus the two new ones in `crates/kubiq` —
 are pinned to `rev = "df1d07b212e21217b1168e1728293b3e0c48e5a3"`, the revision `Cargo.lock` already
 held. The pin is what keeps all four resolving to one source rather than drifting apart the next
 time any one of them moves.
@@ -37,13 +37,13 @@ time any one of them moves.
 ## `Edit` becomes a `ViewLayout`, reversing phase 5's call
 
 [Phase 4/5](./web-panel-phase45.md) put `Edit` on the viewer header as a control separate from the
-Source/Preview/Split toggle, and gave the reason: with the container a browser window beside Ubiq's
+Source/Preview/Split toggle, and gave the reason: with the container a browser window beside Kubiq's
 own, there was nothing for the panel to draw differently when editing was on — a fourth `ViewLayout`
 would have named a layout that rendered the same pixels as Preview. **That premise is what changed.**
 With the container embedded in the panel there is something to draw, so `Edit` moves onto the axis
 it named as the alternative and phase 5 declined.
 
-`crates/ubiq/src/state/editor.rs` adds `ViewLayout::Edit` (label `"Editor"`),
+`crates/kubiq/src/state/editor.rs` adds `ViewLayout::Edit` (label `"Editor"`),
 `ViewerKind::layouts() -> &'static [ViewLayout]` and `ViewerKind::offers(layout)`.
 **Excalidraw's toggle is `[Edit, Preview]` and nothing else** — no Source, no Split: its document is
 JSON nobody edits by hand, and reading the raw bytes is what the general-purpose editor is for.
@@ -61,7 +61,7 @@ session and has no fourth layout to offer.
 
 ## The mark and sweep
 
-`crates/ubiq/src/ui/web_view.rs` is new. A child webview is a native view the platform stacks over
+`crates/kubiq/src/ui/web_view.rs` is new. A child webview is a native view the platform stacks over
 the whole window; it knows nothing about the dock, a hidden tab or a modal, and no GPUI element can
 paint over it. The module's mechanism is a mark and a sweep, both in prepaint:
 
@@ -85,7 +85,7 @@ keeps that from looping.
 
 ## The loader
 
-`crates/ubiq/src/ui/viewer/web.rs` draws the `Editor` position. Three things can be on screen and
+`crates/kubiq/src/ui/viewer/web.rs` draws the `Editor` position. Three things can be on screen and
 only ever one: a `gpui_component::progress::Progress` bar with a line of text until the chrome
 posts `Ready`, the webview element once it has, or a sentence in the danger colour if the session's
 chrome threw or the bundle failed. The webview is created hidden and the sweep is what first shows
@@ -115,7 +115,7 @@ the sweep has already taken its webview off screen — and ends only when the ta
 
 ## Saving goes to the file
 
-A new bridge frame, `FromWeb::Save { document }` in `crates/ubiq/src/web_export/bridge.rs`. `⌘S`
+A new bridge frame, `FromWeb::Save { document }` in `crates/kubiq/src/web_export/bridge.rs`. `⌘S`
 and `Ctrl-S` never reach GPUI while the webview holds the keyboard, so
 `assets/web/excalidraw/app.js` listens for the chord itself, captured, and the component renders a
 `Save` button through `renderTopRightUI`, styled in `index.html` off Excalidraw's own CSS variables
@@ -132,7 +132,7 @@ layout it does not offer and the panel must agree with what actually settled.
 
 ## Keys and theme inside the webview
 
-While the webview holds the keyboard every chord belongs to the editor; Ubiq keeps three, which
+While the webview holds the keyboard every chord belongs to the editor; Kubiq keeps three, which
 the page forwards because GPUI never hears them: `⌘S` (the `Save` frame above) and `⌘W`/`⌘K`, a
 `FromWeb::Shortcut { key: "w" | "k" }` that `apply_web_documents` runs as `close_active_editor` and
 `open_navigator`. Anything else in a `Shortcut` is dropped.
@@ -148,22 +148,22 @@ non-`Auto` choice.
 Excalidraw's Preview position is the native scene painter, so a `.excalidraw` file costs no download
 until `Edit` is chosen. draw.io has no such painter in the interface, so its Preview needs a picture
 from somewhere else: a new bridge frame, `FromWeb::Preview { svg }` in
-`crates/ubiq/src/web_export/bridge.rs`, carries the SVG the editor itself exports.
+`crates/kubiq/src/web_export/bridge.rs`, carries the SVG the editor itself exports.
 
-`crates/ubiq/src/state/diagrams.rs` files it in a second, read-only tier beside the Mermaid renderer's
+`crates/kubiq/src/state/diagrams.rs` files it in a second, read-only tier beside the Mermaid renderer's
 — `key_for(EXPORTED, …)`, `resolve_exported`, `keep_exported` — in the same workarea directory, so a
 preview survives a restart without the panel being reopened. `app/web_panel.rs` gained
 `exported_preview`, `drain_exported_asks` and `keep_exported`, mirroring the diagram-cache trio; and
 `ui/viewer/diagram.rs` gained `exported`, drawn beside `render` for the Preview position of a
 `ViewerKind::Drawio` tab. Nothing in the interface *renders* a `.drawio` file — a document never
 opened in `Edit` reads "Open the editor once to draw this." rather than a picture, since exporting
-one is the editor's own act and nothing else in Ubiq can perform it.
+one is the editor's own act and nothing else in Kubiq can perform it.
 
 ## A `New Excalidraw` row on the explorer, and `New draw.io` beside it
 
 `ExplorerAction::NewExcalidraw` sits beside `NewFile` and `NewFolder` in both context-menu groups in
-`crates/ubiq/src/state/explorer/menu.rs`. `FileDialog::New` gains `ext: Option<String>`, and
-`confirm_file_dialog` in `crates/ubiq/src/app/explorer.rs` appends that extension to the typed name
+`crates/kubiq/src/state/explorer/menu.rs`. `FileDialog::New` gains `ext: Option<String>`, and
+`confirm_file_dialog` in `crates/kubiq/src/app/explorer.rs` appends that extension to the typed name
 when it does not already end with it — forced rather than merely suggested, so deleting the seed's
 suffix cannot turn a drawing into a plain text file. The name field is seeded `drawing.excalidraw`.
 
@@ -171,7 +171,7 @@ suffix cannot turn a drawing into a plain text file. The name field is seeded `d
 premise that an empty Excalidraw scene is nothing — it is not: `state::scene::Scene::parse` only
 accepts JSON starting with `{`, so an empty `.excalidraw` opened straight into the native preview's
 `SceneError::NotAScene`, and an empty `.drawio` failed the same way inside the embedded editor's own
-XML parser (below). `crates/ubiq-host/src/files/mod.rs`'s `new_file_seed` now answers `PathOp::Create`
+XML parser (below). `crates/kubiq-host/src/files/mod.rs`'s `new_file_seed` now answers `PathOp::Create`
 by extension: a minimal `{"type":"excalidraw","version":2,...,"elements":[],...}` for `.excalidraw`,
 a minimal `<mxGraphModel>…</mxGraphModel>` for `.drawio`, and `b""` — unchanged — for everything else.
 Each is exactly what the application's own "new document" writes, so a file created here opens the
@@ -229,8 +229,8 @@ native — `ui/viewer/web.rs`'s spinner — rather than drawn inside the page.
 
 - **The embedded Excalidraw was never seen to boot.** Nothing here was driven in a real window by
   this unit: no bundle was fetched, no session was opened by hand, no drawing was made or saved.
-  What is verified is `cargo test -p ubiq` (every suite), `cargo clippy -p ubiq --all-targets -- -D
-  warnings`, `cargo fmt --all`, `cargo check -p ubiq --all-targets` and `cargo check -p ubiq
+  What is verified is `cargo test -p kubiq` (every suite), `cargo clippy -p kubiq --all-targets -- -D
+  warnings`, `cargo fmt --all`, `cargo check -p kubiq --all-targets` and `cargo check -p kubiq
   --release --lib`.
 - **The embedded draw.io was never seen to boot either**, and its `Preview { svg }` round trip is
   verified only at the bridge and the route, not by an editor actually exporting one: no session was

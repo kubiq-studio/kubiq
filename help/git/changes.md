@@ -3,7 +3,7 @@ id: git-changes
 title: The Changes panel
 summary: The conflicted, staged and unstaged lists in Git mode, and the commit box under them.
 keywords: [stage, unstage, discard, commit, amend, revert, conflict, untracked]
-context: [panel.ubiq.git.changes]
+context: [panel.kubiq.git.changes]
 order: 20
 status: current
 related: [git-overview, git-history, git-diff, guides-review-and-commit]

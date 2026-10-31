@@ -3,13 +3,13 @@
 # requires-python = ">=3.12"
 # dependencies = ["rich"]
 # ///
-"""Drone binary hasher — sha256-pins each cross-built `ubiq-drone` and emits its manifest.
+"""Drone binary hasher — sha256-pins each cross-built `kubiq-drone` and emits its manifest.
 
 Run it through `just`: `just drone-manifest` (snapshot), `just drone-manifest-verify` (drift
 check). Neither fetches anything — a drone binary is built locally by `just drone-build`, never
 downloaded, so this script's whole job is hashing bytes that are already on disk.
 
-`snapshot` looks for `target/<triple>/release/ubiq-drone` (`.exe` on the two Windows triples) for
+`snapshot` looks for `target/<triple>/release/kubiq-drone` (`.exe` on the two Windows triples) for
 every triple in `TRIPLES` below. A triple with no built binary is skipped with a warning and left
 out of the table — nobody has every cross toolchain installed, and an honest partial manifest beats
 a failed run. `verify` re-reads the generated `.rs` with a regex, re-hashes each named binary on
@@ -34,8 +34,8 @@ from rich.console import Console
 from rich.table import Table
 
 REPO = Path(__file__).resolve().parents[1]
-MANIFEST = REPO / "crates/ubiq-proto/src/drone/manifest.rs"
-DRONE_CARGO_TOML = REPO / "crates/ubiq-drone/Cargo.toml"
+MANIFEST = REPO / "crates/kubiq-proto/src/drone/manifest.rs"
+DRONE_CARGO_TOML = REPO / "crates/kubiq-drone/Cargo.toml"
 
 # The seven triples a deployed drone may be built for. Stated once, here, rather than derived from
 # an installed toolchain list: `snapshot` must say what it could *not* build, and it can only say
@@ -69,13 +69,13 @@ def die(message: str) -> None:
 
 
 def drone_version() -> str:
-    """`ubiq-drone`'s own `CARGO_PKG_VERSION`, read from its manifest rather than duplicated here."""
+    """`kubiq-drone`'s own `CARGO_PKG_VERSION`, read from its manifest rather than duplicated here."""
     data = tomllib.loads(DRONE_CARGO_TOML.read_text())
     return data["package"]["version"]
 
 
 def binary_path(triple: str) -> Path:
-    name = "ubiq-drone.exe" if triple in WINDOWS_TRIPLES else "ubiq-drone"
+    name = "kubiq-drone.exe" if triple in WINDOWS_TRIPLES else "kubiq-drone"
     return REPO / "target" / triple / "release" / name
 
 
@@ -95,7 +95,7 @@ def rust_escape(value: str) -> str:
 
 def render_manifest(version: str, built: list[Built]) -> str:
     lines = [
-        "//! The cross-built `ubiq-drone` binaries a deployer can hand to a remote machine, with the",
+        "//! The cross-built `kubiq-drone` binaries a deployer can hand to a remote machine, with the",
         "//! SHA-256 [`crate::drone::verify`] checks a cached copy against.",
         "//!",
         "//! **This is hash-pinned, not signed.** There is no signing key and no release pipeline",
@@ -119,7 +119,7 @@ def render_manifest(version: str, built: list[Built]) -> str:
         "    pub len: u64,",
         "}",
         "",
-        "/// `ubiq-drone`'s own `CARGO_PKG_VERSION` — the cache directory name a deployer keys its",
+        "/// `kubiq-drone`'s own `CARGO_PKG_VERSION` — the cache directory name a deployer keys its",
         "/// copy under, so two versions never collide on disk.",
         f'pub const VERSION: &str = "{version}";',
         "",
@@ -146,7 +146,7 @@ def render_manifest(version: str, built: list[Built]) -> str:
 
 def run_snapshot(out: Path) -> int:
     version = drone_version()
-    console.print(f"[bold]snapshot[/bold] ubiq-drone {version}\n")
+    console.print(f"[bold]snapshot[/bold] kubiq-drone {version}\n")
 
     built: list[Built] = []
     skipped: list[str] = []

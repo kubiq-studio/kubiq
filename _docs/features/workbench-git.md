@@ -7,7 +7,7 @@ summary: The rail's Git mode — the refs explorer of branches, remotes, tags, s
 read_when: you are changing the Git screen — its refs, history, change lists, commit box or diff — or the strip above it
 updated: 2026-10-25
 verified: 2026-10-25
-code_anchors: [crates/ubiq/src/state/git.rs, crates/ubiq/src/app/git.rs, crates/ubiq/src/ui/git/mod.rs, crates/ubiq/src/ui/git/refs.rs, crates/ubiq/src/ui/git/history.rs, crates/ubiq/src/ui/git/changes.rs, crates/ubiq/src/ui/git/diff.rs, crates/ubiq/src/ui/viewer/diff.rs, crates/ubiq/src/ui/ribbon.rs, crates/ubiq/tests/git.rs]
+code_anchors: [crates/kubiq/src/state/git.rs, crates/kubiq/src/app/git.rs, crates/kubiq/src/ui/git/mod.rs, crates/kubiq/src/ui/git/refs.rs, crates/kubiq/src/ui/git/history.rs, crates/kubiq/src/ui/git/changes.rs, crates/kubiq/src/ui/git/diff.rs, crates/kubiq/src/ui/viewer/diff.rs, crates/kubiq/src/ui/ribbon.rs, crates/kubiq/tests/git.rs]
 depends_on: [feat-workbench, tech-ui, tech-version-control]
 review_cycle: monthly
 ---
@@ -245,7 +245,7 @@ anything else clears the slot and is. The confirm's accept is the only sender of
 dialog's state and its two answers; `ui/shell.rs::git_confirm()` paints it with `kit::confirm_modal`
 from the window root — a rung of the shared overlay stack, `Layer::GitConfirm` (`T-270`), rather
 than painted from the toolbar the way `branch_button()`'s own popover is. Escape dismisses it on
-the same footing as the pane's and the conversation's close confirms; `crates/ubiq/tests/dismiss.rs`
+the same footing as the pane's and the conversation's close confirms; `crates/kubiq/tests/dismiss.rs`
 asserts its place in the peel order.
 `OpenProject::git_repo` is the selected repository, set by `select_git_repo()`, which calls
 `GitView::reset_repo()` and asks for that repository's overview, refs and first log page;
@@ -292,7 +292,7 @@ whatever `settle_persistent_chat()` attaches behind it. `git_view()`, `git_view_
 it sends `DiffProjectFile` only when the selection actually moved. `refresh_git()` asks for the
 overview and the working tree together. `ProjectFileDiffed` feeds whichever of the screen and a diff
 tab was waiting on that path and base. The whole of it is tested without a frame in
-`crates/ubiq/tests/git.rs`.
+`crates/kubiq/tests/git.rs`.
 
 ## Failure
 

@@ -17,4 +17,4 @@ Use this when you want to get somewhere without clicking through the window. The
 
 You land on the file, task or agent you picked.
 
-**Files** appear after you type three characters. Pasting a repository address collapses the list to one **Clone** row, and **Enter** opens the clone dialog on it. Pasting a `ubiq://` link collapses it to one row naming where it goes. The navigator does not run commands. [Search the project](how-to-search-the-project) covers what the **Search** row does.
+**Files** appear after you type three characters. Pasting a repository address collapses the list to one **Clone** row, and **Enter** opens the clone dialog on it. Pasting a `kubiq://` link collapses it to one row naming where it goes. The navigator does not run commands. [Search the project](how-to-search-the-project) covers what the **Search** row does.

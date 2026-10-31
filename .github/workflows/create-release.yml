@@ -75,7 +75,7 @@ jobs:
             fi
             version="${tag#v}"
           else
-            base="$(awk -F'"' '/^version *=/ { print $2; exit }' crates/ubiq-app/Cargo.toml)"
+            base="$(awk -F'"' '/^version *=/ { print $2; exit }' crates/kubiq-app/Cargo.toml)"
             stamp="$(date -u +%Y%m%d-%H%M)"
             version="$base-nightly.${stamp/-/}"
             tag="nightly-$stamp"
@@ -196,7 +196,7 @@ jobs:
         run: |
           cd dist
           ls -l
-          sha256sum Ubiq-* > SHA256SUMS
+          sha256sum Kubiq-* > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create release
@@ -222,7 +222,7 @@ jobs:
             exit 0
           fi
           # Linux is not offered updates (`platform_key`), so a Linux-only run has no manifest.
-          if [ ! -f dist/Ubiq-macos-arm64.zip ] && [ ! -f dist/Ubiq-Setup-x86_64.exe ]; then
+          if [ ! -f dist/Kubiq-macos-arm64.zip ] && [ ! -f dist/Kubiq-Setup-x86_64.exe ]; then
             echo "::notice::no updatable platform in this release — channel manifest skipped"
             exit 0
           fi

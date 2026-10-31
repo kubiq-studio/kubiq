@@ -36,7 +36,7 @@ launch.
 
 ## Abstracted I/O
 
-For embedding `am` in a larger tool (a web UI, a CI job, the Ubiq
+For embedding `am` in a larger tool (a web UI, a CI job, the Kubiq
 multiplexer), passthrough isn't enough — the embedder wants structured events,
 not a byte stream to screen-scrape. So `am` can replace the tty with a
 structured channel.
@@ -128,10 +128,10 @@ them.
 
 **An event carries no session identity, deliberately.** Whoever holds the
 table of live bridges attaches one: an embedder keys events by its own id
-(Ubiq attaches a pane id and puts them on its bus), and a future `am acp`
+(Kubiq attaches a pane id and puts them on its bus), and a future `am acp`
 server built on top of this would attach ACP's `sessionId` to the very same
 event. Identity belongs to the multiplexer, never to the event — which is
-what lets one bridge be read by several fronts (Ubiq's bus, an ACP server, a
+what lets one bridge be read by several fronts (Kubiq's bus, an ACP server, a
 recorded transcript) with no second mapping. `AgentEvent::SessionStarted`'s
 `session_id` is not that identity: it is the *harness's own* id for the
 conversation — what a resume needs, not what a consumer keys events by.

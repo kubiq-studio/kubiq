@@ -19,12 +19,12 @@ to the project, so each project keeps its own list.
 | **⌘⌥K** | Adds a bookmark at your current place, or removes it if it is already there |
 | **Bookmarks** | A fold-out list at the head of the [explorer](workbench-explorer), above the filter, with a count; it appears once the project has a bookmark |
 | Row | A bookmark's name, taken from its place; click it to go there |
-| **adrift** | A warning tag on a row whose line Ubiq can no longer find |
+| **adrift** | A warning tag on a row whose line Kubiq can no longer find |
 | Highlight and count | A bookmarked line is lit in the [editor](workbench-editor), and the file's tab shows how many bookmarks it holds |
 
 A bookmark on a line remembers the line's text, not only its number. After you edit the file above
-it, Ubiq looks for that text a couple of hundred lines either way and moves the bookmark with it. When
-the text is gone, the bookmark turns **adrift**. Ubiq leaves it where it was and does not guess.
+it, Kubiq looks for that text a couple of hundred lines either way and moves the bookmark with it. When
+the text is gone, the bookmark turns **adrift**. Kubiq leaves it where it was and does not guess.
 
 The [navigator](how-to-use-the-navigator) lists bookmarks under **Bookmarks**, after **Recent**, so
 **⌘K** and a few letters of a name takes you to one without opening the explorer.
@@ -37,7 +37,7 @@ The [navigator](how-to-use-the-navigator) lists bookmarks under **Bookmarks**, a
 
 ## When something goes wrong
 
-- **⌘⌥K** does nothing: the screen you are on is not a place Ubiq can write down, such as a chat tab.
+- **⌘⌥K** does nothing: the screen you are on is not a place Kubiq can write down, such as a chat tab.
 - A row is tagged **adrift**: the line it pointed at was changed or removed. Click it to open the
   file at the old line number, and press **⌘⌥K** on the line you meant to bookmark.
 - The **Bookmarks** list is missing from the explorer: the project has no bookmarks yet.

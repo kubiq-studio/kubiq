@@ -6,7 +6,7 @@
 """The teams graph's block positioning, rendered as PNGs you can look at.
 
 Run it through `just`: `just teamsim --all-scenarios --algo all --sheet`. The algorithms in
-`algos.py` are a port of `crates/ubiq/src/state/layout.rs`, so what a picture shows is what the app
+`algos.py` are a port of `crates/kubiq/src/state/layout.rs`, so what a picture shows is what the app
 does; `--selftest` is the evidence for that claim.
 """
 

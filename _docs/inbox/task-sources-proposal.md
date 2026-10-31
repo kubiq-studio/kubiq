@@ -4,9 +4,9 @@ title: Proposal — remote task sources, and Trello as the first one
 kind: proposal
 status: proposal
 summary: A provider-agnostic layer that binds a project's tasks board to a board somewhere else — a neutral remote item, a provider trait behind it, a per-project link table, a poll that writes through the shared work handle as an MCP tool does, and one wire family for setup, import and sync — with Trello as the first provider and the whole thing in the base, because a trait with one implementation is a guess. Conflict is a per-binding authority switch rather than a merge, a sync indicator reports drift on the board and on each card, and a force button pushes or pulls one card or all of them. Every fork is a numbered decision with a recommendation and a cost.
-read_when: you are designing how Ubiq talks to an external issue tracker, adding a second task provider, or deciding what a remote-backed task means on the board
+read_when: you are designing how Kubiq talks to an external issue tracker, adding a second task provider, or deciding what a remote-backed task means on the board
 updated: 2026-09-26
-code_anchors: [crates/ubiq-proto/src/tasksrc.rs, crates/ubiq-host/src/tasksrc/mod.rs, crates/ubiq-host/src/tasksrc/store.rs, crates/ubiq-host/src/tasksrc/sync.rs, crates/ubiq-host/src/tasksrc/outbound.rs, crates/ubiq-host/src/tasksrc/service.rs, crates/ubiq-host/src/tasksrc/trello.rs, crates/ubiq/src/state/tasksrc.rs, crates/ubiq/src/app/tasksrc.rs, crates/ubiq/src/ui/tasksrc.rs, crates/ubiq/tests/tasksrc.rs]
+code_anchors: [crates/kubiq-proto/src/tasksrc.rs, crates/kubiq-host/src/tasksrc/mod.rs, crates/kubiq-host/src/tasksrc/store.rs, crates/kubiq-host/src/tasksrc/sync.rs, crates/kubiq-host/src/tasksrc/outbound.rs, crates/kubiq-host/src/tasksrc/service.rs, crates/kubiq-host/src/tasksrc/trello.rs, crates/kubiq/src/state/tasksrc.rs, crates/kubiq/src/app/tasksrc.rs, crates/kubiq/src/ui/tasksrc.rs, crates/kubiq/tests/tasksrc.rs]
 depends_on: [feat-workbench, feat-connectors, tech-transport, tech-architecture, tech-decisions, inbox-editions, wip-kb]
 ---
 
@@ -21,10 +21,10 @@ Trello as the base's seventh connector provider (`D181`, `D182`, `D183`).
 
 **Slice 4's inbound half landed the same day, as `D185`** — §3.5's worker, with `R9`'s two rules
 living there rather than in any provider, each pinned by a test that runs the Trello filter over the
-fixtures and asserts its *effect* (`crates/ubiq-host/tests/tasksrc_sync.rs`).
+fixtures and asserts its *effect* (`crates/kubiq-host/tests/tasksrc_sync.rs`).
 
 **Slice 5's interface half landed the same day, as `D187`.** §3.6's wire family exists and
-`crates/ubiq/src/ui/tasksrc.rs` draws it: **one renderer over `ConfigField`, naming no provider and
+`crates/kubiq/src/ui/tasksrc.rs` draws it: **one renderer over `ConfigField`, naming no provider and
 matching no capability** — `ProviderCaps` greys through a table of `fn(&ProviderCaps) -> bool` rows
 — plus the settings section, the import dialog, the card badge including the `Parked` one M6 filed
 and nothing drew, the command and the status item. Test runs the filter and counts.
@@ -105,8 +105,8 @@ Five parts. Nothing in the first four is Trello-shaped.
 
 | Part | Where | What it is |
 |---|---|---|
-| The neutral model | a `tasksrc` module in `ubiq-proto` | `RemoteItem`, `RemoteLane`, `RemoteContainer`, `ProviderCaps`, and the ids |
-| The provider trait | a `tasksrc` module in `ubiq-host` | `TaskProvider`, and the registry a boot fills |
+| The neutral model | a `tasksrc` module in `kubiq-proto` | `RemoteItem`, `RemoteLane`, `RemoteContainer`, `ProviderCaps`, and the ids |
+| The provider trait | a `tasksrc` module in `kubiq-host` | `TaskProvider`, and the registry a boot fills |
 | The binding and link table | the same module | Per-project config and the row per linked task |
 | The sync worker | its `sync` submodule | The thread, the tick, the drift set, the writes |
 | The provider | its `trello` submodule | Trello REST, and nothing that names a `TaskRecord` |
@@ -136,7 +136,7 @@ pub struct RemoteItem {
 }
 ```
 
-**Every mapping is a string keyed onto a closed Ubiq set**, and the provider supplies the candidate
+**Every mapping is a string keyed onto a closed Kubiq set**, and the provider supplies the candidate
 strings by listing them (`lanes()`, `facets()`). That one decision — R5 — is what lets a Trello list,
 an ADO state and a GitHub column all be "the lane" without the layer knowing which it is holding.
 
@@ -156,7 +156,7 @@ keeping provider specifics out of the core, and why §7's second-provider exerci
 ### 3.3 The trait
 
 Blocking, on the sync thread, because every call is already on a thread of its own and an async
-runtime would be a second scheduler for nobody — `ubiq-host`'s existing reasoning for `ureq`.
+runtime would be a second scheduler for nobody — `kubiq-host`'s existing reasoning for `ureq`.
 
 ```rust
 pub trait TaskProvider: Send + Sync {
@@ -197,7 +197,7 @@ The **link table** is the same file's second half, one row per linked task:
 
 | Column | Why |
 |---|---|
-| `task` (`TaskId`) | Ubiq's side |
+| `task` (`TaskId`) | Kubiq's side |
 | `item` (`RemoteItemId`), `container` | the remote's side |
 | `revision` | what the last successful read saw |
 | `hash` | **per field**, not per record — the dirty test in §4 needs field granularity |
@@ -211,7 +211,7 @@ clone and writes through `Work` exactly as an MCP tool does (`D120`), so every w
 imported task is an ordinary task from the moment it lands. **The lock is taken for one method and
 never across a network call** — that rule is the whole mitigation for `D120`'s stated cost.
 
-**Built, as `tasksrc/sync.rs` (`D185`).** The thread is `ubiq-tasksrc`, it holds no catalogue, and
+**Built, as `tasksrc/sync.rs` (`D185`).** The thread is `kubiq-tasksrc`, it holds no catalogue, and
 it pulls **only the fields the remote changed**, by the link row's per-field hash — which is what
 lets a local edit survive a pass, and the ground §4 is on.
 
@@ -252,7 +252,7 @@ No variant carries a pane id, so `pane_id_of` is untouched.
 
 **Built, as `D188`**, which owns the settled table and the five rules that qualify it.
 
-**The rule is one switch per binding: _Ubiq wins_ or _the remote wins_.** It is consulted **only when
+**The rule is one switch per binding: _Kubiq wins_ or _the remote wins_.** It is consulted **only when
 both sides changed**, which is the case the switch exists for; in every other case there is nothing
 to decide.
 
@@ -278,7 +278,7 @@ Three rules make that safe:
   and a human decides.
 
 The user may override the switch per task — a card whose local edit must not be lost is pinned to
-*Ubiq wins* whatever the binding says.
+*Kubiq wins* whatever the binding says.
 
 ### The indicator, and the force buttons
 
@@ -298,9 +298,9 @@ Trello is chosen as the first provider because it is free, personal, ubiquitous,
 exactly the places a good abstraction must survive**: no query language, no work-item type, no
 priority, no conditional write. A layer that fits Trello fits a richer tracker by relaxing.
 
-| Ubiq | Trello | Notes |
+| Kubiq | Trello | Notes |
 |---|---|---|
-| `status` (7 lanes) | a list on the board | Many-to-one map; an unmapped list parks the task (R9). A fresh binding is seeded `To Do → Backlog`, `Doing → InProgress`, `Done → Done` by list *name* — a board nobody has bound has no ids to match against — and the stored map is id-keyed from then on. The other four Ubiq lanes start unbound |
+| `status` (7 lanes) | a list on the board | Many-to-one map; an unmapped list parks the task (R9). A fresh binding is seeded `To Do → Backlog`, `Doing → InProgress`, `Done → Done` by list *name* — a board nobody has bound has no ids to match against — and the stored map is id-keyed from then on. The other four Kubiq lanes start unbound |
 | `key` | `#{idShort}` | |
 | `link` | `shortUrl` | `issue_provider` does not recognise `trello.com` today — it falls through to the generic chip. One arm and one glyph closes that |
 | `title` / `description` | `name` / `desc` | Trello's `desc` is markdown; the host parses neither |
@@ -329,7 +329,7 @@ What the API gives, and what each fact costs:
 
 ## 6. The interface
 
-All of it is base code in existing containers. **Built as `D187`** in `crates/ubiq/src/ui/tasksrc.rs`,
+All of it is base code in existing containers. **Built as `D187`** in `crates/kubiq/src/ui/tasksrc.rs`,
 bar the detail-panel section and the drift overview, which wait on the drift work they show.
 
 | Surface | Where | What |
@@ -388,13 +388,13 @@ family, and a user who pastes two strings instead of one.
 outside the store that exists for secrets and gives the task source a second, private notion of
 identity.
 
-**R4 — One binding per project to start.** *Recommended.* Two boards on one Ubiq board is a real
+**R4 — One binding per project to start.** *Recommended.* Two boards on one Kubiq board is a real
 want and a real cost: every message grows a binding id, the link table grows a second key, and the
 lane map stops being a map. **Cost:** the table and the messages should be written binding-keyed
 from the first commit even while the setup surface allows only one, so that the second is a UI
 change and not a file migration.
 
-**R5 — Every mapping is a string keyed onto a closed Ubiq set, with the provider supplying the
+**R5 — Every mapping is a string keyed onto a closed Kubiq set, with the provider supplying the
 candidate strings.** *Recommended.* Lanes, kinds, priorities and labels are all the same mechanism,
 and the layer never learns what a Trello list is. **Cost:** a remote value renamed on the remote
 falls out of the map and the task parks (R9) rather than following the rename; matching by id where
@@ -426,11 +426,11 @@ Say so in the settings section next to the switch; do not pretend the two provid
 **R9 — An unmapped lane parks the task; a filter losing an item unlinks it; nothing deletes
 anything.** *Recommended.* A task whose remote lane maps to nothing stays where it is with a badge
 saying so. An item that leaves the filter keeps its task, its content and its history, loses its link
-and says so. Deleting a task in Ubiq never deletes the remote item, and deleting the remote item
+and says so. Deleting a task in Kubiq never deletes the remote item, and deleting the remote item
 unlinks rather than deletes. **Cost:** a board whose filter drifts accumulates unlinked tasks, so the
 overview needs a bulk act on them.
 
-**R10 — The task's steps map to the card's first checklist.** *Recommended.* Ubiq has one ordered
+**R10 — The task's steps map to the card's first checklist.** *Recommended.* Kubiq has one ordered
 checklist and Trello has many; the first is the only unambiguous choice, and a second on the card is
 left alone rather than merged or deleted. Steps are matched by text, not by position,
 because `StepId` and Trello's check-item id are two different things and the link row holds the pair.
@@ -454,7 +454,7 @@ writing to somebody's shared board is the failure mode that loses trust in the w
 linked to a pull-only binding draws no editable control for any field in `outbound::FIELDS` and
 cannot be dragged between columns, since a column is the remote's lane. Everything outside that
 table — sub-tasks, comments, and every field the remote has never heard of — stays editable, so a
-pulled card is still a card Ubiq can annotate. [`../features/workbench-tasks.md`](../features/workbench-tasks.md)
+pulled card is still a card Kubiq can annotate. [`../features/workbench-tasks.md`](../features/workbench-tasks.md)
 carries the whole rule and the reasoning.
 
 **R14 — The poll interval is per binding, with a floor.** *Recommended:* default five minutes, floor
@@ -462,7 +462,7 @@ one minute, and a pass never overlaps itself. **Cost:** a change made elsewhere 
 interval to show, which the force button is for.
 
 **R15 — The MCP surface grows two tools on the existing task server, not a new server.**
-*Recommended:* `sync_task` and `import_tasks` on `manage-ubiq-tasks`, so a hosted agent can pull a
+*Recommended:* `sync_task` and `import_tasks` on `manage-kubiq-tasks`, so a hosted agent can pull a
 card before it starts work. The catalogue is a static table (`G7`, `G229`) and this is inside it.
 **Cost:** none worth naming; still deferred.
 

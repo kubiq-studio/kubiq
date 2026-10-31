@@ -16,10 +16,10 @@ No project is open, and an agent or a shell always runs in a project's folder. P
 
 ## A harness is dimmed, or cannot be chosen
 
-Ubiq cannot find the harness's program on this machine.
+Kubiq cannot find the harness's program on this machine.
 
 1. Install the harness the way its own documentation describes.
-2. If it is installed somewhere Ubiq does not look, open **Settings**, then **Harnesses**, and set its **Command** to where it lives. **Check** beside it tries the command without saving.
+2. If it is installed somewhere Kubiq does not look, open **Settings**, then **Harnesses**, and set its **Command** to where it lives. **Check** beside it tries the command without saving.
 
 [Harnesses and isolation](settings-harnesses) describes the section.
 
@@ -72,7 +72,7 @@ That kind of tab is set to **Close**. To keep agents running when you close thei
 
 ## A pane looks wrong after a resize
 
-Ubiq passes every new size to the harness, and the harness redraws itself at that size. A harness that has not redrawn yet catches up when its size changes again: drag the divider beside the pane a little. Moving a pane never restarts its harness. See [Panes and panels](panes).
+Kubiq passes every new size to the harness, and the harness redraws itself at that size. A harness that has not redrawn yet catches up when its size changes again: drag the divider beside the pane a little. Moving a pane never restarts its harness. See [Panes and panels](panes).
 
 ## A pane is blank after its project moved to another window
 
@@ -97,7 +97,7 @@ See [The help panel](workbench-help).
 
 ## A remote host has stopped answering
 
-Its row stays in the project list while Ubiq retries. Open **Remote hosts** from the **More** menu beside **Settings**, press **Test** to see why, then **Connect** or **Reconnect now**. See [Remote hosts](remote-overview).
+Its row stays in the project list while Kubiq retries. Open **Remote hosts** from the **More** menu beside **Settings**, press **Test** to see why, then **Connect** or **Reconnect now**. See [Remote hosts](remote-overview).
 
 ## Something else is wrong
 

@@ -1,0 +1,2479 @@
+//! Reach a remote host from the UI, and the client half of the wire once it does.
+//!
+//! **Why this lives here and not as its own file elsewhere in `app/`.** The transport section
+//! below (`dial`, the handshake, the two pump threads) has exactly one production caller family:
+//! the connect modal, the reconnect loop and the manager panel's test button. The doc comments
+//! below are the seam instead of a second module.
+//!
+//! **The transport is deliberately dumb.** Exactly like `kubiq_host::remote`'s listener, this knows
+//! nothing about any message family — it is attach, pump frames onto a `Client`, pump the
+//! `Client`'s outbox onto the socket, and stop when either side does. Read `kubiq_host::remote`
+//! alongside this: the two are mirror images of the same handshake, one binding and one dialing.
+//!
+//! **Never on the GPUI thread.** Every step in [`dial`] is a blocking syscall — a DNS lookup, a
+//! TCP connect, a TLS handshake, a byte-at-a-time header read. [`AppState::try_connect_remote`]
+//! runs it inside `cx.background_spawn`, exactly the way `chat.rs` farms out a diagram render,
+//! and reads the answer back through `cx.spawn` updating the entity. A modal that called this
+//! straight from a click handler would freeze the whole window for as long as a dead address
+//! takes to time out.
+//!
+//! **Reconnects replace nothing the user can see.** A dropped socket closes the panes it ran —
+//! the far side reaps them on `Gone`, so there is nothing to reattach to — and a successful
+//! redial re-registers the same saved entry under a new `HostId`, re-asks `ListProjects` and
+//! clears the failed mark. The saved entry's keychain token is what makes that possible
+//! without asking the user again.
+
+use std::io::{self, Read, Write};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+use kubiq_proto::bus::{self, Client, FromClient};
+use kubiq_proto::carrier::{Beat, Heartbeat};
+use kubiq_proto::projects::DroneOrigin;
+use kubiq_proto::settings::{RemoteCarrier, RemoteScheme};
+use kubiq_proto::wire;
+
+use crate::state::remote::{
+    AttemptId, ConnectMode, RemoteConnectState, RemoteConnectStep, with_default_port,
+};
+
+use super::ssh_connect;
+use super::unix_connect;
+use super::*;
+
+/// Which machine a saved remote reaches, in the words a [`DroneOrigin`] names one by.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Reach {
+    /// The SSH profile it was dialled through, if it was.
+    profile: Option<SshProfileId>,
+    /// The contributed carrier and target that claim it, if one does.
+    via: Option<kubiq_proto::projects::OriginVia>,
+}
+
+impl Reach {
+    /// Whether an origin names this machine: by its carrier and target when it has a `via`, by
+    /// its SSH profile otherwise. The folder plays no part — a drone serves what it is asked.
+    fn names(&self, origin: &DroneOrigin) -> bool {
+        match &origin.via {
+            Some(via) => self.via.as_ref() == Some(via),
+            None => origin.profile.is_some() && self.profile == origin.profile,
+        }
+    }
+}
+
+// ── Transport ───────────────────────────────────────────────────────────────
+
+/// How long a dial waits — for the TCP handshake, and separately for each line of the HTTP
+/// response — before giving up. A wrong address must not hang the modal for however long the
+/// platform's own connect timeout is (which can be minutes on some networks); this is Kubiq's own,
+/// short ceiling instead.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
+
+/// A response header claiming more than this before the blank line that ends it is refused.
+/// Mirrors `kubiq_host::remote::MAX_HEADER` — the same ceiling, on the other end of the same
+/// handshake, for the same reason: an unbounded read here would let a broken or hostile peer make
+/// this process buffer without limit.
+const MAX_HEADER: usize = 8 * 1024;
+
+/// How often the writer thread wakes to check whether the reader has given up, when there is
+/// nothing queued to write. Mirrors `kubiq_host::remote::STOP_POLL`.
+const STOP_POLL: Duration = Duration::from_millis(200);
+
+/// Why a dial did not end in an attached `Client`, worded for the modal to show directly.
+#[derive(Clone, Debug)]
+pub enum ConnectFailure {
+    /// The address did not resolve, or nothing answered the TCP handshake before
+    /// [`CONNECT_TIMEOUT`].
+    Unreachable(String),
+    /// The host answered `401`: the token was wrong.
+    TokenRejected,
+    /// The host answered, but not with the `101` this handshake needs.
+    Refused(String),
+    /// The TLS handshake failed, or the certificate was refused. The string names which —
+    /// an untrusted certificate says so explicitly, because the fix is the trust checkbox.
+    Tls(String),
+    /// The socket failed, or timed out, somewhere after the connection was made.
+    Io(String),
+    /// `ssh` refused the far host's key: it differs from the one in `~/.ssh/known_hosts`. The
+    /// string is `ssh`'s own sentence. No retry fixes it, so the reconnect loop stops on it.
+    HostKeyChanged(String),
+    /// A pinned `https` host presented another key than its pin (`D228`). Refused before the
+    /// token was sent; no retry fixes it, so the reconnect loop stops on it and the modal offers
+    /// to trust the new key. Both are `kubiq_tunnel::pin::fingerprint`s.
+    PinMismatch { pinned: String, presented: String },
+    /// The address or the token carried a control character, so no request was sent.
+    Untypable(&'static str),
+}
+
+/// Whether a value may be interpolated into the request text.
+///
+/// A connection string is pasted from somewhere else — that is the whole point of it — so its
+/// halves are untrusted text, not something the user typed on purpose. A carriage return or a
+/// newline in either one would end the request line and let whatever followed be read as further
+/// headers or a second request, which is request smuggling with the user's own hand on the paste.
+/// A real token is base64url and a real address is a host and a port, so nothing legitimate is
+/// turned away by refusing every control character.
+fn is_typable(value: &str) -> bool {
+    !value.is_empty() && !value.chars().any(|c| c.is_control())
+}
+
+impl std::fmt::Display for ConnectFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectFailure::Unreachable(reason) => {
+                write!(f, "could not reach that address: {reason}")
+            }
+            ConnectFailure::TokenRejected => write!(f, "that host rejected the token"),
+            ConnectFailure::Refused(reason) => {
+                write!(f, "that host did not answer as a Kubiq host: {reason}")
+            }
+            ConnectFailure::Tls(reason) => {
+                write!(f, "the secure connection failed: {reason}")
+            }
+            ConnectFailure::Io(reason) => write!(f, "the connection failed: {reason}"),
+            ConnectFailure::HostKeyChanged(said) => write!(
+                f,
+                "the host key does not match ~/.ssh/known_hosts — refused, possibly a \
+                 man-in-the-middle. If the host was reinstalled, remove its line with \
+                 `ssh-keygen -R <host>` and connect again. ssh said: {said}"
+            ),
+            ConnectFailure::PinMismatch { pinned, presented } => write!(
+                f,
+                "the host's TLS key changed — refused, possibly a man-in-the-middle. Pinned \
+                 key SHA-256 {pinned}, presented {presented}. If the host's key was replaced on \
+                 purpose, trust the new key."
+            ),
+            ConnectFailure::Untypable(part) => {
+                write!(
+                    f,
+                    "that {part} contains a character an address cannot carry"
+                )
+            }
+        }
+    }
+}
+
+/// Which of a served host's two upgrades a dial asks for: the bus, or the tunnel channel
+/// (`D227`) — a connection of its own, same token, that never reaches the bus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Upgrade {
+    Attach,
+    Tunnel,
+}
+
+impl Upgrade {
+    /// The `GET /attach…` or `GET /tunnel…` request text, factored out so a test can pin down its
+    /// exact shape with no socket at all.
+    ///
+    /// The token rides the query string, matching `kubiq_host::remote::read_request`'s own
+    /// parsing — its path prefixes and the `token=` lookup right after them.
+    fn request(self, address: &str, token: &str) -> String {
+        let (path, protocol) = match self {
+            Upgrade::Attach => ("attach", "kubiq"),
+            Upgrade::Tunnel => ("tunnel", "kubiq-tunnel"),
+        };
+        format!(
+            "GET /{path}?token={token} HTTP/1.1\r\n\
+             Host: {address}\r\n\
+             Upgrade: {protocol}\r\n\
+             Connection: Upgrade\r\n\
+             \r\n"
+        )
+    }
+}
+
+/// The response header an attach's `101` names the host's carrier capabilities in —
+/// `kubiq_host::remote::CAPS_HEADER`, which this crate cannot name.
+const CAPS_HEADER: &str = "kubiq-capabilities";
+
+/// Pull the numeric status out of a line like `HTTP/1.1 101 Switching Protocols`.
+fn parse_status_code(status_line: &str) -> Option<u16> {
+    status_line.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// Read one line, one byte at a time, refusing to grow past `budget`. `Ok(None)` is "ran out of
+/// budget before a newline"; `Ok(Some(0))` is a clean EOF with nothing read at all.
+///
+/// One byte per syscall, deliberately not a `BufReader`: exactly the trade `kubiq_host::remote`'s
+/// own `read_capped_line` makes, and for the same reason — a buffered reader can pull well past
+/// the header block's end in one underlying read, and everything past the blank line that ends
+/// the response is the first wire frame once the upgrade lands. Swallowing any of it into a buffer
+/// this function is about to drop would desync the two ends from the very first message.
+///
+/// Generic over the stream so the same handshake runs over plaintext TCP and over TLS without a
+/// second copy of it.
+fn read_capped_line(
+    stream: &mut dyn Read,
+    line: &mut String,
+    budget: usize,
+) -> io::Result<Option<usize>> {
+    let mut byte = [0u8; 1];
+    let mut read = 0usize;
+    loop {
+        if read >= budget {
+            return Ok(None);
+        }
+        match stream.read(&mut byte) {
+            Ok(0) => return Ok(Some(read)),
+            Ok(_) => {
+                read += 1;
+                line.push(byte[0] as char);
+                if byte[0] == b'\n' {
+                    return Ok(Some(read));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Read the response's status line and headers up to the blank line that ends them, and no
+/// further — see [`read_capped_line`]'s comment on why stopping exactly there matters. With the
+/// status, the capabilities [`CAPS_HEADER`] names that this end knows — only
+/// [`kubiq_proto::carrier::CAP_TUNNEL`] — and none when it is absent.
+fn read_response_status(stream: &mut dyn Read) -> Result<(u16, Vec<String>), ConnectFailure> {
+    let mut total = 0usize;
+    let mut status_line: Option<String> = None;
+    let mut caps = Vec::new();
+    loop {
+        let mut line = String::new();
+        let read = read_capped_line(stream, &mut line, MAX_HEADER - total)
+            .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+        match read {
+            None => {
+                return Err(ConnectFailure::Refused(
+                    "response header too large".to_string(),
+                ));
+            }
+            Some(0) => {
+                return Err(ConnectFailure::Io(
+                    "the connection closed during the handshake".to_string(),
+                ));
+            }
+            Some(n) => total += n,
+        }
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if status_line.is_none() {
+            status_line = Some(trimmed.to_string());
+        } else if let Some((name, value)) = trimmed.split_once(':')
+            && name.trim().eq_ignore_ascii_case(CAPS_HEADER)
+        {
+            caps.extend(
+                value
+                    .split(',')
+                    .map(str::trim)
+                    // Only the capabilities this end acts on: an unknown name is dropped here
+                    // rather than carried into the connection for something to match by mistake.
+                    .filter(|cap| *cap == kubiq_proto::carrier::CAP_TUNNEL)
+                    .map(str::to_string),
+            );
+        }
+        if trimmed.is_empty() {
+            break;
+        }
+    }
+    let status_line =
+        status_line.ok_or_else(|| ConnectFailure::Refused("empty response".to_string()))?;
+    let status = parse_status_code(&status_line).ok_or(ConnectFailure::Refused(status_line))?;
+    Ok((status, caps))
+}
+
+/// What a dial needs. The modal owns these as fields and inputs; the reconnect loop and the
+/// test button build them from a saved entry.
+#[derive(Clone, Debug)]
+pub struct DialParams {
+    /// `host:port`, default port already applied.
+    pub address: String,
+    pub token: String,
+    pub scheme: RemoteScheme,
+    pub trust_insecure: bool,
+    /// The saved key pin, for `https`: when set, only that key is accepted (`D228`).
+    pub tls_pin: Option<String>,
+}
+
+/// Dial one remote host over plaintext and, on success, hand back the `Client` a `Bus`
+/// registers. The scheme-carrying [`dial_with`] below is what the modal and the loop use; this
+/// stays as the plaintext shorthand its doc comment always described.
+#[allow(dead_code)]
+fn dial(address: &str, token: &str) -> Result<Client, ConnectFailure> {
+    dial_with(&DialParams {
+        address: address.to_string(),
+        token: token.to_string(),
+        scheme: RemoteScheme::Http,
+        trust_insecure: false,
+        tls_pin: None,
+    })
+    .map(|dial| dial.client)
+}
+
+/// What a socket dial that attached hands back.
+pub(super) struct SocketDial {
+    pub client: Client,
+    /// The key pin this dial learned — only ever on a `trust_insecure` host's first use; the
+    /// caller files it on the saved entry.
+    pub learned_pin: Option<String>,
+    /// The carrier capabilities the host's `101` named (`tunnel`, when `/tunnel` answers).
+    pub caps: Vec<String>,
+}
+
+/// [`dial_raw`], then the pumps behind a `Client`.
+fn dial_with(params: &DialParams) -> Result<SocketDial, ConnectFailure> {
+    let session = dial_raw(params)?;
+    let (client, detached) = bus::detached();
+    let closer = session.closer;
+    spawn_pump(
+        session.reader,
+        session.writer,
+        Box::new(move || {
+            let _ = closer.shutdown(Shutdown::Both);
+        }),
+        detached,
+    );
+    Ok(SocketDial {
+        client,
+        learned_pin: session.learned_pin,
+        caps: session.caps,
+    })
+}
+
+/// Open a saved socket host's tunnel channel (`D227`): a second connection beside the bus's, the
+/// `/tunnel` upgrade with the same token, and the window's end of a [`kubiq_tunnel::Mux`] on it.
+///
+/// **Never trust on first use here.** An `https` host that trusts any certificate must already
+/// have its key pinned — by the bus dial, which a person started — or this refuses: a second
+/// connection is not a second chance for whoever answers to be believed.
+pub(super) fn open_socket_tunnel(
+    params: &DialParams,
+    rate: Option<u64>,
+) -> Result<kubiq_tunnel::Mux, String> {
+    if params.scheme == RemoteScheme::Https && params.trust_insecure && params.tls_pin.is_none() {
+        return Err("no key is pinned for this host \u{2014} connect from the panel to pin one".into());
+    }
+    let session = upgrade(params, Upgrade::Tunnel).map_err(|failure| match failure {
+        ConnectFailure::Refused(why) if why.ends_with("404") => {
+            "this host serves no tunnels \u{2014} start it with tunnels on".to_string()
+        }
+        other => other.to_string(),
+    })?;
+    let closer = session.closer;
+    kubiq_tunnel::Mux::window(
+        session.reader,
+        session.writer,
+        rate,
+        Some(Box::new(move || {
+            let _ = closer.shutdown(Shutdown::Both);
+        })),
+    )
+    .map_err(|error| format!("the tunnel hello failed: {error}"))
+}
+
+/// One side of [`dial_raw`]'s answer: the two stream halves plus a TCP clone used only to
+/// `shutdown` the kernel socket when the writer gives up.
+struct RawSession {
+    reader: Box<dyn Socket>,
+    writer: Box<dyn Socket>,
+    closer: TcpStream,
+    /// The key accepted on first use, when this dial was one (`kubiq_tunnel::pin::Trust::FirstUse`).
+    learned_pin: Option<String>,
+    /// The carrier capabilities the `101` named.
+    caps: Vec<String>,
+}
+
+/// Dial and run the HTTP upgrade, handing back the two stream halves with no pumps behind them.
+///
+/// What `dial_with` attaches to the bus, and what the test button drives by hand: one `Stats`
+/// poll down the writer, frames off the reader until `Stats` (skipping the unsolicited
+/// `HostInfo` greeting), then dropped. Split out so the test path never registers a `Client`
+/// nobody would drain.
+fn dial_raw(params: &DialParams) -> Result<RawSession, ConnectFailure> {
+    upgrade(params, Upgrade::Attach)
+}
+
+/// Dial and run `kind`'s HTTP upgrade — [`dial_raw`]'s body, shared with the tunnel channel's.
+fn upgrade(params: &DialParams, kind: Upgrade) -> Result<RawSession, ConnectFailure> {
+    // Before the socket, not after: a request that must not be sent is one this never builds.
+    if !is_typable(&params.address) {
+        return Err(ConnectFailure::Untypable("address"));
+    }
+    if !is_typable(&params.token) {
+        return Err(ConnectFailure::Untypable("token"));
+    }
+
+    let socket_addr = params
+        .address
+        .to_socket_addrs()
+        .map_err(|error| ConnectFailure::Unreachable(error.to_string()))?
+        .next()
+        .ok_or_else(|| {
+            ConnectFailure::Unreachable(format!("no address found for {}", params.address))
+        })?;
+
+    let stream = TcpStream::connect_timeout(&socket_addr, CONNECT_TIMEOUT)
+        .map_err(|error| ConnectFailure::Unreachable(error.to_string()))?;
+    stream
+        .set_nodelay(true)
+        .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+    // Bounds the handshake itself: a peer that completes the TCP handshake but never answers the
+    // HTTP one (a firewall swallowing the request, say) would otherwise hang this thread forever.
+    // Cleared once the upgrade lands, below, so a session that runs for hours is never mistaken
+    // for a stalled read.
+    stream
+        .set_read_timeout(Some(CONNECT_TIMEOUT))
+        .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+
+    // From here the two schemes share everything but the stream: TLS wraps the socket first,
+    // then the same HTTP upgrade runs over (plaintext) or inside (TLS) it.
+    match params.scheme {
+        RemoteScheme::Http => {
+            let mut stream = Box::new(stream);
+            stream
+                .write_all(kind.request(&params.address, &params.token).as_bytes())
+                .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+            let caps = match read_response_status(&mut stream)? {
+                (101, caps) => caps,
+                (401, _) => return Err(ConnectFailure::TokenRejected),
+                (other, _) => {
+                    return Err(ConnectFailure::Refused(format!("host answered {other}")));
+                }
+            };
+            // The deadline was the handshake's, not the session's: a client that says nothing
+            // for an hour is an idle window, not a stalled peer.
+            stream
+                .set_read_timeout(None)
+                .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+            let closer = stream
+                .try_clone()
+                .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+            let reader = stream
+                .try_clone()
+                .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+            Ok(RawSession {
+                reader: Box::new(reader) as Box<dyn Socket>,
+                writer: stream as Box<dyn Socket>,
+                closer,
+                learned_pin: None,
+                caps,
+            })
+        }
+        RemoteScheme::Https => {
+            let trust =
+                kubiq_tunnel::pin::Trust::for_host(params.tls_pin.as_deref(), params.trust_insecure);
+            // The tunnel channel only ever follows a bus dial that settled the trust: never a
+            // first use of its own (`open_socket_tunnel`).
+            if kind == Upgrade::Tunnel && trust == kubiq_tunnel::pin::Trust::FirstUse {
+                return Err(ConnectFailure::Tls("no key is pinned for this host".to_string()));
+            }
+            let (conn, sock, learned_pin) = tls_handshake(stream, &params.address, trust)?;
+            let closer = sock
+                .try_clone()
+                .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+            // One session for both pumps, never locked across a wait on the socket — so neither
+            // direction holds the other up (`kubiq_tunnel::TlsDuplex`).
+            let mut shared = kubiq_tunnel::TlsDuplex::new(conn, sock);
+            shared
+                .write_all(kind.request(&params.address, &params.token).as_bytes())
+                .map_err(|error| ConnectFailure::Io(error.to_string()))?;
+            let caps = match read_response_status(&mut shared)? {
+                (101, caps) => caps,
+                (401, _) => return Err(ConnectFailure::TokenRejected),
+                (other, _) => {
+                    return Err(ConnectFailure::Refused(format!("host answered {other}")));
+                }
+            };
+            let _ = closer.set_read_timeout(None);
+            Ok(RawSession {
+                reader: Box::new(shared.clone()),
+                writer: Box::new(shared),
+                closer,
+                learned_pin,
+                caps,
+            })
+        }
+    }
+}
+
+/// A socket half the pumps can own: anything readable, writable and sendable across threads.
+///
+/// Plaintext dials hand over a `TcpStream` and its `try_clone`; TLS dials hand over two handles
+/// to the same [`kubiq_tunnel::TlsDuplex`] (rustls has no `try_clone`).
+trait Socket: Read + Write + Send + 'static {}
+
+impl<T: Read + Write + Send + 'static> Socket for T {}
+
+/// Wrap a connected socket in TLS and run the handshake to completion.
+///
+/// Blocking, like everything else in this file — the caller is already off the GPUI thread.
+/// `address` is `host:port`; the port is stripped before the server name is derived from it.
+///
+/// How the server is believed is `kubiq_tunnel::pin`'s whole business (`D228`): the platform's
+/// roots, a key accepted on first use — answered back here as the pin to file — or exactly the
+/// pinned key. The handshake signature is checked in every case.
+fn tls_handshake(
+    sock: TcpStream,
+    address: &str,
+    trust: kubiq_tunnel::pin::Trust,
+) -> Result<(rustls::ClientConnection, TcpStream, Option<String>), ConnectFailure> {
+    use rustls::pki_types::ServerName;
+
+    let host = address
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(address)
+        .trim()
+        .trim_matches(['[', ']']);
+    if host.is_empty() {
+        return Err(ConnectFailure::Unreachable("empty host".to_string()));
+    }
+    let server_name: ServerName<'static> = if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        ServerName::IpAddress(ip.into())
+    } else {
+        ServerName::try_from(host.to_string())
+            .map_err(|_| ConnectFailure::Unreachable(format!("{host} is not a valid host name")))?
+    };
+
+    let pinned = match &trust {
+        kubiq_tunnel::pin::Trust::Pinned(pin) => Some(pin.clone()),
+        _ => None,
+    };
+    let first_use = trust == kubiq_tunnel::pin::Trust::FirstUse;
+    let (config, seen) = kubiq_tunnel::pin::client_config(trust);
+    let presented = || seen.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    let mut conn = rustls::ClientConnection::new(config, server_name)
+        .map_err(|error| ConnectFailure::Tls(error.to_string()))?;
+    let mut sock = sock;
+    while conn.is_handshaking() {
+        if let Err(error) = conn.complete_io(&mut sock) {
+            // A refusal under a pin is the key changing, not a broken handshake: say which keys.
+            if let (Some(pinned), Some(presented)) = (pinned.clone(), presented())
+                && !pinned.eq_ignore_ascii_case(&presented)
+            {
+                return Err(ConnectFailure::PinMismatch { pinned, presented });
+            }
+            return Err(ConnectFailure::Tls(error.to_string()));
+        }
+    }
+    let learned = if first_use { presented() } else { None };
+    Ok((conn, sock, learned))
+}
+
+/// Start the session a finished drone handshake earned: a detached [`Client`] and the pump behind
+/// it. The half of a drone dial that is the same whatever carries the bytes — `ssh_connect` and
+/// `unix_connect` both end here, after [`kubiq_proto::carrier::welcome`] on the same two halves.
+pub(super) fn start_drone_session<R, W>(
+    reader: R,
+    writer: W,
+    closer: Box<dyn FnOnce() + Send>,
+) -> Client
+where
+    R: Read + Send + 'static,
+    W: Write + Send + 'static,
+{
+    let (client, detached) = bus::detached();
+    spawn_pump(reader, writer, closer, detached);
+    client
+}
+
+/// Shuttle frames between the socket and a [`bus::Detached`] until either side gives up.
+///
+/// The shape is `kubiq_host::remote::pump`'s, mirrored: there, one `Client` came from a `Hub` and
+/// the socket was accepted; here, the `Client` is [`bus::detached`]'s and the socket was dialed.
+/// Everything past that — own each direction on its own thread, poll `said()` so the writer
+/// notices a dead reader without a blocking `recv` masking it, drop the halves from whichever
+/// side notices first — is identical for the same reason: a session, once the handshake behind
+/// it is done, does not care which end opened the connection.
+///
+/// **The `closer` is a closure, not a socket.** What must happen on the way out is "make a
+/// blocked read on the other half return", and each carrier spells that differently: a TCP dial
+/// shuts the kernel socket down, and `app::ssh_connect` kills its child. Naming the *obligation*
+/// rather than one carrier's way of meeting it is what lets both pumps be this one.
+pub(super) fn spawn_pump<R, W>(
+    reader_stream: R,
+    writer_stream: W,
+    closer: Box<dyn FnOnce() + Send>,
+    detached: bus::Detached,
+) where
+    R: Read + Send + 'static,
+    W: Write + Send + 'static,
+{
+    // Flume's `Sender`/`Receiver` clone by sharing the same queue, so the two threads below can
+    // each own a handle with no `Arc` and no need to keep `detached` itself alive.
+    let said = detached.said().clone();
+    let deliver = detached.deliver().clone();
+
+    let mut reader_stream = reader_stream;
+    let mut writer_stream = writer_stream;
+
+    // The interface's half of the heartbeat, and it is the same half: both ends of a carrier ping
+    // and both answer, because either end can be the one that goes quiet. The rules are
+    // `kubiq_proto::carrier`'s so this pump and `kubiq_host::carrier::pump` cannot drift — the
+    // duplicated *threads* are forced by the crate boundary (`crates/kubiq` does not depend on
+    // `crates/kubiq-host`), the duplicated rules would not be.
+    let beat = Arc::new(Mutex::new(Heartbeat::new()));
+    // A `Pong` the reader owes, on its way to the thread that owns the write half. It never
+    // reaches `deliver`, and so never reaches `AppState`: a heartbeat is transport.
+    let (pongs, pongs_out) = flume::unbounded();
+
+    let writer_said = said;
+    let writer_beat = beat.clone();
+    thread::Builder::new()
+        .name("kubiq-remote-client-writer".to_string())
+        .spawn(move || {
+            loop {
+                // Checked before the wait, and so also after every frame written: a busy outbound
+                // direction with a dead inbound one never reaches the timeout arm below.
+                if writer_beat.lock().expect("the heartbeat").is_gone() {
+                    tracing::info!("the remote host stopped answering: ending the session");
+                    break;
+                }
+                let picked = flume::Selector::new()
+                    .recv(&pongs_out, |taken| taken.ok().map(Outbound::Pong))
+                    .recv(&writer_said, |taken| taken.ok().map(Outbound::Said))
+                    .wait_timeout(STOP_POLL);
+                match picked {
+                    Ok(Some(Outbound::Pong(pong))) => {
+                        if wire::write_frame(&mut writer_stream, &pong).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(Some(Outbound::Said(FromClient::Said { message, .. }))) => {
+                        if wire::write_frame(&mut writer_stream, &message).is_err() {
+                            break;
+                        }
+                    }
+                    // `Connected` never fires for a detached client — only `Hub::connect` sends
+                    // it — and `Gone` is the local `Client` being dropped, an intentional
+                    // teardown rather than a failure to report.
+                    Ok(Some(Outbound::Said(FromClient::Connected(_)))) => {}
+                    Ok(Some(Outbound::Said(FromClient::Gone(_)))) | Ok(None) => break,
+                    Err(flume::select::SelectError::Timeout) => {
+                        let owed = writer_beat.lock().expect("the heartbeat").due();
+                        if let Some(ping) = owed
+                            && wire::write_frame(&mut writer_stream, &ping).is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+            // Close the far end while a handle still exists. Dropping a `TlsDuplex` handle or one
+            // TCP clone does not send EOF while the reader holds the other half, so the host
+            // would never see `Gone` and would not reap panes.
+            closer();
+            drop(writer_stream);
+        })
+        .expect("the remote client's writer thread");
+
+    thread::Builder::new()
+        .name("kubiq-remote-client-reader".to_string())
+        .spawn(move || {
+            while let Ok(message) = wire::read_frame(&mut reader_stream) {
+                let verdict = beat.lock().expect("the heartbeat").inbound(message);
+                match verdict {
+                    Beat::Deliver(message) => {
+                        if deliver.send(message).is_err() {
+                            break;
+                        }
+                    }
+                    Beat::Answer(pong) => {
+                        if pongs.send(pong).is_err() {
+                            break;
+                        }
+                    }
+                    Beat::Swallow => {}
+                }
+            }
+            drop(reader_stream);
+        })
+        .expect("the remote client's reader thread");
+}
+
+/// What the writer thread picked up: a heartbeat answer it owes, or something the window said.
+enum Outbound {
+    Pong(Message),
+    Said(FromClient),
+}
+
+// ── The modal ───────────────────────────────────────────────────────────────
+
+impl AppState {
+    /// Raise the connect modal, with both fields empty.
+    pub fn open_remote_connect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Remote hosts and drones are experimental: with the switch off there is no way in.
+        if !self.offers(crate::state::settings::Tier::Experimental) {
+            return;
+        }
+        self.clear_remote_connect_inputs(window, cx);
+        self.workbench.remote_connect = Some(RemoteConnectState::default());
+        cx.notify();
+    }
+
+    /// Raise the connect modal for a saved-but-unattached host, with the address filled in, the
+    /// scheme and trust picks following the saved entry, and the token filled in when the
+    /// keychain still holds it — left for the user to type when it does not.
+    ///
+    /// Reuses [`Self::open_remote_connect`]'s modal and [`Self::try_connect_remote`]'s dial
+    /// rather than a second path: a saved host is just this same flow with most fields already
+    /// known.
+    pub fn reconnect_saved_host(
+        &mut self,
+        saved: SavedRemoteHost,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_remote_connect_inputs(window, cx);
+        let mut unix_path = String::new();
+        let (mode, profile, preset) = match &saved.carrier {
+            RemoteCarrier::Socket => (ConnectMode::Socket, None, DronePreset::default()),
+            RemoteCarrier::Unix { path, preset } => {
+                unix_path = path.clone();
+                (ConnectMode::Unix, None, *preset)
+            }
+            RemoteCarrier::Ssh {
+                profile,
+                root,
+                preset,
+                ..
+            } => {
+                self.remote_root_input.update(cx, |state, cx| {
+                    state.set_value(root, window, cx);
+                });
+                // A profile the user has since deleted comes back as `None`, so the modal asks
+                // for one rather than dialling whatever happens to be first in the list.
+                let still_there = self
+                    .workbench
+                    .settings
+                    .host
+                    .ssh_profiles
+                    .iter()
+                    .any(|known| known.id == *profile)
+                    .then_some(*profile);
+                (ConnectMode::Ssh, still_there, *preset)
+            }
+        };
+        if matches!(mode, ConnectMode::Socket) {
+            self.remote_address_input.update(cx, |state, cx| {
+                state.set_value(&saved.address, window, cx);
+            });
+            if let Some(token) =
+                host_secrets::load_token(&host_secrets::key_for(&saved.id, &saved.address))
+            {
+                self.remote_token_input.update(cx, |state, cx| {
+                    state.set_value(&token, window, cx);
+                });
+            }
+        }
+        self.workbench.remote_connect = Some(RemoteConnectState {
+            step: RemoteConnectStep::Editing,
+            saved_name: Some(saved.name),
+            save_id: saved.id,
+            scheme: saved.scheme,
+            trust_insecure: saved.trust_insecure,
+            mode,
+            profile,
+            preset,
+            unix_path,
+            pin_offer: None,
+        });
+        cx.notify();
+    }
+
+    /// Flip the connect modal between a socket dial and an `ssh` to a drone. The fields of the
+    /// mode being left keep whatever they say — switching back is a click, not a retype.
+    pub fn set_remote_mode(&mut self, mode: ConnectMode, cx: &mut Context<Self>) {
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.mode = mode;
+        }
+        cx.notify();
+    }
+
+    /// Pick the drone's lifetime — attached, session-lingering, or managed. Only meaningful in
+    /// [`ConnectMode::Ssh`]; kept regardless, like the profile pick above.
+    pub fn set_remote_preset(&mut self, preset: DronePreset, cx: &mut Context<Self>) {
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.preset = preset;
+        }
+        cx.notify();
+    }
+
+    /// Pick which SSH profile the drone is reached with. Only meaningful in
+    /// [`ConnectMode::Ssh`]; kept on the state regardless, like the trust flag above.
+    pub fn set_remote_profile(&mut self, profile: SshProfileId, cx: &mut Context<Self>) {
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.profile = Some(profile);
+        }
+        cx.notify();
+    }
+
+    /// Flip the connect modal's scheme pick. The address field keeps whatever it says — scheme
+    /// and address are separate choices, and a paste carrying a scheme sets this itself.
+    pub fn set_remote_scheme(&mut self, scheme: RemoteScheme, cx: &mut Context<Self>) {
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.scheme = scheme;
+        }
+        cx.notify();
+    }
+
+    /// Flip the connect modal's trust checkbox. Only meaningful for `https`; kept on the state
+    /// regardless so a toggle-then-scheme ordering loses nothing.
+    pub fn set_remote_trust(&mut self, trust_insecure: bool, cx: &mut Context<Self>) {
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.trust_insecure = trust_insecure;
+        }
+        cx.notify();
+    }
+
+    /// Close the modal. A dial still running in the background is left to finish — it holds no
+    /// reference back to this state — and its answer is discarded on arrival because nothing
+    /// still names its `AttemptId`. See [`Self::land_remote_connect`].
+    pub fn cancel_remote_connect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.workbench.remote_connect = None;
+        self.clear_remote_connect_inputs(window, cx);
+        cx.notify();
+    }
+
+    /// Back to editing after a failure, with both fields left as they were: a wrong address is
+    /// corrected by fixing it, not by retyping everything.
+    pub fn retry_remote_connect(&mut self, cx: &mut Context<Self>) {
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.step = RemoteConnectStep::Editing;
+        }
+        cx.notify();
+    }
+
+    fn clear_remote_connect_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for input in [
+            &self.remote_address_input,
+            &self.remote_token_input,
+            &self.remote_root_input,
+        ] {
+            input.update(cx, |state, cx| state.set_value("", window, cx));
+        }
+    }
+
+    /// The address field changed. A paste of a whole connection string fills the token field
+    /// alongside it, follows a pasted scheme, and rewrites the address field down to just the
+    /// address — the one paste a user reaching for this modal actually has in their clipboard,
+    /// made to work without asking them to split it themselves first.
+    pub(super) fn apply_remote_address_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let typed = self.remote_address_input.read(cx).value().to_string();
+        let parsed = crate::state::remote::parse_connection_string(&typed);
+        if let Some(scheme) = parsed.scheme
+            && let Some(state) = &mut self.workbench.remote_connect
+        {
+            state.scheme = scheme;
+        }
+        if parsed.address == typed.trim() && parsed.token.is_none() {
+            // An ordinary keystroke, or a paste of a bare address: nothing to rewrite.
+            cx.notify();
+            return;
+        }
+        let Some(token) = parsed.token else {
+            cx.notify();
+            return;
+        };
+        self.remote_address_input.update(cx, |state, cx| {
+            state.set_value(parsed.address, window, cx);
+        });
+        self.remote_token_input.update(cx, |state, cx| {
+            state.set_value(token, window, cx);
+        });
+    }
+
+    /// Start a dial. Reads both fields plus the scheme and trust picks, mints the [`AttemptId`]
+    /// the answer must carry to be believed, and runs [`dial_with`] on the background executor so
+    /// this call returns immediately — the modal redraws itself in the `Connecting` step while the
+    /// socket work happens elsewhere.
+    pub fn try_connect_remote(&mut self, cx: &mut Context<Self>) {
+        if self
+            .workbench
+            .remote_connect
+            .as_ref()
+            .is_some_and(|state| state.mode == ConnectMode::Ssh)
+        {
+            self.try_connect_drone(cx);
+            return;
+        }
+        if self
+            .workbench
+            .remote_connect
+            .as_ref()
+            .is_some_and(|state| state.mode == ConnectMode::Unix)
+        {
+            self.try_connect_unix(cx);
+            return;
+        }
+        let address = self
+            .remote_address_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let token = self.remote_token_input.read(cx).value().trim().to_string();
+        if address.is_empty() || token.is_empty() {
+            return;
+        }
+        let modal = self.workbench.remote_connect.clone().unwrap_or_default();
+        let params = DialParams {
+            address: with_default_port(&address),
+            token,
+            scheme: modal.scheme,
+            trust_insecure: modal.trust_insecure,
+            // Read now, not when the modal opened: a "Trust new key" just filed one.
+            tls_pin: self
+                .saved_remote_index(&modal.save_id, &address)
+                .and_then(|index| {
+                    self.workbench.settings.host.remote_hosts[index]
+                        .tls_pin
+                        .clone()
+                }),
+        };
+        let save_id = modal.save_id.clone();
+        let saved_name = modal.saved_name.clone();
+
+        let attempt = AttemptId::generate();
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.step = RemoteConnectStep::Connecting {
+                attempt,
+                deploy: None,
+            };
+            state.pin_offer = None;
+        }
+        cx.notify();
+
+        let outcome = cx.background_spawn(async move { dial_with(&params) });
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let outcome = outcome.await;
+            let _ = this.update(cx, |this, cx| {
+                this.land_remote_connect(attempt, outcome, save_id, saved_name, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// A dial's answer, landing back on the GPUI thread.
+    ///
+    /// Discards an answer whose `attempt` is not the one `Connecting` is still showing — the user
+    /// cancelled, retried, or closed the modal while this was in flight, and painting over
+    /// whatever replaced it would be the same bug a stale `RepoQueryId` answer is in the clone
+    /// flow.
+    fn land_remote_connect(
+        &mut self,
+        attempt: AttemptId,
+        outcome: Result<SocketDial, ConnectFailure>,
+        save_id: String,
+        saved_name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let showing = matches!(
+            &self.workbench.remote_connect,
+            Some(RemoteConnectState {
+                step: RemoteConnectStep::Connecting {
+                    attempt: current, ..
+                },
+                ..
+            }) if *current == attempt
+        );
+        if !showing {
+            // The user cancelled, retried, or started a second attempt while this one was still
+            // in flight. A `Client` that arrives late is dropped rather than attached — dropping
+            // it tells whatever it dialled that this window is gone, which is the right thing to
+            // say to a host nobody asked to keep talking to any more.
+            return;
+        }
+
+        let address = self
+            .remote_address_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let modal = self.workbench.remote_connect.clone().unwrap_or_default();
+
+        match outcome {
+            Ok(SocketDial {
+                client,
+                learned_pin,
+                caps,
+            }) => {
+                // A reconnect keeps the name the host was saved under; a fresh dial has none yet,
+                // so the address it just proved reachable at becomes its name — the same thing
+                // `RemoteConn::label` already showed for it before there was a saved-hosts list.
+                let label = saved_name.clone().unwrap_or_else(|| address.clone());
+                // The token proved good, so it is the one the keychain keeps — a later reconnect
+                // dials with this rather than asking again. Filed under the saved entry, minted
+                // here when this dial was the entry's first.
+                let saved = self.save_remote_host(
+                    save_id,
+                    label.clone(),
+                    address.clone(),
+                    modal.scheme,
+                    modal.trust_insecure,
+                    RemoteCarrier::Socket,
+                    cx,
+                );
+                // Trust on first use: the key this dial accepted is the one it is pinned to now.
+                self.learn_tls_pin(&saved, &address, learned_pin);
+                let token = self.remote_token_input.read(cx).value().trim().to_string();
+                if !token.is_empty() {
+                    host_secrets::save_token(&host_secrets::key_for(&saved, &address), &token);
+                }
+                let host_id = self.attach_remote(
+                    client,
+                    label.clone(),
+                    saved,
+                    address.clone(),
+                    modal.scheme,
+                    cx,
+                );
+                self.bus.set_remote_caps(host_id, caps);
+                self.link_tunnels(host_id);
+                self.workbench.settings.failed_hosts.remove(&address);
+                if let Some(state) = &mut self.workbench.remote_connect {
+                    state.step = RemoteConnectStep::Connected { label };
+                    state.pin_offer = None;
+                }
+            }
+            Err(failure) => {
+                // Recorded even for a first-time dial, harmlessly: `host_menu_rows` only ever
+                // consults this set for an address that is also in `remote_hosts`, and this
+                // address is not there until a dial to it succeeds.
+                self.workbench.settings.failed_hosts.insert(address);
+                if let Some(state) = &mut self.workbench.remote_connect {
+                    state.pin_offer = match &failure {
+                        ConnectFailure::PinMismatch { pinned, presented } => {
+                            Some(crate::state::remote::PinOffer {
+                                pinned: pinned.clone(),
+                                presented: presented.clone(),
+                            })
+                        }
+                        _ => None,
+                    };
+                    state.step = RemoteConnectStep::Failed {
+                        reason: failure.to_string(),
+                    };
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The saved entry a socket dial at `address` belongs to — by id when the modal carries one,
+    /// by address otherwise, the rule `upsert_host` files it by — and only while it still names
+    /// that address: an edited address is another machine, and the old pin is not its key.
+    fn saved_remote_index(&self, save_id: &str, address: &str) -> Option<usize> {
+        use crate::state::remote::same_address;
+        let hosts = &self.workbench.settings.host.remote_hosts;
+        let index = if save_id.is_empty() {
+            hosts
+                .iter()
+                .position(|host| same_address(&host.address, address))
+        } else {
+            hosts.iter().position(|host| host.id == save_id)
+        }?;
+        same_address(&hosts[index].address, address).then_some(index)
+    }
+
+    /// File `pin` as the saved entry `save_id`'s key pin — `None` forgets it. Only this field:
+    /// a reconnect running against a stale clone must not restate the rest. Bumps the pin's
+    /// revision, so the host keeps it over a stale window's write.
+    pub fn remember_tls_pin(&mut self, save_id: &str, pin: Option<String>) {
+        let Some(saved) = self
+            .workbench
+            .settings
+            .host
+            .remote_hosts
+            .iter_mut()
+            .find(|saved| saved.id == save_id)
+        else {
+            return;
+        };
+        if crate::state::remote::set_pin(saved, pin) {
+            self.remember_host_settings();
+            self.sync_tunnel_pins();
+        }
+    }
+
+    /// File a key accepted on first use — compare-and-set: only while the entry still has no
+    /// pin and still names the address that was dialled. A pin filed meanwhile (another window,
+    /// a "Trust new key") or an edited address wins over what this dial learned.
+    fn learn_tls_pin(&mut self, save_id: &str, address: &str, pin: Option<String>) {
+        let Some(pin) = pin else {
+            return;
+        };
+        let still_unpinned = self
+            .workbench
+            .settings
+            .host
+            .remote_hosts
+            .iter()
+            .find(|saved| saved.id == save_id)
+            .is_some_and(|saved| {
+                saved.tls_pin.is_none()
+                    && crate::state::remote::same_address(&saved.address, address)
+            });
+        if still_unpinned {
+            self.remember_tls_pin(save_id, Some(pin));
+        }
+    }
+
+    /// The manager panel's "Forget key": the next dial takes the host's key afresh — on first use
+    /// when it trusts any certificate, from the platform's roots otherwise.
+    pub fn forget_tls_pin(&mut self, save_id: String, cx: &mut Context<Self>) {
+        self.remember_tls_pin(&save_id, None);
+        cx.notify();
+    }
+
+    /// The `Failed` step's "Trust new key": pin the key the host just presented, then dial again.
+    /// The user's own click on a refusal that showed both keys — nothing reaches this on its own.
+    pub fn trust_new_remote_key(&mut self, cx: &mut Context<Self>) {
+        let Some(modal) = self.workbench.remote_connect.clone() else {
+            return;
+        };
+        let Some(offer) = modal.pin_offer else {
+            return;
+        };
+        let address = self
+            .remote_address_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        // Replace only the pin the refusal was against: if it moved meanwhile (another window,
+        // a Forget), the offer is stale and the dial below says what the host presents now.
+        if let Some(index) = self.saved_remote_index(&modal.save_id, &address) {
+            let saved = &self.workbench.settings.host.remote_hosts[index];
+            if saved.tls_pin.as_deref() == Some(offer.pinned.as_str()) {
+                let save_id = saved.id.clone();
+                self.remember_tls_pin(&save_id, Some(offer.presented));
+            }
+        }
+        self.try_connect_remote(cx);
+    }
+
+    // ── Drones over ssh ─────────────────────────────────────────────────────
+
+    /// The project pinned to this profile and folder, with the linger its origin overrides, or
+    /// nothing at all. Whitespace-insensitive on the folder, because the string is the user's and
+    /// a trailing space is not a different machine.
+    ///
+    /// Answers with the first match. Two projects pinned to one folder on one machine are the
+    /// same folder, so which one names it is not a choice worth making.
+    pub(super) fn project_pinned_to(
+        &self,
+        profile: SshProfileId,
+        root: &str,
+        cx: &App,
+    ) -> Option<(ProjectId, Option<u64>)> {
+        let root = root.trim();
+        WindowRegistry::read(cx).all().find_map(|snapshot| {
+            let origin = snapshot.record.runs_on.as_ref()?;
+            (origin.profile == Some(profile) && origin.root.trim() == root)
+                .then_some((snapshot.record.id, origin.linger_secs))
+        })
+    }
+
+    /// The drone binary path a saved host records for this profile and folder, if any.
+    ///
+    /// Read from the saved host rather than carried on the project, because where the binary sits
+    /// is the *machine's* fact: `DroneOrigin` says which machine and which folder and nothing
+    /// about how the drone got there.
+    pub fn saved_drone_path(&self, profile: SshProfileId, root: &str) -> Option<String> {
+        let root = root.trim();
+        self.workbench
+            .settings
+            .host
+            .remote_hosts
+            .iter()
+            .find_map(|saved| match &saved.carrier {
+                RemoteCarrier::Ssh {
+                    profile: known,
+                    root: known_root,
+                    drone_path,
+                    ..
+                } if *known == profile && known_root.trim() == root => drone_path.clone(),
+                _ => None,
+            })
+    }
+
+    /// File the drone binary path a dial actually launched against the saved host it belongs to.
+    ///
+    /// The one field of the carrier this touches: a reconnect has no name, address, scheme or
+    /// preset to restate, and restating them would let a loop running against a stale clone
+    /// overwrite an edit made while it was backing off. A path equal to the one already saved
+    /// writes nothing, so the settings message is sent only when the deploy actually moved it.
+    pub fn remember_drone_path(&mut self, save_id: &str, drone_path: Option<String>) {
+        let Some(saved) = self
+            .workbench
+            .settings
+            .host
+            .remote_hosts
+            .iter_mut()
+            .find(|saved| saved.id == save_id)
+        else {
+            return;
+        };
+        let RemoteCarrier::Ssh {
+            drone_path: known, ..
+        } = &mut saved.carrier
+        else {
+            return;
+        };
+        if *known == drone_path {
+            return;
+        }
+        *known = drone_path;
+        self.remember_host_settings();
+    }
+
+    /// Which machine the saved remote `save_id` reaches, in the two words an origin can name one
+    /// by: its SSH profile, or the contributed carrier and target that claim it (`ext::origin`).
+    ///
+    /// The match runs through `remote_hosts` rather than through a field on `RemoteConn`: how a
+    /// connection's bytes arrive is the saved host's business, not the live one's.
+    ///
+    /// `claims` asks the contributed carriers too, which may read their own files: an SSH origin
+    /// passes `false` and never pays for it.
+    fn reach_of(&self, save_id: &str, claims: bool) -> Reach {
+        let profile = self
+            .workbench
+            .settings
+            .host
+            .remote_hosts
+            .iter()
+            .find(|saved| saved.id == save_id)
+            .and_then(|saved| match &saved.carrier {
+                RemoteCarrier::Ssh { profile, .. } => Some(*profile),
+                _ => None,
+            });
+        Reach {
+            profile,
+            via: claims
+                .then(|| crate::ext::origin::claim(self, save_id))
+                .flatten(),
+        }
+    }
+
+    /// The live connection to the machine an origin names, if this window holds one — attached
+    /// or reconnecting. **Any** drone on that machine will do, whatever it was launched with: it
+    /// is asked to serve the folder ([`Self::serve_on`]), so the folder is not part of the match.
+    pub(super) fn origin_host(&self, origin: &DroneOrigin) -> Option<HostId> {
+        self.bus
+            .remote_conns()
+            .iter()
+            .find(|conn| {
+                self.reach_of(&conn.save_id, origin.via.is_some())
+                    .names(origin)
+            })
+            .map(|conn| conn.id)
+    }
+
+    /// Ask a drone to serve one project's folder under the catalogue's own id. Addressed, not
+    /// sent: `Bus::send` would resolve a pinned, unserved project to nowhere. The drone answers
+    /// with its catalogue, and the `ProjectList` arm moves the project's serving to it.
+    pub(super) fn serve_on(&self, host: HostId, project: ProjectId, origin: &DroneOrigin) {
+        self.bus.send_to(
+            HostRef::Remote(host),
+            Message::ServeProject {
+                project_id: project,
+                // The user's string: a trailing space is not a different folder.
+                path: origin.root.trim().to_string(),
+            },
+        );
+    }
+
+    /// A local record that pins its project — newly, or to another machine — while a host on that
+    /// machine is already attached: ask it to serve, since no attach is coming to do it.
+    pub(super) fn serve_if_pinned(&self, record: &kubiq_proto::projects::ProjectRecord) {
+        let Some(origin) = record.runs_on.as_ref().filter(|o| o.check().is_ok()) else {
+            return;
+        };
+        if let Some(host) = self.origin_host(origin)
+            && self.bus.project_host(record.id) != HostRef::Remote(host)
+        {
+            self.serve_on(host, record.id, origin);
+        }
+    }
+
+    /// Ask a just-attached drone to serve every project pinned to its machine.
+    fn serve_pinned(&self, host: HostId, cx: &App) {
+        let Some(save_id) = self.bus.remote(host).map(|conn| conn.save_id.clone()) else {
+            return;
+        };
+        let reach = self.reach_of(&save_id, true);
+        for snapshot in WindowRegistry::read(cx).all() {
+            if let Some(origin) = &snapshot.record.runs_on
+                && reach.names(origin)
+            {
+                self.serve_on(host, snapshot.record.id, origin);
+            }
+        }
+    }
+
+    /// Launch the drone a project names, because opening the project is what asks for it.
+    ///
+    /// The [`ProjectId`] rides the argv as `--root-id`, so the drone announces that folder under
+    /// the id the local catalogue already holds: one row whose host attribution moves as the
+    /// drone comes and goes, never two (`D116`).
+    ///
+    /// Nothing waits on this. The project opens now against its local row — which is the row
+    /// either way — and the drone's own catalogue answer arrives whenever `ssh` has finished.
+    pub(super) fn dial_project_drone(
+        &mut self,
+        project: ProjectId,
+        origin: DroneOrigin,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .workbench
+            .settings
+            .host
+            .ssh_profiles
+            .iter()
+            .find(|profile| Some(profile.id) == origin.profile)
+            .cloned()
+        else {
+            // The profile was deleted out from under the project. Said on the row rather than
+            // dialled: there is no argv to build.
+            cx.global_mut::<WindowRegistry>().mark_unreadable(
+                project,
+                "the SSH profile this project runs on is gone".to_string(),
+            );
+            cx.notify();
+            return;
+        };
+        let label = profile.name.clone();
+        let address = profile.host.clone();
+        let profile_id = profile.id;
+        let params = ssh_connect::SshDialParams {
+            profile,
+            root: origin.root.clone(),
+            preset: origin.preset,
+            root_id: Some(project),
+            linger_secs: origin.linger_secs,
+            drone_path: self.saved_drone_path(profile_id, &origin.root),
+            config_root: self.workbench.config_root.clone(),
+        };
+
+        let outcome = cx.background_spawn(async move { ssh_connect::dial_ssh(&params) });
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let outcome = outcome.await;
+            let _ = this.update(cx, |this, cx| {
+                this.land_project_drone(project, profile_id, origin, label, address, outcome, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// A project's own dial, landing back on the GPUI thread.
+    ///
+    /// **A failure does not take the project with it.** The row is the local catalogue's and
+    /// stays, carrying the dial's own sentence — the vocabulary [`ConnectFailure`] already
+    /// speaks — in `ProjectHealth::Unreadable`, which is what a folder on a machine that did not
+    /// answer actually is.
+    #[allow(clippy::too_many_arguments)]
+    fn land_project_drone(
+        &mut self,
+        project: ProjectId,
+        profile_id: SshProfileId,
+        origin: DroneOrigin,
+        label: String,
+        address: String,
+        outcome: Result<ssh_connect::SshDial, ConnectFailure>,
+        cx: &mut Context<Self>,
+    ) {
+        match outcome {
+            Ok(dial) => {
+                let ssh_connect::SshDial {
+                    client,
+                    identity,
+                    drone_path,
+                } = dial;
+                tracing::info!(
+                    "attached kubiq-drone {} ({}) for a project that runs on it",
+                    identity.drone_version,
+                    identity.triplet
+                );
+                // The path the dial actually launched: the saved one when that worked, and the
+                // one `ensure_drone` uploaded when the far `PATH` had nothing. Saving the second
+                // is what keeps the deploy to once per machine — the next dial for this profile
+                // and folder reads it straight back out of `saved_drone_path`.
+                let saved = self.save_remote_host(
+                    String::new(),
+                    label.clone(),
+                    address.clone(),
+                    RemoteScheme::Http,
+                    false,
+                    RemoteCarrier::Ssh {
+                        profile: profile_id,
+                        root: origin.root,
+                        preset: origin.preset,
+                        drone_path,
+                    },
+                    cx,
+                );
+                let host_id = self.attach_remote(
+                    client,
+                    label,
+                    saved,
+                    address.clone(),
+                    RemoteScheme::Http,
+                    cx,
+                );
+                self.bus.set_remote_caps(host_id, identity.capabilities);
+                self.link_tunnels(host_id);
+                self.workbench.settings.failed_hosts.remove(&address);
+            }
+            Err(failure) => {
+                tracing::warn!("project drone dial failed: {failure}");
+                // A refusal is the drone's own sentence, which cannot name the machine it is on —
+                // a schema mismatch's "the drone is older: replace its binary" is useless without it.
+                let said = match &failure {
+                    ConnectFailure::Refused(_) => format!("the drone on {address}: {failure}"),
+                    _ => failure.to_string(),
+                };
+                cx.global_mut::<WindowRegistry>()
+                    .mark_unreadable(project, said);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Start an `ssh` to a drone. The SSH half of [`Self::try_connect_remote`], on the same
+    /// terms: the [`AttemptId`] is minted here, the work runs on the background executor, and
+    /// the answer is discarded on arrival if the modal has moved on.
+    ///
+    /// Everything about the child process — its argv, its pipes, its handle — stays inside
+    /// `app::ssh_connect`. What crosses back here is a `Client` or a [`ConnectFailure`].
+    fn try_connect_drone(&mut self, cx: &mut Context<Self>) {
+        let modal = self.workbench.remote_connect.clone().unwrap_or_default();
+        let Some(picked) = modal.profile else {
+            return;
+        };
+        let Some(profile) = self
+            .workbench
+            .settings
+            .host
+            .ssh_profiles
+            .iter()
+            .find(|profile| profile.id == picked)
+            .cloned()
+        else {
+            // The list changed under the modal — a settings page in this same window can do
+            // that. Said rather than dialled: there is nothing left to dial.
+            if let Some(state) = &mut self.workbench.remote_connect {
+                state.step = RemoteConnectStep::Failed {
+                    reason: "that SSH profile is gone — pick another".to_string(),
+                };
+            }
+            cx.notify();
+            return;
+        };
+        let root = self.remote_root_input.read(cx).value().trim().to_string();
+        let preset = modal.preset;
+        // A folder a project already pins to this profile is dialled under that project's id, so
+        // a hand-typed dial to it lands on the row the catalogue holds rather than beside it.
+        let pinned = self.project_pinned_to(picked, &root, cx);
+        let params = ssh_connect::SshDialParams {
+            profile: profile.clone(),
+            root: root.clone(),
+            preset,
+            root_id: pinned.map(|(project, _)| project),
+            linger_secs: pinned.and_then(|(_, linger)| linger),
+            drone_path: self.saved_drone_path(picked, &root),
+            config_root: self.workbench.config_root.clone(),
+        };
+        let save_id = modal.save_id.clone();
+        let label = modal
+            .saved_name
+            .clone()
+            .unwrap_or_else(|| profile.name.clone());
+
+        let attempt = AttemptId::generate();
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.step = RemoteConnectStep::Connecting {
+                attempt,
+                deploy: None,
+            };
+        }
+        cx.notify();
+
+        // A first connect to a machine with no drone on its `PATH` deploys one before it can
+        // succeed, and a probe, a verify and an `scp` over that same link take long enough that a
+        // modal saying only "connecting" reads as hung. The steps arrive on this channel and land
+        // on the `Connecting` line the modal already draws.
+        let (steps, arriving) = flume::unbounded::<ssh_connect::DeployStep>();
+        let outcome = cx.background_spawn(async move {
+            ssh_connect::dial_ssh_reporting(&params, &mut |step| {
+                let _ = steps.send(step);
+            })
+        });
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            while let Ok(step) = arriving.recv_async().await {
+                if this
+                    .update(cx, |this, cx| this.note_deploy_step(attempt, step, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let outcome = outcome.await;
+            let _ = this.update(cx, |this, cx| {
+                this.land_drone_connect(attempt, outcome, save_id, label, picked, root, preset, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// Show which step the deployer is on, for the attempt the modal is still waiting on.
+    ///
+    /// Guarded by the same stale-attempt rule every landing here follows: a deploy for a dial the
+    /// user has already cancelled or retried past says nothing, rather than writing a step over
+    /// whatever replaced it.
+    fn note_deploy_step(
+        &mut self,
+        attempt: AttemptId,
+        step: ssh_connect::DeployStep,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = &mut self.workbench.remote_connect else {
+            return;
+        };
+        if !matches!(
+            state.step,
+            RemoteConnectStep::Connecting { attempt: current, .. } if current == attempt
+        ) {
+            return;
+        }
+        state.step = RemoteConnectStep::Connecting {
+            attempt,
+            deploy: Some(step),
+        };
+        cx.notify();
+    }
+
+    /// An `ssh` dial's answer, landing back on the GPUI thread. The stale-attempt discipline is
+    /// [`Self::land_remote_connect`]'s, unchanged — see its comment for why.
+    #[allow(clippy::too_many_arguments)]
+    fn land_drone_connect(
+        &mut self,
+        attempt: AttemptId,
+        outcome: Result<ssh_connect::SshDial, ConnectFailure>,
+        save_id: String,
+        label: String,
+        profile: SshProfileId,
+        root: String,
+        preset: DronePreset,
+        cx: &mut Context<Self>,
+    ) {
+        let showing = matches!(
+            &self.workbench.remote_connect,
+            Some(RemoteConnectState {
+                step: RemoteConnectStep::Connecting {
+                    attempt: current, ..
+                },
+                ..
+            }) if *current == attempt
+        );
+        if !showing {
+            return;
+        }
+        match outcome {
+            Ok(dial) => {
+                let ssh_connect::SshDial {
+                    client,
+                    identity,
+                    drone_path,
+                } = dial;
+                tracing::info!(
+                    "attached kubiq-drone {} ({}) over ssh",
+                    identity.drone_version,
+                    identity.triplet
+                );
+                // The address a drone is remembered at is what `ssh` was pointed at, so the
+                // Hosts section and the manager panel have a place string to show. Nothing
+                // dials it — `RemoteCarrier::Ssh` is what says how to reach this one.
+                let address = self
+                    .workbench
+                    .settings
+                    .host
+                    .ssh_profiles
+                    .iter()
+                    .find(|known| known.id == profile)
+                    .map(|known| known.host.clone())
+                    .unwrap_or_default();
+                // The path this dial launched at, not the one it was handed: a hand-typed or
+                // previously saved path comes back unchanged, and a deploy's fresh one is filed
+                // here so the next connect to this machine skips the probe and the upload.
+                let saved = self.save_remote_host(
+                    save_id,
+                    label.clone(),
+                    address.clone(),
+                    RemoteScheme::Http,
+                    false,
+                    RemoteCarrier::Ssh {
+                        profile,
+                        root,
+                        preset,
+                        drone_path,
+                    },
+                    cx,
+                );
+                let host_id = self.attach_remote(
+                    client,
+                    label.clone(),
+                    saved,
+                    address.clone(),
+                    RemoteScheme::Http,
+                    cx,
+                );
+                self.bus.set_remote_caps(host_id, identity.capabilities);
+                self.link_tunnels(host_id);
+                self.workbench.settings.failed_hosts.remove(&address);
+                if let Some(state) = &mut self.workbench.remote_connect {
+                    state.step = RemoteConnectStep::Connected { label };
+                }
+            }
+            Err(failure) => {
+                if let Some(state) = &mut self.workbench.remote_connect {
+                    state.step = RemoteConnectStep::Failed {
+                        reason: failure.to_string(),
+                    };
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    // ── Drones over a local socket ──────────────────────────────────────────
+
+    /// Dial the Unix socket a saved entry names, from the connect modal. The same terms as
+    /// [`Self::try_connect_drone`]: the [`AttemptId`] is minted here, the dial runs on the
+    /// background executor, and the answer is discarded on arrival if the modal moved on.
+    fn try_connect_unix(&mut self, cx: &mut Context<Self>) {
+        let modal = self.workbench.remote_connect.clone().unwrap_or_default();
+        let path = modal.unix_path.clone();
+        if path.is_empty() {
+            return;
+        }
+        let attempt = AttemptId::generate();
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.step = RemoteConnectStep::Connecting {
+                attempt,
+                deploy: None,
+            };
+        }
+        cx.notify();
+        let label = modal.saved_name.clone().unwrap_or_else(|| path.clone());
+        let dialled = path.clone();
+        let outcome = cx.background_spawn(async move { unix_connect::dial_unix(&dialled) });
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let outcome = outcome.await;
+            let _ = this.update(cx, |this, cx| {
+                this.land_unix_connect(
+                    attempt,
+                    outcome,
+                    modal.save_id,
+                    label,
+                    path,
+                    modal.preset,
+                    cx,
+                )
+            });
+        })
+        .detach();
+    }
+
+    /// A Unix-socket dial's answer, landing back on the GPUI thread. The stale-attempt discipline
+    /// is [`Self::land_remote_connect`]'s, unchanged.
+    #[allow(clippy::too_many_arguments)]
+    fn land_unix_connect(
+        &mut self,
+        attempt: AttemptId,
+        outcome: Result<unix_connect::UnixDial, ConnectFailure>,
+        save_id: String,
+        label: String,
+        path: String,
+        preset: DronePreset,
+        cx: &mut Context<Self>,
+    ) {
+        let showing = matches!(
+            &self.workbench.remote_connect,
+            Some(RemoteConnectState {
+                step: RemoteConnectStep::Connecting {
+                    attempt: current, ..
+                },
+                ..
+            }) if *current == attempt
+        );
+        if !showing {
+            return;
+        }
+        match outcome {
+            Ok(dial) => {
+                tracing::info!(
+                    "attached kubiq-drone {} ({}) on {path}",
+                    dial.identity.drone_version,
+                    dial.identity.triplet
+                );
+                let saved = self.save_remote_host(
+                    save_id,
+                    label.clone(),
+                    path.clone(),
+                    RemoteScheme::Http,
+                    false,
+                    RemoteCarrier::Unix {
+                        path: path.clone(),
+                        preset,
+                    },
+                    cx,
+                );
+                let host_id = self.attach_remote(
+                    dial.client,
+                    label.clone(),
+                    saved,
+                    path.clone(),
+                    RemoteScheme::Http,
+                    cx,
+                );
+                self.bus
+                    .set_remote_caps(host_id, dial.identity.capabilities);
+                self.workbench.settings.failed_hosts.remove(&path);
+                if let Some(state) = &mut self.workbench.remote_connect {
+                    state.step = RemoteConnectStep::Connected { label };
+                }
+            }
+            Err(failure) => {
+                if let Some(state) = &mut self.workbench.remote_connect {
+                    state.step = RemoteConnectStep::Failed {
+                        reason: failure.to_string(),
+                    };
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The Unix half of [`Self::retry_reconnect`]: redial the saved path. A drone that was
+    /// listening is very likely still there, so the loop is the same backoff a socket host gets.
+    fn retry_reconnect_unix(
+        &mut self,
+        key: String,
+        generation: u64,
+        saved: SavedRemoteHost,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let label = saved.name.clone();
+        let save_id = saved.id.clone();
+        let address = saved.address.clone();
+        let outcome = cx.background_spawn(async move { unix_connect::dial_unix(&path) });
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let outcome = outcome.await;
+            let _ = this.update(cx, |this, cx| {
+                this.land_reconnect(
+                    key,
+                    generation,
+                    label,
+                    save_id,
+                    address,
+                    RemoteScheme::Http,
+                    outcome.map(|dial| SocketDial {
+                        client: dial.client,
+                        learned_pin: None,
+                        caps: dial.identity.capabilities,
+                    }),
+                    cx,
+                )
+            });
+        })
+        .detach();
+    }
+
+    /// Register a dialled connection on the bus and start draining it.
+    ///
+    /// Reuses [`Self::route_host`] rather than duplicating `boot.rs`'s router loop — a message
+    /// arriving over this connection has to reach `receive` tagged with its `HostRef` exactly as a
+    /// local one does, and that tagging is all a router task is.
+    ///
+    /// `label` is the saved host's own name for a reconnect, the bare address for a fresh dial,
+    /// and the profile's name for a drone — see [`Self::land_remote_connect`] and
+    /// [`Self::land_drone_connect`], the two callers.
+    fn attach_remote(
+        &mut self,
+        client: Client,
+        label: String,
+        save_id: String,
+        address: String,
+        scheme: RemoteScheme,
+        cx: &mut Context<Self>,
+    ) -> HostId {
+        let (host_id, from_host) = self
+            .bus
+            .register_remote(client, label, save_id, address, scheme);
+        Self::route_host(HostRef::Remote(host_id), from_host, cx);
+        // Nothing about a remote is known until it says so, and it says nothing unasked: the one
+        // `ListProjects` boot.rs sends went to the local host, long before this connection
+        // existed. Addressed rather than sent, because `active` still points wherever the user
+        // left it — attaching a host is not choosing it.
+        self.bus
+            .send_to(HostRef::Remote(host_id), Message::ListProjects);
+        // Then every project pinned to this machine, whatever the drone was launched with: what
+        // it serves is what it is asked to, and its answers move each project's serving here.
+        self.serve_pinned(host_id, cx);
+        // And its own readings, so the manager panel has facts without opening the Control
+        // screen: the greeting carries the machine, the poll carries the moment.
+        self.bus
+            .send_to(HostRef::Remote(host_id), Message::ListStats);
+        host_id
+    }
+
+    // ── Reconnects ──────────────────────────────────────────────────────────
+
+    /// The delay before the next try, from attempts since the drop. Doubles from two seconds
+    /// and caps at a minute — a host that went away for lunch is found within a minute of its
+    /// return without hammering one that is gone for the weekend.
+    pub fn backoff_for(attempt: u32) -> Duration {
+        Duration::from_secs(2u64.saturating_mul(1u64 << attempt.min(5)))
+            .min(Duration::from_secs(60))
+    }
+
+    /// One saved entry by its keychain key, whatever names it now. A rename changes the name,
+    /// never the key, so a reconnect scheduled before one still lands on the right entry.
+    fn saved_entry(&self, key: &str) -> Option<kubiq_proto::settings::SavedRemoteHost> {
+        self.workbench
+            .settings
+            .host
+            .remote_hosts
+            .iter()
+            .find(|host| host_secrets::key_for(&host.id, &host.address) == key)
+            .cloned()
+    }
+
+    /// A live connection dropped under the window — the socket failed, not the user. Its panes
+    /// are closed the same way a manual disconnect closes them (the far side reaps them on
+    /// `Gone`, so there is nothing to reattach to), and when the connection belonged to a saved
+    /// entry the reconnect loop starts: the keychain token dials again without being asked.
+    ///
+    /// A one-off dial with no saved entry behind it keeps the old behaviour — a failed mark and
+    /// a log line, and nothing scheduled.
+    pub(super) fn remote_socket_lost(&mut self, id: HostId, cx: &mut Context<Self>) {
+        let saved = self
+            .bus
+            .remote(id)
+            .map(|remote| (remote.save_id.clone(), remote.address.clone()));
+        // Lost, not let go: the forwarded ports keep listening, refusing, for the reconnect.
+        let label = self.release_host(id, cx);
+        tracing::warn!("remote host {label} disconnected");
+        let Some((save_id, address)) = saved else {
+            return;
+        };
+        self.tunnels_down(&save_id);
+        let key = host_secrets::key_for(&save_id, &address);
+        if save_id.is_empty() && self.saved_entry(&key).is_none() {
+            if let Some(address) = self.address_of_host(&label) {
+                self.workbench.settings.failed_hosts.insert(address);
+            }
+            return;
+        }
+        self.workbench.settings.failed_hosts.insert(address.clone());
+        // A drone reached under `Attached` has no socket behind it: the `ssh` that just died was
+        // the whole of the session, and there is nothing left to reattach to — the user's click on
+        // the Hosts section is the only way back, same as before phase 7. `Session` and `Managed`
+        // both detach, so the drone itself is very likely still there; a fresh `ssh` line is cheap
+        // and, because `--listen` adopts rather than rivals, non-destructive — it reattaches to
+        // the same drone instead of starting a second one. So those two fall through to the same
+        // reconnect loop a socket host uses; `retry_reconnect` is carrier-aware and re-dials with
+        // `ssh_connect::dial_ssh` rather than a socket for them.
+        if self.saved_entry(&key).is_some_and(|host| {
+            matches!(
+                host.carrier,
+                RemoteCarrier::Ssh {
+                    preset: DronePreset::Attached,
+                    ..
+                }
+            )
+        }) {
+            // No reconnect is coming on its own, so nothing for the listeners to wait for.
+            self.forget_tunnels(&save_id);
+            return;
+        }
+        // A host that trusts any certificate and has no key pinned yet would accept whatever
+        // answers on first use. Auto-reconnect would do that without a prompt, so a MITM on this
+        // address would succeed and be pinned. A pinned host reconnects: only its own key passes
+        // (`D228`). A click on Connect still can, because that is the user saying so again.
+        if self
+            .saved_entry(&key)
+            .is_some_and(|host| host.trust_insecure && host.tls_pin.is_none())
+        {
+            return;
+        }
+        self.begin_reconnect(&key, false, cx);
+    }
+
+    /// Begin (or re-begin) the reconnect loop for a saved entry: bump the generation so a timer
+    /// scheduled earlier aborts, reset the attempt count for a manual start, and dial at once
+    /// rather than waiting out a backoff the user just asked to skip. A person's click: its first
+    /// attempt may take a trust-any host's key on first use, which no timer-driven one does.
+    pub fn start_reconnect(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.begin_reconnect(key, true, cx);
+    }
+
+    fn begin_reconnect(&mut self, key: &str, manual: bool, cx: &mut Context<Self>) {
+        let generation = self
+            .workbench
+            .settings
+            .reconnects
+            .get(key)
+            .map(|state| state.generation + 1)
+            .unwrap_or(0);
+        self.workbench.settings.reconnects.insert(
+            key.to_string(),
+            crate::state::settings::ReconnectState {
+                attempt: 0,
+                error: String::new(),
+                generation,
+                pin: self.saved_entry(key).and_then(|saved| saved.tls_pin),
+            },
+        );
+        self.retry_reconnect(key.to_string(), generation, manual, cx);
+    }
+
+    /// Stop the loop for a saved entry. Every scheduled wake checks the generation it was
+    /// scheduled under and aborts on a mismatch — removing the entry stops all of them at once.
+    pub fn stop_reconnect(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.workbench.settings.reconnects.remove(key);
+        cx.notify();
+    }
+
+    /// One attempt, now. Reads the saved entry fresh every time, so an edit between tries is
+    /// honoured without stopping the loop, and dispatches on its carrier: a socket host dials with
+    /// its keychain token, a drone re-launches the same `ssh` line the connect modal would.
+    fn retry_reconnect(
+        &mut self,
+        key: String,
+        generation: u64,
+        manual: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.workbench.settings.reconnects.get(&key).cloned();
+        let Some(state) = current else {
+            return;
+        };
+        if state.generation != generation {
+            return;
+        }
+        let Some(saved) = self.saved_entry(&key) else {
+            self.workbench.settings.reconnects.remove(&key);
+            cx.notify();
+            return;
+        };
+        match saved.carrier.clone() {
+            RemoteCarrier::Socket => {
+                self.retry_reconnect_socket(key, generation, saved, state, manual, cx)
+            }
+            RemoteCarrier::Ssh {
+                profile,
+                root,
+                preset,
+                ..
+            } => self.retry_reconnect_ssh(key, generation, saved, profile, root, preset, cx),
+            RemoteCarrier::Unix { path, .. } => {
+                self.retry_reconnect_unix(key, generation, saved, path, cx)
+            }
+        }
+    }
+
+    /// The socket half of [`Self::retry_reconnect`].
+    ///
+    /// For `https`, the key a timer-driven attempt accepts is fixed when the loop begins
+    /// (`ReconnectState::pin`, `D228`): a trust-any host whose pin is gone — forgotten, or erased
+    /// by another window — would otherwise take whatever answers on first use and send it the
+    /// token, and a pin that changed mid-loop is a trust decision the loop did not see made. Both
+    /// stop the loop with the reason on the row; "Reconnect now" is the person deciding again.
+    #[allow(clippy::too_many_arguments)]
+    fn retry_reconnect_socket(
+        &mut self,
+        key: String,
+        generation: u64,
+        saved: SavedRemoteHost,
+        state: crate::state::settings::ReconnectState,
+        manual: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if saved.scheme == RemoteScheme::Https && !manual {
+            let refusal = if saved.tls_pin != state.pin {
+                Some("the host's key pin changed since this reconnect began — reconnect to use it")
+            } else if saved.trust_insecure && saved.tls_pin.is_none() {
+                Some("no key is pinned for this host — connect from the panel to pin one")
+            } else {
+                None
+            };
+            if let Some(refusal) = refusal {
+                if let Some(state) = self.workbench.settings.reconnects.get_mut(&key) {
+                    state.error = refusal.to_string();
+                }
+                cx.notify();
+                return;
+            }
+        }
+        let address = saved.address.clone();
+        let Some(token) = host_secrets::load_token(&key) else {
+            // No secret, no loop: retrying without one is a dial that cannot succeed. The entry
+            // stays with the reason on it, so the panel says what to do instead of spinning.
+            if let Some(state) = self.workbench.settings.reconnects.get_mut(&key) {
+                state.error = "no saved token — connect once from the panel to keep it".to_string();
+            }
+            cx.notify();
+            return;
+        };
+        // `saved` is read fresh for every attempt; past the check above, its pin is the loop's.
+        let params = DialParams {
+            address: with_default_port(&address),
+            token,
+            scheme: saved.scheme,
+            trust_insecure: saved.trust_insecure,
+            tls_pin: saved.tls_pin.clone(),
+        };
+        let label = saved.name.clone();
+        let save_id = saved.id.clone();
+        let scheme = saved.scheme;
+        let outcome = cx.background_spawn(async move { dial_with(&params) });
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let outcome = outcome.await;
+            let _ = this.update(cx, |this, cx| {
+                this.land_reconnect(
+                    key, generation, label, save_id, address, scheme, outcome, cx,
+                )
+            });
+        })
+        .detach();
+    }
+
+    /// The drone half of [`Self::retry_reconnect`]: a fresh `ssh` on [`Self::try_connect_drone`]'s
+    /// own terms, dialled with the saved profile and root rather than with a socket and a token.
+    /// Reached only for [`DronePreset::Session`] and [`DronePreset::Managed`] — see
+    /// [`Self::remote_socket_lost`] — where the relaunch adopts the drone that is very likely
+    /// still there instead of starting a rival.
+    #[allow(clippy::too_many_arguments)]
+    fn retry_reconnect_ssh(
+        &mut self,
+        key: String,
+        generation: u64,
+        saved: SavedRemoteHost,
+        profile_id: SshProfileId,
+        root: String,
+        preset: DronePreset,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .workbench
+            .settings
+            .host
+            .ssh_profiles
+            .iter()
+            .find(|known| known.id == profile_id)
+            .cloned()
+        else {
+            // The profile this entry names is gone. There is nothing to dial with, so the loop
+            // stops here rather than retrying against a target it cannot build an argv for.
+            self.workbench.settings.reconnects.remove(&key);
+            if let Some(address) = self.address_of_host(&saved.name) {
+                self.workbench.settings.failed_hosts.insert(address);
+            }
+            cx.notify();
+            return;
+        };
+        // A drone that comes back has to come back as the *same* row for a project pinned to it,
+        // or the reconnect would announce the folder under a fresh id and the catalogue would
+        // grow a duplicate — see `Bus::row_owner`.
+        let pinned = self.project_pinned_to(profile_id, &root, cx);
+        let drone_path = self.saved_drone_path(profile_id, &root);
+        let params = ssh_connect::SshDialParams {
+            profile,
+            root,
+            preset,
+            root_id: pinned.map(|(project, _)| project),
+            linger_secs: pinned.and_then(|(_, linger)| linger),
+            drone_path,
+            config_root: self.workbench.config_root.clone(),
+        };
+        let label = saved.name.clone();
+        let save_id = saved.id.clone();
+        let address = saved.address.clone();
+        let outcome = cx.background_spawn(async move { ssh_connect::dial_ssh(&params) });
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let outcome = outcome.await;
+            let _ = this.update(cx, |this, cx| {
+                this.land_reconnect_ssh(key, generation, label, save_id, address, outcome, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// The drone-reconnect answer, landing back on the GPUI thread. Mirrors [`Self::land_reconnect`]
+    /// on every rule — generation check, backoff, attach — over an `ssh` dial's outcome instead of
+    /// a socket's.
+    #[allow(clippy::too_many_arguments)]
+    fn land_reconnect_ssh(
+        &mut self,
+        key: String,
+        generation: u64,
+        label: String,
+        save_id: String,
+        address: String,
+        outcome: Result<ssh_connect::SshDial, ConnectFailure>,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.workbench.settings.reconnects.get(&key).cloned();
+        let Some(state) = current else {
+            return;
+        };
+        if state.generation != generation {
+            return;
+        }
+        match outcome {
+            Ok(dial) => {
+                self.workbench.settings.reconnects.remove(&key);
+                self.workbench.settings.failed_hosts.remove(&address);
+                // A reconnect can be the dial that deploys — the drone the link lost may have
+                // been the last thing on that machine's `PATH`. Filed against the same entry the
+                // first connect saved, so the loop does not re-deploy on every later attempt.
+                self.remember_drone_path(&save_id, dial.drone_path);
+                let host_id =
+                    self.attach_remote(dial.client, label, save_id, address, RemoteScheme::Http, cx);
+                self.bus
+                    .set_remote_caps(host_id, dial.identity.capabilities);
+                self.link_tunnels(host_id);
+            }
+            Err(failure) => {
+                let attempt = state.attempt + 1;
+                if let Some(state) = self.workbench.settings.reconnects.get_mut(&key) {
+                    state.attempt = attempt;
+                    state.error = failure.to_string();
+                }
+                cx.notify();
+                // A changed host key is not transient: the entry stays with the reason on it
+                // and no further attempt is scheduled.
+                if matches!(failure, ConnectFailure::HostKeyChanged(_)) {
+                    return;
+                }
+                let delay = Self::backoff_for(attempt);
+                cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                    cx.background_executor().timer(delay).await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.retry_reconnect(key, generation, false, cx)
+                    });
+                })
+                .detach();
+                return;
+            }
+        }
+        cx.notify();
+    }
+
+    /// A reconnect attempt's answer, landing back on the GPUI thread.
+    #[allow(clippy::too_many_arguments)]
+    fn land_reconnect(
+        &mut self,
+        key: String,
+        generation: u64,
+        label: String,
+        save_id: String,
+        address: String,
+        scheme: RemoteScheme,
+        outcome: Result<SocketDial, ConnectFailure>,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.workbench.settings.reconnects.get(&key).cloned();
+        let Some(state) = current else {
+            return;
+        };
+        if state.generation != generation {
+            return;
+        }
+        match outcome {
+            Ok(SocketDial {
+                client,
+                learned_pin,
+                caps,
+            }) => {
+                self.workbench.settings.reconnects.remove(&key);
+                self.workbench.settings.failed_hosts.remove(&address);
+                // Only a "Reconnect now" on an unpinned trust-any host learns one: the loop never
+                // starts on its own for such a host.
+                self.learn_tls_pin(&save_id, &address, learned_pin);
+                let host_id = self.attach_remote(client, label, save_id, address, scheme, cx);
+                self.bus.set_remote_caps(host_id, caps);
+                self.link_tunnels(host_id);
+            }
+            Err(failure) => {
+                let attempt = state.attempt + 1;
+                if let Some(state) = self.workbench.settings.reconnects.get_mut(&key) {
+                    state.attempt = attempt;
+                    state.error = failure.to_string();
+                }
+                cx.notify();
+                // A changed key is not transient: the entry keeps the reason — both keys — and
+                // no further attempt is scheduled. Connect from the panel offers to trust it.
+                if matches!(failure, ConnectFailure::PinMismatch { .. }) {
+                    return;
+                }
+                let delay = Self::backoff_for(attempt);
+                cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                    cx.background_executor().timer(delay).await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.retry_reconnect(key, generation, false, cx)
+                    });
+                })
+                .detach();
+                return;
+            }
+        }
+        cx.notify();
+    }
+
+    /// Dial a saved entry once and report, without attaching: the manager panel's test button.
+    /// Reads the keychain token; without one the outcome says to connect once first, which is
+    /// the flow that files it.
+    pub fn test_saved_host(&mut self, key: String, cx: &mut Context<Self>) {
+        let Some(saved) = self.saved_entry(&key) else {
+            return;
+        };
+        self.workbench.remote_manager.test_started(key.clone());
+        if let RemoteCarrier::Unix { path, .. } = &saved.carrier {
+            let path = path.clone();
+            let outcome = cx.background_spawn(async move {
+                // The dial hands back a live client; dropping it closes the session.
+                match unix_connect::dial_unix(&path) {
+                    Ok(dial) => {
+                        drop(dial);
+                        "reachable".to_string()
+                    }
+                    Err(failure) => format!("unreachable: {failure}"),
+                }
+            });
+            cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                let report = outcome.await;
+                let ok = report.starts_with("reachable");
+                let _ = this.update(cx, |this, cx| {
+                    this.workbench.remote_manager.test_finished(key, ok, report);
+                    cx.notify();
+                });
+            })
+            .detach();
+            return;
+        }
+        let address = saved.address.clone();
+        let Some(token) = host_secrets::load_token(&key) else {
+            self.workbench.remote_manager.test_finished(
+                key,
+                false,
+                "no saved token — connect once to keep it".to_string(),
+            );
+            cx.notify();
+            return;
+        };
+        let params = DialParams {
+            address: with_default_port(&address),
+            token,
+            scheme: saved.scheme,
+            // A test files nothing: a key it accepts on first use is not pinned by it.
+            trust_insecure: saved.trust_insecure,
+            tls_pin: saved.tls_pin.clone(),
+        };
+        let outcome = cx.background_spawn(async move {
+            match dial_raw(&params) {
+                Err(failure) => format!("unreachable: {failure}"),
+                Ok(mut session) => {
+                    let _ = session.closer.set_read_timeout(Some(CONNECT_TIMEOUT));
+                    probe_stats(&mut session.reader, &mut session.writer)
+                }
+            }
+        });
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let report = outcome.await;
+            let ok = report.starts_with("reachable");
+            let _ = this.update(cx, |this, cx| {
+                this.workbench.remote_manager.test_finished(key, ok, report);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+}
+
+/// One `ListStats` poll: skip the unsolicited `HostInfo` greeting `Hub::connect` sends, then
+/// take the first `Stats`. Anything else, or a quiet socket, is a failed probe.
+fn probe_stats(reader: &mut Box<dyn Socket>, writer: &mut Box<dyn Socket>) -> String {
+    if wire::write_frame(writer, &Message::ListStats).is_err() {
+        return "connected, but the host would not answer".to_string();
+    }
+    loop {
+        match wire::read_frame(reader) {
+            Ok(message) => match classify_probe_frame(&message) {
+                ProbeFrame::Skip => continue,
+                ProbeFrame::Reachable(report) => return report,
+                ProbeFrame::Odd => return "connected, but the host answered oddly".to_string(),
+            },
+            Err(_) => return "connected, but the host went quiet".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum ProbeFrame {
+    Skip,
+    Reachable(String),
+    Odd,
+}
+
+fn classify_probe_frame(message: &Message) -> ProbeFrame {
+    match message {
+        Message::HostInfo { .. } => ProbeFrame::Skip,
+        Message::Stats { stats } => ProbeFrame::Reachable(format!(
+            "reachable — {} session{}, {} agents live",
+            stats.sessions_count,
+            if stats.sessions_count == 1 { "" } else { "s" },
+            stats.agents_live
+        )),
+        _ => ProbeFrame::Odd,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A connection reaches an origin by its SSH profile, or by the carrier and target that claim
+    /// it — never by the folder, which any drone on that machine is asked to serve.
+    #[test]
+    fn a_connection_reaches_an_origin_by_machine_not_by_folder() {
+        use kubiq_proto::projects::OriginVia;
+        use kubiq_proto::settings::DronePreset;
+        let profile = SshProfileId::generate();
+        let origin = |profile, via| DroneOrigin {
+            profile,
+            root: "/srv/a".into(),
+            preset: DronePreset::Session,
+            linger_secs: None,
+            via,
+        };
+        let via = OriginVia {
+            kind: "rdp".into(),
+            target: "t1".into(),
+        };
+        let ssh = Reach {
+            profile: Some(profile),
+            via: None,
+        };
+        assert!(ssh.names(&origin(Some(profile), None)));
+        assert!(!ssh.names(&origin(Some(SshProfileId::generate()), None)));
+        assert!(!ssh.names(&origin(None, Some(via.clone()))));
+        let claimed = Reach {
+            profile: None,
+            via: Some(via.clone()),
+        };
+        assert!(claimed.names(&origin(None, Some(via))));
+        let other = OriginVia {
+            kind: "rdp".into(),
+            target: "t2".into(),
+        };
+        assert!(!claimed.names(&origin(None, Some(other))));
+        assert!(!Reach::default().names(&origin(None, None)));
+    }
+
+    /// Pinned down with no socket at all: this is exactly the request
+    /// `kubiq_host::remote::read_request` parses — a `GET /attach?token=…` with an `Upgrade: kubiq`
+    /// header — so a change here that drifted from that parser would otherwise only show up as a
+    /// real handshake failing.
+    /// A pasted connection string is untrusted text, and the request is built by interpolation.
+    /// A carriage return in either half would close the request line and let the rest be read as
+    /// headers of its own, so the dial has to refuse before it builds anything.
+    #[test]
+    fn a_control_character_is_refused_before_a_request_is_built() {
+        assert!(!is_typable("host:7420\r\nX-Smuggled: 1"));
+        assert!(!is_typable("tok\r\nGET /attach?token=stolen HTTP/1.1"));
+        assert!(!is_typable("token\nwith-a-newline"));
+        assert!(!is_typable(""));
+        // What a real banner prints stays acceptable: base64url, and a host with a port.
+        assert!(is_typable("aB3-_xyZ"));
+        assert!(is_typable("192.168.1.5:7420"));
+    }
+
+    #[test]
+    fn attach_request_matches_the_host_side_handshake() {
+        let request = Upgrade::Attach.request("192.168.1.5:7420", "aB3-_xyZ");
+        assert!(request.starts_with("GET /attach?token=aB3-_xyZ HTTP/1.1\r\n"));
+        assert!(request.contains("Upgrade: kubiq\r\n"));
+        assert!(request.contains("Host: 192.168.1.5:7420\r\n"));
+        assert!(request.ends_with("\r\n\r\n"));
+        let request = Upgrade::Tunnel.request("192.168.1.5:7420", "aB3-_xyZ");
+        assert!(request.starts_with("GET /tunnel?token=aB3-_xyZ HTTP/1.1\r\n"));
+        assert!(request.contains("Upgrade: kubiq-tunnel\r\n"));
+    }
+
+    #[test]
+    fn the_capabilities_header_is_read_and_nothing_past_the_head() {
+        let mut head: &[u8] =
+            b"HTTP/1.1 101 Switching Protocols\r\nKubiq-Capabilities: tunnel, x\r\n\r\nFRAME";
+        let (status, caps) = read_response_status(&mut head).unwrap();
+        assert_eq!(status, 101);
+        assert_eq!(caps, vec!["tunnel".to_string()]);
+        assert_eq!(head, b"FRAME");
+    }
+
+    #[test]
+    fn status_code_is_pulled_out_of_the_status_line() {
+        assert_eq!(
+            parse_status_code("HTTP/1.1 101 Switching Protocols"),
+            Some(101)
+        );
+        assert_eq!(parse_status_code("HTTP/1.1 401 Unauthorized"), Some(401));
+    }
+
+    #[test]
+    fn a_status_line_with_no_recognisable_code_parses_to_none() {
+        assert_eq!(parse_status_code("not a status line"), None);
+        assert_eq!(parse_status_code(""), None);
+    }
+
+    #[test]
+    fn a_hostinfo_greeting_is_not_a_failed_probe() {
+        assert_eq!(
+            classify_probe_frame(&Message::HostInfo {
+                config_root: String::new(),
+                is_default: false,
+                hostname: None,
+                os: None,
+                arch: None,
+                triplet: None,
+                cpu_count: None,
+                mem_total_bytes: None,
+                shared_workarea: None,
+            }),
+            ProbeFrame::Skip
+        );
+        let stats = kubiq_proto::stats::HostStats {
+            sessions_count: 1,
+            agents_live: 2,
+            ..kubiq_proto::stats::HostStats::default()
+        };
+        assert_eq!(
+            classify_probe_frame(&Message::Stats { stats }),
+            ProbeFrame::Reachable("reachable — 1 session, 2 agents live".to_string())
+        );
+        assert_eq!(
+            classify_probe_frame(&Message::ListProjects),
+            ProbeFrame::Odd
+        );
+    }
+}

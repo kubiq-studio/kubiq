@@ -643,7 +643,7 @@ mod tests {
         let mut spec = home_spec(&home, &scratch, "/tmp/acp");
         spec.harness = "claude-code-acp".to_string();
         spec.io = crate::spec::IoModes::Structured;
-        spec.mcps.push(http_mcp("ubiq", "http://127.0.0.1:1/run"));
+        spec.mcps.push(http_mcp("kubiq", "http://127.0.0.1:1/run"));
 
         let tmpl_dir = tempfile::TempDir::new().unwrap();
         let templates = crate::harness::FsTemplateStore::new(tmpl_dir.path());
@@ -651,7 +651,7 @@ mod tests {
 
         assert_eq!(provisioned.home.as_deref(), Some(home.as_path()));
         assert_eq!(provisioned.mcp_servers.len(), 1);
-        assert_eq!(provisioned.mcp_servers[0].id, "ubiq");
+        assert_eq!(provisioned.mcp_servers[0].id, "kubiq");
         assert!(std::fs::read_dir(&scratch).unwrap().next().is_none());
         let claude_json: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap())
@@ -659,7 +659,7 @@ mod tests {
         assert!(claude_json["projects"]["/tmp/acp"].is_object());
     }
 
-    /// Two runs of one profile share its home but not their MCP servers: each run's URL (Ubiq's
+    /// Two runs of one profile share its home but not their MCP servers: each run's URL (Kubiq's
     /// embed the run key) stays in its own scratch dir.
     #[test]
     fn two_runs_in_one_home_keep_their_mcps_apart() {
@@ -669,11 +669,11 @@ mod tests {
         let mut spec_a = home_spec(&home, &a, "/tmp/a");
         spec_a
             .mcps
-            .push(http_mcp("ubiq", "http://127.0.0.1:1/run-a"));
+            .push(http_mcp("kubiq", "http://127.0.0.1:1/run-a"));
         let mut spec_b = home_spec(&home, &b, "/tmp/b");
         spec_b
             .mcps
-            .push(http_mcp("ubiq", "http://127.0.0.1:1/run-b"));
+            .push(http_mcp("kubiq", "http://127.0.0.1:1/run-b"));
 
         let tmpl_dir = tempfile::TempDir::new().unwrap();
         let templates = crate::harness::FsTemplateStore::new(tmpl_dir.path());

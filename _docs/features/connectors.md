@@ -4,10 +4,10 @@ title: Connectors
 kind: feature
 status: draft
 summary: Named authenticated identities at GitHub, GitLab, Gitea, Azure DevOps, Atlassian and Google Workspace — cloud or self-hosted, several per provider — created by completing a flow, with the token in the OS keychain and an untrusted certificate resolved by pinning one confirmed fingerprint to the instance.
-read_when: you are changing how Ubiq authenticates against an external service, where those tokens live, or how a browser-based login reaches the application
+read_when: you are changing how Kubiq authenticates against an external service, where those tokens live, or how a browser-based login reaches the application
 updated: 2026-09-26
 verified: 2026-10-27
-code_anchors: [crates/ubiq-proto/src/connectors.rs, crates/ubiq-proto/src/messages.rs, crates/ubiq-proto/src/settings.rs, crates/ubiq-host/src/connectors/mod.rs, crates/ubiq-host/src/connectors/flow.rs, crates/ubiq-host/src/connectors/tls.rs, crates/ubiq-host/src/connectors/providers.rs, crates/ubiq-host/src/connectors/store.rs, crates/ubiq-host/src/connectors/app.rs, crates/ubiq-proto/src/ids.rs, crates/ubiq-host/src/settings.rs, crates/ubiq/src/ui/settings.rs, crates/ubiq/src/state/settings.rs, crates/ubiq/src/app/settings.rs]
+code_anchors: [crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/messages.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-host/src/connectors/mod.rs, crates/kubiq-host/src/connectors/flow.rs, crates/kubiq-host/src/connectors/tls.rs, crates/kubiq-host/src/connectors/providers.rs, crates/kubiq-host/src/connectors/store.rs, crates/kubiq-host/src/connectors/app.rs, crates/kubiq-proto/src/ids.rs, crates/kubiq-host/src/settings.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/state/settings.rs, crates/kubiq/src/app/settings.rs]
 depends_on: [tech-transport, tech-agent-manager, feat-workbench]
 review_cycle: quarterly
 ---
@@ -16,7 +16,7 @@ review_cycle: quarterly
 
 ## Purpose
 
-A **connection** is an authenticated identity at an external service. It is what lets Ubiq hold a
+A **connection** is an authenticated identity at an external service. It is what lets Kubiq hold a
 GitHub token, a GitLab identity on a company's own install, an Azure DevOps scope or a Google
 Workspace grant — the missing piece every capability that reaches a service is blocked on.
 
@@ -73,7 +73,7 @@ split by the Trello client at read time. The `Authorization` header it renders i
   are offered from the provider table rather than special-casing a provider.
 
 **An application registration is named, and several may exist for one install.** A registration is
-what Ubiq authenticates *as*: a name, a provider, the base URL it is registered at, the client id
+what Kubiq authenticates *as*: a name, a provider, the base URL it is registered at, the client id
 the provider issued, and optionally a client secret. It is keyed by its own id and by nothing else,
 because a company registers one application per team and a provider-and-instance pair no longer
 names a single one. The name and the URL are the user's to change; the id is what a connection and a
@@ -87,7 +87,7 @@ registration surface prints it, exactly as the host binds it, with a control tha
 registration already knows its own instance, so choosing one sets the instance and the client id
 together and neither can disagree with the other. A **Default** entry is offered only where the host
 says this build ships a registered application for that provider — never guessed at, because a
-browser sent to an authorization URL with no client id fails at the provider rather than in Ubiq.
+browser sent to an authorization URL with no client id fails at the provider rather than in Kubiq.
 Typing a base URL by hand stays on offer beside the registrations, since a pasted token needs no
 application at all and a self-hosted install must stay reachable without one registered.
 
@@ -135,18 +135,18 @@ carry away a connection a flow has just made. A registration therefore reaches t
 `SetAppSecret` and `ClearAppSecret`, and every one of the four is answered with the settings blob
 itself or with `ConnectorError`.
 
-The callback URL is `ubiq_proto::connectors::OAUTH_REDIRECT`, and the port under it
+The callback URL is `kubiq_proto::connectors::OAUTH_REDIRECT`, and the port under it
 `OAUTH_REDIRECT_PORT`. They are constants on the contract rather than a payload because both halves
 need the same string for different reasons — the host binds it, the interface displays it — and a
 second spelling of it would be a string that drifts from the one actually listened on.
 
 ## Implementation
 
-`crates/ubiq-proto/src/connectors.rs` holds what both halves need: the provider enum, which flows
+`crates/kubiq-proto/src/connectors.rs` holds what both halves need: the provider enum, which flows
 work where, and the records. Endpoints, embedded client ids and poll intervals are the host's alone,
-in `crates/ubiq-host/src/connectors/providers.rs`.
+in `crates/kubiq-host/src/connectors/providers.rs`.
 
-`crates/ubiq-host/src/connectors/` is the engine. One thread per flow, and one bounded channel per
+`crates/kubiq-host/src/connectors/` is the engine. One thread per flow, and one bounded channel per
 flow doing all three jobs a flow needs — asking the interface a question and blocking for the
 answer, sleeping a poll interval while staying interruptible, and reporting whether anyone is still
 listening. Cancelling is dropping the sender, which is why a window closing needs no code of its
@@ -174,7 +174,7 @@ names, a registration matching the provider and origin, and the id compiled into
 `ClientIdSource` says which answered and carries the registration where one did, so the client
 secret and the client id are never resolved by two different rules.
 
-`crates/ubiq/src/ui/settings.rs` draws the section as a list, not a form: one row per connection with
+`crates/kubiq/src/ui/settings.rs` draws the section as a list, not a form: one row per connection with
 its status, a "Connect…" control opening a modal that draws whatever the current stage says, an
 "App registration…" control beside it opening the registration form, and below them the pinned
 certificates and the registrations. The registrations are drawn whether or not there are any, since

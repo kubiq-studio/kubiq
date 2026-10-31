@@ -7,7 +7,7 @@ summary: Phases 4 and 5 of the web-panel proposal as built — a chrome page tha
 read_when: you are touching the Excalidraw chrome, the Edit action, the bridge drain loop, or how a web panel's edits reach a file buffer
 updated: 2026-09-12
 verified: 2026-09-12
-code_anchors: [crates/ubiq/assets/web/excalidraw/index.html, crates/ubiq/assets/web/excalidraw/app.js, crates/ubiq/assets/web/drawio/index.html, crates/ubiq/assets/web/drawio/app.js, crates/ubiq/src/app/web_panel.rs, crates/ubiq/src/state/web_panel.rs, crates/ubiq/src/web_export/routes.rs, crates/ubiq/src/web_export/assets.rs, crates/ubiq/src/web_export/archive.rs, crates/ubiq/src/ui/viewer/mod.rs]
+code_anchors: [crates/kubiq/assets/web/excalidraw/index.html, crates/kubiq/assets/web/excalidraw/app.js, crates/kubiq/assets/web/drawio/index.html, crates/kubiq/assets/web/drawio/app.js, crates/kubiq/src/app/web_panel.rs, crates/kubiq/src/state/web_panel.rs, crates/kubiq/src/web_export/routes.rs, crates/kubiq/src/web_export/assets.rs, crates/kubiq/src/web_export/archive.rs, crates/kubiq/src/ui/viewer/mod.rs]
 depends_on: [wip-web-panel-phase2, wip-web-panel-phase3, feat-workbench, tech-decisions]
 ---
 
@@ -16,8 +16,8 @@ depends_on: [wip-web-panel-phase2, wip-web-panel-phase3, feat-workbench, tech-de
 Phases 4 and 5 of [`../inbox/web-panel-proposal.md`](../inbox/web-panel-proposal.md), and the last
 unit of it. Phase 2 built the origin, the token and the typed bridge; phase 3 built the fetch that
 puts 554 verified files in the shared workarea. This mounts a real component on those bytes and
-lets it write back. Everything here is in `crates/ubiq` and `crates/ubiq/assets/` — no transport
-message was added, and neither `crates/ubiq-proto` nor `crates/ubiq-host` was touched.
+lets it write back. Everything here is in `crates/kubiq` and `crates/kubiq/assets/` — no transport
+message was added, and neither `crates/kubiq-proto` nor `crates/kubiq-host` was touched.
 
 ## `Edit` is a separate axis, not a fourth `ViewLayout`
 
@@ -79,7 +79,7 @@ img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; object-src 
 `img-src` takes `data:` and `blob:` because that is how the editor holds an embedded image and
 previews an export; neither is a network fetch. **No remote origin is permitted, deliberately** —
 Excalidraw always appends its own `esm.sh` path to the font candidate list, so a hole in the mirror
-has to fail loudly here rather than quietly reach the network. `crates/ubiq/src/web_export/mod.rs`
+has to fail loudly here rather than quietly reach the network. `crates/kubiq/src/web_export/mod.rs`
 asserts both the nonce and the absence of any remote origin.
 
 **`worker-src` was not widened.** There is one module worker — font subsetting, built from
@@ -184,7 +184,7 @@ who wants a tidy diff should not round-trip a file they did not change.
 
 - **`app.js` carries the mirror's package version as one constant**
   (`vendor/npm/@excalidraw/excalidraw@0.18.1/dist/prod/`). It must equal the host's
-  `manifest::ASSET_SUBPATH`, and `crates/ubiq` cannot depend on `crates/ubiq-host` to read it. A
+  `manifest::ASSET_SUBPATH`, and `crates/kubiq` cannot depend on `crates/kubiq-host` to read it. A
   version bump that moves that directory shows up as the chrome's explicit failure notice rather
   than as a blank page, but it is a duplicated constant and a bump has to touch both.
 - **The nonce forced `index.html` to be a template.** It is `include_str!`-ed in both profiles and
@@ -206,11 +206,11 @@ who wants a tidy diff should not round-trip a file they did not change.
   evidence that the *bundle* boots; that this *chrome* mounts it correctly is reasoned from that
   report and untested.
 - **`just check` could not be run** — the `foundation-models` Swift build script fails under
-  `sandbox-exec` in this environment. `cargo check -p ubiq --all-targets`,
-  `cargo clippy -p ubiq --all-targets -- -D warnings`, `cargo test -p ubiq` and `cargo fmt --all`
-  all pass, as does `cargo check -p ubiq --release --lib` — which is what exercises the
+  `sandbox-exec` in this environment. `cargo check -p kubiq --all-targets`,
+  `cargo clippy -p kubiq --all-targets -- -D warnings`, `cargo test -p kubiq` and `cargo fmt --all`
+  all pass, as does `cargo check -p kubiq --release --lib` — which is what exercises the
   `web-excalidraw-app.js.gz` include path the debug profile never compiles.
-- `crates/ubiq/tests/new_pane.rs` gained `shared_workarea: None` — phase 3's `HostInfo` field left
+- `crates/kubiq/tests/new_pane.rs` gained `shared_workarea: None` — phase 3's `HostInfo` field left
   that fixture uncompilable.
 
 ## Related docs

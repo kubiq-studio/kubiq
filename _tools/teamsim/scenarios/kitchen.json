@@ -1,5 +1,5 @@
 {
-  "format": "ubiq.teamsim/1",
+  "format": "kubiq.teamsim/1",
   "name": "kitchen",
   "note": "the worst realistic case: three sessions, fourteen containers, thirty agents, delegates scattered",
   "viewport": { "w": 1600, "h": 1000 },

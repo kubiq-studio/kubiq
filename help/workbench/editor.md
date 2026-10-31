@@ -3,7 +3,7 @@ id: workbench-editor
 title: The editor
 summary: Opening, reading, editing and saving files as tabs in IDE mode's centre, and drawing a file in another viewer.
 keywords: [editor, tab, save, open file, markdown, preview, split, image, mermaid, excalidraw, draw.io, vim, word wrap, unsaved]
-context: [panel.ubiq.file]
+context: [panel.kubiq.file]
 order: 50
 status: current
 related: [workbench-explorer, workbench-status-bar, workbench-file-dialogs, workbench-outline, workbench-bookmarks, workbench-panels]
@@ -47,4 +47,4 @@ them on and off as well, and shows the mode you are in.
 - **File already exists** appears on save-as: pick **Overwrite** only if you mean to replace that file.
 - **Unsaved changes** appears when you close a tab with edits, or reload a file that has them:
   **Discard** closes the tab without saving, and **Reload** replaces your edits with what is on disk.
-- A file will not open: the tab says why, either the file is unreadable or it is not a kind Ubiq opens.
+- A file will not open: the tab says why, either the file is unreadable or it is not a kind Kubiq opens.

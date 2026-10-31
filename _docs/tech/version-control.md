@@ -7,33 +7,33 @@ summary: How the host reads a project's repositories and how the Git screen writ
 read_when: you are extending version control, adding a write, touching how a clone runs, working on a project that holds more than one repository, or wondering why the commit graph's lane engine is hand-rolled rather than a dependency
 updated: 2026-09-29
 verified: 2026-09-29
-code_anchors: [crates/ubiq-proto/src/git.rs, crates/ubiq-host/src/git/mod.rs, crates/ubiq-host/src/git/observe.rs, crates/ubiq-host/src/git/write.rs, crates/ubiq-host/src/git/nested.rs, crates/ubiq-host/src/files/ignored.rs, crates/ubiq-host/src/git/history.rs, crates/ubiq-host/src/git/graph.rs, crates/ubiq-host/src/files/diff.rs, crates/ubiq-host/src/watch/mod.rs, crates/ubiq/src/state/git.rs, crates/ubiq/src/app/git.rs, crates/ubiq-host/src/repos/mod.rs, crates/ubiq-host/src/repos/clone.rs, crates/ubiq-host/src/repos/list.rs]
+code_anchors: [crates/kubiq-proto/src/git.rs, crates/kubiq-host/src/git/mod.rs, crates/kubiq-host/src/git/observe.rs, crates/kubiq-host/src/git/write.rs, crates/kubiq-host/src/git/nested.rs, crates/kubiq-host/src/files/ignored.rs, crates/kubiq-host/src/git/history.rs, crates/kubiq-host/src/git/graph.rs, crates/kubiq-host/src/files/diff.rs, crates/kubiq-host/src/watch/mod.rs, crates/kubiq/src/state/git.rs, crates/kubiq/src/app/git.rs, crates/kubiq-host/src/repos/mod.rs, crates/kubiq-host/src/repos/clone.rs, crates/kubiq-host/src/repos/list.rs]
 depends_on: [tech-architecture, tech-transport, tech-decisions, feat-workbench]
 review_cycle: monthly
 ---
 
 # Version control
 
-The subsystem model: what Ubiq reads out of a repository, where that work runs, and what it
+The subsystem model: what Kubiq reads out of a repository, where that work runs, and what it
 refuses to do. The message table belongs to
 [`transport-contract.md`](./transport-contract.md); what the Git screen draws with these answers
 belongs to [`../features/workbench-git.md`](../features/workbench-git.md). This document is the layer under
 both.
 
-## 1. Ubiq creates a repository, reads one, and writes when the Git screen asks
+## 1. Kubiq creates a repository, reads one, and writes when the Git screen asks
 
 **The agents in the panes mutate the working tree as they work. The Git screen is the other
 writer, and it is explicit.** Stage, unstage, commit, fetch, pull, push, create-branch, stash,
 undo-commit, checkout, merge, delete-ref, discard, restore-file, cherry-pick, revert-commit and
 reset go through `WriteProjectGit` and run on the git worker — the same thread that reads, so the
 per-project handle stays un-mutexed (`D122`). A write and an agent's `git commit` in the same
-second can still collide; the worker serialises Ubiq's own writes, not the agent's.
+second can still collide; the worker serialises Kubiq's own writes, not the agent's.
 
-`D30` covers everything Ubiq owns: no ubiq file lands in the project's folder, and a status walk
+`D30` covers everything Kubiq owns: no kubiq file lands in the project's folder, and a status walk
 leaves the index-stat cache alone so a *read* cannot touch the index. The Git screen's writes are
 the exception that mutates the repository the user asked it to. `D43` keeps `git2` the one
 library: no `git` subprocess, and gitoxide is not a second reader. Both are in
-[`decisions.md`](./decisions.md); `D9` is why the harness library, and not Ubiq, decides how an
+[`decisions.md`](./decisions.md); `D9` is why the harness library, and not Kubiq, decides how an
 agent is launched into that same folder.
 
 **Branch, stash and undo are three small writes in `write.rs`, each refused while a merge, rebase
@@ -73,7 +73,7 @@ literal match and `unstage_all` deltas zero entries — the call answers `Ok(())
 untouched. `write.rs::unstage_all` uses `"*"` whole-repo and `"{scope}/*"` scoped for exactly this
 reason; `write.rs::stage_all` is unaffected because `index.add_all`/`update_all` walk the workdir
 rather than going through this prefix machinery, so the same literal scope works there. Both
-`crates/ubiq-host/tests/git.rs::unstage_all_restores_the_index_to_head` and its scoped sibling
+`crates/kubiq-host/tests/git.rs::unstage_all_restores_the_index_to_head` and its scoped sibling
 assert the index is actually cleared, not just that the call returned `Ok`, because that is exactly
 what this bug hid.
 
@@ -154,7 +154,7 @@ facts about the same folder, so an initialised submodule appears on **both** lis
 on the overview, and walked as a `GitNested` in the map.
 
 `git::web_url` turns a remote's URL into the page a browser would open, and is the whole of what
-Ubiq knows about providers: strip the scheme, the credentials and the `.git`, and every host but
+Kubiq knows about providers: strip the scheme, the credentials and the `.git`, and every host but
 Azure DevOps puts the repository at `https://<host>/<path>` — GitHub, GitLab, Gitea, Bitbucket and
 a self-hosted instance alike. Azure is the one exception, because its web path is
 `org/project/_git/repo` while its ssh path is `v3/org/project/repo`. It is not a URL parser: a
@@ -163,7 +163,7 @@ which is how the titlebar decides whether to draw the link at all.
 
 ## 3. Where the work runs
 
-`crates/ubiq-host/src/git/` is a worker thread of its own, on the shape the files worker proved: a
+`crates/kubiq-host/src/git/` is a worker thread of its own, on the shape the files worker proved: a
 `Job` carries the project's root rather than a way to look one up, and the coordinator resolves the
 record in memory, submits, and answers nothing itself. A cold status on a large repository is
 seconds, and seconds on the coordinator's thread is every pane's keystrokes stalled behind it.
@@ -177,7 +177,7 @@ never stuck behind the explorer's badges. A second full refresh for a project th
 **A clone never runs on this worker** (`D73`). The worker is one shared thread whose `answer()` is
 synchronous, so a clone of a large repository sitting in either queue would be minutes of
 head-of-line blocking on the branch name and the explorer's badges of every project in every window.
-`crates/ubiq-host/src/repos/` takes a thread per clone instead, copying the connector flows' shape:
+`crates/kubiq-host/src/repos/` takes a thread per clone instead, copying the connector flows' shape:
 an id in every message, the asker's mailbox for progress, and a `flume` receiver as the sole cancel
 mechanism. Progress is throttled to one message every 250ms, because libgit2's `transfer_progress`
 fires per object. The clone thread cannot reach the project catalogue, so it hands the finished
@@ -247,7 +247,7 @@ the repository's configured identity. `rel_path` narrows a page to one path's hi
 pathspec — bounded by `PATH_SCAN_CEILING` so a path with no history cannot walk to the root. An
 unborn `HEAD` answers with an empty page, not an error. A log with no `rel_path` walks the whole
 repository rather than the project's prefix (`G124`). The cursor has a caller: the interface asks
-for the next page through `AppState::load_more_git_log` (`crates/ubiq/src/app/git.rs`) as the
+for the next page through `AppState::load_more_git_log` (`crates/kubiq/src/app/git.rs`) as the
 reader's scroll nears the bottom of what has loaded, so the walk goes as far as the reader scrolls
 without waiting for them to reach the edge and click.
 
@@ -261,7 +261,7 @@ repository and not a ref.
 
 ## 5. The commit-graph lane engine
 
-`crates/ubiq-host/src/git/graph.rs` holds `assign_lanes()`: a pure function over one page of commits
+`crates/kubiq-host/src/git/graph.rs` holds `assign_lanes()`: a pure function over one page of commits
 plus the lanes carried in from the page before it. No repository access, no ancestor walk. A commit
 claims the lane waiting for its id or opens the lowest free one; that lane then waits for the
 commit's first parent, and each additional parent claims or opens a lane of its own — those are the
@@ -271,7 +271,7 @@ Lane assignment is **host-side**, on the same reasoning as the rollups: two wind
  the same history differently. It is also why a commit's parents cross the bus as ids rather than as
  a count — a lane algorithm matches a child to the lane its parent occupies, and a count cannot say
  which lane that is. What the interface adds is a pure projection over the host's `lane`/`merges`/
- `parents`, `graph_cells()` in `crates/ubiq/src/state/git.rs`: which lanes are live above and below
+ `parents`, `graph_cells()` in `crates/kubiq/src/state/git.rs`: which lanes are live above and below
  each row, and which end at it. It is deterministic over the same data — a lane the host numbered
  is drawn as the same line in every window — so host-side layout is not diluted; the pattern is
  still the rollup's. `lanes_for()` keeps page continuity: a request whose cursor, `rel_path` and
@@ -286,7 +286,7 @@ a full git read internally, none pages. (`gix-chunk` and its neighbours read git
 working engine, in other engines, is a single-pass allocator with a "keep the main line
 on lane 0" heuristic that takes the entire loaded commit slice and recomputes from scratch on every
 call — no cursor, no resumable lane state. It works there because that interface loads a growing
-window; Ubiq's log is deliberately cursor-paged, which is the case it does not handle.
+window; Kubiq's log is deliberately cursor-paged, which is the case it does not handle.
 `assign_lanes()` is under sixty lines because it skips that heuristic and the ancestor cache it
 needs; the lane cache is page continuity instead.
 
@@ -296,13 +296,13 @@ Five triggers ask for a refresh, all from the interface, all through the same me
 
 | Trigger | Where |
 |---|---|
-| A project is opened | `crates/ubiq/src/app/shell.rs` |
-| The user asks | `crates/ubiq/src/app/git.rs`, `refresh_git()` |
-| An editor save lands | `crates/ubiq/src/app/wire.rs` |
-| A pane exits | `crates/ubiq/src/app/wire.rs` |
-| The git directory changes | `crates/ubiq/src/app/wire.rs`, from the watcher |
+| A project is opened | `crates/kubiq/src/app/shell.rs` |
+| The user asks | `crates/kubiq/src/app/git.rs`, `refresh_git()` |
+| An editor save lands | `crates/kubiq/src/app/wire.rs` |
+| A pane exits | `crates/kubiq/src/app/wire.rs` |
+| The git directory changes | `crates/kubiq/src/app/wire.rs`, from the watcher |
 
-The last is the one that catches an agent. `crates/ubiq-host/src/watch/mod.rs` classifies writes to
+The last is the one that catches an agent. `crates/kubiq-host/src/watch/mod.rs` classifies writes to
 `HEAD`, `MERGE_HEAD`, `index` and `refs/**` and raises the `repository` flag on the change
 notification; the interface turns that into a full refresh. It finds the `.git` component
 **anywhere** in the project, so a nested clone's `sub/.git/HEAD` and a submodule's real git
@@ -318,7 +318,7 @@ Refreshes coalesce at the queue (§3), and the answers are guarded by generation
 ## 7. The ceilings
 
 Every bound is honest — the answer says it was cut short rather than pretending to be whole — and
-none is measured against a repository of the size Ubiq is opened on (`G133`).
+none is measured against a repository of the size Kubiq is opened on (`G133`).
 
 | Constant | Bounds | Value | What passing it looks like |
 |---|---|---|---|
@@ -335,7 +335,7 @@ none is measured against a repository of the size Ubiq is opened on (`G133`).
   libgit2's submodule status errors — a silent wrong answer rather than an absent one, and the only
   place in the family that does that (`G132`).
 - **The repository is opened twice.** The git worker caches one handle per project; the one-file
-  diff in `crates/ubiq-host/src/files/diff.rs` runs its own discovery per request, from the file's folder and uncached
+  diff in `crates/kubiq-host/src/files/diff.rs` runs its own discovery per request, from the file's folder and uncached
   (`G130`). `D43` accepted a second comparison engine, not a second discovery walk on every file
   opened.
 - **A managed nested repository is opened on every full refresh.** The status walk does not use the
@@ -348,7 +348,7 @@ none is measured against a repository of the size Ubiq is opened on (`G133`).
 - **The project catalogue's health probe is filesystem-only.** `probe()` looks at the path, not at
   `.git`, so a corrupt repository probes healthy while the worker returns an error to a different
   part of the screen (`G131`).
-- **An agent's turn and the commit it produced are unconnected facts** (`G134`). Ubiq watches both
+- **An agent's turn and the commit it produced are unconnected facts** (`G134`). Kubiq watches both
   the agent and the repository and joins neither.
 - **Untested seams:** whether the author check falls back correctly when `user.email` is unset, and
   the stash reflog path.
@@ -380,7 +380,7 @@ they change a shape rather than fill a hole.
    repository, and the repository *above* the project whose `.git` sits outside the watched root.
    The Git screen's refs, history, changes and commit box are one selected repository's, chosen
    from its Repositories section, and a write goes to that repository.
-7. **Joining an agent's turn to the commit it produced (`G134`).** The most interesting thing Ubiq
+7. **Joining an agent's turn to the commit it produced (`G134`).** The most interesting thing Kubiq
    could know: it is the one application in the category watching both the agent and the repository.
    It needs the log family it has and a link the work family does not carry.
 

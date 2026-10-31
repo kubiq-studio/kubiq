@@ -12,9 +12,9 @@ This page takes you from the first launch to one agent working in one project. [
 
 ## What you see on first launch
 
-Ubiq opens one window with no project in it. The centre says **No project open**, explains that Ubiq works in a project, and offers one button, **Add a project…**. The project picker in the title bar says **No projects yet.**, and the status bar reads `no project`.
+Kubiq opens one window with no project in it. The centre says **No project open**, explains that Kubiq works in a project, and offers one button, **Add a project…**. The project picker in the title bar says **No projects yet.**, and the status bar reads `no project`.
 
-Nearly everything in Ubiq works against a [project](projects): a folder on your machine that its agents run in. **New agent** and **New terminal** appear in the title bar once a project is open.
+Nearly everything in Kubiq works against a [project](projects): a folder on your machine that its agents run in. **New agent** and **New terminal** appear in the title bar once a project is open.
 
 ## Open a project
 
@@ -22,16 +22,16 @@ Nearly everything in Ubiq works against a [project](projects): a folder on your 
 2. Choose the folder you want to work in, and press **Add**.
 3. Project settings opens on **General**, titled **New project**. Check the **Project name**, pick a **Color** if you like, and press **Create**.
 
-The project opens in this window, with the [rail](workbench-rail) down the left edge and the project's name in the title bar. Ubiq remembers it, so the project picker offers it on every later launch.
+The project opens in this window, with the [rail](workbench-rail) down the left edge and the project's name in the title bar. Kubiq remembers it, so the project picker offers it on every later launch.
 
 To start from a repository instead of a local folder, open the chevron beside **Add a project** and pick **Clone a project…**; [Clone a project](how-to-clone-a-project) walks through it. **Open remote project…** in the same menu reaches a folder on another machine; [Remote hosts](remote-overview) explains it.
 
 ## Start your first agent
 
-Install the harness you want to use, and sign it in, the way its own documentation describes; Ubiq starts the program that is already on your machine.
+Install the harness you want to use, and sign it in, the way its own documentation describes; Kubiq starts the program that is already on your machine.
 
 1. Press **New agent** in the title bar. The [new agent dialog](agents-new-agent) opens.
-2. Open the **Harness** tab and pick your harness. A **Default** row runs it with its own configuration, exactly as it runs in a terminal. A dimmed row is a harness Ubiq cannot find on this machine.
+2. Open the **Harness** tab and pick your harness. A **Default** row runs it with its own configuration, exactly as it runs in a terminal. A dimmed row is a harness Kubiq cannot find on this machine.
 3. Leave the model and the permission mode as they are, or change them. Type a first task in **Initial prompt** if you want the agent to start working at once.
 4. Press **Start**.
 

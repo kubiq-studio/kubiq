@@ -3,7 +3,7 @@ id: inbox-config
 title: Proposal — configuration and persistence
 kind: proposal
 status: proposal
-summary: What Ubiq writes down and where — the five classes of durable state, the movable config root that keeps a development run out of the user's real accounts, the two store traits, and the rule that Ubiq holds bindings while agent-manager holds definitions.
+summary: What Kubiq writes down and where — the five classes of durable state, the movable config root that keeps a development run out of the user's real accounts, the two store traits, and the rule that Kubiq holds bindings while agent-manager holds definitions.
 read_when: you are deciding where a piece of durable state lives, adding a store, or wiring the embedded library's roots
 updated: 2026-08-31
 depends_on: [tech-architecture, inbox-projects]
@@ -11,7 +11,7 @@ depends_on: [tech-architecture, inbox-projects]
 
 # Proposal — configuration and persistence
 
-Everything Ubiq remembers between runs, and which half of it writes each thing down. The companion
+Everything Kubiq remembers between runs, and which half of it writes each thing down. The companion
 to [`project-handling-proposal.md`](completed/project-handling-proposal.md), which proposes the headless host
 this assumes: the host owns disk, the interface owns nothing, and every store below is the host's.
 
@@ -22,15 +22,15 @@ avoid is one store for all of them.
 
 | Class | Example | Home | Lost if deleted |
 |---|---|---|---|
-| The catalogue | Which projects exist, name, path, colour, `last_opened_at` | Ubiq's config root, one file | The list of projects |
-| Bindings | Which profile, harness and account this project opens on | Ubiq's config root, per project | A choice, remade in one click |
-| View state | Panel sizes, expanded folders, open tabs, palette, terminal layout | Ubiq's config root, per project | Where you left off |
-| Definitions | Profiles, harnesses, accounts, skills, plugins, MCP servers, policies | **agent-manager's**, never Ubiq's | Nothing of Ubiq's |
-| Derived cache | File-tree index, git history, transcripts | Ubiq's config root, per project, deletable | Nothing — it rebuilds |
+| The catalogue | Which projects exist, name, path, colour, `last_opened_at` | Kubiq's config root, one file | The list of projects |
+| Bindings | Which profile, harness and account this project opens on | Kubiq's config root, per project | A choice, remade in one click |
+| View state | Panel sizes, expanded folders, open tabs, palette, terminal layout | Kubiq's config root, per project | Where you left off |
+| Definitions | Profiles, harnesses, accounts, skills, plugins, MCP servers, policies | **agent-manager's**, never Kubiq's | Nothing of Kubiq's |
+| Derived cache | File-tree index, git history, transcripts | Kubiq's config root, per project, deletable | Nothing — it rebuilds |
 
 The line that matters most is between definitions and bindings. **A definition is agent-manager's; a binding to
-it is Ubiq's.** What a "developer" profile *is*, which accounts a harness has, what a skill contains
-— none of that is Ubiq's to store, and §5 says what that means as the set grows.
+it is Kubiq's.** What a "developer" profile *is*, which accounts a harness has, what a skill contains
+— none of that is Kubiq's to store, and §5 says what that means as the set grows.
 
 ## 2. Where the config root is
 
@@ -40,16 +40,16 @@ development run must not touch the accounts, catalogue and credentials a user wo
 | Source | Precedence |
 |---|---|
 | A `--config-root` flag | Highest |
-| `UBIQ_CONFIG_DIR` | |
-| The nearest `ubiq.toml` walking up from the working directory | |
-| `~/.config/ubiq` | The default |
+| `KUBIQ_CONFIG_DIR` | |
+| The nearest `kubiq.toml` walking up from the working directory | |
+| `~/.config/kubiq` | The default |
 
-`ubiq.toml` is a **bootstrap file, not a settings file** — it exists to say where the settings are,
+`kubiq.toml` is a **bootstrap file, not a settings file** — it exists to say where the settings are,
 and the discipline that keeps it useful is that it never grows a second answer to a question a store
 already answers. In this repository it sets `config_root = "_data/config"`, and `_data/` is ignored
 by git.
 
-**Local mode redirects agent-manager too.** A config root that moves Ubiq's stores but leaves the
+**Local mode redirects agent-manager too.** A config root that moves Kubiq's stores but leaves the
 embedded library pointed at `~/.config/agent-manager` is a trap: a test login writes a real account,
 and the credentials engine reaches the real keychain. So the host derives that library's roots from
 its own config root — catalogue, accounts, and a file-backed credentials engine in place of the OS
@@ -72,8 +72,8 @@ Three methods, because that is every mutation the catalogue makes. A file store 
 file for each; a SQL store maps each to a statement. Neither shape leaks into the caller. The trait
 and the directory it writes to live in the host crate; the UI never learns where.
 
-**The recommendation is one TOML file, not SQLite.** At `~/.config/ubiq/projects.toml`, overridable
-by `UBIQ_CONFIG_DIR`, on the convention `crates/agent-manager/src/settings.rs` already sets.
+**The recommendation is one TOML file, not SQLite.** At `~/.config/kubiq/projects.toml`, overridable
+by `KUBIQ_CONFIG_DIR`, on the convention `crates/agent-manager/src/settings.rs` already sets.
 
 | | One TOML file | SQLite |
 |---|---|---|
@@ -137,15 +137,15 @@ Three rules that differ from the catalogue's, and the differences are the point:
 
 Profiles with roles — director, developer, QA — harness definitions, several accounts per harness,
 skills and plugins are all coming, and all of them exist in agent-manager today. The rule that keeps
-that merge cheap is the one already written: **Ubiq never names a harness config path.** It follows
-that Ubiq stores no definition of any of them, and grows no registry of its own.
+that merge cheap is the one already written: **Kubiq never names a harness config path.** It follows
+that Kubiq stores no definition of any of them, and grows no registry of its own.
 
-What Ubiq's host does instead is two things.
+What Kubiq's host does instead is two things.
 
 **It projects the library's catalogue over the bus.** A `ListCatalog` answered by a `Catalog` message
 carrying profiles, harnesses, accounts, skills and plugins — identifiers and display names, resolved
 by the library, held by the UI as a projection like everything else. The composer's `HARNESSES`,
-`MODELS` and `MODES` constants in `crates/ubiq/src/state/chat.rs` stop being constants and become
+`MODELS` and `MODES` constants in `crates/kubiq/src/state/chat.rs` stop being constants and become
 that projection. **An account crosses as an id and a label, never as credential material** — the
 domain rule holds at the transport, not just in the library.
 
@@ -158,16 +158,16 @@ The host reads `project.toml` because it acts on it, and never reads `view.toml`
 opinion about layout. That is the same rule in both directions, and it is why they are two files.
 
 **A binding is a personal layer, not a replacement for the project's own configuration.** A team's
-committed `am.toml` is discovered by walking up from the project root, as it already is; Ubiq's
+committed `am.toml` is discovered by walking up from the project root, as it already is; Kubiq's
 binding is one more layer over it, resolved by the library's existing merge. That needs agent-manager
 to accept a layer from its embedder — a change in that crate, with its own documentation, not here.
 
-## 6. What Ubiq does not persist
+## 6. What Kubiq does not persist
 
-**Nothing is written inside the project folder.** Everything Ubiq remembers about a project lives in
-Ubiq's own config directory, keyed by the project's ULID. That buys four things: forgetting a project
+**Nothing is written inside the project folder.** Everything Kubiq remembers about a project lives in
+Kubiq's own config directory, keyed by the project's ULID. That buys four things: forgetting a project
 cleans up completely, a read-only or missing folder still has its view state, no repository acquires
-a file to gitignore, and no team has to agree on one. A committed `.ubiq/` for deliberately shared
+a file to gitignore, and no team has to agree on one. A committed `.kubiq/` for deliberately shared
 view state stays available later, as an opt-in that changes none of this.
 
 ## 7. On disk

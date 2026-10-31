@@ -73,7 +73,7 @@ only *configures and launches*; the interaction is standard console.
 ### Lib mode
 
 Embed the crate (`use agent_manager::…`) inside a larger tool — for example the
-Ubiq Agentic Workspace. The embedder:
+Kubiq Agentic Workspace. The embedder:
 
 - builds a `RunSpec` programmatically instead of parsing flags,
 - can register **custom in-process MCP servers** (a library callback the agent
@@ -88,8 +88,8 @@ split.)
 
 ## What `am` is *not*
 
-- **Not** a terminal emulator or a multiplexer. That is Ubiq's job; `am` is a
-  library Ubiq can embed.
+- **Not** a terminal emulator or a multiplexer. That is Kubiq's job; `am` is a
+  library Kubiq can embed.
 - **Not** a secrets manager. Account injection wires *references* (env var
   names, keyring entries, credential file paths) into the harness's native auth
   slot; the secret material stays in the OS keyring / the user's shell / a
@@ -112,5 +112,5 @@ split.)
   the tools a given run needs in the agent's context, instead of every MCP the
   user has ever installed.
 - **Embeddable.** Lib mode + abstracted I/O make `am` the substrate a bigger
-  orchestrator (Ubiq, a web UI, a CI job) drives without shelling out and
+  orchestrator (Kubiq, a web UI, a CI job) drives without shelling out and
   scraping a tty.

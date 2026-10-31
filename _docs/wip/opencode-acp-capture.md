@@ -12,8 +12,8 @@ verified: 2026-09-13
 # opencode ACP — captured from a live session
 
 Everything below was captured from a real `opencode acp` session on 2026-09-12 — opencode
-**1.18.28**, the ubiq-agent session `ses_f63e56491ffePLNaX3yhGLaZ61`, agent id
-`01M2E1J73WAHT2GBBHJBVYB5XN` — over most of a two-turn task. The frames are the ubiq bus stream
+**1.18.28**, the kubiq-agent session `ses_f63e56491ffePLNaX3yhGLaZ61`, agent id
+`01M2E1J73WAHT2GBBHJBVYB5XN` — over most of a two-turn task. The frames are the kubiq bus stream
 (session/update notifications mapped onto `ConvUpdate`), with the original wire JSON preserved on
 every frame, in `_data/opencode-acp-2.jsonl` (21,388 lines). Counts below are exact.
 
@@ -58,7 +58,7 @@ The session delegated three times (Scaffold, Author _docs, Verify). Each spawn i
   `rawInput: {}` (empty). opencode's `task` tool is a `think`-kind call precisely so the reading
   harness does not block it on a permission prompt.
 - **patch frame** — `sessionUpdate: "tool_call_update"`, `title: <the human operation>` — e.g.
-  `"Scaffold ubiq-pro workspace"` — and `rawInput: {"description": <operation>, "subagent_type":
+  `"Scaffold kubiq-pro workspace"` — and `rawInput: {"description": <operation>, "subagent_type":
   "general", "prompt": <the delegate's brief>}`.
 - **completion** — `kind: "think"`, status `completed`, content text starting
   `<task id="ses_…" state="completed">` and closing with `<task_result>`.
@@ -102,7 +102,7 @@ The five changes, all in `crates/agent-manager/src/io/acp_client.rs`:
 5. `attribute`'s delegate `ToolCall` arm sets the call's own origin when the title is `task` (§5).
 
 The interface renders the spawned-agent count and the todo count in one shared bar above the
-footer: `activity_bar` in `crates/ubiq/src/ui/conversation/mod.rs` draws a chip per reading, one
+footer: `activity_bar` in `crates/kubiq/src/ui/conversation/mod.rs` draws a chip per reading, one
 panel at a time, and is shared by both the agents column and the chat tab through
 `conversation::render`. Tests cover the echo, the structured read, the text fallback, the
 no-todos pass-through, and the subagent panel's layout.

@@ -63,7 +63,7 @@ To see what a harness can do, open **Info** from the three-dots menu and press *
 
 The dialog is titled with the harness's name and shows who answered and its protocol version, then groups of
 capabilities. A check mark means the harness has it; a dash means it does not. Under **Authentication** the sign-in
-methods it offers are listed, and the default one carries a check mark. The foot reads how long ago Ubiq learned this.
+methods it offers are listed, and the default one carries a check mark. The foot reads how long ago Kubiq learned this.
 **Close** dismisses it. It only reports; nothing in it can be changed.
 
 A harness that does not use the Agent Client Protocol has no such list, so its **Capabilities** button is dimmed. Before the

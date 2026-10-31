@@ -105,11 +105,11 @@ pub struct Profile {
     pub legacy_worker: Option<bool>,
     /// Whether the embedder has switched this profile off. Recorded only: a disabled profile is
     /// still stored, still readable and still resolvable — what "off" means is the embedder's
-    /// question, and for Ubiq it means "not offered anywhere a run is started from".
+    /// question, and for Kubiq it means "not offered anywhere a run is started from".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
     /// What this profile is for, in prose. Recorded only, never read by the library — the
-    /// embedder's business is what to do with it (Ubiq hands it to another agent through its own
+    /// embedder's business is what to do with it (Kubiq hands it to another agent through its own
     /// MCP surface), this crate only carries it through a save and an inheritance chain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

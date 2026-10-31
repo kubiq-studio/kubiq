@@ -9,7 +9,7 @@ related: [how-to-switch-permission-mode, agents-new-agent, agents-conversation]
 ---
 
 Every harness has its own idea of what it may do without stopping to ask: run a command, write a file, reach
-the network. A permission mode is that setting, and Ubiq shows each harness's own labels for it rather than
+the network. A permission mode is that setting, and Kubiq shows each harness's own labels for it rather than
 translating them. You choose one when you start an agent and can change it at any point; when the agent
 does need to ask, the question appears in its [conversation](agents-conversation).
 
@@ -46,4 +46,4 @@ setting belongs to one conversation, starts off, and is labelled while on.
   there to catch that; click its label to jump to the question.
 - **The shortcut does nothing.** The conversation has no request waiting, or none offering an allow or reject
   answer.
-- **A button you expected is missing.** The harness did not offer that answer, so Ubiq does not draw it.
+- **A button you expected is missing.** The harness did not offer that answer, so Kubiq does not draw it.

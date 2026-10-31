@@ -1,13 +1,13 @@
 ---
 id: onboarding-welcome
 title: Welcome
-summary: The onboarding wizard's first page — what Ubiq is, in three points.
+summary: The onboarding wizard's first page — what Kubiq is, in three points.
 hidden: true
 ---
 
-# Welcome to Ubiq
+# Welcome to Kubiq
 
-Ubiq is an **agentic workspace**: several AI coding agents — Claude Code, Codex, Gemini CLI,
+Kubiq is an **agentic workspace**: several AI coding agents — Claude Code, Codex, Gemini CLI,
 opencode, Copilot CLI — side by side under one window, each in a real terminal of its own.
 
 - **Agents run as themselves.** Every harness gets a full terminal, so it draws exactly what it

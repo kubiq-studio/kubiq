@@ -1,4 +1,4 @@
-# Ubiq — Screen 3: Subagents fan-out
+# Kubiq — Screen 3: Subagents fan-out
 # When the main agent spawns subagents, side panes appear for the others.
 # Layout: large main pane (left) + stacked subagent panes (right).
 # EVERY pane keeps the same TWO-ROW title (badge+workspace+status / folder·status).
@@ -24,7 +24,7 @@ elements:
   - ellipse: { id: tl_r, at: [40, 34], size: [12, 12], bg: "#fa5252", stroke: "#fa5252" }
   - ellipse: { id: tl_y, at: [58, 34], size: [12, 12], bg: "#fab005", stroke: "#fab005" }
   - ellipse: { id: tl_g, at: [76, 34], size: [12, 12], bg: "#40c057", stroke: "#40c057" }
-  - text: "● Ubiq   —   backend-refactor · 3 agents"
+  - text: "● Kubiq   —   backend-refactor · 3 agents"
     id: wintitle
     at: [540, 31]
     fontSize: 13
@@ -33,7 +33,7 @@ elements:
 
   # =================================================== SIDEBAR (always visible)
   - rect: { id: sidebar, at: [40, 72], size: [240, 768], bg: "#1a1b26", stroke: "#1a1b26", roundness: true }
-  - text: "◆ Ubiq"
+  - text: "◆ Kubiq"
     id: brand
     at: [64, 92]
     fontSize: 20

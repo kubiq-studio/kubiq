@@ -3,8 +3,8 @@ id: inbox-vim-mode
 title: Proposal — vim mode for the editor and textareas
 kind: proposal
 status: proposal
-summary: Modal editing in the code editor and multi-line textareas — normal, insert, visual and replace modes, operator-pending with text objects, command-line search, and a status indicator — built as a Ubiq-side addon that drives gpui-component's existing editing primitives.
-read_when: you are deciding how the editor handles keyboard input, or whether modal editing belongs in the component library or in Ubiq
+summary: Modal editing in the code editor and multi-line textareas — normal, insert, visual and replace modes, operator-pending with text objects, command-line search, and a status indicator — built as a Kubiq-side addon that drives gpui-component's existing editing primitives.
+read_when: you are deciding how the editor handles keyboard input, or whether modal editing belongs in the component library or in Kubiq
 updated: 2026-09-02
 depends_on: [feat-workbench]
 ---
@@ -19,7 +19,7 @@ exposes them only through standard macOS keybindings. There is no mode concept, 
 and no extension point for adding one: the `InputModeKind` trait is sealed with three compile-time
 markers.
 
-This proposes building vim mode as a **Ubiq-side module** that wraps the editor *and* multi-line
+This proposes building vim mode as a **Kubiq-side module** that wraps the editor *and* multi-line
 textareas (the chat composer, the agent input, the task description), intercepts keystrokes, and
 translates vim commands into the component's existing API. It does not modify `gpui-component`.
 
@@ -87,7 +87,7 @@ the existing editor and textarea, or a deep fork of the engine:
 
 ## 3. Where the mode state lives
 
-**A `VimState` struct in a new module `crates/ubiq/src/ui/vim/`.** It holds:
+**A `VimState` struct in a new module `crates/kubiq/src/ui/vim/`.** It holds:
 
 | Field | Type | Purpose |
 |-------|------|---------|
@@ -290,7 +290,7 @@ editor's bounds.
   toggle, not an application-wide switch. A user can have some editors in vim mode and others in
   insert mode. The chat composer can be in vim mode while a task description textarea is not.
 
-- **Not modifying gpui-component.** The vim module is entirely Ubiq-side. It drives the public API
+- **Not modifying gpui-component.** The vim module is entirely Kubiq-side. It drives the public API
   (`insert`, `replace`, `left`, `right`, `select_word`, etc.) and observes keystrokes. No changes
   to the component library.
 
@@ -301,20 +301,20 @@ editor's bounds.
 
 | Component | Change |
 |-----------|--------|
-| `crates/ubiq/src/ui/vim/mod.rs` | New module: `VimState`, `VimMode`, `VimInput<T>`, `Operator`, mode transitions |
-| `crates/ubiq/src/ui/vim/normal.rs` | Normal mode: keystroke dispatch, operator-pending, motions |
-| `crates/ubiq/src/ui/vim/insert.rs` | Insert mode: intercepts `Escape`, `Ctrl-O`, and Enter-in-textarea |
-| `crates/ubiq/src/ui/vim/visual.rs` | Visual/VisualLine/VisualBlock: selection extension, operators on selection |
-| `crates/ubiq/src/ui/vim/motion.rs` | Motion computation: from keystroke sequence to byte range |
-| `crates/ubiq/src/ui/vim/text_objects.rs` | Text object computation: `iw`, `aw`, `i"`, `a(`, etc. |
-| `crates/ubiq/src/ui/vim/search.rs` | `/`, `?`, `n`, `N`, `*`, `#` — drives the component's search session |
-| `crates/ubiq/src/ui/vim/replace.rs` | Replace mode: like insert but overwrites instead of inserting |
-| `crates/ubiq/src/ui/vim/status.rs` | The status indicator overlay |
-| `crates/ubiq/src/state/editor.rs` | `OpenFile` gains an `Option<VimInput<EditorState>>` field |
-| `crates/ubiq/src/app/mod.rs` | Keystroke observer registration for editors and textareas; `chat_input` and `agent_input` wrapped in `VimInput<TextareaState>` when vim is enabled |
-| `crates/ubiq/src/ui/viewer/mod.rs` | `buffer()` function uses `VimInput<EditorState>` when vim is enabled |
-| `crates/ubiq/src/ui/chat/composer.rs` | Composer renders `VimInput<TextareaState>` when vim is enabled; toolbar shows vim mode indicator |
-| `crates/ubiq/src/ui/agents/inspector.rs` | Agent input wrapped in `VimInput<TextareaState>` when vim is enabled |
+| `crates/kubiq/src/ui/vim/mod.rs` | New module: `VimState`, `VimMode`, `VimInput<T>`, `Operator`, mode transitions |
+| `crates/kubiq/src/ui/vim/normal.rs` | Normal mode: keystroke dispatch, operator-pending, motions |
+| `crates/kubiq/src/ui/vim/insert.rs` | Insert mode: intercepts `Escape`, `Ctrl-O`, and Enter-in-textarea |
+| `crates/kubiq/src/ui/vim/visual.rs` | Visual/VisualLine/VisualBlock: selection extension, operators on selection |
+| `crates/kubiq/src/ui/vim/motion.rs` | Motion computation: from keystroke sequence to byte range |
+| `crates/kubiq/src/ui/vim/text_objects.rs` | Text object computation: `iw`, `aw`, `i"`, `a(`, etc. |
+| `crates/kubiq/src/ui/vim/search.rs` | `/`, `?`, `n`, `N`, `*`, `#` — drives the component's search session |
+| `crates/kubiq/src/ui/vim/replace.rs` | Replace mode: like insert but overwrites instead of inserting |
+| `crates/kubiq/src/ui/vim/status.rs` | The status indicator overlay |
+| `crates/kubiq/src/state/editor.rs` | `OpenFile` gains an `Option<VimInput<EditorState>>` field |
+| `crates/kubiq/src/app/mod.rs` | Keystroke observer registration for editors and textareas; `chat_input` and `agent_input` wrapped in `VimInput<TextareaState>` when vim is enabled |
+| `crates/kubiq/src/ui/viewer/mod.rs` | `buffer()` function uses `VimInput<EditorState>` when vim is enabled |
+| `crates/kubiq/src/ui/chat/composer.rs` | Composer renders `VimInput<TextareaState>` when vim is enabled; toolbar shows vim mode indicator |
+| `crates/kubiq/src/ui/agents/inspector.rs` | Agent input wrapped in `VimInput<TextareaState>` when vim is enabled |
 
 **No new crates. No changes to gpui-component. No new bus messages.** Vim mode is local to the
 UI process.
@@ -356,7 +356,7 @@ Phases 3–5 are refinements.
 
 ## 13. What this asks to be decided
 
-- Vim mode is a Ubiq-side module that drives `gpui-component`'s public API, not a modification
+- Vim mode is a Kubiq-side module that drives `gpui-component`'s public API, not a modification
   to the component library. The `InputModeKind` trait stays sealed.
 - Keystroke interception is via `cx.observe_keystrokes()`, not via keybinding context switching.
   This requires no component changes and runs before the editor's own handlers.
@@ -367,7 +367,7 @@ Phases 3–5 are refinements.
 - In textareas with `submit_on_enter`, bare Enter in Insert mode submits (preserving existing
   behaviour); in Normal mode, Enter is always a movement. Shift+Enter always inserts a newline.
 - The cursor shape is changed via `set_editor_style()`, which the component already supports.
-- The status indicator is a Ubiq-rendered overlay, not a component feature.
+- The status indicator is a Kubiq-rendered overlay, not a component feature.
 - Phase 1 ships with Normal, Insert and basic commands on editors and textareas. The operator
   stack and text objects arrive in Phase 2.
 

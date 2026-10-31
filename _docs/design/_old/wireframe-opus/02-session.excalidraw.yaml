@@ -1,4 +1,4 @@
-# Ubiq — Screen 2: Session view (single main agent)
+# Kubiq — Screen 2: Session view (single main agent)
 # Left: always-visible sidebar with running sessions + Settings + Add session.
 # Main: session topbar, then ONE agent pane filling the work area.
 # The agent pane has a TWO-ROW title: row 1 = agent badge + workspace + status,
@@ -25,7 +25,7 @@ elements:
   - ellipse: { id: tl_r, at: [40, 34], size: [12, 12], bg: "#fa5252", stroke: "#fa5252" }
   - ellipse: { id: tl_y, at: [58, 34], size: [12, 12], bg: "#fab005", stroke: "#fab005" }
   - ellipse: { id: tl_g, at: [76, 34], size: [12, 12], bg: "#40c057", stroke: "#40c057" }
-  - text: "● Ubiq   —   backend-refactor"
+  - text: "● Kubiq   —   backend-refactor"
     id: wintitle
     at: [560, 31]
     fontSize: 13
@@ -34,7 +34,7 @@ elements:
 
   # =================================================== SIDEBAR (always visible)
   - rect: { id: sidebar, at: [40, 72], size: [240, 768], bg: "#1a1b26", stroke: "#1a1b26", roundness: true }
-  - text: "◆ Ubiq"
+  - text: "◆ Kubiq"
     id: brand
     at: [64, 92]
     fontSize: 20

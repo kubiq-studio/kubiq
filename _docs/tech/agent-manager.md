@@ -3,11 +3,11 @@ id: tech-agent-manager
 title: The agent-manager boundary
 kind: tech
 status: draft
-summary: What the embedded harness-management library owns, what Ubiq owns, how the application consumes it, and the rule that keeps the two from growing into each other.
+summary: What the embedded harness-management library owns, what Kubiq owns, how the application consumes it, and the rule that keeps the two from growing into each other.
 read_when: you are about to write code that launches a harness, drives one as a conversation, names a harness config path, or touches accounts, skills or MCP servers
 updated: 2026-10-26
 verified: 2026-10-26
-code_anchors: [crates/ubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/ubiq-host/Cargo.toml, crates/ubiq-host/src/agent.rs, crates/ubiq-host/src/conversation.rs, crates/ubiq-host/src/coordinator.rs, crates/ubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/ubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/ubiq-host/src/mcp/mod.rs, crates/ubiq-host/src/ask.rs, crates/ubiq-host/src/mcp/ask.rs, crates/ubiq-proto/src/ask.rs]
+code_anchors: [crates/kubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/kubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/ask.rs]
 depends_on: [tech-structure]
 review_cycle: monthly
 ---
@@ -22,7 +22,7 @@ throwaway configuration directory, optionally inside an isolated environment, an
 binary against it. The user's own `~/.claude` and its siblings are read-only for the duration.
 
 It ships two front ends: an `am` CLI for the terminal, and a front-end-agnostic library for
-embedding. Ubiq is the embedder.
+embedding. Kubiq is the embedder.
 
 Its full documentation lives with the crate, starting at `crates/agent-manager/_docs/README.md`.
 **That library owns every fact about harness configuration.** This document owns only the boundary.
@@ -36,47 +36,47 @@ Its full documentation lives with the crate, starting at `crates/agent-manager/_
 | What a run is composed of — skills, MCPs, account, instructions, hooks | the library |
 | What a saved definition can pin, how it inherits, and where it is stored | the library |
 | The permission modes a harness has (`Harness::modes`), and how `Profile.mode` reaches a policy | the library |
-| Which executable this machine runs for a harness, when it is not the harness's own name | Ubiq |
-| Which definition a conversation starts from, and the form that writes one | Ubiq |
+| Which executable this machine runs for a harness, when it is not the harness's own name | Kubiq |
+| Which definition a conversation starts from, and the form that writes one | Kubiq |
 | Which accounts exist and how credentials are referenced | the library |
 | Session history and resume, as the *harness* understands it | the library |
 | Which files are a harness's own record of a conversation, and the on-disk shape a record is written in | the library |
-| Where a run's record is kept, under whose id, and when it is written | Ubiq |
+| Where a run's record is kept, under whose id, and when it is written | Kubiq |
 | How a harness's I/O is bridged into structured events, and what those events are called | the library |
-| The one translation from those events onto the bus | Ubiq |
+| The one translation from those events onto the bus | Kubiq |
 | Whether a provider states how much of a plan is left, by what route, and at which URL | the library |
-| When to ask, what to cache, and how long a reading may be called current | Ubiq |
+| When to ask, what to cache, and how long a reading may be called current | Kubiq |
 | What a policy grants, and how the operating system enforces it | the library |
 | Which policy layers a confined run stacks, and which of them are unusable | the library |
-| Whether an agent is confined at all, and where its run directory lives | Ubiq |
-| Which `$HOME` a confined agent runs with, and which folders it may reach beyond the policy | Ubiq |
-| This machine's own toolchain locations and machine-only variables (`environment.toml`) | Ubiq |
-| That a harness runs under a pseudo-terminal in a pane | Ubiq |
-| Which panes exist, which is focused, how they are laid out | Ubiq |
-| A session as a *user's* piece of work, with a home folder | Ubiq |
-| The window, the theme, the chrome | Ubiq |
+| Whether an agent is confined at all, and where its run directory lives | Kubiq |
+| Which `$HOME` a confined agent runs with, and which folders it may reach beyond the policy | Kubiq |
+| This machine's own toolchain locations and machine-only variables (`environment.toml`) | Kubiq |
+| That a harness runs under a pseudo-terminal in a pane | Kubiq |
+| Which panes exist, which is focused, how they are laid out | Kubiq |
+| A session as a *user's* piece of work, with a home folder | Kubiq |
+| The window, the theme, the chrome | Kubiq |
 
 The overlapping word is **session**, and the two meanings are genuinely different. The library's
-session is a harness conversation that can be resumed. Ubiq's session is a named grouping of panes
+session is a harness conversation that can be resumed. Kubiq's session is a named grouping of panes
 with a folder. A document that means one must say which.
 
-## How Ubiq consumes it
+## How Kubiq consumes it
 
 The library exposes a run as a value — a `RunSpec` in `crates/agent-manager/src/spec.rs` — built
 from flags, settings and catalog contents, then handed to a provisioner that materialises the
-configuration directory and produces a launch. Ubiq's coordinator constructs that value
+configuration directory and produces a launch. Kubiq's coordinator constructs that value
 programmatically instead of parsing command-line flags, and spawns the resulting launch under a
 pseudo-terminal it owns.
 
-`crates/ubiq-host/src/agent.rs` is the whole of that consumption, and it is deliberately thin. The
+`crates/kubiq-host/src/agent.rs` is the whole of that consumption, and it is deliberately thin. The
 agent-type list is `harness::all()` projected into `AgentTypeInfo`, each row marked with whether the
 harness's own binary is on this machine or a command override is configured for it. A spawn naming
 one of those ids composes a run, provisions it, and answers with what to exec. A spawn naming
 anything else is a program name, which is what a shell is.
 
-**What this machine runs for a harness is Ubiq's answer, applied where the launch is resolved
+**What this machine runs for a harness is Kubiq's answer, applied where the launch is resolved
 rather than by changing the library.** The library says what a harness is called and how to launch
-it; `Agents::resolve_program` in `crates/ubiq-host/src/agent.rs` is the seam, already there to turn
+it; `Agents::resolve_program` in `crates/kubiq-host/src/agent.rs` is the seam, already there to turn
 a bare `claude` into an absolute path, that now also checks `HostSettings.agent_commands` first. An
 override for the harness splits into words — quote-aware, backslashes preserved so a Windows path
 survives — the first word becomes the program (looked up on the login shell's `PATH` only when it
@@ -94,29 +94,29 @@ directory, which is a TCC prompt on macOS and a harness reading someone else's `
 config or `CLAUDE.md`. A real session is unaffected: its cwd is `RunSpec::cwd`, the project folder
 the caller chose.
 
-**Ubiq does not build the `RunSpec` itself — `resolve` does.** `agent.rs` calls
+**Kubiq does not build the `RunSpec` itself — `resolve` does.** `agent.rs` calls
 `agent_manager::resolve::resolve` with a `RunFlags` naming only the harness and the folder, and
-overrides exactly four fields of what comes back: the configuration strategy (Ubiq owns where a
+overrides exactly four fields of what comes back: the configuration strategy (Kubiq owns where a
 run's state lives — `agent.rs`'s `run_config`: for a harness that `Harness::shares_home`,
 `ConfigStrategy::Home` on the home of the account the run resolved to, named by
 `home::HomeStore::home`, or with no account — or a name no home can be keyed by —
 `ConfigStrategy::Native` on the user's own config, confined or not; `ConfigStrategy::Fixed` on the
 run directory only for a harness that cannot share a home, which no built-in one is — `D194`),
-the I/O mode (Ubiq owns which face the workspace wears), the isolation
-(Ubiq's own settings own the toggle, and it applies to a conversation exactly as to a pane), and —
+the I/O mode (Kubiq owns which face the workspace wears), the isolation
+(Kubiq's own settings own the toggle, and it applies to a conversation exactly as to a pane), and —
 when that isolation is on — the permission mode, because a confined run is contained by the sandbox
 rather than by the prompts and would otherwise stop on every ask the sandbox has already answered.
-Ubiq names no mode to do it: `Harness::unattended_mode` is the library's own word for which of its
+Kubiq names no mode to do it: `Harness::unattended_mode` is the library's own word for which of its
 `modes()` means "ask nothing" (`None` for a harness that has no such mode or already asks nothing),
 and an explicit mode picked for this run outranks it — an agent definition's `mode` does not, being a default
 under the same toggle. Everything else — which account, which model, which skills and MCP servers, which config overlays — is the library's
 answer, read from the agent definition that names them. So an account reaches a pane without `agent.rs`
 learning what an account is, and a harness that grows a new composition knob needs no change here.
 
-The stores `resolve` reads are the filesystem defaults, each rooted under Ubiq's own config root so
+The stores `resolve` reads are the filesystem defaults, each rooted under Kubiq's own config root so
 a development run never touches what the `am` CLI manages: `<root>/accounts`, `<root>/agent-definitions`,
 `<root>/catalog` (overlaid by a project's own layer, below). A missing directory is an empty store, not an error, so this resolves on a machine
-that has configured nothing. The library's own settings file is deliberately **not** read — Ubiq's
+that has configured nothing. The library's own settings file is deliberately **not** read — Kubiq's
 settings are the settings surface, and a second file answering the same question is a second
 answer — which leaves `resolve`'s precedence as flags, then the agent definition.
 
@@ -130,7 +130,7 @@ run unauthenticated, and the model and mode ids are that harness's words. `start
 **A configured harness entry is a library `Profile`.** The pair a user thinks of as "Claude Code, work
 account" is `agent_manager::profile::Profile` with its `harness` and `account` set, and the agent
 layer that comes later is the same type with `defaults.instructions` filled. That record is what an
-agent definition is stored as — the library keeps the word `Profile`, Ubiq's own vocabulary is
+agent definition is stored as — the library keeps the word `Profile`, Kubiq's own vocabulary is
 `AgentDefinition` (`D174`). A `Profile` also
 carries a `mode` beside its `isolate` — the harness-native permission mode, which `resolve` reads
 into `spec.policy.permission_mode` under a flag and above nothing, so it sits on the `Profile` rather
@@ -138,14 +138,14 @@ than in `ProfileDefaults`: it is a policy axis, not a composition input. Beside 
 `max_subagents`, and `ProfileDefaults` carries `thinking` and `prompt`. **Those three the library
 records and never reads.** No harness has a subagent-ceiling flag and an opening prompt is a turn
 rather than a launch, so there is nothing for `resolve` to compose them into; they are on the
-agent definition because a saved setup has to remember what it asked for, and it is Ubiq's start that acts
+agent definition because a saved setup has to remember what it asked for, and it is Kubiq's start that acts
 on them. `thinking` is an ordinary default, on the same terms as `model`. The agent definition named
 `default` is what a run with no explicit selection resolves to.
 
 A `Profile` also carries `tags`, a list of free strings the library records and never reads, on the
 same terms as `max_subagents`; a child's non-empty list replaces its parent's. The legacy
 `mission_coordinator` and `mission_worker` booleans are still read from a stored profile and folded
-into the `coordinator` and `worker` tags, and never written. Ubiq owns what the tags mean
+into the `coordinator` and `worker` tags, and never written. Kubiq owns what the tags mean
 ([Transport contract](./transport-contract.md)).
 
 **A reference in an agent definition that resolves to nothing degrades the run rather than refusing
@@ -159,8 +159,8 @@ deliberate exceptions. `agent.rs` carries that list forward as `Composed::proble
 the agent definition up hears about the dropped entry without the launch failing over it. The CLI front end
 takes the same list and prints each line to stderr instead.
 
-**Ubiq writes the form over agent definitions and none of the mechanism behind them.**
-`crates/ubiq-host/src/agent.rs` reads and writes them through an `FsProfileStore` rooted at
+**Kubiq writes the form over agent definitions and none of the mechanism behind them.**
+`crates/kubiq-host/src/agent.rs` reads and writes them through an `FsProfileStore` rooted at
 `<root>/agent-definitions` — `definitions()` projects each into an `AgentDefinition` for the wire,
 skipping any that
 pins no harness, and `save_definition()` folds one back into a `Profile` and calls
@@ -176,13 +176,13 @@ override), and `Agents::infos` / `save_definition` are the one translation. The 
 isolation and `extends` chain a `Profile` can carry are still written by hand.
 
 **The catalog those ids name is the library's `FsRegistry`, one layer per scope** (`D196`).
-`crates/ubiq-host/src/catalog.rs` (`Catalog`) picks the directory a wire `scope` names — `<root>/catalog`
+`crates/kubiq-host/src/catalog.rs` (`Catalog`) picks the directory a wire `scope` names — `<root>/catalog`
 for the application, `<root>/projects/<id>/catalog` (`ProjectData::catalog`) for a project, which
 `Projects::forget` removes with the rest of the project — and converts between the library's
 `SkillEntry`/`McpEntry`/`SkillSource` and the wire's `SkillInfo`/`CatalogMcp`/`SkillSourceInfo`. Writing
 goes through the library's `CatalogStore` (link a skill folder, scan a folder, install from a source,
 save an MCP), so the host holds no catalog file format. Two rules are the host's own: a catalog MCP id
-may not be one of Ubiq's built-in slugs (`crate::mcp::knows`), because both share one `mcps` list and
+may not be one of Kubiq's built-in slugs (`crate::mcp::knows`), because both share one `mcps` list and
 the built-in answers first in `compose_run`; and a remote skill source is cloned into
 `<root>/cache/skill-sources`, which is derived data.
 
@@ -200,7 +200,7 @@ lacks lands in `Composed::problems`, like any stale reference.
 layer to every window; `AddSkill::Remote`, `SearchSkills` and `SearchMcpRegistry` clone, fetch or call
 out, so each runs on a thread of its own holding mailboxes (`catalog_change`, `catalog_answer`). A layer
 for a project the catalogue does not hold is a `CatalogError`. The library's `remote` feature (the MCP
-registry client) is switched on by `ubiq-host`'s `harness` feature, so the lean relay build carries
+registry client) is switched on by `kubiq-host`'s `harness` feature, so the lean relay build carries
 none of it.
 
 **An agent definition can belong to a project, and belonging is a location** (`D158`). Beside the global
@@ -253,7 +253,7 @@ lands where a run of that definition reads it; nothing is captured, and the outc
 exit code, which the pane's reaper notes (`pty::reap_noting`) before the window closes the pane —
 `HarnessHomeSignedIn` on a clean exit, `HarnessLoginFailed` otherwise.
 
-**The bridge is owned by a pump thread, and `crates/ubiq-host/src/conversation.rs` is that thread.**
+**The bridge is owned by a pump thread, and `crates/kubiq-host/src/conversation.rs` is that thread.**
 `IoBridge::next_event` blocks and both its methods take `&mut self`, so whoever reads a bridge
 cannot also be handed a prompt; the reader owns it and a turn reaches the harness through the
 detached `AgentInputSink` the bridge hands out. Events reach the window on the same unbounded
@@ -264,7 +264,7 @@ exists.** Asking a harness to shut down is the graceful way out and a harness th
 the ask keeps the pump thread waiting; nothing else can reach the child, because the pump owns the
 bridge. So
 `IoBridge::killer` hands out a kill-by-pid over the process the library spawned — the library keeps
-naming how a harness is started and stopped — and Ubiq's `Conversation::abort` is what uses it,
+naming how a harness is started and stopped — and Kubiq's `Conversation::abort` is what uses it,
 behind `AbortConversation`. The pid cannot go stale: a bridge holds its child unreaped until it is
 dropped, and reaping is still the bridge's own teardown.
 
@@ -279,14 +279,14 @@ Copilot all answer `multi_turn: true`, the last two because they now speak ACP i
 their prompt as one-shot argv. The **one-shot** path — a harness whose prompt is argv rather than a
 pipe write, answering exactly once and exiting, with that exit a turn ending rather than the
 conversation's — has no harness exercising it today, but the mechanism stays live in
-`crates/ubiq-host/src/coordinator.rs`'s `finish_one_shot_turn` for a future harness that needs it: the
+`crates/kubiq-host/src/coordinator.rs`'s `finish_one_shot_turn` for a future harness that needs it: the
 coordinator starts such a harness's pump `quiet` so it never announces `ConversationEnded` on its own;
 when the process exits, `finish_one_shot_turn` carries the transcript's sequence counter forward,
 keeps the harness's own session id off `Conversation::session_id()` (populated from
 `AgentEvent::SessionStarted` as the pump sees it), and puts the conversation back into
 `pending_conversations` rather than ending it. The next prompt would relaunch the harness with that
 id as `RunSpec::resume` and the new text as `RunSpec::initial.prompt` — `ConverseOptions` in
-`crates/ubiq-host/src/agent.rs` carries both through `Agents::converse`. A harness that names no
+`crates/kubiq-host/src/agent.rs` carries both through `Agents::converse`. A harness that names no
 session id is relaunched anyway and answers with no memory of the turn before it, which is `G95`.
 
 **One bridge covers every harness that speaks ACP.** `agent_manager::io::AcpBridge`
@@ -315,15 +315,15 @@ native sibling and only swapping `structured_bridge` for `AcpBridge` over `claud
 `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`, keeps a copy at
 `<config root>/cache/acp-registry.json` (`load` falls back to a bundled snapshot, and the embedder
 refreshes only past a 24-hour `TTL`, `D220`), and `detect` classifies each agent as installed
-(including a binary Ubiq downloaded under `<config root>/acp-agents/`, `D218`), downloadable, runnable
+(including a binary Kubiq downloaded under `<config root>/acp-agents/`, `D218`), downloadable, runnable
 through a pinned `npx`/`uvx` (`D219`), needing its adapter package, needing `node`/`uv` first, or absent,
-against the `PATH` the embedder passes (`ubiq-host`'s login-shell probe). A `PATH` hit counts only
+against the `PATH` the embedder passes (`kubiq-host`'s login-shell probe). A `PATH` hit counts only
 for an id in `KNOWN`, matched by its CLI or ACP binary name; the user's override and the install dir
 work for any id. A newer registry version of an
 installed binary is reported, never installed (`D221`). The registry is untrusted: a `cmd` is reduced to a
 basename and looked up, never executed from the document; `claude-acp`, `codex-acp` and any CLI
 named `claude` or `codex` are dropped. `install_command` only names the command — `npm install -g --`
-or `uv tool install --`, the package validated — and `crates/ubiq-host/src/acp.rs` runs it on a
+or `uv tool install --`, the package validated — and `crates/kubiq-host/src/acp.rs` runs it on a
 thread of its own with a five-minute timeout; for a downloadable agent it calls `install_binary`
 instead. The same module refreshes a stale cache on a thread of its own, at boot and on each check. An added agent becomes a harness through
 `harness/registry.rs` (`RegistryHarness`, installed by `set_registry_harnesses`): one generic
@@ -338,7 +338,7 @@ the model option's choices, with the thinking option's levels (`category` `thoug
 Vibe's `thinking`) under the current model only. A picked level reaches the run as
 `Provisioned::thinking` and `AcpBridge::apply_thinking` sets it over the wire after the handshake, as
 the requested model already is. Modes are not probed — `Harness::modes` is a fixed list — so a
-registry agent's mode picker still arrives with its session. **`initialize` is the only discovery an ACP agent offers, so the bridge takes all of it**: `io/acp_caps.rs` reads that answer once into an `AcpCapabilities` and `IoBridge::acp_capabilities` hands it to a type-erased caller, `None` for every bridge on a wire of its own — `_docs/tech/transport-contract.md` owns what Ubiq does with it. **Two things ACP does not say, the bridge says for it.** `from_acp` is a pure per-notification
+registry agent's mode picker still arrives with its session. **`initialize` is the only discovery an ACP agent offers, so the bridge takes all of it**: `io/acp_caps.rs` reads that answer once into an `AcpCapabilities` and `IoBridge::acp_capabilities` hands it to a type-erased caller, `None` for every bridge on a wire of its own — `_docs/tech/transport-contract.md` owns what Kubiq does with it. **Two things ACP does not say, the bridge says for it.** `from_acp` is a pure per-notification
 mapping, so the pieces of the `AgentEvent::UsageUpdate` and `Origin` contracts that need memory live
 in `AcpBridge`'s reader instead. ACP states `cost.amount` as a session-cumulative figure while
 `UsageUpdate.cost` is contractually a per-report delta, so the reader subtracts the running total —
@@ -367,7 +367,7 @@ stamps nothing leaves only the shape of the traffic, which is enough for a heuri
 `Task`/`Agent` tool call is open the main agent is blocked on it, so every unattributed chunk,
 thought, tool call and usage report is that delegate's. `ToolKind::Delegate` travels as
 `kind: "other"` with `_meta.toolKind: "delegate"` beside it, which is what the chat panel's subagent
-tabs read. That heuristic is now the fallback, not the primary path. The adapters Ubiq launches —
+tabs read. That heuristic is now the fallback, not the primary path. The adapters Kubiq launches —
 `@agentclientprotocol/claude-agent-acp` and `@agentclientprotocol/codex-acp` — implement the ACP
 subagent draft (PR #1992) behind a client capability, so `initialize_params` advertises it at
 `clientCapabilities._meta.jetbrains.air` (`version: 1`, `capabilities: ["nativeSubagentSessions"]`),
@@ -419,14 +419,14 @@ the vendor picker shapes and the child sessions a spawn streams on. The other fo
 protocol reference rather than from a capture, which `../backlog.md`'s `G101` carries.
 
 **One file knows both vocabularies.** `map_event()` in the same module is the only place that names
-`agent_manager::io::AgentEvent` and `ubiq_proto::conversation::ConvUpdate` together. Both are the
+`agent_manager::io::AgentEvent` and `kubiq_proto::conversation::ConvUpdate` together. Both are the
 Agent Client Protocol's `session/update` vocabulary — `D53` — so the translation is a rename, and
 confining it to the host is what keeps the interface free of any dependency on this library. A
 second mapping anywhere else is the boundary being crossed.
 
-Four things in these files are Ubiq's rather than the library's, and all four concern ownership
+Four things in these files are Kubiq's rather than the library's, and all four concern ownership
 rather than configuration. **A run's configuration directory belongs to whatever owns the run**: it
-is the `Fixed` directory — or the `Home`/`Native` scratch — under Ubiq's own config root, named by
+is the `Fixed` directory — or the `Home`/`Native` scratch — under Kubiq's own config root, named by
 the pane id or by the agent id —
 both ULIDs, so neither can be read as the other's — deleted when that pane closes or that
 conversation is retired, and swept at startup for whatever a killed process left. **An agent in a
@@ -438,7 +438,7 @@ same setting as a pane, and what most bridges still own alone is tool approval: 
 request itself, because it holds its child's descriptors. That is `G92` in
 [`../backlog.md`](../backlog.md).
 
-**Which `$HOME` a confined agent runs with is Ubiq's answer, and so is every folder granted beyond
+**Which `$HOME` a confined agent runs with is Kubiq's answer, and so is every folder granted beyond
 the policy.** `HostSettings.agent_home` and `HostSettings.extra_grants` reach `Agents::set_policy`
 on every `SetSettings`, and become the home mode and the `extra_ro`/`extra_rw` lists of the
 `IsolateOptions` handed to `agent_manager::isolate::plan`. The default is the user's real home, and
@@ -448,10 +448,10 @@ home, so a replaced home aims every toolchain grant the policy carries — `~/.c
 cannot build. Inheriting grants nothing extra by itself: only the paths a resolved layer names are
 reachable inside the home. **A toolchain installed somewhere other than its default location is
 named in a file, not discovered.** `IsolateOptions::grant_toolchains_from_env()` read a relocated
-`CARGO_HOME` or `GOPATH` off the process Ubiq itself was started with, which a GUI launch never
+`CARGO_HOME` or `GOPATH` off the process Kubiq itself was started with, which a GUI launch never
 carries — no login shell ran, so the variable is simply absent and the grant it would have produced
 never happens; the agent then holds `cargo` on its `PATH` and is denied the moment it runs it.
-`crates/ubiq-host/src/environment.rs` is the fix: `Environment::load` reads
+`crates/kubiq-host/src/environment.rs` is the fix: `Environment::load` reads
 `<config root>/environment.toml` at startup — an `[env]` table of variables and a `[[grants]]` list of
 `path`/`write` pairs, absent by default, and a missing or malformed file is the empty environment,
 logged rather than fatal. `Agents::set_environment` holds it, and two helpers are the only readers — `Agents::add_machine_env`
@@ -477,21 +477,21 @@ the launch's `StartConversation.grants`, and `add_rw` expands each `~` and adds 
 edits as one file, not a preference that syncs — see `G204`. What stays per-run is the
 configuration, which `CLAUDE_CONFIG_DIR` and its siblings pin to the run directory.
 
-**A run's record is written through the library and kept by Ubiq.** Two library entry points carry
+**A run's record is written through the library and kept by Kubiq.** Two library entry points carry
 it. `Harness::transcripts(config_dir)` in `crates/agent-manager/src/harness/mod.rs` answers the
 files a harness wrote as its own record inside a relocated configuration directory — defaulted to
 empty, which means that harness's record is not portable yet, and overridden today only by
-`Claude`. That defaulted method is the reason rule 1 survives this feature: Ubiq copies a file whose
-path it was told, and a `projects/<hash>/*.jsonl` literal in `crates/ubiq-host/src/` would be the
+`Claude`. That defaulted method is the reason rule 1 survives this feature: Kubiq copies a file whose
+path it was told, and a `projects/<hash>/*.jsonl` literal in `crates/kubiq-host/src/` would be the
 boundary crossed. `agent_manager::session::save` in `crates/agent-manager/src/session.rs` writes the
 `SessionMeta` — and only `meta.json`, deliberately not the library's `session::start`, which would
 leave an empty `transcript.jsonl` that `read_transcript` would report back as an empty
-`AgentEvent` transcript, when Ubiq's record is the harness's own file rather than `AgentEvent` lines.
+`AgentEvent` transcript, when Kubiq's record is the harness's own file rather than `AgentEvent` lines.
 
-The three answers around them are Ubiq's. **Where the store lives**: `Agents::sessions_dir()` is
+The three answers around them are Kubiq's. **Where the store lives**: `Agents::sessions_dir()` is
 `<root>/sessions`, passed to every call explicitly rather than resolved through
-`session::sessions_root`, so `AM_SESSIONS` cannot redirect a user's Ubiq transcripts into the store
-the `am` CLI manages — with the consequence, deliberate, that `am session ls` does not list Ubiq's
+`session::sessions_root`, so `AM_SESSIONS` cannot redirect a user's Kubiq transcripts into the store
+the `am` CLI manages — with the consequence, deliberate, that `am session ls` does not list Kubiq's
 runs. **Which id names a record**: the pane's or the agent's ULID, because that is what a teardown
 holds and the harness's own session id never reaches this process. **When it is written**: the
 metadata when a run is composed, so a run that crashes still has a record; the harness's files at
@@ -500,7 +500,7 @@ startup sweep included, where the finish time is the sweep's own and the exit co
 All of it is best effort: a record that cannot be written is never a reason to fail a spawn or a
 close, and a run with no metadata is a plain shell pane rather than an error.
 
-Confining a run in a terminal Ubiq owns works on macOS and Windows, not on Linux. isol8 spawns with
+Confining a run in a terminal Kubiq owns works on macOS and Windows, not on Linux. isol8 spawns with
 inherited stdio and keeps its child handle private, so no host hands it a pseudo-terminal: on macOS
 `isolate::confined_launch` renders the policy and execs `sandbox-exec` around the harness. Windows
 has no ConPTY seam either, but isol8 calls `CreateProcessW` with no console-creation flag, so its
@@ -511,8 +511,8 @@ For a conversation the caller is the shim `crates/agent-manager/src/io/structure
 `spawn_piped` starts, and that spawn now asks Windows for `CREATE_NO_WINDOW`, so the console the
 confined harness inherits carries no window rather than popping up a freestanding one beside the
 interface for every conversation — see [`operations.md`](./operations.md) for the same flag applied
-everywhere else Ubiq spawns a console-subsystem child headlessly.
-`isolate::confine_entrypoint()` runs before any other startup work — `ubiq-app`'s `run()` right
+everywhere else Kubiq spawns a console-subsystem child headlessly.
+`isolate::confine_entrypoint()` runs before any other startup work — `kubiq-app`'s `run()` right
 after `askpass()`, `agent-manager`'s own `main()` before `init_tracing()` — and answers the confine
 run's exit code, or `None` for an ordinary one. The re-entered process joins a `KILL_ON_JOB_CLOSE`
 job through the `win32job` wrapper, since `lib.rs` forbids raw `unsafe`, so killing it takes the
@@ -521,7 +521,7 @@ directory read-write and a confined child inherits its parent's (`G289`).
 `isolate::kill_descendants_on_exit()` puts an *ordinary*, unconfined process in that same kind of
 job — Windows keeps no process tree, so without it a closed or crashed interface left every pane's
 harness and every conversation's confine shim running with no window left to reach them through.
-`ubiq-app`'s `run()` calls it right after `confine_entrypoint()` and before anything else starts, a
+`kubiq-app`'s `run()` calls it right after `confine_entrypoint()` and before anything else starts, a
 failure worth only a line on stderr; it is the boot-time counterpart to the job a confine run joins
 for itself. Windows confinement also
 denies the network outright unless granted: isol8 checks a socket open (`\Device\Afd`) the same way
@@ -557,7 +557,7 @@ form, applying between `fork` and `exec`, so `confined_launch` errors on Linux;
 
 Everything an embedder can substitute is a trait: the catalog registry, the account store, the
 secret store, agent definitions, templates, session history, and an in-process MCP service behind the
-`inproc-mcp` feature. Ubiq supplies its own implementations where it wants application-specific
+`inproc-mcp` feature. Kubiq supplies its own implementations where it wants application-specific
 behaviour and takes the filesystem defaults elsewhere.
 
 One feature decision follows from embedding rather than shelling out:
@@ -565,15 +565,15 @@ One feature decision follows from embedding rather than shelling out:
 - **`default-features = false`.** The library's default build pulls in `clap` and `ratatui` for its
   own front ends. An application that has a window needs neither.
 
-**Ubiq exposes its own tools without turning `inproc-mcp` on.** The trait exists for an embedder
-that wants the library to host and rewrite its service for it; Ubiq instead binds one loopback
-`tiny_http` listener of its own (`crates/ubiq-host/src/mcp/`) and hands each run an ordinary
+**Kubiq exposes its own tools without turning `inproc-mcp` on.** The trait exists for an embedder
+that wants the library to host and rewrite its service for it; Kubiq instead binds one loopback
+`tiny_http` listener of its own (`crates/kubiq-host/src/mcp/`) and hands each run an ordinary
 `McpRef::Inline` HTTP reference pointed at it, the same shape a remote server would arrive in. That
 keeps the listener's lifetime, its identity model and its stateless-by-URL routing entirely inside
-`ubiq-host` rather than behind a library feature flag, which is the choice `D102` states and costs.
-The catalogue is `test`, `project-info`, `manage-ubiq-tasks`, `use-task`, `ubiq-kb` and `ubiq-ask`.
+`kubiq-host` rather than behind a library feature flag, which is the choice `D102` states and costs.
+The catalogue is `test`, `project-info`, `manage-kubiq-tasks`, `use-task`, `kubiq-kb` and `kubiq-ask`.
 The middle three share the host's `Work` and `Kb` through handles, so an agent reaches what a window
-does (`D120`). `ubiq-ask` shares neither: its one tool, `ask_user_question`, answers no fact the host
+does (`D120`). `kubiq-ask` shares neither: its one tool, `ask_user_question`, answers no fact the host
 already holds, so it mints an `AskId`, arms the dialog for the end of the turn (`D210`) and pushes
 `Message::AskUser` to the window that owns the conversation instead — the pending-call pattern
 `D138` states for a drone tool call, generalised to a call that waits on a person rather than a
@@ -581,40 +581,40 @@ remote host (`D155`). It is the first built-in tool that round-trips through the
 and the one request the listener answers as an event stream rather than as JSON — a park carrying an
 MCP `progressToken` gets `notifications/progress` while it waits (`D191`).
 
-`crates/ubiq-host/Cargo.toml` declares the dependency and `crates/ubiq/Cargo.toml` does not, which
+`crates/kubiq-host/Cargo.toml` declares the dependency and `crates/kubiq/Cargo.toml` does not, which
 is where the edge belongs: the host owns configuration and processes, and the interface may not name
 either. `just host` and `just ui` are the mechanical checks that this stayed true, and `just core`
 is the check that the host only ever reaches for the library's ungated core — `cli` and `pty` are
 absent from this build, so the CLI's own helpers are not available to it and the host builds its
 stores itself. Letting the *user* choose a composition is on the wire: `StartConversation` carries a
 agent definition id beside the account, and an agent definition's own fields are read by `resolve` under any flag the
-launch passes. `StartConversation.mcps` / `.skills` and `AgentDefinition.mcps` / `.skills` do the same for Ubiq's
+launch passes. `StartConversation.mcps` / `.skills` and `AgentDefinition.mcps` / `.skills` do the same for Kubiq's
 own built-in MCP servers and the catalog's skills and MCP servers. What a composition can still not name
 from the interface — hooks, instructions, isolation and the `extends` chain — is tracked in
 [`../backlog.md`](../backlog.md).
 
 ## The rules
 
-**1. Ubiq never names a harness configuration path.** Not `~/.claude`, not `CLAUDE_CONFIG_DIR`, not
-a settings filename. If Ubiq needs one, the library grows an accessor. A path literal in
-`crates/ubiq/src/` is the clearest possible sign the boundary has been crossed.
+**1. Kubiq never names a harness configuration path.** Not `~/.claude`, not `CLAUDE_CONFIG_DIR`, not
+a settings filename. If Kubiq needs one, the library grows an accessor. A path literal in
+`crates/kubiq/src/` is the clearest possible sign the boundary has been crossed.
 
-**2. Ubiq never hard-codes how to launch a harness.** Which binary, which arguments, which
-environment — the library answers all three. Ubiq's `agent.rs` holds the *user-facing* agent-type
+**2. Kubiq never hard-codes how to launch a harness.** Which binary, which arguments, which
+environment — the library answers all three. Kubiq's `agent.rs` holds the *user-facing* agent-type
 list and gets its launch facts from the library.
 
 **3. Nothing about windows, panes or terminals goes into the library.** The library builds with no
 UI dependency and must keep doing so; that property is what lets it stay embeddable by anything.
 
 **4. New harness support is a library change.** Adding a harness means a new implementation there,
-against the runtime contract already written up in `crates/agent-manager/_docs/harness/`. Ubiq gains
+against the runtime contract already written up in `crates/agent-manager/_docs/harness/`. Kubiq gains
 the harness with no change of its own — which is the whole point of the split.
 
 **5. A fact stated in the library's documentation is linked, never copied.** Two copies of a harness
 launch flag is one copy that goes stale silently.
 
-**6. Ubiq names no provider endpoint.** How a limit is asked for is the library's, like every other
-harness fact, and a quota probe lives behind `Harness::quota`. Ubiq decides *when* to ask and what
+**6. Kubiq names no provider endpoint.** How a limit is asked for is the library's, like every other
+harness fact, and a quota probe lives behind `Harness::quota`. Kubiq decides *when* to ask and what
 to do with the answer; it never learns where the answer comes from.
 
 **7. No credential material is read at all, and the library makes no network call of its own.** The

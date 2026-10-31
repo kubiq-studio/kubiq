@@ -18,8 +18,8 @@ The harness you work with is installed. You know the logins you will use, one pe
 
 ## Steps
 
-1. Open **Settings** in the [title bar](workbench-titlebar) and pick **Harnesses**. **Installed** lists every harness Ubiq knows, dimmed where it is not on this machine. **Identities**, further down, lists your accounts.
-2. Under **Identities** press **Add harness**. Pick the harness, then give the identity a **Name** that tells clients apart, such as `client-a`, and press **Sign in**. The harness runs its own sign-in inside the dialog, the same screen it shows in a shell; Ubiq never holds the password or token. An address the sign-in prints appears as a button under the terminal.
+1. Open **Settings** in the [title bar](workbench-titlebar) and pick **Harnesses**. **Installed** lists every harness Kubiq knows, dimmed where it is not on this machine. **Identities**, further down, lists your accounts.
+2. Under **Identities** press **Add harness**. Pick the harness, then give the identity a **Name** that tells clients apart, such as `client-a`, and press **Sign in**. The harness runs its own sign-in inside the dialog, the same screen it shows in a shell; Kubiq never holds the password or token. An address the sign-in prints appears as a button under the terminal.
 
 ![The Add harness dialog with Claude Code selected and the name client-a typed](../img/guides/accounts-and-definitions-1.png)
 
@@ -30,7 +30,7 @@ The harness you work with is installed. You know the logins you will use, one pe
 
 5. Press **Save**. The definition joins the list as `name`, then its harness, model and mode. **Clone** copies one under a new name, which is the quickest way to make the same role for another client; **Edit** and **Delete** do what they say.
 
-![The Agent definitions list with the new reviewer definition under the three that came with Ubiq](../img/guides/accounts-and-definitions-3.png)
+![The Agent definitions list with the new reviewer definition under the three that came with Kubiq](../img/guides/accounts-and-definitions-3.png)
 
 6. Start from a definition. Press **New agent**, stay on the **Agents** tab and open the **Agent** row: every saved definition is listed, each as `name — harness`. Pick one, write the first request, and press **Start**. **Customize** under the row changes the model, level or mode for this one start without touching the definition.
 

@@ -1,12 +1,12 @@
 # AGENTS.md
 
-**Ubiq** — agentic workspace. A desktop application that hosts several interactive AI coding
+**Kubiq** — agentic workspace. A desktop application that hosts several interactive AI coding
 agents (Claude Code, Codex, Gemini CLI, opencode, Copilot CLI) side by side, each in a real terminal
 pane, under one window. Think tmux, with the panes specialised for agent harnesses. Rust throughout:
-six crates — `crates/ubiq-proto` (the contract, the bus, the log sink), `crates/ubiq-host` (the
-headless host: processes, pseudo-terminals, the project catalogue), `crates/ubiq` (the GPUI
-interface), `crates/ubiq-app` (the binary, the only thing that names both halves),
-`crates/ubiq-db` (the database engine, a leaf) and `crates/ubiq-md` (the markdown engine, a leaf)
+six crates — `crates/kubiq-proto` (the contract, the bus, the log sink), `crates/kubiq-host` (the
+headless host: processes, pseudo-terminals, the project catalogue), `crates/kubiq` (the GPUI
+interface), `crates/kubiq-app` (the binary, the only thing that names both halves),
+`crates/kubiq-db` (the database engine, a leaf) and `crates/kubiq-md` (the markdown engine, a leaf)
 — plus the harness-management library they embed in `crates/agent-manager`.
 
 ## Finding things
@@ -21,14 +21,14 @@ Code loads them by name; any other harness reads `.claude/skills/<name>/SKILL.md
 
 | Skill | Read it when you are touching |
 |---|---|
-| `ubiq-ui` | Any screen, panel, modal, control, colour or layout in `crates/ubiq` |
-| `ubiq-agents` | A harness launch, accounts, profiles, permission modes, a `ConvUpdate`, the chat panel or the agents columns |
-| `ubiq-host` | The coordinator, a pane's lifecycle, the project catalogue, a store or a worker thread |
-| `ubiq-transport` | A message, the bus and its routing, the framing, an id type, a log subsystem, a remote host |
-| `ubiq-files` | The file, search, index or watch workers, the explorer tree, the picker or the search panel |
-| `ubiq-web-panels` | A web panel — a tenant, the bridge, the chrome page and its CSP, the vendor mirror |
-| `ubiq-icons` | An icon — the registry, the SVG spec, the draw-and-review loop |
-| `ubiq-docs` | Finishing any change — the same-commit duty, the frontmatter, the lint, `Dnn` and `Gnn` |
+| `kubiq-ui` | Any screen, panel, modal, control, colour or layout in `crates/kubiq` |
+| `kubiq-agents` | A harness launch, accounts, profiles, permission modes, a `ConvUpdate`, the chat panel or the agents columns |
+| `kubiq-host` | The coordinator, a pane's lifecycle, the project catalogue, a store or a worker thread |
+| `kubiq-transport` | A message, the bus and its routing, the framing, an id type, a log subsystem, a remote host |
+| `kubiq-files` | The file, search, index or watch workers, the explorer tree, the picker or the search panel |
+| `kubiq-web-panels` | A web panel — a tenant, the bridge, the chrome page and its CSP, the vendor mirror |
+| `kubiq-icons` | An icon — the registry, the SVG spec, the draw-and-review loop |
+| `kubiq-docs` | Finishing any change — the same-commit duty, the frontmatter, the lint, `Dnn` and `Gnn` |
 
 A skill is a reference, not an authority: where one disagrees with the document it was built from,
 the document wins and the skill is what you fix.
@@ -67,27 +67,27 @@ document; file it instead.
 
 ## Architecture rules
 
-- **The UI and the host talk only through the message set in `crates/ubiq-proto/src/messages.rs`.**
+- **The UI and the host talk only through the message set in `crates/kubiq-proto/src/messages.rs`.**
   No direct call, no shared handle, no callback that skips it — even though they share a process.
-  This is a crate boundary, not a convention: `crates/ubiq` does not depend on `crates/ubiq-host`,
+  This is a crate boundary, not a convention: `crates/kubiq` does not depend on `crates/kubiq-host`,
   and `just ui` and `just host` check that nothing reintroduced it.
 - **The UI never assumes the pseudo-terminal is local.** No path, no process handle, no file
   descriptor crosses into UI code. A pane is an ID plus a byte stream.
 - **The coordinator renders nothing** and has no opinion about layout or colour.
 - **Every message carries a pane ID**, including in the single-pane case.
-- **Terminal bytes stay opaque.** Ubiq writes no VT parser and no terminal state engine.
+- **Terminal bytes stay opaque.** Kubiq writes no VT parser and no terminal state engine.
 - **One host per process**, started by the binary before the first window. A window attaches to it
   and gets a client; pane messages route to the window that owns the pane, project messages reach
   every window.
-- **No literal colour outside `crates/ubiq/src/theme.rs`.** Every colour is a token, with a value in
+- **No literal colour outside `crates/kubiq/src/theme.rs`.** Every colour is a token, with a value in
   both palettes.
-- **Ubiq never names a harness config path and never hard-codes how to launch one.**
-  `crates/agent-manager` owns all of that, and Ubiq embeds it. New harness support is a change
+- **Kubiq never names a harness config path and never hard-codes how to launch one.**
+  `crates/agent-manager` owns all of that, and Kubiq embeds it. New harness support is a change
   there, not here.
 - **Claude Code's native `stream-json` bridge is never removed.** `io/jsonl.rs` and the
   `claude-code` harness stay, whatever else moves to ACP: `claude-code-acp` is a sibling, not a
   successor, and the native path is the one with no adapter process and no npm dependency between
-  Ubiq and the model. It also states three things no ACP adapter does — the per-model context
+  Kubiq and the model. It also states three things no ACP adapter does — the per-model context
   window, a delegate's spend split out of the turn's, and the full token breakdown. See `D95`.
 - **`crates/agent-manager` keeps no UI dependency** and must keep building with
   `--no-default-features` — `just core` is that check.
@@ -108,7 +108,7 @@ document; file it instead.
   The tab's right-click menu always offers both, `Hide` then `Close`.
 - **The coordinator's reader is never blocked by a slow UI** — that stalls the harness itself.
 - **Accounts carry credential references, never credential material.**
-- **The word "session" means two things.** Ubiq's session is a named grouping of panes with a
+- **The word "session" means two things.** Kubiq's session is a named grouping of panes with a
   folder; the library's session is a resumable harness conversation. Say which one you mean.
 
 ## Commands

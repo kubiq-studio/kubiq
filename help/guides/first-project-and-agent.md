@@ -23,9 +23,9 @@ One harness installed on your machine, such as Claude Code, and signed in the wa
 ![The window with a project open: its name in the title bar, the rail on the left and the project's files in the explorer](../img/guides/first-project-and-agent-1.png)
 
 2. Press **New agent** in the title bar. The **New agent** dialog opens. Everything under the first row stays faint until you choose what to run.
-3. Open the **Harness** tab, press the **Harness** row and pick the harness you want. A dimmed name is a harness that is not on this machine; [Settings](settings-harnesses) says how to point Ubiq at it.
+3. Open the **Harness** tab, press the **Harness** row and pick the harness you want. A dimmed name is a harness that is not on this machine; [Settings](settings-harnesses) says how to point Kubiq at it.
 4. Leave **Model** and **Thinking effort** alone for now, and pick a **Mode**. A permission mode is how much the agent may do before asking you; each harness uses its own names, and [Permission modes](agents-permissions) explains them.
-5. Write the first request in **Initial prompt**, for example `Add a discount(price, percent) function to app.py and mention it in README.md`. Ubiq sends it as the agent's first message, so the agent starts without another keystroke.
+5. Write the first request in **Initial prompt**, for example `Add a discount(price, percent) function to app.py and mention it in README.md`. Kubiq sends it as the agent's first message, so the agent starts without another keystroke.
 
 ![The New agent dialog on the Harness tab, with Claude Code chosen, Accept edits as the mode and a request in the Initial prompt box](../img/guides/first-project-and-agent-2.png)
 

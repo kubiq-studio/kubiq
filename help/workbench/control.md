@@ -1,7 +1,7 @@
 ---
 id: workbench-control
 title: The Control screen
-summary: Control mode — what Ubiq is holding right now and what your agents have spent in tokens, across every project.
+summary: Control mode — what Kubiq is holding right now and what your agents have spent in tokens, across every project.
 keywords: [control, stats, usage, tokens, spend, memory, uptime, cost, how much]
 context: [rail.control]
 order: 90
@@ -18,12 +18,12 @@ beside the strip saying what the page reports.
 
 | Part | What it does |
 |---|---|
-| **General** | Five readings of what Ubiq is doing right now |
-| **Memory** | How much memory Ubiq holds, or `unavailable` where the system will not say |
-| **Uptime** | How long Ubiq has been running, as `1h 05m` or `04m 12s` |
+| **General** | Five readings of what Kubiq is doing right now |
+| **Memory** | How much memory Kubiq holds, or `unavailable` where the system will not say |
+| **Uptime** | How long Kubiq has been running, as `1h 05m` or `04m 12s` |
 | **Open projects** | How many projects have at least one pane running |
 | **Agents live** | How many agents are alive now |
-| **Agents this run** | Every agent started since Ubiq launched, including ones that have ended, so it only rises |
+| **Agents this run** | Every agent started since Kubiq launched, including ones that have ended, so it only rises |
 | **AI** | A table of what agents have spent, one row per hour, harness, model and subagent |
 
 The **AI** table has the columns **Hour**, **Harness**, **Model**, **Subagent**, **In**, **Out**,
@@ -48,5 +48,5 @@ you enter the mode.
   token counts, Codex among them, adds no rows.
 - **Memory** says `unavailable`: the operating system declined to give it, so there is no number to
   show.
-- The numbers do not match a harness's own bill: they cover only what Ubiq saw reported, from the
+- The numbers do not match a harness's own bill: they cover only what Kubiq saw reported, from the
   moment it was recording.

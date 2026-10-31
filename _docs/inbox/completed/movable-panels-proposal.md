@@ -19,13 +19,13 @@ and each open file.
 
 What a panel *draws* when the file it holds is not plain text is
 [`file-viewers-proposal.md`](./file-viewers-proposal.md), its companion. Neither blocks the other,
-and each is worth less alone: a dock holding only terminals is a multiplexer Ubiq already nearly has,
+and each is worth less alone: a dock holding only terminals is a multiplexer Kubiq already nearly has,
 and a Markdown preview that cannot be dragged beside its source is a tab the user switches away
 from.
 
 ## 1. Where it stands
 
-`crates/ubiq/src/ui/shell.rs` builds one `h_resizable` of three slots — explorer, centre, chat — and
+`crates/kubiq/src/ui/shell.rs` builds one `h_resizable` of three slots — explorer, centre, chat — and
 makes the centre a `v_resizable` of two: the editor above, the dock below. The arrangement is
 written in the function; what varies at runtime is each panel's `visible` flag and its size within a
 constant range. Four consequences, and each is a reason to move.
@@ -136,7 +136,7 @@ explorer. That is the honest limit, and a real top region is a backlog row again
 `gpui-component` at the revision the workspace pins ships a complete dock: a `DockArea` owning one
 tree per region, tabbed groups, splits over the same `resizable` primitive `shell.rs` already uses,
 drag-to-tab and drag-to-edge with drop indicators, zoom, a free-floating tiles canvas, and a
-serialisable layout with a panel registry to rebuild leaves on load. Ubiq should use it rather than
+serialisable layout with a panel registry to rebuild leaves on load. Kubiq should use it rather than
 write a second one. That is [`../tech/ui-and-design.md`](../../tech/ui-and-design.md)'s "gpui-component
 first" applied to the largest widget in the library.
 
@@ -147,7 +147,7 @@ moves a *panel ID* within the tree — the entity is never rebuilt. That is exac
 demands: a dragged terminal is the same `TerminalView`, on the same stream, under the same harness.
 
 **Appearance is a seam, not a given.** The engine owns the tree, the drag and the persistence; a
-renderer trait owns every pixel. Ubiq writes its own skin instead of taking the library's default and
+renderer trait owns every pixel. Kubiq writes its own skin instead of taking the library's default and
 keeps `D18` — square surfaces, one coloured left edge, tokens only. The skin is also where §3's
 placement policy is enforced, because whether a tab offers a drag at all is the skin's answer.
 
@@ -226,7 +226,7 @@ payload forward, so an unknown panel is preserved rather than silently deleted o
 
 That fits the seam [`config-persistence-proposal.md`](../config-persistence-proposal.md) already
 proposes, without extending it: the layout is **view state, and the host stores it as an opaque value
-it never parses**, keyed by project. Ubiq writes nothing inside the project's folder. This resolves
+it never parses**, keyed by project. Kubiq writes nothing inside the project's folder. This resolves
 `G13` and more than it asked for — sizes, visibility, arrangement and which files were open, in one
 blob, which is exactly the row that proposal lists as "terminal layout".
 
@@ -252,7 +252,7 @@ diagram. What a viewer may put in its payload is its companion's rule.
 
 ## 9. Phases
 
-1. **The dock, with today's contents.** The `DockArea`, Ubiq's own skin over it, the panel adapter,
+1. **The dock, with today's contents.** The `DockArea`, Kubiq's own skin over it, the panel adapter,
    and the six existing areas as panels in the arrangement `shell.rs` builds now. Drag, split, tab
    and zoom work; nothing else changes. `LayoutMode`, `DockTab` and the hand-rolled strip leave.
 2. **Panes as first-class panels.** Every pane draws at once, the placement policy is enforced, the
@@ -271,7 +271,7 @@ Five decision rows, if this is taken:
 
 - The window's arrangement is a dock tree the user rearranges, not a frame the code fixes. Panels
   are dragged, tabbed, split, docked and zoomed.
-- The dock is `gpui-component`'s, with Ubiq's own skin over its renderer seam. Ubiq writes no drag,
+- The dock is `gpui-component`'s, with Kubiq's own skin over its renderer seam. Kubiq writes no drag,
   no drop indicator and no layout serialisation.
 - `D17` is half reversed: a panel is a view, because the dock requires one. `AppState` stays the only
   owner of state, and panels stay adapters over the area functions that exist.

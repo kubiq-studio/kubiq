@@ -14,7 +14,7 @@ A database connection saved with the project, a query run against it, and an age
 
 ## Before you start
 
-A project is open and you have a database to look at: PostgreSQL, MySQL or MariaDB, SQLite or SQL Server. The steps use a SQLite file, which needs no server or password. A server needs its host, port, database and user, and a password that Ubiq asks for when you connect.
+A project is open and you have a database to look at: PostgreSQL, MySQL or MariaDB, SQLite or SQL Server. The steps use a SQLite file, which needs no server or password. A server needs its host, port, database and user, and a password that Kubiq asks for when you connect.
 
 ## Steps
 
@@ -34,7 +34,7 @@ A project is open and you have a database to look at: PostgreSQL, MySQL or Maria
 
 6. Bring in the agent. Press **New agent** in the title bar, choose a harness, and write a request that carries what the agent needs, such as the table's columns and your query: `Explain this query and suggest an index for it: <query>`. A chat tab opens on the right, beside the editor. Paste what it suggests into the editor and press **Run** again; **Explain** shows the plan before you do.
 
-Ubiq checks every statement before sending it. On a read-only tab it underlines one that would write and refuses it, and a statement that can change data asks first, with **Run anyway** to go ahead.
+Kubiq checks every statement before sending it. On a read-only tab it underlines one that would write and refuses it, and a statement that can change data asks first, with **Run anyway** to go ahead.
 
 ## What next
 

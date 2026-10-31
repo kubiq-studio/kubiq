@@ -1,0 +1,410 @@
+//! The "Connect to a remote host" modal's state, and the pure parsing it needs.
+//!
+//! Nothing here opens a socket. `crate::app::remote_connect` does that, off the GPUI thread, and
+//! reports back through the same `cx.background_spawn` / `cx.spawn` pairing every other
+//! long-running action in this crate uses — see that module for the transport. What lives here is
+//! only what the modal draws, plus [`parse_connection_string`] and [`with_default_port`], which
+//! are pure precisely so they can be pinned down by a test with no window, no host and no socket
+//! at all.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use kubiq_proto::ids::SshProfileId;
+use kubiq_proto::settings::{DronePreset, RemoteScheme, SavedRemoteHost};
+
+use crate::app::ssh_connect::DeployStep;
+
+/// The port a remote host listens on when nothing else is said. Matches
+/// `kubiq_host::remote::serve`'s own default bind port — kept as a constant here rather than
+/// imported, since `kubiq-host` is not a dependency of this crate and the number is a fact about
+/// the wire protocol's convention, not about that crate's types.
+pub const DEFAULT_PORT: u16 = 7420;
+
+/// One attempt to reach a remote host.
+///
+/// Minted when a connect starts, and compared against on the way back: a background dial that is
+/// still running when the user cancels or retries must not paint over whatever replaced it, so
+/// every outcome the transport reports carries the id it was asked to answer, and a result naming
+/// a stale one is discarded rather than drawn. The same discipline `ConnectId`, `RepoQueryId` and
+/// every other in-flight id in this crate already follows — this one stays local to the interface
+/// (nothing about a TCP dial belongs in the wire contract), so it is minted here rather than in
+/// `kubiq_proto::ids`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AttemptId(u64);
+
+impl AttemptId {
+    pub fn generate() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// Which stage the modal is showing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoteConnectStep {
+    /// The two fields are being typed into. The modal's idle state.
+    Editing,
+    /// A dial is running in the background for `attempt`.
+    ///
+    /// `deploy` is the step the deployer is on, once a drone dial has found nothing on the far
+    /// `PATH` and fallen back to putting one there — a probe, a hash-verified resolve and an
+    /// upload over the same slow link the dial failed on. `None` for every dial that does not
+    /// reach that fallback, which is every socket dial and every drone the far machine already
+    /// has. The wording is the modal's, as it is for every other step here; what crosses is which
+    /// step, on `app::ssh_connect`'s own terms.
+    Connecting {
+        attempt: AttemptId,
+        deploy: Option<DeployStep>,
+    },
+    /// The dial answered with a `Client` and it was registered on the bus. `label` is the address
+    /// that succeeded, shown back so the user can tell which host they just added.
+    Connected { label: String },
+    /// The dial failed, or the host was reached and refused the token. `reason` is worded for the
+    /// modal to show directly — see `app::remote_connect::ConnectFailure`'s `Display`.
+    Failed { reason: String },
+}
+
+/// Which kind of host the modal is collecting, and therefore which fields it shows.
+///
+/// The same discriminant `SavedRemoteHost::carrier` carries, minus its payload: the payload here
+/// is the modal's own fields — the picked profile below, and the root in
+/// `AppState::remote_root_input` — because a half-filled form is not a `RemoteCarrier` yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ConnectMode {
+    /// Dial a `kubiq --serve` host over TCP: an address and a token.
+    #[default]
+    Socket,
+    /// Spawn an `ssh` to a drone: a saved SSH profile and a folder on the far machine.
+    Ssh,
+    /// A drone listening on a Unix socket on this machine. Never picked in the modal: the entry
+    /// is created programmatically and the modal only shows its path, read-only, on a reconnect.
+    Unix,
+}
+
+/// The connect-to-a-remote-host modal, while it is up.
+///
+/// Composed into `ui/shell.rs` on the same terms as `SettingsState::connect`: an `Option` field,
+/// `Some` only while the modal is on screen, painted from the window's root so it outlives
+/// whatever raised it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteConnectState {
+    pub step: RemoteConnectStep,
+    /// Set when this dial was started from the Hosts section's "connect" row on a saved host,
+    /// rather than typed fresh from the titlebar — the saved host's own name. Carried through so
+    /// a successful attach is attributed to that name instead of the bare address it dialled
+    /// under, the same way `saved` marks this as a reconnect worth reflecting in
+    /// `SettingsState::failed_hosts` rather than an ordinary first dial.
+    pub saved_name: Option<String>,
+    /// The saved entry this dial belongs to, when it belongs to one. Links the landing to its
+    /// keychain token and its scheme/trust settings.
+    pub save_id: String,
+    /// Which protocol to dial with. Follows the saved entry for a reconnect, the pasted scheme
+    /// for a fresh paste, and the picker's own toggle otherwise.
+    pub scheme: RemoteScheme,
+    /// Only meaningful for `https`: skip chain validation. Never silent — the modal says the
+    /// certificate is not verified, and the saved entry keeps the flag so the manager panel
+    /// shows it too.
+    pub trust_insecure: bool,
+    /// Which carrier this connect is for. A socket dial reads the address and token fields; an
+    /// SSH one reads [`Self::profile`] and the root field instead.
+    pub mode: ConnectMode,
+    /// The SSH profile picked, in [`ConnectMode::Ssh`]. `None` until one is chosen — and a saved
+    /// entry whose profile has since been deleted lands here as `None` too, so the modal asks
+    /// again rather than dialling something the user did not mean.
+    pub profile: Option<SshProfileId>,
+    /// The drone's lifetime, in [`ConnectMode::Ssh`]: attached to this session, detached with a
+    /// linger, or detached for good. Kept regardless of mode, like the scheme and trust picks
+    /// above — switching to `Ssh` and back loses nobody's choice.
+    pub preset: DronePreset,
+    /// The socket path, in [`ConnectMode::Unix`]. Shown, never edited.
+    pub unix_path: String,
+    /// The last dial was refused because the host presented another key than the one it is
+    /// pinned to: the `Failed` step offers "Trust new key". Cleared when a dial starts, so an
+    /// offer never outlives the refusal it answers.
+    pub pin_offer: Option<PinOffer>,
+}
+
+/// A pinned host's key changed: the pin it had, and the key it presented instead. Both are
+/// [`kubiq_tunnel::pin::fingerprint`]s.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PinOffer {
+    pub pinned: String,
+    pub presented: String,
+}
+
+impl Default for RemoteConnectState {
+    fn default() -> Self {
+        Self {
+            step: RemoteConnectStep::Editing,
+            saved_name: None,
+            save_id: String::new(),
+            scheme: RemoteScheme::Http,
+            trust_insecure: false,
+            mode: ConnectMode::Socket,
+            profile: None,
+            preset: DronePreset::Attached,
+            unix_path: String::new(),
+            pin_offer: None,
+        }
+    }
+}
+
+/// What pasting text into the address field yields.
+///
+/// A user reaching for this modal has one thing to paste: the whole `http://host:port?token=…`
+/// string the host printed to its terminal. Asking them to split it into two fields by hand before
+/// they can paste anything is the failure mode this type exists to avoid — so the address field
+/// accepts either shape, and a paste that turns out to carry a token fills both fields at once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedPaste {
+    /// The address part, with any scheme and trailing slash stripped. Never `None` — even a
+    /// malformed paste is echoed back as an address, so nothing typed is silently thrown away.
+    pub address: String,
+    /// The token, when the paste carried a `token=` query parameter.
+    pub token: Option<String>,
+    /// The scheme the paste carried, when it carried one. `None` is "no scheme typed", which
+    /// leaves the picker's own toggle alone rather than resetting it.
+    pub scheme: Option<RemoteScheme>,
+}
+
+/// Parse whatever was pasted or typed into the address field.
+///
+/// Accepts a full connection string (`http://host:port?token=abc-_123`), the same without a
+/// scheme, or a bare `host` or `host:port` with no query at all — in which case `token` comes back
+/// `None` and whatever is already in the token field is left alone. This is deliberately lenient
+/// rather than validating: a partial or malformed paste still yields *an* address, because the
+/// alternative is a paste that visibly does nothing, which reads as broken.
+pub fn parse_connection_string(input: &str) -> ParsedPaste {
+    let trimmed = input.trim();
+    let scheme = scheme_of(trimmed);
+    let without_scheme = strip_scheme(trimmed);
+    let (address, query) = match without_scheme.split_once('?') {
+        Some((address, query)) => (address, Some(query)),
+        None => (without_scheme, None),
+    };
+    let token = query
+        .and_then(|query| {
+            query
+                .split('&')
+                .find_map(|pair| pair.strip_prefix("token="))
+        })
+        .filter(|token| !token.is_empty())
+        .map(|token| token.trim().to_string());
+    ParsedPaste {
+        address: address.trim().trim_end_matches('/').to_string(),
+        token,
+        scheme,
+    }
+}
+
+/// The scheme a typed or pasted string carries, if any. `https` survives as a choice the dial
+/// honours; `http` is stated explicitly rather than assumed.
+fn scheme_of(input: &str) -> Option<RemoteScheme> {
+    let lower = input.to_ascii_lowercase();
+    if lower.starts_with("https://") {
+        Some(RemoteScheme::Https)
+    } else if lower.starts_with("http://") {
+        Some(RemoteScheme::Http)
+    } else {
+        None
+    }
+}
+
+/// Strip a leading `http://` or `https://`, case-insensitively. The host prints whichever
+/// scheme it serves, and the dial honours it — see `RemoteConnectState::scheme` — rather than
+/// treating both as the same thing.
+fn strip_scheme(input: &str) -> &str {
+    for scheme in ["http://", "https://"] {
+        if input.len() >= scheme.len()
+            && input.as_bytes()[..scheme.len()].eq_ignore_ascii_case(scheme.as_bytes())
+        {
+            return &input[scheme.len()..];
+        }
+    }
+    input
+}
+
+/// The address as the transport needs it: `host:port`, filling in [`DEFAULT_PORT`] when the typed
+/// address carried none.
+///
+/// A trailing `:1234` is taken as a port already given; anything else — including an address with
+/// no colon at all, and a malformed trailing colon with nothing after it — gets the default port
+/// appended. This does not attempt to handle a bare IPv6 literal (`::1`) without brackets; nothing
+/// upstream of it offers one today, and misreading a colon inside one as a port separator would be
+/// the wrong kind of clever for the address this modal actually asks for.
+pub fn with_default_port(address: &str) -> String {
+    let address = address.trim();
+    let has_port = address
+        .rsplit_once(':')
+        .is_some_and(|(_, port)| !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()));
+    if has_port {
+        address.to_string()
+    } else {
+        format!("{address}:{DEFAULT_PORT}")
+    }
+}
+
+/// Insert or update one saved remote in `hosts`, and answer with its id.
+///
+/// The id is stable; the address is not. A non-empty `saved.id` is matched by id (updated, or
+/// pushed as-is when unknown). An empty one is matched by address — a legacy entry with no id yet
+/// — and otherwise minted. Pure, so the persistence rule is pinned down with no window.
+pub fn upsert_host(hosts: &mut Vec<SavedRemoteHost>, mut saved: SavedRemoteHost) -> String {
+    let existing = if saved.id.is_empty() {
+        hosts
+            .iter_mut()
+            .find(|host| same_address(&host.address, &saved.address))
+    } else {
+        hosts.iter_mut().find(|host| host.id == saved.id)
+    };
+    match existing {
+        Some(existing) => {
+            // A legacy match keeps the address it was first reached at; an id match moves it —
+            // and a moved address is another machine as far as its key goes, so the pin goes too.
+            if !saved.id.is_empty() {
+                if !same_address(&existing.address, &saved.address) {
+                    set_pin(existing, None);
+                }
+                existing.address = saved.address;
+            }
+            // Unticking "trust certificate" returns the host to the platform's roots.
+            if existing.trust_insecure && !saved.trust_insecure {
+                set_pin(existing, None);
+            }
+            if saved.tls_pin.is_some() {
+                set_pin(existing, saved.tls_pin);
+            }
+            existing.name = saved.name;
+            existing.scheme = saved.scheme;
+            existing.trust_insecure = saved.trust_insecure;
+            existing.carrier = saved.carrier;
+            if existing.id.is_empty() {
+                existing.id = kubiq_proto::ids::HostSaveId::generate().to_string();
+            }
+            existing.id.clone()
+        }
+        None => {
+            if saved.id.is_empty() {
+                saved.id = kubiq_proto::ids::HostSaveId::generate().to_string();
+            }
+            let id = saved.id.clone();
+            hosts.push(saved);
+            id
+        }
+    }
+}
+
+/// Two saved addresses name the same `host:port` once the default port is applied.
+pub fn same_address(a: &str, b: &str) -> bool {
+    with_default_port(a) == with_default_port(b)
+}
+
+/// Change a saved host's key pin, bumping its revision so the host keeps this write over a stale
+/// window's (`HostSettings::keep_newer_pins`). An unchanged pin writes nothing. Answers whether
+/// it changed.
+pub fn set_pin(host: &mut SavedRemoteHost, pin: Option<String>) -> bool {
+    if host.tls_pin == pin {
+        return false;
+    }
+    host.tls_pin = pin;
+    host.tls_pin_rev += 1;
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kubiq_proto::settings::RemoteCarrier;
+
+    fn unix(id: &str, path: &str) -> SavedRemoteHost {
+        SavedRemoteHost {
+            id: id.into(),
+            name: "helper".into(),
+            address: path.into(),
+            scheme: RemoteScheme::Http,
+            trust_insecure: false,
+            carrier: RemoteCarrier::Unix {
+                path: path.into(),
+                preset: DronePreset::Attached,
+            },
+            tunnels: Vec::new(),
+            tunnel_rate_bps: None,
+            tls_pin: None,
+            tls_pin_rev: 0,
+        }
+    }
+
+    #[test]
+    fn a_moved_address_drops_the_pin_and_a_new_pin_replaces_it() {
+        let mut hosts = Vec::new();
+        let mut host = unix("", "/tmp/a.sock");
+        host.tls_pin = Some("aa".into());
+        let id = upsert_host(&mut hosts, host);
+
+        // Same address, no pin on the update: the saved pin stays.
+        upsert_host(&mut hosts, unix(&id, "/tmp/a.sock"));
+        assert_eq!(hosts[0].tls_pin.as_deref(), Some("aa"));
+
+        // A pin on the update replaces it.
+        let mut host = unix(&id, "/tmp/a.sock");
+        host.tls_pin = Some("bb".into());
+        upsert_host(&mut hosts, host);
+        assert_eq!(hosts[0].tls_pin.as_deref(), Some("bb"));
+
+        // Every deliberate change bumped the revision.
+        assert_eq!(hosts[0].tls_pin_rev, 1);
+
+        // Another address: the pin is gone.
+        upsert_host(&mut hosts, unix(&id, "/tmp/b.sock"));
+        assert_eq!(hosts[0].tls_pin, None);
+        assert_eq!(hosts[0].tls_pin_rev, 2);
+    }
+
+    #[test]
+    fn unticking_trust_drops_the_pin() {
+        let mut hosts = Vec::new();
+        let mut host = unix("", "/tmp/a.sock");
+        host.trust_insecure = true;
+        host.tls_pin = Some("aa".into());
+        let id = upsert_host(&mut hosts, host);
+        upsert_host(&mut hosts, unix(&id, "/tmp/a.sock"));
+        assert_eq!(hosts[0].tls_pin, None);
+        assert!(!hosts[0].trust_insecure);
+    }
+
+    #[test]
+    fn the_default_port_does_not_make_another_address() {
+        assert!(same_address("box", "box:7420"));
+        assert!(!same_address("box:1", "box:2"));
+    }
+
+    #[test]
+    fn an_empty_id_is_minted_and_a_second_upsert_by_that_id_updates() {
+        let mut hosts = Vec::new();
+        let id = upsert_host(&mut hosts, unix("", "/tmp/a.sock"));
+        assert!(!id.is_empty());
+        assert_eq!(hosts.len(), 1);
+        let again = upsert_host(&mut hosts, unix(&id, "/tmp/b.sock"));
+        assert_eq!(again, id);
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].address, "/tmp/b.sock");
+        assert!(matches!(
+            &hosts[0].carrier,
+            RemoteCarrier::Unix { path, .. } if path == "/tmp/b.sock"
+        ));
+    }
+
+    #[test]
+    fn an_unknown_caller_chosen_id_is_kept() {
+        let mut hosts = Vec::new();
+        assert_eq!(upsert_host(&mut hosts, unix("mine", "/tmp/a.sock")), "mine");
+        assert_eq!(hosts[0].id, "mine");
+    }
+
+    #[test]
+    fn an_empty_id_on_a_known_address_reuses_the_entry() {
+        let mut hosts = vec![unix("kept", "/tmp/a.sock")];
+        assert_eq!(upsert_host(&mut hosts, unix("", "/tmp/a.sock")), "kept");
+        assert_eq!(hosts.len(), 1);
+    }
+}

@@ -7,7 +7,7 @@ summary: The window's shell — the activity rail and the ten modes it selects b
 read_when: you are changing the window layout, the rail, the dock, where a panel may sit or when it is drawn, the titlebar, the navigator, the project picker, cloning a project, project or application settings, the Tools dialog, remote hosts, the file picker, vim mode, or the status bar
 updated: 2026-10-29
 verified: 2026-10-29
-code_anchors: [crates/ubiq/src/app/browser.rs, crates/ubiq/src/state/browser.rs, crates/ubiq/src/ui/browser.rs, crates/ubiq/src/ui/web_view.rs, crates/ubiq/src/app/mod.rs, crates/ubiq/src/app/onboarding.rs, crates/ubiq/src/state/onboarding.rs, crates/ubiq/src/ui/search.rs, crates/ubiq/src/app/shell.rs, crates/ubiq/src/app/panels.rs, crates/ubiq/src/state/mod.rs, crates/ubiq/src/state/workbench.rs, crates/ubiq/src/state/windows.rs, crates/ubiq/src/state/when.rs, crates/ubiq/src/state/prefs.rs, crates/ubiq/tests/prefs.rs, crates/ubiq-host/src/projects.rs, crates/ubiq/src/ui/shell.rs, crates/ubiq/src/ui/ribbon.rs, crates/ubiq/src/state/dock.rs, crates/ubiq/src/ui/dock/mod.rs, crates/ubiq/src/ui/dock/skin.rs, crates/ubiq/src/ui/tab_menu.rs, crates/ubiq/src/ui/menus.rs, crates/ubiq/src/ext/menu.rs, crates/ubiq/src/ui/overflow_menu.rs, crates/ubiq/src/ui/new_project_menu.rs, crates/ubiq/src/ui/run_tool_menu.rs, crates/ubiq/src/ui/hidden_agents_menu.rs, crates/ubiq/tests/new_project.rs, crates/ubiq/tests/dock.rs, crates/ubiq/tests/mode_restore.rs, crates/ubiq/src/ui/terminal.rs, crates/ubiq/src/ui/logs.rs, crates/ubiq/src/ui/outline.rs, crates/ubiq/src/ui/rail.rs, crates/ubiq/src/ext/rail.rs, crates/ubiq/tests/rail_container.rs, crates/ubiq/src/ui/project_face.rs, crates/ubiq/src/ui/titlebar.rs, crates/ubiq/src/ui/project_menu.rs, crates/ubiq/src/ui/all_projects.rs, crates/ubiq/src/ui/empty.rs, crates/ubiq/src/ui/status_bar.rs, crates/ubiq/src/state/updates.rs, crates/ubiq/src/app/updates.rs, crates/ubiq/src/ui/size.rs, crates/ubiq/src/app/size.rs, crates/ubiq/src/ui/kit/controls.rs, crates/ubiq/src/state/work.rs, crates/ubiq/src/ui/settings.rs, crates/ubiq/src/ext/settings.rs, crates/ubiq/src/ui/sink/ext_demo.rs, crates/ubiq/src/ui/acp_capabilities.rs, crates/ubiq/src/app/settings.rs, crates/ubiq/src/state/settings.rs, crates/ubiq/src/ui/kit/settings.rs, crates/ubiq/tests/settings.rs, crates/ubiq/tests/settings_container.rs, crates/ubiq/src/state/catalog.rs, crates/ubiq/src/app/catalog.rs, crates/ubiq/src/ui/catalog.rs, crates/ubiq/tests/catalog.rs, crates/ubiq/src/ui/sink/project.rs, crates/ubiq-host/src/cli_shortcut.rs, crates/ubiq-host/src/shell_integration.rs, crates/ubiq/src/state/file_picker.rs, crates/ubiq/src/ui/file_picker.rs, crates/ubiq/tests/file_picker.rs, crates/ubiq/src/state/vim/mod.rs, crates/ubiq/src/state/vim/step.rs, crates/ubiq/src/state/vim/motion.rs, crates/ubiq/src/state/vim/object.rs, crates/ubiq/src/state/vim/search.rs, crates/ubiq/src/app/vim.rs, crates/ubiq/tests/vim.rs, crates/ubiq/src/state/nav.rs, crates/ubiq/src/state/nav/text.rs, crates/ubiq/src/state/navigator.rs, crates/ubiq/src/app/nav.rs, crates/ubiq/src/ui/navigator.rs, crates/ubiq/tests/nav.rs, crates/ubiq/tests/nav_text.rs, crates/ubiq/tests/bookmarks.rs, crates/ubiq/tests/navigator.rs, crates/ubiq/src/app/projects.rs, crates/ubiq/src/state/clone.rs, crates/ubiq/src/app/clone.rs, crates/ubiq/src/ui/clone.rs, crates/ubiq-proto/src/repos.rs, crates/ubiq-host/src/repos/mod.rs, crates/ubiq-host/src/repos/list.rs, crates/ubiq-host/src/repos/clone.rs, crates/ubiq/src/state/remote.rs, crates/ubiq/src/app/remote_connect.rs, crates/ubiq/src/app/ssh_connect.rs, crates/ubiq/src/app/unix_connect.rs, crates/ubiq/src/ui/remote_connect.rs, crates/ubiq/src/app/host_browse.rs, crates/ubiq/src/app/hosts.rs, crates/ubiq/src/app/picker.rs, crates/ubiq/src/state/run_picker.rs, crates/ubiq/src/state/about.rs, crates/ubiq/src/app/about.rs, crates/ubiq/src/ui/about.rs, crates/ubiq/src/state/devtools.rs, crates/ubiq/src/app/devtools.rs, crates/ubiq/src/ui/devtools.rs, crates/ubiq/src/devtools/mod.rs, crates/ubiq/src/devtools/codec.rs, crates/ubiq/src/devtools/detect.rs, crates/ubiq/src/devtools/diff.rs, crates/ubiq/src/devtools/hash.rs, crates/ubiq/src/devtools/jwt.rs, crates/ubiq/src/devtools/lorem.rs, crates/ubiq/src/devtools/time.rs, crates/ubiq/src/devtools/uuids.rs]
+code_anchors: [crates/kubiq/src/app/browser.rs, crates/kubiq/src/state/browser.rs, crates/kubiq/src/ui/browser.rs, crates/kubiq/src/ui/web_view.rs, crates/kubiq/src/app/mod.rs, crates/kubiq/src/app/onboarding.rs, crates/kubiq/src/state/onboarding.rs, crates/kubiq/src/ui/search.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/panels.rs, crates/kubiq/src/state/mod.rs, crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/windows.rs, crates/kubiq/src/state/when.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/tests/prefs.rs, crates/kubiq-host/src/projects.rs, crates/kubiq/src/ui/shell.rs, crates/kubiq/src/ui/ribbon.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/ui/dock/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/ui/tab_menu.rs, crates/kubiq/src/ui/menus.rs, crates/kubiq/src/ext/menu.rs, crates/kubiq/src/ui/overflow_menu.rs, crates/kubiq/src/ui/new_project_menu.rs, crates/kubiq/src/ui/run_tool_menu.rs, crates/kubiq/src/ui/hidden_agents_menu.rs, crates/kubiq/tests/new_project.rs, crates/kubiq/tests/dock.rs, crates/kubiq/tests/mode_restore.rs, crates/kubiq/src/ui/terminal.rs, crates/kubiq/src/ui/logs.rs, crates/kubiq/src/ui/outline.rs, crates/kubiq/src/ui/rail.rs, crates/kubiq/src/ext/rail.rs, crates/kubiq/tests/rail_container.rs, crates/kubiq/src/ui/project_face.rs, crates/kubiq/src/ui/titlebar.rs, crates/kubiq/src/ui/project_menu.rs, crates/kubiq/src/ui/all_projects.rs, crates/kubiq/src/ui/empty.rs, crates/kubiq/src/ui/status_bar.rs, crates/kubiq/src/state/updates.rs, crates/kubiq/src/app/updates.rs, crates/kubiq/src/ui/size.rs, crates/kubiq/src/app/size.rs, crates/kubiq/src/ui/kit/controls.rs, crates/kubiq/src/state/work.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ext/settings.rs, crates/kubiq/src/ui/sink/ext_demo.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/app/settings.rs, crates/kubiq/src/state/settings.rs, crates/kubiq/src/ui/kit/settings.rs, crates/kubiq/tests/settings.rs, crates/kubiq/tests/settings_container.rs, crates/kubiq/src/state/catalog.rs, crates/kubiq/src/app/catalog.rs, crates/kubiq/src/ui/catalog.rs, crates/kubiq/tests/catalog.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq-host/src/cli_shortcut.rs, crates/kubiq-host/src/shell_integration.rs, crates/kubiq/src/state/file_picker.rs, crates/kubiq/src/ui/file_picker.rs, crates/kubiq/tests/file_picker.rs, crates/kubiq/src/state/vim/mod.rs, crates/kubiq/src/state/vim/step.rs, crates/kubiq/src/state/vim/motion.rs, crates/kubiq/src/state/vim/object.rs, crates/kubiq/src/state/vim/search.rs, crates/kubiq/src/app/vim.rs, crates/kubiq/tests/vim.rs, crates/kubiq/src/state/nav.rs, crates/kubiq/src/state/nav/text.rs, crates/kubiq/src/state/navigator.rs, crates/kubiq/src/app/nav.rs, crates/kubiq/src/ui/navigator.rs, crates/kubiq/tests/nav.rs, crates/kubiq/tests/nav_text.rs, crates/kubiq/tests/bookmarks.rs, crates/kubiq/tests/navigator.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/state/clone.rs, crates/kubiq/src/app/clone.rs, crates/kubiq/src/ui/clone.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-host/src/repos/mod.rs, crates/kubiq-host/src/repos/list.rs, crates/kubiq-host/src/repos/clone.rs, crates/kubiq/src/state/remote.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/app/unix_connect.rs, crates/kubiq/src/ui/remote_connect.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/state/run_picker.rs, crates/kubiq/src/state/about.rs, crates/kubiq/src/app/about.rs, crates/kubiq/src/ui/about.rs, crates/kubiq/src/state/devtools.rs, crates/kubiq/src/app/devtools.rs, crates/kubiq/src/ui/devtools.rs, crates/kubiq/src/devtools/mod.rs, crates/kubiq/src/devtools/codec.rs, crates/kubiq/src/devtools/detect.rs, crates/kubiq/src/devtools/diff.rs, crates/kubiq/src/devtools/hash.rs, crates/kubiq/src/devtools/jwt.rs, crates/kubiq/src/devtools/lorem.rs, crates/kubiq/src/devtools/time.rs, crates/kubiq/src/devtools/uuids.rs]
 depends_on: [tech-ui]
 review_cycle: monthly
 ---
@@ -19,7 +19,7 @@ review_cycle: monthly
 The workbench is the window a user leaves open all day. It puts the project's files, the file being
 read, the terminals the agents run in, and the conversation driving them on one screen, so that
 following an agent's work does not mean switching windows. It is the frame every other feature is
-seen through, and it is built against [`../design/ubiq-layout.png`](../design/ubiq-layout.png).
+seen through, and it is built against [`../design/kubiq-layout.png`](../design/kubiq-layout.png).
 
 ## Behaviour
 
@@ -58,7 +58,7 @@ unless the project hid it, which nine of the base's own ten are — or by `OptIn
 has to ask for it first (`DB`, the base's one, ticked in project settings > General > Modes and kept in
 `ViewPrefs::opted_in_modes`), or by a `When` predicate the contribution owns. The predicate is
 answered from interface state, so a contributed mode costs no message. The kitchen sink's own demo
-mode (`ubiq.rail.ext-demo`, M4, `X11`) is the twelfth registration and the first `When` —
+mode (`kubiq.rail.ext-demo`, M4, `X11`) is the twelfth registration and the first `When` —
 gated by a switch its own demo settings section draws — proving invariant 9's rule that a
 container with no contributor is silently dead. Finding that first `When` in the wild also found a
 real bug: `AppState::toggle_mode`'s "the last visible mode survives" guard counted *every*
@@ -74,7 +74,7 @@ it with the table tabs its explorer opened, and with a page pointing at the expl
 open; its SQL tabs live in the bottom region ([DB mode](./workbench-db.md)).
 
 **KB is the documents counterpart of IDE, and its explorer has several sources.** A source is a
-folder the user pointed at, a repository the host clones for them, or a wiki Ubiq keeps itself, each
+folder the user pointed at, a repository the host clones for them, or a wiki Kubiq keeps itself, each
 with its own name, its own read-only/read-write access and its own name-glob filter —
 `*.md *.excalidraw` — and none of them need be inside the project. A project nobody has configured
 draws one page in the panel with an **Add KB** button on it, which opens project settings on its own
@@ -89,7 +89,7 @@ project picture gets, which is `G311`.
 **Every row of the KB explorer has a right-click menu**, drawn with the same `kit::context_menu` the
 project explorer uses and answered by the same prompt and confirm modals. A **source row** offers
 Open in Finder, Copy path, *Get latest version* for a git source only, New file and New folder for a
-writable source, and *Rename source* always — a source's name is Ubiq's label for it, so it is
+writable source, and *Rename source* always — a source's name is Kubiq's label for it, so it is
 renameable even where the material behind it is not, and it commits through the whole-list
 `SetKbSources` write rather than a rename on disk. A **folder row** offers Open in Finder and Copy
 path, plus New file, New folder, Rename and Delete when the source is writable; a **file row** the
@@ -106,7 +106,7 @@ control; under them is a single **Add source** button. The modal it raises is th
 shape — `ui/kb/source_form.rs`, `kit::modal` with a footer, a first full-width `Picker` and every
 row below it drawn inert until that first answer lands: a name seeded from whatever the form points
 at until the user types their own, the kind (folder, git repository or wiki), and then the one thing
-that kind needs. A folder is chosen through **Ubiq's own host-backed file picker**, never the
+that kind needs. A folder is chosen through **Kubiq's own host-backed file picker**, never the
 platform dialog, because the path has to be one on the machine the *host* runs on; a repository
 takes a URL with a **Check** button beside it that sends `ListRepoBranches` — the clone modal's own
 ask, answered in the same `receive_repo` arm — and fills the branch picker from the answer, plus a
@@ -185,13 +185,13 @@ or a gpui field while the page also moved its caret; so while a webview is the w
 responder gpui's view answers `inputContext` with nil (`web_view::quiet_host_input_context`, on
 every webview — browser tabs and web panels alike), and the key reaches the page once. The address
 field still refuses any edit containing a control or private-use character (U+F700–U+F8FF), as a
-second guard. The field sends a query to the **search engine** of the Ubiq settings' Browser
+second guard. The field sends a query to the **search engine** of the Kubiq settings' Browser
 section (`UiSettings.search_engine`). Cookies and storage live in a **profile**: the project's own
-by default, kept when *Persist profile* is on in both the Ubiq and the project settings' Browser
+by default, kept when *Persist profile* is on in both the Kubiq and the project settings' Browser
 sections, or an ephemeral private store when the project's *Private profile* is on
 (`ViewPrefs`). The project's Browser section also clears its history and resets the profile; the
 history is host-kept (`BrowserHistory*`, [`transport-contract.md`](../tech/transport-contract.md)).
-An agent whose definition names the `ubiq-browser` MCP server drives the same tabs, in the one window
+An agent whose definition names the `kubiq-browser` MCP server drives the same tabs, in the one window
 the host picks — including `browser_screenshot` (the visible page as an MCP image, scaled to
 `max_dimension`, default 1568; macOS only) and `browser_set_viewport` (the same width setting;
 `browser_info` reports it as `viewport` and the laid-out width as `viewport_width`). The tab is a native view stacked over the window, so an overlay that must cover it
@@ -210,10 +210,10 @@ hides it while it is down (`ui::shell::overlaid`). Tabs are not saved in the arr
 | ⌘C/X/V/A/Z, ⇧⌘Z | page holding the keyboard, macOS | Handed to the page |
 | arrows, Page Up/Down, Home, End, F-keys | page holding the keyboard, macOS | Left to the page |
 
-The `ubiq-browser` tools are `browser_list_tabs`, `browser_open`, `browser_navigate`, `browser_back`,
+The `kubiq-browser` tools are `browser_list_tabs`, `browser_open`, `browser_navigate`, `browser_back`,
 `browser_forward`, `browser_reload`, `browser_stop`, `browser_close`, `browser_get_content`,
 `browser_eval`, `browser_info`, `browser_screenshot`, `browser_set_viewport` and `browser_wait_load`
-(`crates/ubiq-host/src/mcp/catalogue.rs`).
+(`crates/kubiq-host/src/mcp/catalogue.rs`).
 
 **Two kinds of screen stand over the same records, and the split is the point** — `D47`. Agents is
 where the user *talks to* the agents; `Teams` is where the user *arranges* them. A
@@ -267,7 +267,7 @@ knowledge base's.
 **A project is a colour.** Each project owns one of the theme's swatches, and wears it in four
 places at once: its dot in the picker, the fill behind its name in the titlebar, the mark above the
 rail, and the window's left edge. Two windows on two projects are told apart without reading
-anything. The mark is Ubiq's logo on that fill — the white file on a dark swatch and the blue one
+anything. The mark is Kubiq's logo on that fill — the white file on a dark swatch and the blue one
 on a light swatch, chosen by the swatch's luminance — so the logo reads on whatever the project is
 tinted.
 
@@ -294,7 +294,7 @@ says it has nothing to show, no open files, and "Add a project…" in the middle
 is where a first run starts, where closing a project leaves the window, and where taking a project
 into another window leaves the one it came from.
 
-**Ubiq never closes a window.** Only the user does, and the application quits with its last one. A
+**Kubiq never closes a window.** Only the user does, and the application quits with its last one. A
 window holding nothing is a window waiting for a project, not an error to be tidied away.
 
 **The empty state is two panels and a strip.** The centre panel says no project is open and offers
@@ -359,12 +359,12 @@ never removed because its
 folder went: an unplugged drive and a worktree mid-rebase are both temporary, and forgetting is
 always the user's action.
 
-**Forgetting asks first and says what it will do.** It drops the record and everything Ubiq
+**Forgetting asks first and says what it will do.** It drops the record and everything Kubiq
 remembers about the project, and touches nothing inside the project's own folder — which is why the
 word is "Forget". Rename and recolour are not on the row: they live in project settings.
 
 **Choosing a project's folder is the operating system's dialog**, both for Add and for Locate — the
-chooser the user already knows, with their bookmarks, their network volumes and a path field. Ubiq
+chooser the user already knows, with their bookmarks, their network volumes and a path field. Kubiq
 draws no folder browser of its own for this. Opening a file or a folder *inside* a project stays in
 the interface, where the explorer is. Adding a folder already in the catalogue points at the project
 that is there rather than making a second.
@@ -375,9 +375,9 @@ prefilled from the folder's last component. Create sends `AddProject`. Cancel le
 untouched.
 
 **Where the project keeps its data is chosen in that panel, and only there.** A "Project data" row
-offers two answers: Ubiq's config folder, which is the default and writes nothing inside the
-project, and "In the project (.ubiq/)", which writes the tasks, the project metadata and the
-configuration to a `.ubiq/` folder the project commits — with a `.gitignore` that leaves this
+offers two answers: Kubiq's config folder, which is the default and writes nothing inside the
+project, and "In the project (.kubiq/)", which writes the tasks, the project metadata and the
+configuration to a `.kubiq/` folder the project commits — with a `.gitignore` that leaves this
 machine's caches and view state out. **The edit panel draws the same row and it moves the data**
 (`T-249`): a pill sends `SetProjectStorage`, and because that copies a tree across two unrelated
 roots nothing is drawn as moved until the host says so. The row names the mode it is waiting for
@@ -420,7 +420,7 @@ is not there, a folder already there, an unsupported provider or a refusal it wa
 **A pasted repository URL is a clone, wherever it is pasted.** Typing one into the `⌘K` field and
 pressing Enter opens the same modal on that URL — see the navigator below.
 
-**A clone can be ephemeral.** The checkbox puts it under Ubiq's own ephemeral folder instead of the
+**A clone can be ephemeral.** The checkbox puts it under Kubiq's own ephemeral folder instead of the
 default project folder and marks the record `temporary`: the case is a repository read once and
 thrown away — a pull request looked at, a dependency checked before it is trusted. Closing an
 ephemeral project turns its row into the same inline confirmation a project with terminals raises,
@@ -452,14 +452,14 @@ greyed with the reason beside it rather than removed, so two providers' pages ar
 [`workbench-tasks.md`](./workbench-tasks.md) has what the board does with the result.
 
 **Skills and MCP servers are two more sections under Agents, and each has a project twin.** The
-application's pair sits after Agent definitions (`ubiq.settings.skills`, `ubiq.settings.mcp-servers`);
-the project dialog's (`ubiq.project.skills`, `ubiq.project.mcp-servers`, gated on a record) draw the
+application's pair sits after Agent definitions (`kubiq.settings.skills`, `kubiq.settings.mcp-servers`);
+the project dialog's (`kubiq.project.skills`, `kubiq.project.mcp-servers`, gated on a record) draw the
 same component with that project as the layer and, below the project's own rows, a `From the
 application` group with no actions, on which an entry the project shadows by id says so. Arriving at
 any of the four asks `ListCatalog` for the layers it draws. **Skills** lists a layer's skills (id,
 origin badge `Installed` / `Linked` / `Folder`, description elided, a Remove icon action — absent on a `Folder`
 one, which leaves with the folder entry under `Scanned folders`), with `Add skill folder…` and `Add
-skills directory…` (Ubiq's host folder picker, `PickerOwner::SkillFolder`, answered with `AddSkill`)
+skills directory…` (Kubiq's host folder picker, `PickerOwner::SkillFolder`, answered with `AddSkill`)
 and `Browse repositories…`, a modal that searches the configured sources (`SearchSkills`, source
 pills, `Install`). The application page alone also lists the sources with a Remove icon action and `Add source…`
 (a git address and an optional path; `SaveSkillSources`). **MCP servers** lists a layer's servers
@@ -579,7 +579,7 @@ names a project, never a window**: one whose project another window holds sends 
 and raises it, so nothing moves between windows and the follower's own place is untouched.
 
 **A repository's remote earns a globe beside the 3-dot**, which opens the project's page on its
-provider and says which URL in its hint. It is drawn only when `ubiq_proto::git::web_url` recognises
+provider and says which URL in its hint. It is drawn only when `kubiq_proto::git::web_url` recognises
 the default remote's URL, so a project that is not a repository, has no remote, or fetches from a
 local path shows nothing rather than a dead button.
 
@@ -594,7 +594,7 @@ rows from `state::run_picker::rows`): *Favorites* first, then *Recent* (the last
 starred), then the tools the user wrote — the project's before the machine's — and, past a rule, the
 targets the host found in the project's `justfile`, `Makefile` and `mise.toml`, the ones run before
 first. No tool appears twice, and typing cuts every section by a subsequence match on the name.
-Each row leads with its origin's icon — the runner's, or Ubiq's own mark for a tool the user wrote —
+Each row leads with its origin's icon — the runner's, or Kubiq's own mark for a tool the user wrote —
 and ends with a star and the controls its state allows: Play for a tool with no live pane, Stop and
 Restart plus a running dot for one that has. **A tool has one live run**: clicking its name (or
 Enter on the row) brings the live pane forward and gives it the keyboard, and only a tool with no pane
@@ -623,7 +623,7 @@ scrolling means coming forward lands where the user left rather than where the l
 stack holds 64, drops its oldest, and is not persisted. An entry whose project another window now
 holds is stepped over and kept; one whose project has been forgotten is dropped.
 
-**A destination survives being written down, as `ubiq://<project-id>/<view>[/<item>][#<locus>]`.**
+**A destination survives being written down, as `kubiq://<project-id>/<view>[/<item>][#<locus>]`.**
 The view slug decides how much follows it rather than the number of segments, so a file path needs
 no escaping: `ide` and `explorer` take everything up to the fragment, `terminal`, `tasks`, `chat`
 and `agents` take exactly one id, `graph` and `teams` each take `s:<session-id>` or `a:<agent-id>`
@@ -667,7 +667,7 @@ filtered and always under the cursor as the list opens. Then five groups, drawn 
 Recent, Bookmarks, Files, Tasks and Agents, eight rows each, matched by subsequence over what the
 row itself says. An empty query is Recent then Bookmarks and **no files**: a file list
 with nothing typed is the explorer. Files are the explorer's own filtered rows, under the same
-three-character floor and deepening as its background walk lands. A pasted `ubiq://` is an answer
+three-character floor and deepening as its background walk lands. A pasted `kubiq://` is an answer
 rather than a filter and collapses the list to one row naming where it goes; one naming a project
 this catalogue does not hold says so and takes no click. **A pasted repository URL collapses it the
 same way**, to a single Clone row whose Enter opens the clone modal on that URL rather than going
@@ -680,7 +680,7 @@ against the document, so `../src/app.rs#L200` opens that file at that line, and 
 past the project root is not a link. `http`, `https` and `mailto` are handed to the operating
 system; anything else does nothing at all. The same handler is on the chat transcript's rendered
 replies and on a task's rendered description, both resolved from the project root. **Terminal
-output is never scanned for links** — reading a harness's screen is the thing Ubiq does not do.
+output is never scanned for links** — reading a harness's screen is the thing Kubiq does not do.
 
 **The window's body is a dock, and the user arranges it.** Everything between the chrome is a tree
 of tabbed groups: dropping a tab in the middle of a group tabs it there, dropping it on a group's
@@ -690,7 +690,7 @@ titlebar, the rail, the dock and the status bar, and what is inside the dock is 
 
 **The window says which build it is.** A diagonal ribbon — a `kit::ribbon`
 — lies across the bottom-left corner, over everything, reading `beta` when the
-bundle's version is a released one — a `UBIQ_VERSION` starting with `v` — and `alpha` otherwise, a
+bundle's version is a released one — a `KUBIQ_VERSION` starting with `v` — and `alpha` otherwise, a
 bare `cargo build`'s `dev` included. **Clicking the band swaps
 the dock icon** for the yellow mark, and clicking it again puts the bundle's own icon back — which
 is how two builds running side by side are told apart in the dock. macOS only, since nothing else
@@ -844,7 +844,7 @@ opening empty. Then **New terminal**
 (`IconName::SquareTerminal`) opens the bottom region if it is shut and
 spawns exactly one pane, never two, whether the region was already open or had to be opened onto
 panes still in it. Then the notification bell, feedback, help, and **Point at something**
-(`UbiqIcon::TitlebarPointAt`, the ⇧F1 gesture given a control of its own) — help asks about the
+(`KubiqIcon::TitlebarPointAt`, the ⇧F1 gesture given a control of its own) — help asks about the
 screen you are standing on, this one waits for you to point at a part of it, so they are neighbours.
 Then **Settings**, and the overflow chevron flush against it as the fifth split button in the row:
 settings is the one thing in that menu reached often enough to stand on the strip, and the chevron
@@ -853,25 +853,25 @@ a project), Capture this window (needing a project and captures offered on this 
 — each row left off whole rather than drawn disabled when its condition fails, in that order.
 **Remote hosts is a row rather than a button** for the reason settings is no longer one: the manager
 is consulted when a connection is in question, not every session, and the strip is the scarce thing.
-Then the theme switch, and last of all **About** (`UbiqIcon::TitlebarAbout`, the Ubiq mark), the strip's right-most control. The overflow chevron lights while its own menu is open, the rule
+Then the theme switch, and last of all **About** (`KubiqIcon::TitlebarAbout`, the Kubiq mark), the strip's right-most control. The overflow chevron lights while its own menu is open, the rule
 every menu-raising control in this strip follows; the bell lights while its list is up, carries a
 badge of what has not been read, and flashes when something arrives —
 [`notifications.md`](./notifications.md) owns all of it. The overflow menu's **Show onboarding** restarts
 the first-run walk, which [`onboarding.md`](./onboarding.md) owns.
 Settings are interface-wide, so the overlay opens with no project.
 
-**The network button's modal opens on a pick between two carriers**, a pair of pills reading `crate::state::remote::ConnectMode` — **Ubiq host**, a socket dial taking a pasted connection string
+**The network button's modal opens on a pick between two carriers**, a pair of pills reading `crate::state::remote::ConnectMode` — **Kubiq host**, a socket dial taking a pasted connection string
 or an address and token typed separately, and **Drone over ssh**, a saved SSH profile plus a folder
 on the far machine. Both share the same four steps — editing, connecting, connected and
 failed-with-reason, `crate::state::remote::RemoteConnectStep` names them — and the same footer and
 Connect button; only the body beneath the pills and what "ready" means differ. A saved **local-socket** drone (`RemoteCarrier::Unix`) reopens the same modal with no
 pills: the socket path, read-only, and Connect. Pasting a whole `http://host:port?token=…` into the
 socket carrier's address field splits it across both fields at
-once, so the one string a running `ubiq --serve` printed is the only thing a user has to paste. The
+once, so the one string a running `kubiq --serve` printed is the only thing a user has to paste. The
 ssh carrier lists the SSH profiles from the settings page (below) as pills of their own — connecting
 is disabled until one is picked — a folder field the drone serves, empty meaning the login
 directory, and a third pill row for the drone's own lifetime: **Attached** (dies with this `ssh`),
-**Session** (detaches, survives a dropped link, not Ubiq quitting) or **Managed** (detaches for
+**Session** (detaches, survives a dropped link, not Kubiq quitting) or **Managed** (detaches for
 good, until stopped from the Drones settings section, below). `Session` and `Managed` both launch
 the drone with a `--listen … && exec … --attach …` line that *adopts* one already running on those
 roots rather than starting a rival — reconnecting after a dropped link is a fresh instance of that
@@ -893,12 +893,12 @@ changes, when the pin changes under it, or when the pin is gone — only **Recon
 key on first use. The Remote hosts manager notes the pin's head on the row and offers **Forget
 key**; a saved host whose address is edited, or whose "Trust certificate" is unticked, loses its
 pin. **A first connect to a machine with no drone deploys one and says so as it
-goes**: the far `PATH` is tried first, and only a shell answering "not found" sends Ubiq round the
+goes**: the far `PATH` is tried first, and only a shell answering "not found" sends Kubiq round the
 four steps the `Connecting` line names in turn — checking what was uploaded before, asking what
 machine it is, verifying the drone built for it, uploading it. A machine this build has no
 cross-built binary for stops there, naming the triple and `just drone-build`, which is what a tree
-with an empty manifest says every time. The transport underneath the modal — `crates/ubiq/src/app/remote_connect.rs`'s
-socket dial, and `crates/ubiq/src/app/ssh_connect.rs`'s `ssh` child process, each ending in the same
+with an empty manifest says every time. The transport underneath the modal — `crates/kubiq/src/app/remote_connect.rs`'s
+socket dial, and `crates/kubiq/src/app/ssh_connect.rs`'s `ssh` child process, each ending in the same
 pump threads — is [`../tech/architecture.md`](../tech/architecture.md)'s to describe, not this
 document's.
 
@@ -943,7 +943,7 @@ nothing on it says which machine it lives on. Losing that host takes its project
 again, along with its panes. What a new pane's menus offer stays the local machine's whichever host
 is active (`G188`).
 
-**How much of a project Ubiq indexes is a setting, per project, with an application-wide
+**How much of a project Kubiq indexes is a setting, per project, with an application-wide
 default.** Application settings' Search section offers three levels — Off, Full text, and Full text
 + symbols — and a project's own settings dialog offers the same three plus a Default row that
 returns it to whichever the application says. The levels are cumulative: Full text + symbols is
@@ -953,7 +953,7 @@ the files that could match. The default is Full text.
 
 A change takes effect at once rather than at the next open: turning indexing off frees the disk
 while the dialog is still up, and turning it on starts a build in the background. **The filesystem
-watch runs at every level, Off included** — what a level decides is what Ubiq keeps, not what it
+watch runs at every level, Off included** — what a level decides is what Kubiq keeps, not what it
 notices — so a project that is not indexed still refreshes its explorer and its Git state. Nothing
 is written into the project's own folder at any level.
 
@@ -973,8 +973,8 @@ bind or spawn is logged and the next click tries a fresh start — there is no s
 retry loop. It serves markdown rendered to HTML and other source files as syntax-highlighted code
 (highlighted client-side, via a CDN-loaded highlight.js — there is no server-side highlighter here),
 read-only, over `127.0.0.1` only. See `D55` for why this lives in the interface rather than the host.
-Its palette is Ubiq's own — `style.css`'s custom properties are transcribed from
-`crates/ubiq/src/theme.rs`'s `light()`/`dark()`, not a separate design.
+Its palette is Kubiq's own — `style.css`'s custom properties are transcribed from
+`crates/kubiq/src/theme.rs`'s `light()`/`dark()`, not a separate design.
 
 **The page itself has two search affordances, both browser-side.** The sidebar's filter matches
 names already in the DOM, live as it is typed, and its "docs only" toggle beside it (same row as
@@ -985,8 +985,8 @@ already walks (so `.gitignore` still applies), does a plain case-insensitive sub
 doc and known source files, and returns matches as a dropdown of file/line hits. Clicking one opens
 that file with its in-page find already run — see below. The scan is capped — 200 files, 20 lines
 per file — and says so (`truncated`) rather than pretending a stopped scan was a complete one.
-Deliberately no regex and no ranking: this module keeps zero dependency on `ubiq-host`, so it
-doesn't reach for the ripgrep machinery `crates/ubiq-host/src/search/` already has for the in-app
+Deliberately no regex and no ranking: this module keeps zero dependency on `kubiq-host`, so it
+doesn't reach for the ripgrep machinery `crates/kubiq-host/src/search/` already has for the in-app
 project search.
 
 **Every file the server can classify gets one of four views**, decided in `routes.rs`'s `serve_path`
@@ -1049,13 +1049,13 @@ none compiled in and none set under Settings → Feedback — the sentence under
 of the three. A change on that page re-enables or dims Send live, without a restart. A report without a
 picture is valid. A report that lands turns the footer into a receipt, with an Open link when the
 destination returned one. The balloon is drawn always, project or none, because it says something
-about Ubiq itself rather than about a project.
+about Kubiq itself rather than about a project.
 
-**The mark beside the balloon opens About Ubiq**, a fixed-size modal (`ABOUT_WIDTH` by
+**The mark beside the balloon opens About Kubiq**, a fixed-size modal (`ABOUT_WIDTH` by
 `ABOUT_HEIGHT`, so switching tabs never resizes it) with a `kit::tab_strip` of three tabs, drawn
 always, project or none. **About** holds the logo, the name, the running version with the channel
-this build follows, links to the website (`version::SITE`, `https://ubiq.app`) and the source
-repository (`version::REPO`, `https://github.com/mdnmdn/ubiq`) — `UBIQ_SITE` and `UBIQ_REPO` replace
+this build follows, links to the website (`version::SITE`, `https://kubiq.app`) and the source
+repository (`version::REPO`, `https://github.com/kubiq-studio/kubiq`) — `KUBIQ_SITE` and `KUBIQ_REPO` replace
 them at build time — and the updater's status line with the available release and its notes link.
 *Check for updates* sends `CheckForUpdates`; *Update* shows only while a release is available or
 ready and takes the same road as the Updates section (`AppState::take_update`): it downloads, then
@@ -1093,7 +1093,7 @@ node) or v5 (namespace and name), up to a hundred, in either case with or withou
 inspects a pasted one; **Lorem ipsum** writes paragraphs, sentences or words; **Diff** takes two
 texts — pasted, dropped, or loaded through the platform's chooser — and draws their line diff
 through the same `ui::viewer::diff` renderer a file's Git change uses, unified or side by side. The
-arithmetic is pure and lives in `crates/ubiq/src/devtools/` (named so because "tools" is already the
+arithmetic is pure and lives in `crates/kubiq/src/devtools/` (named so because "tools" is already the
 runnable-tools catalogue); a dropped or chosen file is read through the same guest-file reader a file
 dropped on the editor uses, since such a path is by construction on the window's machine — no
 message crosses to the host for any of it.
@@ -1149,7 +1149,7 @@ whether the rail carries the open-project badges, whether
 the titlebar's capture control and its keystroke are offered at all, and whether a conversation
 footer draws a second ring comparing cached tokens to the total — off by default), **Size** (the
 same preset pills, `ui_scale` slider and `text_ratio` slider the status bar's size popover draws,
-built from the one shared `crates/ubiq/src/ui/size.rs`; the saved-preset list, with Rename and
+built from the one shared `crates/kubiq/src/ui/size.rs`; the saved-preset list, with Rename and
 Delete beside each user-saved preset and neither offered on a built-in nobody has saved over; a
 trim pill ladder each for **Chrome text**, **Conversation text** and **Content text**; and Reset,
 which returns both sliders to 1.0 and leaves the three trims alone), **File
@@ -1167,19 +1167,19 @@ remote hosts a window may attach to), **SSH profiles** (the named SSH targets a 
 dial, each with its address, port and user and one of four ways to authenticate — an agent, a key
 file, a password or a `~/.ssh/config` alias — and a key's passphrase or a password filed at this
 machine's own credential store rather than in the settings file), **Drones** (per saved ssh-carrier
-host, what `ubiq-drone --list` reports is running there — uptime, pane count, version, linger and
+host, what `kubiq-drone --list` reports is running there — uptime, pane count, version, linger and
 the roots served — with a Check beside Refresh that asks only whether the host is reachable and a
 drone already on its `PATH`, drawn the same one line the connect modal's own Check does, above; a
 Refresh that shells to `ssh` again and a Stop, danger-confirmed because it
 kills every pane the drone holds; a version differing from this build's own is flagged with the
 one remedy the design names: stop, redeploy, reattach), **Assistance** (which backend
-writes the short lines Ubiq
+writes the short lines Kubiq
 would otherwise invent mechanically, what that backend reports about itself, whether a conversation
 names itself from its opening exchange, and the API providers
 configured here — each with its key typed once, its models picked from what the provider lists, and
 a test that streams a real answer back), **Tools** (the runnable tools
 every project inherits, edited at machine scope),
-**Command line** (the `ubiq`
+**Command line** (the `kubiq`
 command on the shell's `PATH`), **Feedback** (where the feedback modal posts: the effective
 intake URL and key, each badged *compiled* or *override*, the key shown only as its first twelve
 characters; a URL field and a masked key field with a show toggle, **Save**, **Clear URL
@@ -1197,7 +1197,7 @@ work and every control is a `Message` to it, a build that cannot update says why
 same unsaved-files-and-running-agents question the quit confirm asks
 (`FileDialog::RestartForUpdate`); the answer is `UpdateState`, kept on
 `WorkbenchState::updates`, asked at boot; the About modal's first tab is a second surface over the
-same state, and its Releases tab lists what every channel publishes), **Shell integration** on Windows only (*Open in Ubiq* on
+same state, and its Releases tab lists what every channel publishes), **Shell integration** on Windows only (*Open in Kubiq* on
 Explorer's right-click menu), and **Extensions demo** — the kitchen sink's own contribution
 (`X11`, `D186`), registered through `ext::settings::register` with nothing in this list's own
 module touched to add it, and the switch that gates the rail's own demo mode below — then
@@ -1275,7 +1275,7 @@ thing that still names the harness while it is off. Turning the switch on brings
 Which harnesses have a switch is read off the harness list, not written down
 (`WorkbenchState::native_sibling`), so a tool whose only wire is ACP never gets one.
 
-**Command opens the login modal on its one question: the command Ubiq starts that harness with.**
+**Command opens the login modal on its one question: the command Kubiq starts that harness with.**
 The picker lists every harness, installed or not, because an override is what makes an absent one
 startable — a row for a harness whose binary this machine lacks draws faint but stays pickable, and
 a gated ACP harness stays pickable here too, since it is reachable from a row that is still drawn.
@@ -1331,7 +1331,7 @@ would be and able to write the home it is signing in. A URL the login prints is 
 under the pane, because clicking beats selecting text in a terminal; the bytes themselves are
 untouched, so the real output is still there to read. Closing the modal abandons the login and
 costs nothing. A login that exits cleanly *is* the account: the host writes the record, the list
-grows it, and every agent that names that identity from then on starts signed in. Ubiq captures,
+grows it, and every agent that names that identity from then on starts signed in. Kubiq captures,
 copies and stores nothing — the login is the harness's, in the harness's own home (`D194`).
 
 **Signing in is a modal with a real terminal in it, because the harness runs its own login.** The
@@ -1429,7 +1429,7 @@ extending one that is ticked can un-mention it.
 **A `Tags` block and a `Disabled` checkbox sit under it, and they are the record's own answers.**
 The block draws the standard tags (`coordinator`, `planner`, `worker`) as toggle pills, any custom
 tag as a removable chip, and a free-text `Add`; the settings rows of the definitions list show a
-badge per tag. `coordinator`, `worker` and `doc` (`ubiq-doc` and `ubiq-archify`) are not labels —
+badge per tag. `coordinator`, `worker` and `doc` (`kubiq-doc` and `kubiq-archify`) are not labels —
 the host holds the MCP set each implies (`mcp::catalogue::role_mcps`)
 and re-adds it on every save, so a definition carrying one cannot be left without the servers the
 role needs, however the checklist was edited. The `prompt` field is labelled `Agent prompt`. The MCPs panel draws
@@ -1492,20 +1492,20 @@ way to ask for another, so the status bar is where the mode is reported instead 
 readout the user cannot act on and a switch that does not say what it did are the same slot asked
 twice, that chip is also the switch.
 
-**The `ubiq` command is a small script Ubiq writes onto the shell's `PATH`, and the Command line
-section is where it is put there and taken away.** `ubiq .` opens a folder as a project and
-`ubiq README.md` opens a file, in the window that already holds it when there is one. It is a
+**The `kubiq` command is a small script Kubiq writes onto the shell's `PATH`, and the Command line
+section is where it is put there and taken away.** `kubiq .` opens a folder as a project and
+`kubiq README.md` opens a file, in the window that already holds it when there is one. It is a
 script rather than a symbolic link because that is the only shape that reaches the running
-application: on a macOS bundle the script runs `open -a Ubiq.app`, so LaunchServices hands the path
+application: on a macOS bundle the script runs `open -a Kubiq.app`, so LaunchServices hands the path
 to the window that is already up. Off a bundle it starts the binary, and the single-instance
-handoff in `ubiq-app` hands the path to the application running under the same config
+handoff in `kubiq-app` hands the path to the application running under the same config
 root — a socket on Unix, a loopback port on Windows — so the new process exits at once; `D56`
 records why. What the window then does with the path is what a drop on the window does — a folder
 opens as a temporary project, a file outside every project opens as a guest tab (`D54`).
 
-**Every script Ubiq writes carries a `# ubiq-target:` marker naming the build it launches, and that
-line does both of the section's jobs.** Its presence is the proof Ubiq wrote the file, so **Remove**
-deletes only a shortcut of Ubiq's own and never a `ubiq` the user put on their `PATH` themselves.
+**Every script Kubiq writes carries a `# kubiq-target:` marker naming the build it launches, and that
+line does both of the section's jobs.** Its presence is the proof Kubiq wrote the file, so **Remove**
+deletes only a shortcut of Kubiq's own and never a `kubiq` the user put on their `PATH` themselves.
 The path on it, compared against the running executable, is how a shortcut left behind by a moved or
 replaced build is told apart from a current one — that is the `stale` case, and the button reads
 **Update** in the danger tint instead of **Remove**.
@@ -1533,15 +1533,15 @@ accounts: a shortcut can be moved, deleted or left behind by another build while
 and the answer costs a directory listing. Until the host answers, the section says it is looking —
 which is a different thing from saying no shortcut is installed.
 
-**On Windows, Shell integration puts *Open in Ubiq* on Explorer's right-click menu**, for a file, a
+**On Windows, Shell integration puts *Open in Kubiq* on Explorer's right-click menu**, for a file, a
 folder, and the empty space inside an open folder, for the current user only — no elevation, and no
-other account's menu changes. Picking it launches `ubiq <path>`, which the handoff delivers to the
-window that is up, where it lands exactly as `ubiq <path>` from a shell does. The section is the
+other account's menu changes. Picking it launches `kubiq <path>`, which the handoff delivers to the
+window that is up, where it lands exactly as `kubiq <path>` from a shell does. The section is the
 Command line section's shape: one row with **Install**, **Remove** or **Update**, a status line —
 *Not installed*, *Installed · on the right-click menu*, or *Installed — launches another build of
-Ubiq* in the danger tint — the command line the entries run beneath it, and the same banner for a
+Kubiq* in the danger tint — the command line the entries run beneath it, and the same banner for a
 write the host refused. *Stale* also covers one of the three entries gone missing, since **Update**
-is what puts it back. **Remove** deletes only the entries Ubiq wrote, recognised by the marker each
+is what puts it back. **Remove** deletes only the entries Kubiq wrote, recognised by the marker each
 carries (`D198`). The section asks every time it is opened, and appears only in a window running on
 Windows; a host on another platform answers that it is not supported, and the section says so.
 
@@ -1596,7 +1596,7 @@ on what is on screen, and the bench is exactly the difference between the field 
 reports. On the board it counts the work instead: how
 many cards are in each column, how many sub-tasks are done across the cards on screen, and how many
 of them nobody can finish without the user — over the cards the filters leave, because a count that
-disagrees with what is drawn is worse than none. Where Ubiq is writing is not among the facts it
+disagrees with what is drawn is worse than none. Where Kubiq is writing is not among the facts it
 reports: a non-default config root is named once in the log at startup and nowhere in the chrome,
 because the strip is read while working on a file and a path that never changes is not news.
 
@@ -1621,7 +1621,7 @@ has never been arranged in the mode it is entered in**: entering a mode forces i
 defaults rather than leaving whatever was on screen, so a project reached from another one never
 inherits that one's edges and has them written down as its own. A blob it cannot parse is discarded and the window opens on defaults.
 
-**A mode is keyed in that blob by its id**, `ubiq.rail.ide`, since `RailMode` became a container
+**A mode is keyed in that blob by its id**, `kubiq.rail.ide`, since `RailMode` became a container
 (`D184`). The ten names it used to be written under are read by the decoder, so nothing was
 discarded at the `5 → 6` schema step — and **an id this build has no registration for is kept, not
 dropped**: a mode a second edition contributes keeps its saved arrangement across a base launch,
@@ -1699,7 +1699,7 @@ reopen tabs the user has since closed.
 has been listed, so each listing that arrives opens whatever became reachable and asks for what is
 below it. A remembered folder that no longer exists is dropped rather than waited on.
 
-**The theme toggle switches both palettes at once.** Ubiq's tokens and the component library's own
+**The theme toggle switches both palettes at once.** Kubiq's tokens and the component library's own
 theme move together, so the editor and the chat's markdown never sit in a different mode from the
 chrome around them. The toggle flips ground **inside the palette family the window is in** — a warm
 dark reaches the warm light — because a family's two grounds are a pair the registry names, not an
@@ -1733,7 +1733,7 @@ rather than only the one that asked. The two folders the settings section writes
 settings blob as `projects_root` and `ephemeral_root`, through the same `SetSettings` every other
 host setting uses. The repository family is in the transport contract with the rest.
 
-**The `ubiq` command crosses the bus as a single pair.** `CliShortcut` goes out carrying nothing but
+**The `kubiq` command crosses the bus as a single pair.** `CliShortcut` goes out carrying nothing but
 `Query`, `Install` or `Remove`, and `CliShortcutState` comes back to every one of them — where a
 shortcut is, whether it launches this build, where one would go, and the directories considered. The
 interface names no directory in either direction, because which one the shell would find is a fact
@@ -1823,7 +1823,7 @@ mode.
 To add a panel: a `PanelKind` variant with its class, its home, its permanent name and its rule in
 `is_drawn()`, an arm in `ui::dock::body`, and the area module under `ui/`. One that a saved
 arrangement cannot rebuild from its name alone — as a file cannot, every file panel answering
-`ubiq.file` — also writes a payload in `dump()` and is read back out of it in `rebuild()`. To add a
+`kubiq.file` — also writes a payload in `dump()` and is read back out of it in `rebuild()`. To add a
 rail mode: **one registration**, not a variant (`D184`). `RailMode` is a `SlotId` newtype over the
 rail container, and a mode is a `RailModeSpec` handed to `ext::rail::register` — its group, label,
 note, slug, icon and `UiId`, its `Availability`, whether it needs a project, which side regions a
@@ -1875,7 +1875,7 @@ project is open in one window at a time.
 
 ## Implementation
 
-`AppState` in `crates/ubiq/src/app/mod.rs` is the root view. It owns the window's own state — the dock
+`AppState` in `crates/kubiq/src/app/mod.rs` is the root view. It owns the window's own state — the dock
 and the panels in it, a typed-over name and a pin for any non-file tab (`tab_names`, `pinned_tabs`
 — a file's own name and pin live on the `OpenFile` instead, since they are the tab keys that
 persist), the console, the emulators, the component library's `TextareaState`
@@ -1928,13 +1928,13 @@ pretty-prints through `state/format.rs` (2-space indent) as one `replace_all` �
 dirtied, never saved — and on a parse error leaves the buffer alone and raises a `Files`
 notification. YAML re-emit drops comments; JSON Lines is not offered.
 
-`open_project_window` in `crates/ubiq/src/app/mod.rs` is the only place a window is created, so the
+`open_project_window` in `crates/kubiq/src/app/mod.rs` is the only place a window is created, so the
 first window and "open in a new window" reach the same code. It seeds the registry, allocates the
 window's letter — before the window exists — and each window owns its
 own `AppState`. `focus_window` brings one to the front; `window_closed`, called from `main.rs`, drops
 a closed window's slot so everything it held returns to history.
 
-`WindowRegistry` in `crates/ubiq/src/state/windows.rs` is the process-wide half, held as a GPUI
+`WindowRegistry` in `crates/kubiq/src/state/windows.rs` is the process-wide half, held as a GPUI
 global. It holds the projection — `replace_all` for a `ProjectList`, `apply` for one snapshot,
 `forget` for a `ProjectForgotten` — and one `WindowSlot` per live window — its letter, the projects
 open in it, and which of them it is pointed at. `register`, `open_in`, `activate` and `close` are the
@@ -1944,7 +1944,7 @@ state. `groups` computes the picker's three lists for one window, and `window_co
 `AppState::several_windows()` asks before drawing a letter anywhere. Every `AppState` subscribes with `observe_global`, so a move in one window
 redraws the picker in all of them, and reads go through `WindowRegistry::read` rather than
 `default_global`, which would notify the observers on a plain read and spin the frame. The registry
-is pure logic and is tested without a frame in `crates/ubiq/tests/windows.rs`, which seeds it the
+is pure logic and is tested without a frame in `crates/kubiq/tests/windows.rs`, which seeds it the
 way the host does.
 
 `state/when.rs` renders a row's relative time at draw time from `last_opened_at`, and
@@ -1970,7 +1970,7 @@ the one case a default cannot rescue — nothing is missing, and the value means
 the blob is discarded whole, and `ui::dock::LAYOUT_VERSION` follows the number so the arrangement
 inside it goes with it.
 
-`crates/ubiq/src/ui/shell.rs` assembles the frame and nothing more: the mark and the titlebar in one
+`crates/kubiq/src/ui/shell.rs` assembles the frame and nothing more: the mark and the titlebar in one
 row, then the rail beside `AppState::dock()`, then the status bar, and — when one is up — the
 project-settings overlay, the application-settings overlay, the login modal, or one of the window's
 own menus over all of it: the tab menu, the new-pane menu, the new-agent menu and the titlebar's
@@ -1994,7 +1994,7 @@ open files" and would find nothing among the documents — `is_drawn()` is the h
 rule, and `closable()` says whose tab offers a close. `is_drawn()` is asked against one `Visibility` — everything the window knows about itself
 that a panel could care about — so a new rule is a field on that struct rather than another argument
 threaded through the dock. All of it is pure logic and is tested without a frame in
-`crates/ubiq/tests/dock.rs`, which is also what makes the cost of renaming a panel visible at the
+`crates/kubiq/tests/dock.rs`, which is also what makes the cost of renaming a panel visible at the
 moment somebody edits the string. `ui/dock/mod.rs` holds `WorkbenchPanel` — a `PanelKind`, a weak
 `AppState` handle and a focus handle, and nothing else — whose render delegates through `body()` to
 the area functions that already exist, so adding a panel is an arm of a `match` rather than a new
@@ -2011,7 +2011,7 @@ two apart by name before handing the key back as a `PanelKind::Kb` rather than a
 three renderer traits and draws every pixel the library would otherwise style: the tab strip at the
 same height as `ui::kit::tab_strip`, the active tab marked on its bottom edge, the dot beside a tab,
 the close wherever the panel allows one — through `ui::dock::close_panel()` rather than the group,
-because the component library refuses to give up a region's last panel and Ubiq collapses the
+because the component library refuses to give up a region's last panel and Kubiq collapses the
 emptied region instead — the drop indicator and the strips that resize a region —
 and, at the right end of a tab strip whose group holds a terminal or the console, the `+` that asks
 the host for a new pane and the chevron that asks for the menu of what else it could reach. The
@@ -2021,9 +2021,9 @@ group says which node it is and nothing about where it sits, and the control has
 strip of a region the user has emptied. The `+` is drawn only while that window holds a project. The
 chevron crosses the same seam a tab's right-click does, and for the same reason: a tab's right-click
 crosses it through the `with_tab_menu` builder and its `TabMenuRun` type, in
-`crates/ubiq/src/ui/tab_menu.rs` — the one module every kind of tab's menu is painted from. The
+`crates/kubiq/src/ui/tab_menu.rs` — the one module every kind of tab's menu is painted from. The
 skin cannot name `AppState`, so the tab's `PanelKind` and the click's point are handed across rather
-than a file's key alone, and the window paints the menu over the dock. Ubiq writes no drag, no drop
+than a file's key alone, and the window paints the menu over the dock. Kubiq writes no drag, no drop
 geometry and no layout serialisation.
 
 `AppState` holds the dock's half of that. `dock()` hands it to the shell; `regions_open()` and
@@ -2115,21 +2115,21 @@ rail. `ext::menu` holds a `MenuBlockSpec` — an id, the menu it belongs to, and
 because a menu's rows are not a fixed list: the shells are the machine's, the hidden agents are
 whatever is running. The base registers exactly four blocks, one
 per menu, and a second edition inserts, reorders or removes blocks on the
-`ubiq_app::Contributions::bar_menus` registry it is handed — with every base builder in
+`kubiq_app::Contributions::bar_menus` registry it is handed — with every base builder in
 `ui::menus` `pub`, a replacement block that wants the base's rows minus one calls it and filters.
 
 **The run picker has a container of its own: the runner kinds** (`ext::runner`). A discovered tool
 carries the id of the runner source that found it, and a `RunnerKindSpec` per id says what the
 picker calls the kind and which icon marks its rows. The base seeds `make`, `just` and `mise`;
 a runner no kind was registered for is drawn with a generic icon, not dropped. The registry is
-`ubiq_app::Contributions::runner_kinds`, installed beside the other three before the first window.
+`kubiq_app::Contributions::runner_kinds`, installed beside the other three before the first window.
 
 **A drone-served project's carriers are a container too: the origin carriers** (`ext::origin`). An
 `OriginCarrierSpec` gives a carrier's kind — what a project origin's `via` names — the targets the
 project dialog's Remote panel lists beside the SSH profiles, which saved remote it claims as one of
 its drones (so a folder picked on that drone becomes a local project pinned to it), and the hook that
 launches or adopts the drone when such a project opens. The base registers none; the registry is
-`ubiq_app::Contributions::origin_carriers`. [`drone.md`](./drone.md) owns what an origin is.
+`kubiq_app::Contributions::origin_carriers`. [`drone.md`](./drone.md) owns what an origin is.
 
 The rest is one module per area: `rail.rs`, `titlebar.rs`, `project_menu.rs`, `status_bar.rs`,
 `size.rs`, `explorer.rs`, `editor.rs`, `terminal.rs`, `empty.rs`, `chat/`, `agents/`, `teams/`
@@ -2141,7 +2141,7 @@ error into a line) with `app/clone.rs` carrying the traffic and linking `receive
 `app/wire.rs` chain. It reuses the kit and nothing else: `kit::menu::Picker` for the connection and
 for the branch, `kit::field` for the filter and the URL, `kit::check_box` for ephemeral and shallow,
 and `app/projects.rs`'s own `choose_folder()` for the destination. `state/navigator.rs`'s `rows()`
-short-circuits on `parse_repo_url` the way it already does on a `ubiq://` link, into a `Group::Clone`
+short-circuits on `parse_repo_url` the way it already does on a `kubiq://` link, into a `Group::Clone`
 of one row; `NavRow` carries an optional `action` that `app/nav.rs`'s `press_navigator()` checks
 before it looks a destination up. `AppState::project_holds` takes `cx` and its `Holds` carries
 `ephemeral`, which is what raises the discard confirmation on the picker's row, and `agents`, which
@@ -2154,7 +2154,7 @@ and `ui/sink/project.rs`'s `index_row()` for a project's override, both drawn wi
 `app/settings.rs::set_index_level` and `app/projects.rs::set_project_index` are the traffic, the
 second sending an `UpdateProject` carrying only an `IndexChange`. The host resolves the two into
 one answer in `coordinator.rs::index_level` and acts on it in `settle_index`, which is called
-whenever either could have moved. The index itself is `crates/ubiq-host/src/index/`: one thread
+whenever either could have moved. The index itself is `crates/kubiq-host/src/index/`: one thread
 owning one open index per project, fed by the same walk content search runs and by the watcher's
 own batches, handing out a read handle that carries no writer. It lives in a host-owned `index/`
 directory beside the interface's `ui/` workarea, which Forget and the orphan collector already
@@ -2220,16 +2220,16 @@ a naming runs through that provider and nothing else, and the control that would
 the row directly above, so nothing is trapped by it. No second provider picker: a naming is the
 fast model's work at whichever backend is selected. The sentence under the row is the host's own, and
 the interface authors no sentence about a platform. The
-half that knows anything about a path is the host's `crates/ubiq-host/src/cli_shortcut.rs`:
+half that knows anything about a path is the host's `crates/kubiq-host/src/cli_shortcut.rs`:
 `handle()` takes the action, `candidates()` and `install_dir()` decide where, `script()` writes the
 launcher, `marked_target()` reads the marker line, and `state()` is the answer all three actions
 share. Its tests cover the three things that would be silent if they broke — the script is written
 marked and executable, a bundle is launched through `open -a` where a bare binary is exec'd, and
-remove takes Ubiq's own file and leaves a foreign `ubiq` alone. Shell integration mirrors it: the
+remove takes Kubiq's own file and leaves a foreign `kubiq` alone. Shell integration mirrors it: the
 section is `shell_integration()` in `ui/settings.rs`, registered under `ids::SHELL_INTEGRATION`
 only when `cfg!(windows)`; `ask_shell_integration()` and `apply_shell_integration()` in
 `app/settings.rs` are the traffic, `SettingsState::shell` holds the answer, and the host half is
-`crates/ubiq-host/src/shell_integration.rs` (behind `desktop`) — `install()`, `remove()`, `marked()`
+`crates/kubiq-host/src/shell_integration.rs` (behind `desktop`) — `install()`, `remove()`, `marked()`
 and `state()` over a caller-supplied `Software\Classes` key, so its tests write under a throwaway
 key rather than the user's real menu. Shared primitives are in `ui/kit/`;
 the conventions behind that split are `tech/ui-and-design.md`'s.
@@ -2283,7 +2283,7 @@ consume anything — resolves the focused input through the component's `WindowE
 and applies the effects through `set_selected_range` and `replace`. Undo and redo are the exception:
 the component's undo stack is not reachable, so those two go back out as its own actions.
 
-State types live under `crates/ubiq/src/state/`: `workbench.rs` for the rail mode, the open menu, the
+State types live under `crates/kubiq/src/state/`: `workbench.rs` for the rail mode, the open menu, the
 project settings dialog, the application settings overlay, what was typed into the picker's and the
 explorer's filters, and the menus that came later — `MenuId::Size` for the status bar's size
 popover, `WorkbenchState::size_presets` for the pill row it and the Size settings section share and
@@ -2306,7 +2306,7 @@ describes it; `agents.rs` for the columns' view of that work, `teams.rs` for the
 
 `state/work.rs` is the projection and nothing else: the sessions, agents and tasks of one project as
 the window last heard the host describe them, and a flag saying whether it has heard at all. The
-records are `ubiq_proto::work`'s own, carried across the bus rather than rebuilt beside it.
+records are `kubiq_proto::work`'s own, carried across the bus rather than rebuilt beside it.
 `replace_all()` takes a `WorkList` whole; `apply_task()` and `apply_agent()` replace on id and answer
 whether the record was new, which is what tells the arrangement there is something to find a place
 for; `forget_task()` answers whether there was anything to drop. Replacing on id is the property the
@@ -2338,7 +2338,7 @@ remote host's filesystem before any project exists on it — see the Behaviour s
 host browse family (`tech/transport-contract.md`) — walking the tree straight from an already-loaded
 explorer's `forest_from_explorer` still needs none of it. A child's path joins with the separator
 its parent uses, since the host runs Windows or Unix independently of this window; the host strips
-the verbatim prefix before a path ever reaches the wire (`crates/ubiq-host/src/host_path.rs`).
+the verbatim prefix before a path ever reaches the wire (`crates/kubiq-host/src/host_path.rs`).
 
 `AppState` holds `file_picker: Option<FilePickerState>`, `picker_filter` and `picker_scroll`, because
 exactly one dialog may be up per window and the field above its rows is one of the window's like every
@@ -2360,7 +2360,7 @@ rather than writing back into any field of the picker's own, and `PickerOwner::K
 folds the chosen folder into the "Add source" form instead of sending anything — a source is
 committed when that form is confirmed, as one whole-list `SetKbSources`. `ui/file_picker.rs` draws it, painted
 from `ui/sink/mod.rs` for the same reason the modal is: where a dialog is asked for is not where it
-is painted. `crates/ubiq/tests/file_picker.rs` asserts every rule above with no frame at all, over
+is painted. `crates/kubiq/tests/file_picker.rs` asserts every rule above with no frame at all, over
 the sink's own fixture tree.
 
 A row keyed by a ULID takes its element id from `ui::eid`, or `ui::eid2` for a row two ids deep like
@@ -2374,7 +2374,7 @@ chat, `label()`, the `History` stack with `record()`, `back()`, `forward()` and 
 `Fate` predicate the caller supplies, the `Bookmark` record — serialised with its destination as
 text, so what keeps an old bookmark readable is the parser rather than a set of serde variant names,
 and one that no longer parses is dropped alone rather than costing the blob — and `resolve_anchor()`.
-`state/nav/text.rs` is the `ubiq://` form: `Display`, `FromStr`, and `resolve_relative()` for a link
+`state/nav/text.rs` is the `kubiq://` form: `Display`, `FromStr`, and `resolve_relative()` for a link
 written inside a document, where `..` pops because a document holds paths a human wrote while the
 host only ever holds paths it handed out. `app/nav.rs` is the router. `current_destination()` matches
 the rail mode, reads the screen's own selection and asks `where_locus()`; `navigate()` resolves the
@@ -2401,7 +2401,7 @@ field's bottom-left corner rather than from wherever the layout put the deferred
 reads its position from that, so the list drops just under the field with its left edge on the
 field's, instead of landing in the middle of the centred row and covering the text being typed. `ui::on_link()` is the one handler
 `ui/viewer/markdown.rs`, `ui/conversation/mod.rs` and `ui/board/form.rs` each hand to their
-`TextView`. `crates/ubiq/tests/nav.rs`, `tests/nav_text.rs`, `tests/bookmarks.rs` and
+`TextView`. `crates/kubiq/tests/nav.rs`, `tests/nav_text.rs`, `tests/bookmarks.rs` and
 `tests/navigator.rs` assert all of it without a frame.
 
 ## Failure

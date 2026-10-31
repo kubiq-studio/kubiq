@@ -23,20 +23,20 @@ help an element shows under ⇧F1.
 
 ## 1. Voice and tone
 
-**The reader** is someone using Ubiq to get their own work done — running agents on their code,
+**The reader** is someone using Kubiq to get their own work done — running agents on their code,
 reviewing what the agents changed, keeping several projects and accounts apart. They are not
-interested in how Ubiq is built. Every page answers their questions: *what is this for me*, *what
+interested in how Kubiq is built. Every page answers their questions: *what is this for me*, *what
 can I do with it*, *how do I do it*, *what happens when I do*, and *what do I do when it goes
 wrong*. A behaviour is explained by what the reader sees and gets, never by the mechanism behind
 it; when a reason helps, it is a reason in the reader's terms ("so the agent keeps working while
 the tab is hidden"), not an architectural one. If a sentence would only interest someone reading
-Ubiq's source, it does not belong in the manual.
+Kubiq's source, it does not belong in the manual.
 
 The reader knows their own tools — git, a terminal, the harnesses they use — and the manual does
-not teach those. It teaches Ubiq: where things are, what they do, and how to use them for the
+not teach those. It teaches Kubiq: where things are, what they do, and how to use them for the
 reader's purpose.
 
-The manual talks to one person who is using Ubiq while reading it. It is plain, calm and exact.
+The manual talks to one person who is using Kubiq while reading it. It is plain, calm and exact.
 
 | Rule | Write | Not |
 |---|---|---|
@@ -48,10 +48,10 @@ The manual talks to one person who is using Ubiq while reading it. It is plain, 
 | State, do not hedge | **Close** ends the harness. | **Close** should usually end the harness. |
 | Describe the shipped build | (a missing feature is absent from the page) | This arrives in a later version. |
 | Say why when a choice is surprising, once | A chat tab hides rather than closes, because the conversation outlives the tab. | A chat tab hides rather than closes. (and the reader closes it three times) |
-| Name the user's goal, not the machinery | The harness redraws at the new size. | Ubiq sends the new geometry to the pseudo-terminal. |
+| Name the user's goal, not the machinery | The harness redraws at the new size. | Kubiq sends the new geometry to the pseudo-terminal. |
 
-**The interface is "Ubiq", never "we" or "the app".** A sentence whose subject is Ubiq says what
-Ubiq does — "Ubiq keeps the arrangement when you come back" — not what it tries or wants.
+**The interface is "Kubiq", never "we" or "the app".** A sentence whose subject is Kubiq says what
+Kubiq does — "Kubiq keeps the arrangement when you come back" — not what it tries or wants.
 
 **A failure is written as the way out, never as blame.** "Open a project first" — not "you forgot
 to open a project".
@@ -68,12 +68,12 @@ page's `keywords:` when a user is likely to type them, never in its prose.
 | **pane** | the terminal panel an agent or a shell runs in | window, console, view |
 | **panel** | anything in the window with a tab that you can move, split or close | widget, view, pane (for a panel that is not a terminal) |
 | **tab** | the handle of a panel | page |
-| **window** | the operating-system window Ubiq draws in | screen, app |
+| **window** | the operating-system window Kubiq draws in | screen, app |
 | **region** | the centre, left, right or bottom of the window | sidebar, drawer, area |
-| **Agents sidebar** · **log console** | the list beside the agent columns in Agents mode · the **Console** panel that shows Ubiq's log — the only places these two words appear | — |
+| **Agents sidebar** · **log console** | the list beside the agent columns in Agents mode · the **Console** panel that shows Kubiq's log — the only places these two words appear | — |
 | **rail** · **rail mode** | the column of destinations on the left · one of them, by its label: **IDE**, **Git**, **Agents**, **Tasks** | activity bar, tab, view |
-| **project** | a folder Ubiq has opened, and everything it remembers about it | repo (unless it is about git), workspace, folder |
-| **workspace session** | Ubiq's named grouping of agents with a home folder | session, workspace |
+| **project** | a folder Kubiq has opened, and everything it remembers about it | repo (unless it is about git), workspace, folder |
+| **workspace session** | Kubiq's named grouping of agents with a home folder | session, workspace |
 | **conversation** | one harness's exchange with you that can be resumed or forked | session, thread, chat history |
 | **account** | a named identity a harness runs under; it points at credentials and never holds them | login, credentials, user |
 | **agent definition** | a saved setup — harness, model, skills, tool servers — that starts an agent in one pick; the interface lists them under **Agent definitions** | profile, preset, template |
@@ -83,10 +83,10 @@ page's `keywords:` when a user is likely to type them, never in its prose.
 | **skill** | packaged instructions given to a harness for a run | prompt, plugin |
 | **subagent** | an agent another agent started | child agent, worker |
 | **focus** | which panel receives your keystrokes; exactly one has it | active, selected |
-| **drone** · **remote host** | Ubiq's helper on another machine · that machine, as Ubiq connects to it | server, agent |
+| **drone** · **remote host** | Kubiq's helper on another machine · that machine, as Kubiq connects to it | server, agent |
 | **help panel** | this manual, inside the window | docs, help window |
 
-**Session is never written alone.** In Ubiq it names two things: Ubiq's grouping of agents, and the
+**Session is never written alone.** In Kubiq it names two things: Kubiq's grouping of agents, and the
 resumable conversation a harness keeps. Write *workspace session* for the first and *conversation*
 for the second, every time, even when the context seems to settle it.
 
@@ -111,7 +111,7 @@ what it does.
 | Emphasis | italics for a term at its definition, nowhere else | a *pane* is… |
 
 **Links.** Link another page by its id, with the id as the link target and the page's name as the
-text; a heading in it by `<id>#<slug>`. Never link by path, which breaks when the file moves. `ubiq://./<view>` opens a place in
+text; a heading in it by `<id>#<slug>`. Never link by path, which breaks when the file moves. `kubiq://./<view>` opens a place in
 the window and is used where doing beats reading about it; it does nothing with no project open, so
 the sentence around it never depends on it. External links go only to a harness's or a provider's
 own documentation. Link the first mention of a term on a page, not every one.
@@ -138,7 +138,7 @@ excluded.
 
 A user cannot act on any of these, and each one rots the moment the code moves.
 
-- **Code paths and file names of Ubiq itself** — no `crates/…`, no source file.
+- **Code paths and file names of Kubiq itself** — no `crates/…`, no source file.
 - **Rust names** — no types, functions, enum variants, panel kind names or setting keys as the code
   spells them. Write the setting's label.
 - **Message names and anything about the wire** — the host, the coordinator, the bus, a

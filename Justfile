@@ -1,8 +1,8 @@
-# Ubiq — every command anyone runs. Reference: _docs/tech/operations.md
+# Kubiq — every command anyone runs. Reference: _docs/tech/operations.md
 
 # The bundle version baked into the footer — env override, else derived from git.
 # See _devops/scripts/bundle-version.sh.
-export UBIQ_VERSION := `_devops/scripts/bundle-version.sh`
+export KUBIQ_VERSION := `_devops/scripts/bundle-version.sh`
 
 # List the recipes
 default:
@@ -10,55 +10,55 @@ default:
 
 # ── the application ────────────────────────────────────────────────
 
-# Run Ubiq
+# Run Kubiq
 dev: help-bundle
-    cargo run -p ubiq-app --features assist-apple
+    cargo run -p kubiq-app --features assist-apple
 
-# Run Ubiq with debug logging
+# Run Kubiq with debug logging
 verbose: help-bundle
-    RUST_LOG=debug cargo run -p ubiq-app --features assist-apple
+    RUST_LOG=debug cargo run -p kubiq-app --features assist-apple
 
 # Build the whole workspace for release
 build: help-bundle licenses
-    cargo build --workspace --release --features ubiq-app/assist-apple
+    cargo build --workspace --release --features kubiq-app/assist-apple
 
 # Build the macOS application icon from the logo in assets/
 icns:
     uv run _tools/icns.py
 
-# Assemble Ubiq.app in target/ — icon, binary, Info.plist
+# Assemble Kubiq.app in target/ — icon, binary, Info.plist
 bundle: help-bundle licenses
     uv run _tools/icns.py
-    cargo build -p ubiq-app --release --features assist-apple
-    rm -rf target/Ubiq.app
-    mkdir -p target/Ubiq.app/Contents/MacOS target/Ubiq.app/Contents/Resources
-    cp target/release/ubiq target/Ubiq.app/Contents/MacOS/ubiq
-    cp target/AppIcon.icns target/Ubiq.app/Contents/Resources/AppIcon.icns
-    cp _tools/Info.plist target/Ubiq.app/Contents/Info.plist
+    cargo build -p kubiq-app --release --features assist-apple
+    rm -rf target/Kubiq.app
+    mkdir -p target/Kubiq.app/Contents/MacOS target/Kubiq.app/Contents/Resources
+    cp target/release/kubiq target/Kubiq.app/Contents/MacOS/kubiq
+    cp target/AppIcon.icns target/Kubiq.app/Contents/Resources/AppIcon.icns
+    cp _tools/Info.plist target/Kubiq.app/Contents/Info.plist
     # Stamp the version: short = X.Y.Z core (kept as-is for dev-… builds), build = the full string
-    v="{{UBIQ_VERSION}}"; v="${v#v}"; core="${v%%[-+]*}"; \
-        case "$v" in dev-*) ;; *) /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $core" target/Ubiq.app/Contents/Info.plist;; esac; \
-        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $v" target/Ubiq.app/Contents/Info.plist
+    v="{{KUBIQ_VERSION}}"; v="${v#v}"; core="${v%%[-+]*}"; \
+        case "$v" in dev-*) ;; *) /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $core" target/Kubiq.app/Contents/Info.plist;; esac; \
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $v" target/Kubiq.app/Contents/Info.plist
     # The help bundle ships inside the .app, where `help::resolve` looks first after the override
-    cp target/help/help.bundle target/Ubiq.app/Contents/Resources/help.bundle
+    cp target/help/help.bundle target/Kubiq.app/Contents/Resources/help.bundle
     @echo "Done at $(date)"
 
-# Assemble the Windows release in target/ubiq-windows-x86_64/ — the .exe
+# Assemble the Windows release in target/kubiq-windows-x86_64/ — the .exe
 bundle-win: help-bundle licenses
-    cargo build -p ubiq-app --release --features assist-apple
-    rm -rf target/ubiq-windows-x86_64
-    mkdir -p target/ubiq-windows-x86_64
-    cp target/release/ubiq.exe target/ubiq-windows-x86_64/ubiq.exe
-    cp target/help/help.bundle target/ubiq-windows-x86_64/help.bundle
+    cargo build -p kubiq-app --release --features assist-apple
+    rm -rf target/kubiq-windows-x86_64
+    mkdir -p target/kubiq-windows-x86_64
+    cp target/release/kubiq.exe target/kubiq-windows-x86_64/kubiq.exe
+    cp target/help/help.bundle target/kubiq-windows-x86_64/help.bundle
 
-# Assemble the Linux release in target/ubiq-linux-x86_64/ — the binary, help.bundle beside it
+# Assemble the Linux release in target/kubiq-linux-x86_64/ — the binary, help.bundle beside it
 bundle-linux: help-bundle
-    cargo build -p ubiq-app --release --features assist-apple
-    rm -rf target/ubiq-linux-x86_64
-    mkdir -p target/ubiq-linux-x86_64
-    cp target/release/ubiq target/ubiq-linux-x86_64/ubiq
-    cp target/help/help.bundle target/ubiq-linux-x86_64/help.bundle
-    cp assets/logo-white-on-blue.png target/ubiq-linux-x86_64/ubiq.png
+    cargo build -p kubiq-app --release --features assist-apple
+    rm -rf target/kubiq-linux-x86_64
+    mkdir -p target/kubiq-linux-x86_64
+    cp target/release/kubiq target/kubiq-linux-x86_64/kubiq
+    cp target/help/help.bundle target/kubiq-linux-x86_64/help.bundle
+    cp assets/logo-white-on-blue.png target/kubiq-linux-x86_64/kubiq.png
 
 # ── the harness library ────────────────────────────────────────────
 
@@ -74,47 +74,47 @@ core:
 
 # The host draws nothing: no GPUI crate may reach its dependency tree
 host:
-    cargo build -p ubiq-host --all-targets
-    @! cargo tree -p ubiq-host -e no-dev --prefix none | grep -q '^gpui' \
+    cargo build -p kubiq-host --all-targets
+    @! cargo tree -p kubiq-host -e no-dev --prefix none | grep -q '^gpui' \
         || { echo "the host draws: a gpui crate is in its tree"; exit 1; }
 
 # The lean host a drone links: no version control, no index, no harness library, no listener and
 # nothing that talks to a desktop. What is left is a machine's terminal, its files and its facts.
 relay:
-    cargo build -p ubiq-host --no-default-features --all-targets
-    @! cargo tree -p ubiq-host --no-default-features -e normal,build --prefix none \
+    cargo build -p kubiq-host --no-default-features --all-targets
+    @! cargo tree -p kubiq-host --no-default-features -e normal,build --prefix none \
         | awk '{print $1}' | sort -u \
         | grep -qxE 'git2|tantivy|rusqlite|agent-manager|isol8|notify-rust|trash|ureq|rustls|tiny_http|gpui' \
         || { echo "the lean host is not lean: a gated crate reached its tree"; exit 1; }
 
 # The interface names the protocol and never the host, and never a type size of its own
 ui:
-    cargo build -p ubiq --all-targets
-    @! cargo tree -p ubiq -e no-dev --prefix none | grep -q '^ubiq-host' \
+    cargo build -p kubiq --all-targets
+    @! cargo tree -p kubiq -e no-dev --prefix none | grep -q '^kubiq-host' \
         || { echo "the interface names the host"; exit 1; }
-    # The interface opens no connection: `ubiq-db`'s `drivers` feature is the host's alone, so no
-    # engine crate may reach `-p ubiq`'s tree.
-    @! cargo tree -p ubiq -e no-dev --prefix none | awk '{print $1}' \
+    # The interface opens no connection: `kubiq-db`'s `drivers` feature is the host's alone, so no
+    # engine crate may reach `-p kubiq`'s tree.
+    @! cargo tree -p kubiq -e no-dev --prefix none | awk '{print $1}' \
         | grep -qxE 'rusqlite|mysql|tiberius|sqlx-core' \
         || { echo "the interface links a database driver"; exit 1; }
     # `theme.rs` is the one file allowed to name a size. `text_size(px(font))`, where the size is
     # computed from the project's zoom, is legitimate — hence the digit.
-    @! grep -rqE 'text_size\(px\([0-9]' crates/ubiq/src \
+    @! grep -rqE 'text_size\(px\([0-9]' crates/kubiq/src \
         || { echo "a literal type size outside theme.rs — use theme::font(Family, Role)"; exit 1; }
     # The same rule for icons. The component library's `Size` enum is discrete and does not follow
     # the UI scale, so an icon drawn at a size of its own is `Size::Size(theme::icon_*())`.
-    @! grep -rqE '(with_size\(px\(|Size::Size\(px\()[0-9]' crates/ubiq/src \
+    @! grep -rqE '(with_size\(px\(|Size::Size\(px\()[0-9]' crates/kubiq/src \
         || { echo "a literal icon size outside theme.rs — use theme::icon_sm/icon_md/icon_lg"; exit 1; }
 
 # ── checks ─────────────────────────────────────────────────────────
 
 # The app compiles with no `ui` feature — no `use` escapes `#[cfg(feature = "ui")]` into a headless
 # build. Studio's root Justfile has its own `headless`, routed through `--manifest-path
-# ubiq/Cargo.toml` because `ubiq-app` is a patched non-member there; here it is a plain workspace
+# kubiq/Cargo.toml` because `kubiq-app` is a patched non-member there; here it is a plain workspace
 # member, so no manifest path is needed.
 headless:
-    cargo check -p ubiq-app --no-default-features --all-targets
-    @! cargo tree -p ubiq-app -e no-dev --prefix none --no-default-features | grep -q '^gpui' \
+    cargo check -p kubiq-app --no-default-features --all-targets
+    @! cargo tree -p kubiq-app -e no-dev --prefix none --no-default-features | grep -q '^gpui' \
         || { echo "the headless base draws: a gpui crate is in its tree"; exit 1; }
 
 # The on-device model is Apple's: `foundation-models` may reach a macOS tree and no other. It
@@ -123,12 +123,12 @@ headless:
 # nobody on that platform asked for. Resolution alone answers this, so neither toolchain has to
 # be installed to run it.
 apple:
-    @cargo tree -p ubiq-app -e normal,build --features assist-apple \
+    @cargo tree -p kubiq-app -e normal,build --features assist-apple \
         --target aarch64-apple-darwin --prefix none \
         | grep -q '^foundation-models' \
         || { echo "the on-device backend is gone: foundation-models is not in the macOS tree"; exit 1; }
     @for triple in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do \
-        ! cargo tree -p ubiq-app -e normal,build --features assist-apple \
+        ! cargo tree -p kubiq-app -e normal,build --features assist-apple \
             --target $triple --prefix none \
             | grep -q '^foundation-models' \
             || { echo "foundation-models reached the $triple tree: the backend is not macOS-only"; exit 1; }; \
@@ -139,7 +139,7 @@ check:
     cargo check --workspace --all-targets
     # And with nothing on. The developer loop already runs without `assist-apple`; this is what
     # covers `quickjs` off too, where the script facade reports itself unavailable.
-    cargo check -p ubiq-app --no-default-features --all-targets
+    cargo check -p kubiq-app --no-default-features --all-targets
 
 # Not in `verify`: `assist-apple` compiles a Swift bridge, so it wants a Swift toolchain and the
 # macOS 26 SDK, and it costs a minute of `swiftc` for a backend no test exercises. The developer
@@ -147,7 +147,7 @@ check:
 #
 # Type-check the on-device model backend — needs a Swift toolchain and the macOS 26 SDK
 assist:
-    cargo check -p ubiq-app --features assist-apple --all-targets
+    cargo check -p kubiq-app --features assist-apple --all-targets
 
 # Lint, warnings are errors
 clippy:
@@ -163,9 +163,9 @@ test:
 
 # The id registry: every SlotId string literal in the base lives in ext/ids.rs (D178)
 slots-check:
-    @! grep -rn 'SlotId::new("' crates/ubiq/src --include='*.rs' \
-        | grep -v '^crates/ubiq/src/ext/' \
-        || { echo "a SlotId literal outside crates/ubiq/src/ext/ — declare it as a const in ext::ids (D178)"; exit 1; }
+    @! grep -rn 'SlotId::new("' crates/kubiq/src --include='*.rs' \
+        | grep -v '^crates/kubiq/src/ext/' \
+        || { echo "a SlotId literal outside crates/kubiq/src/ext/ — declare it as a const in ext::ids (D178)"; exit 1; }
 
 # check + clippy + test + the crate boundary + docs-lint + help-check + the id registry lint
 verify: check clippy test host relay ui apple docs-lint help-check slots-check
@@ -215,7 +215,7 @@ diagram SOURCE:
 icons-check:
     uv run _tools/icons.py check
 
-# Write crates/ubiq/src/ui/kit/icons.rs from the registry — `icons-check` fails if it is stale
+# Write crates/kubiq/src/ui/kit/icons.rs from the registry — `icons-check` fails if it is stale
 icons-gen:
     uv run _tools/icons.py codegen
 
@@ -255,7 +255,7 @@ web-assets-drawio *ARGS:
 
 # Re-fetch every file in the drawio manifest and report CDN drift
 web-assets-verify-drawio:
-    uv run _tools/webassets.py verify --out crates/ubiq-host/src/web_assets/manifest_drawio.rs
+    uv run _tools/webassets.py verify --out crates/kubiq-host/src/web_assets/manifest_drawio.rs
 
 # ── help ───────────────────────────────────────────────────────────
 
@@ -287,19 +287,19 @@ licenses-check:
 
 # ── the drone ──────────────────────────────────────────────────────
 
-# Cross-build ubiq-drone for one triple, or every triple this toolchain has installed
+# Cross-build kubiq-drone for one triple, or every triple this toolchain has installed
 drone-build TRIPLE="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "{{TRIPLE}}" ]; then
-        cargo build -p ubiq-drone --release --target {{TRIPLE}}
+        cargo build -p kubiq-drone --release --target {{TRIPLE}}
         exit 0
     fi
     installed=$(rustup target list --installed)
     triples="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc"
     for triple in $triples; do
         if echo "$installed" | grep -qx "$triple"; then
-            cargo build -p ubiq-drone --release --target "$triple"
+            cargo build -p kubiq-drone --release --target "$triple"
         else
             echo "skipping $triple — not installed (rustup target add $triple)"
         fi
@@ -335,7 +335,7 @@ dump-outline *ARGS:
 
 # ── reading a tape ────────────────────────────────────────────────
 
-# When each subagent in a Ubiq tape spawned, stopped, was marked ended, and what it cost
+# When each subagent in a Kubiq tape spawned, stopped, was marked ended, and what it cost
 tape-subagents *ARGS:
     @uv run _tools/tape-subagents.py {{ARGS}}
 

@@ -1,0 +1,654 @@
+//! The file picker dialog.
+//!
+//! **It is drawn where it is asked for and painted over everything**, through `deferred` and
+//! `anchored` like the kit's modal — so a picker raised from inside a dock panel covers the window
+//! rather than being clipped to the panel that wanted it.
+//!
+//! The shape is the window's shape: square, filled, a coloured left edge. What is different from a
+//! modal is that this dialog is *worked in* rather than answered — it holds a filter field, two
+//! arrangements of the same set, a scroll, and a corner that resizes it — so it is bigger than a
+//! modal, it remembers its size while it is up, and it says at the bottom how much has been chosen.
+//!
+//! **A row is one line, always.** A name or a folder that does not fit is elided and carries the
+//! whole of itself as a tooltip; nothing here wraps, because a wrapped row would push the rest of
+//! the list down and a list is scanned by its left edge.
+//!
+//! Whether an outside click dismisses it is the caller's, not this file's: a modal picker is
+//! answered or cancelled, and one that is not modal goes away the moment attention leaves it.
+
+use gpui::prelude::FluentBuilder as _;
+use gpui::{
+    AnyElement, Context, CursorStyle, Focusable, InteractiveElement, IntoElement, KeyBinding,
+    MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, Window, anchored, deferred, div, point, px,
+};
+use gpui_component::input::Input;
+use gpui_component::{Icon, IconName, Sizable as _, Size};
+
+use crate::app::AppState;
+use crate::state::file_picker::{
+    FilePickerState, PickerCount, PickerKey, PickerOwner, PickerRow, PickerView,
+};
+use crate::theme;
+use crate::ui::eid;
+use crate::ui::empty::empty_panel;
+use crate::ui::kit::{
+    check_box, elided, elided_with, file_row, filter_bar, ghost_button, icon_button, kind_icon,
+    mono, primary_button, row_font, twisty, view_switch,
+};
+
+/// The key context the dialog is answered in, and the one the component library gives the field
+/// inside it.
+const CONTEXT: &str = "FilePicker";
+const FIELD_CONTEXT: &str = "FilePicker > Input";
+
+gpui::actions!(
+    kubiq_picker,
+    [
+        PickerUp,
+        PickerDown,
+        PickerOut,
+        PickerInto,
+        PickerEnter,
+        PickerConfirm,
+        PickerDismiss
+    ]
+);
+
+/// The keys the dialog answers to, bound twice each.
+///
+/// **The focus is in the filter field**, because typing a name is the first thing a picker is for,
+/// and the component library's input binds `up`, `down`, `left`, `right`, `enter` and `escape` for
+/// itself — at the deepest node in the tree, which is where a keymap's ties are broken. A binding
+/// that only named the dialog would sit above the field and lose every one of them. So each key is
+/// bound for the dialog *and* for the field inside it: the second predicate matches at the same
+/// depth as the input's own and wins by being registered after it, which is why this is called from
+/// `app::install_key_bindings` rather than anywhere earlier.
+///
+/// What the dialog does not answer, it hands back — [`AppState::press_picker_key`] answers false
+/// and the handler propagates, so `left` and `right` are the field's caret keys again in the flat
+/// list, where there is no tree to walk.
+pub fn key_bindings() -> Vec<KeyBinding> {
+    /// One key, for the dialog and for the field inside it.
+    fn both<A: gpui::Action + Clone>(key: &str, action: A) -> [KeyBinding; 2] {
+        [
+            KeyBinding::new(key, action.clone(), Some(CONTEXT)),
+            KeyBinding::new(key, action, Some(FIELD_CONTEXT)),
+        ]
+    }
+
+    [
+        both("up", PickerUp),
+        both("down", PickerDown),
+        both("left", PickerOut),
+        both("right", PickerInto),
+        both("enter", PickerEnter),
+        // What the platform calls confirm: cmd on macOS, ctrl everywhere else.
+        both("secondary-enter", PickerConfirm),
+        both("escape", PickerDismiss),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// One key, answered by the picker if it means anything there and handed back if it does not.
+fn answer(this: &mut AppState, key: PickerKey, window: &mut Window, cx: &mut Context<AppState>) {
+    if !this.press_picker_key(key, window, cx) {
+        // Nothing here wanted it: the field is welcome to it.
+        cx.propagate();
+    }
+}
+
+pub fn render(
+    app: &AppState,
+    picker: &FilePickerState,
+    window: &Window,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let viewport = window.viewport_size();
+    let modal = picker.request.modal;
+    let tree = picker.view == PickerView::Tree;
+    let multiple = picker.request.count == PickerCount::Multiple;
+
+    let rows: Vec<AnyElement> = picker
+        .rows()
+        .into_iter()
+        .map(|row| line(row, tree, multiple, cx))
+        .collect();
+    let nothing = rows.is_empty();
+
+    let panel =
+        div()
+            .id("file-picker-panel")
+            // Named for the tests: the dialog is mounted once, at the window root, and a mount
+            // moved back into a page would leave every other caller setting the state and
+            // drawing nothing. `tests/dismiss.rs` looks the dialog up by this name.
+            .debug_selector(|| "file-picker".into())
+            .key_context(CONTEXT)
+            .on_action(
+                cx.listener(|this, _: &PickerUp, window, cx| {
+                    answer(this, PickerKey::Up, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &PickerDown, window, cx| {
+                answer(this, PickerKey::Down, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PickerOut, window, cx| {
+                answer(this, PickerKey::Left, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PickerInto, window, cx| {
+                answer(this, PickerKey::Right, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PickerEnter, window, cx| {
+                answer(this, PickerKey::Enter, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PickerConfirm, window, cx| {
+                answer(this, PickerKey::Confirm, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &PickerDismiss, window, cx| {
+                answer(this, PickerKey::Dismiss, window, cx)
+            }))
+            .relative()
+            .w(px(picker.width))
+            .h(px(picker.height))
+            .max_w(viewport.width - px(32.))
+            .max_h(viewport.height - px(32.))
+            .flex()
+            .flex_col()
+            .bg(theme::surface_raised())
+            .border_l(px(theme::accent_edge()))
+            .border_color(theme::accent())
+            .shadow_lg()
+            .occlude()
+            .child(header(picker, cx))
+            .children(host_browse_banner(app, cx))
+            .child(field(app, picker, window, cx))
+            .child(
+                div()
+                    .id("file-picker-rows")
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .track_scroll(&app.picker_scroll)
+                    .children(nothing.then(|| empty_panel("Nothing matches")))
+                    .children(rows),
+            )
+            .child(footer(app, picker, cx))
+            .child(grip(cx))
+            // A picker that does not hold the window goes away when attention leaves it. A modal one
+            // stays up until it is answered or cancelled, which is what modal means.
+            .when(!modal, |this| {
+                this.on_mouse_down_out(
+                    cx.listener(|this, _, window, cx| this.cancel_file_picker(window, cx)),
+                )
+            });
+
+    // The layer is full-window in both cases: it is what the resize drag is tracked on, because a
+    // pointer that outran the corner would otherwise leave the dialog and strand the drag.
+    let mut layer = div()
+        .id("file-picker")
+        .w(viewport.width)
+        .h(viewport.height)
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+            if event.dragging() {
+                let at = (f32::from(event.position.x), f32::from(event.position.y));
+                this.drag_picker_resize(at, window, cx);
+            }
+        }))
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this, _, _, cx| this.end_picker_resize(cx)),
+        );
+
+    if modal {
+        // The scrim occludes, so nothing behind a modal picker can be clicked while it is up.
+        layer = layer.bg(theme::scrim()).occlude();
+    }
+
+    deferred(
+        anchored()
+            .position(point(px(0.), px(0.)))
+            .child(layer.child(panel)),
+    )
+    // Above the kit's dropdowns, which sit at 1, for the same reason a modal is.
+    .priority(2)
+    .into_any_element()
+}
+
+/// What is being chosen, in what shape, and which arrangement it is in.
+///
+/// The two chips are the request made visible: a dialog that takes several files and one that takes
+/// exactly one look alike until the footer, and the header is where a user finds out which they are
+/// in.
+fn header(picker: &FilePickerState, cx: &mut Context<AppState>) -> AnyElement {
+    // let count = match picker.request.count {
+    // PickerCount::Single => "single",
+    // PickerCount::Multiple => "multi",
+    // };
+
+    div()
+        .h(px(44.))
+        .px_3()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_2()
+        .child(
+            div()
+                .flex_shrink(1.0)
+                .min_w(px(0.))
+                .text_size(theme::font(theme::Family::Chrome, theme::Role::Title))
+                .text_color(theme::text())
+                .truncate()
+                .child(SharedString::from(picker.request.title.clone())),
+        )
+        // .child(chip(picker.request.kind.label()))
+        // .child(chip(count))
+        .child(div().flex_1().min_w(px(0.)))
+        .child(view_switch(
+            "file-picker-tree",
+            "file-picker-list",
+            picker.view == PickerView::Tree,
+            cx.listener(|this, _, _, cx| this.set_picker_view(PickerView::Tree, cx)),
+            cx.listener(|this, _, _, cx| this.set_picker_view(PickerView::List, cx)),
+        ))
+        .child(icon_button(
+            "file-picker-close",
+            IconName::Close,
+            false,
+            cx.listener(|this, _, window, cx| this.cancel_file_picker(window, cx)),
+        ))
+        .into_any_element()
+}
+
+/// What a host last refused, shown until the next answer clears it — the same shape
+/// `ui::project_menu`'s own banner gives a refused `AddProject`, drawn here instead because the
+/// dialog that answer is about is this one, not the project picker sitting behind it.
+fn host_browse_banner(app: &AppState, _cx: &mut Context<AppState>) -> Option<AnyElement> {
+    let error = app.host_browse.as_ref()?.error.clone()?;
+    Some(
+        div()
+            .px_3()
+            .py_2()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .bg(theme::danger_soft())
+            .border_l(px(theme::accent_edge()))
+            .border_color(theme::danger())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .text_size(theme::font(theme::Family::Chrome, theme::Role::Label))
+                    .text_color(theme::text())
+                    .child(error),
+            )
+            .into_any_element(),
+    )
+}
+
+/// The filter field, the prefilter it is on top of, and the name of the arrangement below it.
+///
+/// One field over both views on purpose: what was typed survives the toggle, because a user who
+/// cannot find something in the tree switches to the list to look for the same thing.
+///
+/// A host-project picker adds two things no local one needs: a way up past the folder it opened
+/// on — [`AppState::walk_picker_up`], greyed out at the filesystem root where `parent` is `None` —
+/// and the absolute path currently at the top of the tree, so a user several folders deep can
+/// still tell where they are without counting indent levels.
+fn field(
+    app: &AppState,
+    picker: &FilePickerState,
+    window: &Window,
+    cx: &mut Context<AppState>,
+) -> impl IntoElement {
+    let focused = app
+        .picker_filter
+        .read(cx)
+        .focus_handle(cx)
+        .is_focused(window);
+    let browse = app.host_browse.as_ref();
+    let can_go_up = browse.is_some_and(|browse| browse.parent.is_some());
+
+    let mut trailing = div().flex().flex_none().items_center().gap_1();
+
+    if let Some(browse) = browse {
+        trailing = trailing
+            .child(
+                div()
+                    .id("file-picker-up")
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .size(px(20.))
+                    .when(can_go_up, |this| {
+                        this.cursor_pointer()
+                            .hover(|this| this.bg(theme::hover()))
+                            .on_click(cx.listener(|this, _, _, cx| this.walk_picker_up(cx)))
+                    })
+                    .child(
+                        Icon::new(IconName::ArrowUp)
+                            .with_size(Size::XSmall)
+                            .text_color(if can_go_up {
+                                theme::text_muted()
+                            } else {
+                                theme::text_faint()
+                            }),
+                    ),
+            )
+            .child(
+                mono(
+                    browse
+                        .root
+                        .clone()
+                        .unwrap_or_else(|| "\u{2026}".to_string()),
+                    theme::text_faint(),
+                )
+                .text_size(theme::font(theme::Family::Chrome, theme::Role::Micro))
+                .flex_none()
+                .max_w(px(220.))
+                .truncate(),
+            )
+            // The root's own listing was cut short by the host's entry ceiling — the one
+            // truncation a row can never say for itself, since no row draws the root.
+            .children(browse.root_truncated.then(|| {
+                mono("+", theme::text_faint())
+                    .text_size(theme::font(theme::Family::Chrome, theme::Role::Meta))
+                    .flex_none()
+            }));
+    }
+
+    trailing = trailing
+        .child(icon_button(
+            "file-picker-hidden",
+            IconName::Eye,
+            picker.show_hidden(),
+            cx.listener(|this, _, _, cx| this.toggle_picker_hidden(cx)),
+        ))
+        .children(picker.request.pattern.clone().map(|pattern| {
+            mono(pattern, theme::text_faint())
+                .text_size(theme::font(theme::Family::Chrome, theme::Role::Micro))
+                .flex_none()
+                .px_1()
+                .bg(theme::surface_raised())
+        }))
+        .child(
+            mono(picker.view.label(), theme::text_faint())
+                .text_size(theme::font(theme::Family::Chrome, theme::Role::Micro))
+                .flex_none()
+                .px_1()
+                .bg(theme::surface_raised()),
+        );
+
+    filter_bar(
+        Input::new(&app.picker_filter).appearance(false),
+        trailing,
+        focused,
+    )
+}
+
+/// One row: what it is, what it is called, and what it says at its far end.
+///
+/// The tick box is drawn only where several answers are possible. A single pick says which one it
+/// is with the row's own accent edge, because a lone tick box invites a second tick the dialog
+/// would then have to take away.
+///
+/// The twisty is its own click target and stops the click there, so a folder that *can* be picked
+/// is opened by its chevron and chosen by its row — the one case where the two mean different
+/// things.
+fn line(row: PickerRow, tree: bool, multiple: bool, cx: &mut Context<AppState>) -> AnyElement {
+    let path = row.path.clone();
+    let ticks = row.pickable && multiple;
+    let selected = row.selected;
+
+    let mut line = file_row(
+        eid("picker-row", &row.path),
+        row.depth,
+        selected,
+        row.on_cursor,
+        // The picker's rows are walked from its own field, which never leaves it: there is no
+        // second focus here to tell the cursor bar apart from.
+        true,
+        row_font(),
+    );
+
+    // An unreadable folder draws no twisty at all — there is nothing a click on it could open, and
+    // a twisty that always fails is worse than one that is not there.
+    if tree && row.is_dir && row.readable {
+        let folder = row.path.clone();
+        line = line.child(twisty(
+            eid("picker-twisty", &row.path),
+            row.expanded,
+            cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.toggle_picker_folder(folder.clone(), cx);
+            }),
+        ));
+    }
+
+    if ticks {
+        let ticked = row.path.clone();
+        line = line.child(check_box(
+            eid("picker-tick", &row.path),
+            selected,
+            cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.click_picker_row(ticked.clone(), window, cx);
+            }),
+        ));
+    }
+
+    line = line
+        .child(kind_icon(row.is_dir, theme::text_faint()))
+        .child(elided_with(
+            eid("picker-name", &row.path),
+            row.name.clone(),
+            // The whole path, not the name again: a name that fits still leaves "which one is
+            // this" open, and in the flat list two folders can agree on one.
+            match row.path.is_empty() {
+                true => row.name.clone(),
+                false => row.path.clone(),
+            },
+            match row.pickable {
+                true => theme::text(),
+                false => theme::text_muted(),
+            },
+            theme::font(theme::Family::Chrome, theme::Role::Body),
+        ));
+
+    // A folder a host is still filling — see `PickerRow::loading` — says so with the same mark
+    // `ui::explorer` gives the same wait, and a folder whose listing came back cut short says so
+    // with the same `+` explorer gives a truncated one.
+    if row.loading {
+        line = line.child(
+            mono("\u{2026}", theme::text_faint())
+                .text_size(theme::font(theme::Family::Chrome, theme::Role::Meta))
+                .flex_none(),
+        );
+    }
+    if row.truncated {
+        line = line.child(
+            mono("+", theme::text_faint())
+                .text_size(theme::font(theme::Family::Chrome, theme::Role::Meta))
+                .flex_none(),
+        );
+    }
+
+    if !row.trailing.is_empty() {
+        line = line.child(
+            div()
+                .flex()
+                .flex_none()
+                .max_w(px(180.))
+                .font_family(theme::MONO_FONT)
+                .child(elided(
+                    eid("picker-trailing", &row.path),
+                    row.trailing.clone(),
+                    theme::text_faint(),
+                    theme::font(theme::Family::Chrome, theme::Role::Label),
+                )),
+        );
+    }
+
+    line.on_click(
+        cx.listener(move |this, _, window, cx| this.click_picker_row(path.clone(), window, cx)),
+    )
+    .into_any_element()
+}
+
+/// How much has been chosen, and the two ways out.
+///
+/// The confirming button is absent when a click on a row is already the answer: a dialog that
+/// closes on the click has nothing left for a button to do, and one drawn there would look like a
+/// step the user is skipping.
+///
+/// A host-project pick — opening a folder as a project on a remote host — also carries the
+/// persistent checkbox: checked, the project joins that host's catalogue and is still there to
+/// reconnect to later; unchecked, the host keeps it in memory only and it is gone at its next
+/// launch.
+fn footer(app: &AppState, picker: &FilePickerState, cx: &mut Context<AppState>) -> AnyElement {
+    let ready = picker.can_commit();
+    let label = picker.confirm_label();
+    let persistent = app
+        .host_browse
+        .as_ref()
+        .map(|browse| browse.persistent)
+        .unwrap_or(true);
+
+    div()
+        .px_3()
+        .py_2()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_2()
+        .bg(theme::pane_bg())
+        .border_t_1()
+        .border_color(theme::border())
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .font_family(theme::MONO_FONT)
+                .child(elided(
+                    "file-picker-tally",
+                    picker.tally(),
+                    theme::text_muted(),
+                    theme::font(theme::Family::Chrome, theme::Role::Label),
+                )),
+        )
+        .children((picker.request.owner == PickerOwner::HostProject).then(|| {
+            div()
+                .id("file-picker-persistent")
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(check_box(
+                    "file-picker-persistent",
+                    persistent,
+                    cx.listener(|this, _, _, cx| this.toggle_host_project_persistent(cx)),
+                ))
+                .child(
+                    mono("Keep project", theme::text_muted())
+                        .text_size(theme::font(theme::Family::Chrome, theme::Role::Meta)),
+                )
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(
+                        "Keep this project on the remote host, so a later reconnect finds it \
+                         still working. Unchecked, it lasts only until that host restarts.",
+                    )
+                    .build(window, cx)
+                })
+        }))
+        .child(hint(picker))
+        .child(ghost_button(
+            "file-picker-cancel",
+            None,
+            "Cancel",
+            cx.listener(|this, _, window, cx| this.cancel_file_picker(window, cx)),
+        ))
+        .children((!picker.request.commits_on_click()).then(|| {
+            primary_button(
+                "file-picker-confirm",
+                None,
+                label,
+                cx.listener(|this, _, window, cx| this.commit_file_picker(window, cx)),
+            )
+            // Nothing chosen is nothing to add. The button stays where it is and drains, rather
+            // than disappearing and moving Cancel under the pointer.
+            .when(!ready, |button| {
+                button.bg(theme::fade(theme::accent(), 0.35))
+            })
+        }))
+        .into_any_element()
+}
+
+/// What the keyboard can do here, said once where it is needed.
+///
+/// A dialog that answers arrow keys and says nothing about it is a dialog nobody uses them in. The
+/// wording changes with what was asked for, because half of it would be a lie otherwise: there is
+/// no "add" in a single pick, and no folders to walk in the flat list.
+fn hint(picker: &FilePickerState) -> impl IntoElement {
+    let confirm = match cfg!(target_os = "macos") {
+        true => "\u{2318}\u{23ce} add",
+        false => "ctrl-\u{23ce} add",
+    };
+
+    let mut parts = vec!["\u{2191}\u{2193} move"];
+    if picker.view == PickerView::Tree {
+        parts.push("\u{2190}\u{2192} folders");
+    }
+    match picker.request.count {
+        PickerCount::Single => parts.push("\u{23ce} select"),
+        PickerCount::Multiple => {
+            parts.push("\u{23ce} tick");
+            parts.push(confirm);
+        }
+    }
+    parts.push("esc close");
+
+    mono(parts.join("  \u{00b7}  "), theme::text_faint())
+        .flex_none()
+        .text_size(theme::font(theme::Family::Chrome, theme::Role::Micro))
+}
+
+/// The corner the dialog is resized by.
+///
+/// The dialog is centred, so a drag of the corner moves both of its edges: the grip follows the
+/// pointer and the far side moves the same distance the other way. That arithmetic is
+/// [`FilePickerState::drag_to`]'s, not this file's.
+fn grip(cx: &mut Context<AppState>) -> impl IntoElement {
+    div()
+        .id("file-picker-grip")
+        .absolute()
+        .bottom(px(0.))
+        .right(px(0.))
+        .size(px(16.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor(CursorStyle::ResizeUpLeftDownRight)
+        .child(
+            Icon::new(IconName::ResizeCorner)
+                .with_size(Size::XSmall)
+                .text_color(theme::text_faint()),
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                let at = (f32::from(event.position.x), f32::from(event.position.y));
+                this.start_picker_resize(at, cx);
+            }),
+        )
+}

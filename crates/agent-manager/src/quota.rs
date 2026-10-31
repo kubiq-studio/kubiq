@@ -112,7 +112,7 @@ pub enum QuotaReading {
     },
     /// A count against a stated ceiling. `limit` is `None` where the provider counts but names no
     /// ceiling — a reader draws the count and no bar, because a meter without a denominator is
-    /// exactly the thing Ubiq's stats rule refuses.
+    /// exactly the thing Kubiq's stats rule refuses.
     Count {
         /// How many have been used.
         used: u64,

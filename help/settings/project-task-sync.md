@@ -21,10 +21,10 @@ the section shows how many tasks are linked.
 | **Connection** | Which signed-in identity this project calls the tracker as; the binding keeps a reference, never the token |
 | **Board** | The board at the provider that this project is bound to |
 | **Filter** | The provider's own fields (for Trello **Board**, **Lists**, **Labels**, **Members**) that decide which cards are offered, with a **Test** that counts the matches |
-| **Lanes** | For each lane at the provider, which of Ubiq's lanes its cards land in; **—** leaves the cards where they are |
-| **Kinds and priorities** | A word the provider uses, mapped to one of Ubiq's; its × undoes a mapping |
+| **Lanes** | For each lane at the provider, which of Kubiq's lanes its cards land in; **—** leaves the cards where they are |
+| **Kinds and priorities** | A word the provider uses, mapped to one of Kubiq's; its × undoes a mapping |
 | **Direction** | **Pull only**, the default, or **Two-way**, which also writes your changes back |
-| **When both sides changed** | **The remote wins** or **Ubiq wins**, for a field changed on both sides; the loser's value is kept in a comment |
+| **When both sides changed** | **The remote wins** or **Kubiq wins**, for a field changed on both sides; the loser's value is kept in a comment |
 | **Interval** | Seconds between passes, with a floor that the page names when it applies |
 | **Import everything the filter matches** | Off by default; on, every match becomes a task without being picked |
 | **What this provider accepts** | Chips for what two-way can write, such as **Push the title** or **Push comments**; a dim chip is something this tracker does not do |

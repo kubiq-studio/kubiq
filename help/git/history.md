@@ -3,7 +3,7 @@ id: git-history
 title: The History panel
 summary: The commit graph, its search and filters, and what picking a commit does.
 keywords: [history, log, commit graph, search commits, cherry-pick, reset, revert]
-context: [panel.ubiq.git.history]
+context: [panel.kubiq.git.history]
 order: 30
 status: current
 related: [git-overview, git-changes, git-refs, git-compare-commits]
@@ -11,7 +11,7 @@ related: [git-overview, git-changes, git-refs, git-compare-commits]
 
 History fills the centre of [Git mode](git-overview) with the repository's commit graph, newest at
 the top. Each row shows the graph lanes, the **Message**, the **Author**, **When** and **SHA**. While
-something is uncommitted, the top row reads **Uncommitted changes** with a count, and Ubiq opens on it.
+something is uncommitted, the top row reads **Uncommitted changes** with a count, and Kubiq opens on it.
 
 ## The parts
 
@@ -35,7 +35,7 @@ Right-click a commit for **Copy SHA**, **Cherry-pick**, **Revert** and **Reset (
 
 ## When something goes wrong
 
-- **A commit you jumped to is missing.** Ubiq clears the filters and loads older commits until it
+- **A commit you jumped to is missing.** Kubiq clears the filters and loads older commits until it
   finds it.
 - **The list is short.** It loads as you scroll; use **Load more commits** if nothing seems to load.
 - **Loading history…** shows in the strip while a page is on its way.

@@ -3,7 +3,7 @@ id: inbox-personalisation
 kind: proposal
 status: proposal
 title: Proposal — personalisation, two size axes and author-made themes
-summary: Sizing is four unrelated mechanisms today — a density factor over five constants, three independent type bases, a per-project content size reachable only from a status-bar px dropdown, and twenty-six frozen layout constants — so growing the text does not grow the boxes around it. The proposal collapses them into two axes a slider each can drive, a UI scale that moves every dimension and a text ratio that moves type within it, names the pair as a saveable preset, makes every appearance value one setting for all of Ubiq by moving the content size out of per-project view state, and opens the palette registry to author-made themes as a fork plus a sparse override map.
+summary: Sizing is four unrelated mechanisms today — a density factor over five constants, three independent type bases, a per-project content size reachable only from a status-bar px dropdown, and twenty-six frozen layout constants — so growing the text does not grow the boxes around it. The proposal collapses them into two axes a slider each can drive, a UI scale that moves every dimension and a text ratio that moves type within it, names the pair as a saveable preset, makes every appearance value one setting for all of Kubiq by moving the content size out of per-project view state, and opens the palette registry to author-made themes as a fork plus a sparse override map.
 read_when: you are changing a size constant, the density factor, the type scale, the status bar's size control, the Appearance settings section, or asking how a user would author a theme
 updated: 2026-09-19
 depends_on: [tech-ui, feat-workbench, tech-decisions, inbox-config, inbox-component-reuse]
@@ -11,11 +11,11 @@ depends_on: [tech-ui, feat-workbench, tech-decisions, inbox-config, inbox-compon
 
 # Proposal — personalisation, two size axes and author-made themes
 
-Ubiq has four sizing mechanisms and no relationship between them. `Density` is a factor of 0.9,
+Kubiq has four sizing mechanisms and no relationship between them. `Density` is a factor of 0.9,
 1.0 or 1.15 applied to exactly five constants. `TextScale` carries three independent bases —
 chrome, content, conversation — of which content is per-project and the other two are
 per-interface. Twenty-six layout constants under "Dragged regions" in
-`crates/ubiq/src/theme.rs` are frozen by test. And the fifty-odd paddings, gaps and field heights
+`crates/kubiq/src/theme.rs` are frozen by test. And the fifty-odd paddings, gaps and field heights
 written as `px_3` or `h(px(28.))` follow nothing at all.
 
 The user-visible consequence is that the three controls do not compose. Raising chrome text in
@@ -27,7 +27,7 @@ put. A user who wants "everything bigger" has to find three controls, and still 
 **One fact makes the fix far cheaper than it looks: GPUI's whole Tailwind-shaped spacing scale is
 already rem-relative.** Every `p_3`, `gap_2`, `w_4` and `h_8` expands to `rems(...)` in
 `gpui_macros`, and `gpui_component::Root` sets the window's rem size from its own
-`Theme::font_size` on every paint — a value Ubiq never writes, so it has sat at 16px forever.
+`Theme::font_size` on every paint — a value Kubiq never writes, so it has sat at 16px forever.
 Writing that one number is how several hundred hand-placed spacings, and every
 `gpui-component` internal that measures in rems, start scaling with no call-site change at all.
 
@@ -60,7 +60,7 @@ exists to remove. `Density::Compact | Regular | Comfortable` migrate to `ui_scal
 and the enum goes. The three built-in presets keep those names, so nothing disappears from the
 user's vocabulary.
 
-**The content size stops being per-project.** Appearance is one setting for all of Ubiq, and
+**The content size stops being per-project.** Appearance is one setting for all of Kubiq, and
 `content_font_size` is the last thing that is not: it lives in `ViewPrefs`, in a project's
 `view.toml`, so the same window renders the same editor at two sizes depending on which project is
 adopted, and `ui/shell.rs` has to push the active project's value into the process-wide scale at
@@ -89,7 +89,7 @@ The two sliders are a day's work; making them *accurate* is the proposal.
   pixels fed to `Size::Size(px)`, and `just ui` grows a lint for a literal icon size, matching the
   one it already runs for `text_size(px(...))`.
 - **The fourteen existing `text_size(px(N))` violations go through `font()`.** They are all
-  content-family zoom plumbing in `crates/ubiq/src/ui/search.rs`, `ui/outline.rs`,
+  content-family zoom plumbing in `crates/kubiq/src/ui/search.rs`, `ui/outline.rs`,
   `ui/kb/mod.rs`, `ui/viewer/mod.rs` and `ui/viewer/markdown.rs`, and the ad-hoc `- 0.5` deltas
   beside them are a `Role` written by hand. A `Role::Dense` at 0.96 replaces all of them.
 - **Terminal re-dress is debounced.** A slider drag changes `terminal_padding()` and the content
@@ -129,10 +129,10 @@ between two.
 
 Two new things the kit owes this:
 
-- **`kit::slider`** — Ubiq's kit has no continuous control at all; `kit::meter` displays and
+- **`kit::slider`** — Kubiq's kit has no continuous control at all; `kit::meter` displays and
   `kit::stepper` is discrete. `gpui-component` ships `Slider` and `SliderState`, unused, and
   adopting it is exactly the case `component-reuse-proposal.md` argues for: real drag, keyboard
-  and accessibility behaviour Ubiq would otherwise write. The kit wrapper adds the palette, the
+  and accessibility behaviour Kubiq would otherwise write. The kit wrapper adds the palette, the
   leading and trailing icon slots, and `.step()` so the value snaps to a ladder rather than
   landing on 1.0374. **The step is `0.05` on both axes** — thirteen stops over the UI scale and
   eight over the text ratio — because the library quantises to multiples of the step measured from
@@ -141,7 +141,7 @@ Two new things the kit owes this:
   two `Entity<SliderState>` handles live on `AppState` with their subscriptions — the widget's
   state *is* the model, which is the stated exception to the no-component-types-in-`state/` rule.
 - **Four icons** — small interface, large interface, small glyph, large glyph — drawn through the
-  `ubiq-icons` loop and added to the registry. The sliders are otherwise unlabelled controls,
+  `kubiq-icons` loop and added to the registry. The sliders are otherwise unlabelled controls,
   and every one of those carries a tooltip.
 
 `MenuId::FontSize` becomes `MenuId::Size`, and the helper that found the nearest ladder entry goes
@@ -211,7 +211,7 @@ it is paired with.
 - **No sliders for the per-family trims.** Three more continuous controls for a preference most
   users will never touch is a worse settings page. They stay pills.
 - **The library's own text follows `S` but not `T`.** Rem is a length, so it cannot carry a
-  type-only ratio. Ubiq draws nearly all of its own text through `font()`; what is left is input
+  type-only ratio. Kubiq draws nearly all of its own text through `font()`; what is left is input
   fields, the dock's tab labels and the table — narrow enough to record as a gap rather than
   design around.
 
@@ -259,10 +259,10 @@ P4 is independent of P1–P3 and can be dropped or deferred without stranding th
 | P4b | `CustomTheme` and the theme editor | done — `D152`, `theme::EDITABLE_TOKENS`, and an interned `custom-…` slug that leaves `ThemeId` `Copy` |
 
 `just check` and `just verify` cannot run in the current environment: `foundation-models`, a
-pre-existing optional dependency of `ubiq-host` behind `assist-apple`, builds a Swift bridge whose
+pre-existing optional dependency of `kubiq-host` behind `assist-apple`, builds a Swift bridge whose
 `swift build` invokes `sandbox-exec`, which is denied. No manifest in this change touches it. The
-standing substitute gate is `cargo check -p ubiq-studio --all-targets` from the Studio root, which
-does compile crate `ubiq`, plus `just ui`, `just host`, `just fmt` and `just docs-lint`.
+standing substitute gate is `cargo check -p kubiq-studio --all-targets` from the Studio root, which
+does compile crate `kubiq`, plus `just ui`, `just host`, `just fmt` and `just docs-lint`.
 
 ## 8. Decisions and gaps this would add
 
@@ -272,8 +272,8 @@ does compile crate `ubiq`, plus `just ui`, `just host`, `just fmt` and `just doc
 - **D152** — a custom theme is a fork of a built-in palette plus a sparse override map. *Cost:* a
   forked theme drifts when its base palette is retuned, and an author cannot build one from
   nothing.
-- **D153** — the window's rem size is the UI scale. *Cost:* Ubiq inherits `gpui-component`'s
-  spacing judgement wholesale, and a library upgrade that re-tunes a rem value moves Ubiq's layout.
+- **D153** — the window's rem size is the UI scale. *Cost:* Kubiq inherits `gpui-component`'s
+  spacing judgement wholesale, and a library upgrade that re-tunes a rem value moves Kubiq's layout.
 - **G303** — library-drawn text tracks the UI scale but not the text ratio.
 - **G304** — icon sizes are literal pixels at call sites, with no lint, until P1 lands.
 

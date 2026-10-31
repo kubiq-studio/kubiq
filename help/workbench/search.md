@@ -3,7 +3,7 @@ id: workbench-search
 title: Search
 summary: Finding text across a project's files from the Search panel, and opening a result at its line.
 keywords: [search, find, grep, content search, regex, case, whole word, results]
-context: [panel.ubiq.search]
+context: [panel.kubiq.search]
 order: 40
 status: current
 related: [workbench-explorer, workbench-editor, workbench-titlebar, how-to-search-the-project, settings-files-and-search]
@@ -32,7 +32,7 @@ they are. The panel draws the first 500 hits and says `shown first 500` when the
 Open the panel from the title bar's **Search** button ![Search](../img/ui/titlebar-search.png), or
 press **⌘⇧F**. The title bar's command field gets there too: type a term and press **⌘Enter**, or pick the
 first row of the [navigator](how-to-use-the-navigator), which offers what you typed as a search
-`in project`. Either way Ubiq switches to IDE mode and runs it.
+`in project`. Either way Kubiq switches to IDE mode and runs it.
 
 ## What you can do here
 

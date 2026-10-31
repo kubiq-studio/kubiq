@@ -1,0 +1,159 @@
+//! The host: everything that is not drawing.
+//!
+//! Processes, pseudo-terminals, and the harnesses running under them. It has no window, no
+//! palette, no layout and no dependency that draws — `just host` checks that mechanically rather
+//! than trusting the rule.
+//!
+//! Everything it says leaves as a [`kubiq_proto::messages::Message`] addressed to a client. It
+//! renders nothing and has no opinion about layout or colour.
+//!
+//! - `config`: where Kubiq's config root is, and how it is found
+//! - `connectors`: the identities Kubiq holds at external services, and the flows that obtain them
+//!   (behind `listener`)
+//! - `assist`: whether a suggestion can be asked for, and the backend that writes one (behind
+//!   `harness`)
+//! - `atomic`: writing a file so a crash never leaves half of one
+//! - `carrier`: a session over one duplex byte stream — the pump every transport shares
+//! - `store`: the catalogue, a project's tasks, the interface's view state and settings, behind four traits
+//! - `health`: what is actually at a project's path
+//! - `repos`: cloning a repository into a project, and the listings that find one (behind `git`)
+//! - `projects`: the catalogue as the host runs it
+//! - `gc`: collecting the directories of projects no record names (behind `harness`)
+//! - `feedback`: the user's report on its way out — the destination trait, the compiled default
+//!   and the user's override of it, and the thread that posts it (the destinations behind
+//!   `listener`)
+//! - `updates`: Kubiq updating itself — the signed feed, the verified download, and the detached
+//!   helper that swaps the app in (behind `listener`)
+//! - `files`: a project's tree and its files, read and written off the coordinator's thread
+//! - `git`: a project's repository, observed off the coordinator's thread (behind `git`)
+//! - `work`: the tasks a project has written down, and the sessions and agents doing them (behind
+//!   `harness`)
+//! - `plan`: a task's plan — one markdown document per mission, kept beside its tasks. The block
+//!   matcher and the provenance layer (`plan::blocks`, `plan::provenance`) read and write the
+//!   sidecar with no dependency on `work`; `Plans`/`Handle`/`Target`, which check a task's level
+//!   through it, are behind `harness`
+//! - `mission`: a mission's runner — the pure pass over its task tree, the actions, the launches
+//!   addressed to one window, and the derived snapshot; the mission is its parent task and keeps
+//!   no record of its own (behind `harness`)
+//! - `reply`: what a service wants said, before the coordinator addresses it
+//! - `coordinator`: the run loop that starts harnesses, supervises them, and answers the bus
+//!   (behind `full`)
+//! - `pty`: pseudo-terminal streams, the one place a descriptor or a process is held
+//! - `quota`: how much of an account's plan is left — the in-memory cache, and the thread that
+//!   asks (behind `harness`)
+//! - `shells`: which shells this machine has, and how one is started
+//! - `agent`: agent-type definitions and the registry over them (behind `harness`)
+//! - `conversation`: one live agent, its pump thread, and the one mapping onto the bus (behind
+//!   `harness`)
+//! - `conversation_record`: a conversation's launch recipe on disk, so a marked one outlives the
+//!   process (behind `harness`)
+//! - `watch`: what changed on disk in an open project, said without being asked
+//! - `browser`: the internal browser's host half — the per-project history worker, and the table
+//!   an agent's `kubiq-browser` command waits in until a window replies
+//! - `mcp`: the MCP surface Kubiq exposes to the agents it hosts — one loopback listener, the
+//!   built-in servers behind it, and the registry that says which agent is calling (behind
+//!   `harness`)
+//! - `web_assets`: the vendor bundles a web panel needs, fetched once into the shared workarea,
+//!   verified against a manifest in source, and served by the interface off its own origin (behind
+//!   `listener`)
+//! - `help`: Kubiq's own documentation — a prebuilt bundle found once and unpacked into the shared
+//!   workarea, on `web_assets`'s bundle-then-serve shape with no network in it
+//! - `kb`: a project's knowledge base — its configured sources, a git one's fetch, and the state
+//!   of each now (git fetch behind `git`, same as `repos`)
+//! - `tasksrc`: binding a project's board to a board somewhere else — the provider trait, the
+//!   binding and its link table, the `tasksrc.toml` sidecar, and Trello as the first provider
+//!   (the provider itself behind `listener`, since it makes HTTP requests)
+//! - `runners`: the targets a project's `justfile`, `Makefile` and `mise.toml` offer, served as
+//!   tools the user never wrote — the source trait, its registry, and the three base sources
+//! - `index`: the full-text index that speeds up content search (behind `index`)
+//! - `notifications`: telling the desktop about a notification (behind `desktop`)
+//! - `remote`, `links`: the rest of what `listener` gates
+//! - `drone`: re-exports `kubiq_proto::drone` — resolving and caching a cross-built `kubiq-drone`
+//!   binary for deployment, hash-pinned against a generated manifest rather than signed (`G108`);
+//!   moved there so `crates/kubiq`'s deployer can reach it too (behind `listener`)
+//! - `catalog`: the skill and MCP catalog — one library `FsRegistry` layer per scope, overlaid at
+//!   launch, and the conversions to the wire (behind `harness`)
+//! - `cli_shortcut`: behind `harness`
+//! - `shell_integration`: *Open in Kubiq* in the desktop's file-manager context menu — Explorer's,
+//!   through per-user registry keys; unsupported elsewhere (behind `desktop`)
+//!
+//! `git`, `index`, `harness`, `listener` and `desktop` are the features a lean embedder (a
+//! headless drone with no window, no account, no network surface) can each leave off; `full`,
+//! which `default` turns on, is all five together and is what `coordinator` needs.
+
+#[cfg(feature = "full")]
+pub(crate) mod acp;
+#[cfg(feature = "harness")]
+pub mod agent;
+#[cfg(feature = "harness")]
+pub mod archify;
+pub mod armed;
+pub mod ask;
+#[cfg(feature = "harness")]
+pub mod assist;
+pub mod atomic;
+pub mod browser;
+pub mod carrier;
+#[cfg(feature = "harness")]
+pub mod catalog;
+#[cfg(feature = "harness")]
+pub mod cli_shortcut;
+pub mod config;
+#[cfg(feature = "listener")]
+pub mod connectors;
+#[cfg(feature = "harness")]
+pub mod conversation;
+#[cfg(feature = "harness")]
+pub mod conversation_record;
+#[cfg(feature = "full")]
+pub mod coordinator;
+#[cfg(feature = "db")]
+pub mod db;
+#[cfg(feature = "listener")]
+pub mod drone;
+pub mod environment;
+pub mod feedback;
+pub mod files;
+#[cfg(feature = "harness")]
+pub mod gc;
+#[cfg(feature = "git")]
+pub mod git;
+pub mod health;
+pub mod help;
+pub mod host_meta;
+pub mod host_path;
+#[cfg(feature = "index")]
+pub mod index;
+pub mod kb;
+pub mod links;
+#[cfg(feature = "harness")]
+pub mod mcp;
+#[cfg(feature = "harness")]
+pub mod mission;
+#[cfg(feature = "desktop")]
+pub mod notifications;
+pub mod plan;
+pub mod projects;
+pub mod pty;
+#[cfg(feature = "harness")]
+pub mod quota;
+#[cfg(feature = "listener")]
+pub mod remote;
+pub mod reply;
+#[cfg(feature = "git")]
+pub mod repos;
+pub mod runners;
+pub mod search;
+pub mod settings;
+#[cfg(feature = "desktop")]
+pub mod shell_integration;
+pub mod shells;
+pub mod store;
+pub mod tasksrc;
+#[cfg(feature = "listener")]
+pub mod updates;
+pub mod watch;
+#[cfg(feature = "listener")]
+pub mod web_assets;
+#[cfg(feature = "harness")]
+pub mod work;

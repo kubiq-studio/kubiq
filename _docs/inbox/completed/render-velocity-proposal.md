@@ -11,13 +11,13 @@ depends_on: [feat-chat, feat-workbench, tech-ui, tech-version-control, tech-arch
 
 # Problem — every long list in the interface is built whole, every frame
 
-Ubiq's slowness under a long list is not one bug in one screen. It is one architectural fact and a
+Kubiq's slowness under a long list is not one bug in one screen. It is one architectural fact and a
 set of consequences that follow from it mechanically:
 
 > **The window is a single render entity, and every wire message marks it dirty.**
-> `impl Render for AppState` (`crates/ubiq/src/app/shell.rs:809`) is the only `Render` in the crate
+> `impl Render for AppState` (`crates/kubiq/src/app/shell.rs:809`) is the only `Render` in the crate
 > that draws anything real — the rest are drag ghosts. `Message::ConversationUpdate` calls
-> `cx.notify()` unconditionally (`crates/ubiq/src/app/wire.rs:1107`), once per streamed delta, with
+> `cx.notify()` unconditionally (`crates/kubiq/src/app/wire.rs:1107`), once per streamed delta, with
 > no coalescing and no test for whether that agent is on screen.
 
 So a token arriving in a background agent's transcript rebuilds the dock, the explorer, the git
@@ -66,7 +66,7 @@ and is debounced and bounded; it is not part of this problem.
 
 | Fact | Where | Cost |
 |---|---|---|
-| The diff body builds every hunk header and every row into a `div` chain, up to the host's `MAX_ROWS = 10_000` | `ui/viewer/diff.rs:36`, `crates/ubiq-host/src/files/diff.rs:49` | O(rows) per frame — the worst single number in the interface |
+| The diff body builds every hunk header and every row into a `div` chain, up to the host's `MAX_ROWS = 10_000` | `ui/viewer/diff.rs:36`, `crates/kubiq-host/src/files/diff.rs:49` | O(rows) per frame — the worst single number in the interface |
 | Commit history builds every visible commit row | `ui/git/history.rs:44` | O(page) per frame |
 | `visible_commits()` allocates a fresh `to_lowercase()` for the summary, author and short id of **every** commit, every frame, whether or not a filter is typed | `state/git.rs:373` | 3n allocations per frame |
 | `lanes()` maxes over all commits every frame just to size the gutter | `state/git.rs:389` | O(n) per frame |
@@ -75,7 +75,7 @@ and is debounced and bounded; it is not part of this problem.
 | History pagination is wired one way and dead: `GitView` writes `log_cursor` and `log_done` and nothing ever reads them to ask for page two, so history stops at a hundred commits | `state/git.rs:300`, `app/git.rs:44` | correctness, not speed |
 
 The host side is already right: lanes are assigned once per page in
-`crates/ubiq-host/src/git/graph.rs`, the diff is parsed once and capped, and the log message
+`crates/kubiq-host/src/git/graph.rs`, the diff is parsed once and capped, and the log message
 already carries a cursor. Nothing in this proposal moves work across the bus.
 
 ## 2. The shape of the fix

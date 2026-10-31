@@ -37,12 +37,12 @@ to change here, and it is the proof that fan-out is already a thing the coordina
 carries its client and the answer goes back to it. Two interfaces asking the same question get two
 answers and never collide. Nothing has to change here either.
 
-**Streams it addresses to one owner.** `crates/ubiq-host/src/pty/mod.rs` resolves a pane's mailbox
+**Streams it addresses to one owner.** `crates/kubiq-host/src/pty/mod.rs` resolves a pane's mailbox
 once, at spawn, and its reader thread stops when that mailbox is gone. The coordinator keys `owners`
 by pane and `conversation_owners` by agent, and a conversation's updates go to the owner it finds
 there. Both are single-owner by construction, and neither keeps
 history: bytes are opaque by `D6`, and the conversation pump in
-`crates/ubiq-host/src/conversation.rs` carries a monotonic sequence while the content passes
+`crates/kubiq-host/src/conversation.rs` carries a monotonic sequence while the content passes
 straight through.
 
 **And one arbiter already exists.** `D37` makes a save name the version it read and refuses it if the
@@ -104,11 +104,11 @@ This is the expensive part, and the two resources want different answers.
 the ring is process memory and never reaches disk. A ring alone is not a screen, because it may begin
 mid-escape-sequence and because a full-screen harness paints by absolute address; so the joiner also
 gets a repaint nudge — the resize round-trip every full-screen application answers by redrawing.
-Together they cover the case Ubiq actually has, which is a harness on the alternate screen. They do
+Together they cover the case Kubiq actually has, which is a harness on the alternate screen. They do
 not cover a shell halfway down a scroll, and pretending otherwise would be the wrong promise.
 
 **A conversation: the argument has to be had, not assumed.**
-[`chat-resume-and-fork`](../chat-resume-and-fork.md) argues that Ubiq should not own a transcript
+[`chat-resume-and-fork`](../chat-resume-and-fork.md) argues that Kubiq should not own a transcript
 record, because the harnesses replay their own on resume. That argument is about durability across a
 restart, and a live in-process delta buffer for the seconds a second interface takes to join is a
 different object — but it is close enough that building one without answering that document would be
@@ -166,7 +166,7 @@ designed around — or it is the service on the other end of the rendezvous. Bot
 **And the sequencing writes itself.** Build the lease because one person with two interfaces needs it.
 Keep the policy behind a seam from the first commit, so a tier stays possible without a fork. Decide
 the tier when somebody asks for the second *person*, not the second interface — the two are months
-apart, and only the second one changes what Ubiq is.
+apart, and only the second one changes what Kubiq is.
 
 One thing here is not an engineering call: crossing the multi-user refusal in `product/overview.md`
 is a product decision, and that document prescribes.

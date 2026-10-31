@@ -11,9 +11,9 @@ on:
         required: true
 
 env:
-  UBIQ_VERSION: ${{ inputs.version }}
-  UBIQ_CHANNEL: ${{ inputs.channel }}
-  UBIQ_UPDATE_PUBKEY: ${{ vars.UPDATE_PUBLIC_KEY }}
+  KUBIQ_VERSION: ${{ inputs.version }}
+  KUBIQ_CHANNEL: ${{ inputs.channel }}
+  KUBIQ_UPDATE_PUBKEY: ${{ vars.UPDATE_PUBLIC_KEY }}
 
 jobs:
   build:
@@ -34,14 +34,14 @@ jobs:
       # either half at run time in Settings → Feedback. Unset → an empty value, read as no default.
       - run: just bundle
         env:
-          UBIQ_FEEDBACK_URL: ${{ vars.UBIQ_FEEDBACK_URL }}
-          UBIQ_FEEDBACK_API_KEY: ${{ secrets.UBIQ_FEEDBACK_API_KEY }}
+          KUBIQ_FEEDBACK_URL: ${{ vars.KUBIQ_FEEDBACK_URL }}
+          KUBIQ_FEEDBACK_API_KEY: ${{ secrets.KUBIQ_FEEDBACK_API_KEY }}
 
       # Sign, and notarize when Apple credentials are set. Three modes, picked by which secrets exist:
       #   Developer ID cert + APPLE_* → signed, notarized, stapled (opens without a prompt)
       #   any cert (self-signed)      → signed, not notarized ("unidentified developer", Open Anyway)
       #   no cert                     → ad-hoc signed bundle, so macOS never calls it "damaged"
-      # Nothing may write into Ubiq.app after `codesign` — `help.bundle` is copied in by
+      # Nothing may write into Kubiq.app after `codesign` — `help.bundle` is copied in by
       # `just bundle`, so it is sealed with the rest of Resources.
       - name: Sign and notarize
         env:
@@ -53,20 +53,20 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           set -euo pipefail
-          APP=target/Ubiq.app
-          DMG=Ubiq-macos-arm64.dmg
+          APP=target/Kubiq.app
+          DMG=Kubiq-macos-arm64.dmg
 
-          # The installer image: Ubiq.app plus an Applications link, compressed.
+          # The installer image: Kubiq.app plus an Applications link, compressed.
           make_dmg() {
             rm -rf "$RUNNER_TEMP/dmg" "$DMG"
             mkdir "$RUNNER_TEMP/dmg"
-            ditto "$APP" "$RUNNER_TEMP/dmg/Ubiq.app"
+            ditto "$APP" "$RUNNER_TEMP/dmg/Kubiq.app"
             ln -s /Applications "$RUNNER_TEMP/dmg/Applications"
-            hdiutil create -volname Ubiq -srcfolder "$RUNNER_TEMP/dmg" -ov -format UDZO "$DMG"
+            hdiutil create -volname Kubiq -srcfolder "$RUNNER_TEMP/dmg" -ov -format UDZO "$DMG"
           }
 
           if [ -z "$MACOS_CERT_P12" ]; then
-            echo "::warning::no signing certificate — ad-hoc signing Ubiq.app"
+            echo "::warning::no signing certificate — ad-hoc signing Kubiq.app"
             codesign --force --deep --sign - "$APP"
             codesign --verify --deep --strict --verbose=2 "$APP"
             make_dmg
@@ -94,14 +94,14 @@ jobs:
           fi
           TS=--timestamp=none
           if $NOTARIZE; then TS=--timestamp; fi
-          for target in "$APP/Contents/MacOS/ubiq" "$APP"; do
+          for target in "$APP/Contents/MacOS/kubiq" "$APP"; do
             codesign --force $TS --options runtime --keychain "$KEYCHAIN" \
               --sign "$MACOS_SIGN_IDENTITY" "$target"
           done
           codesign --verify --deep --strict --verbose=2 "$APP"
 
           if ! $NOTARIZE; then
-            echo "::warning::APPLE_* secrets not set — Ubiq.app is signed but not notarized"
+            echo "::warning::APPLE_* secrets not set — Kubiq.app is signed but not notarized"
             make_dmg
             codesign --force --timestamp=none --keychain "$KEYCHAIN" --sign "$MACOS_SIGN_IDENTITY" "$DMG"
             exit 0
@@ -136,12 +136,12 @@ jobs:
           xcrun stapler staple "$DMG"
 
       # Zipped after stapling, so the ticket travels inside the archive.
-      - run: ditto -c -k --keepParent target/Ubiq.app Ubiq-macos-arm64.zip
+      - run: ditto -c -k --keepParent target/Kubiq.app Kubiq-macos-arm64.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-macos
           if-no-files-found: error
           path: |
-            Ubiq-macos-arm64.zip
-            Ubiq-macos-arm64.dmg
+            Kubiq-macos-arm64.zip
+            Kubiq-macos-arm64.dmg

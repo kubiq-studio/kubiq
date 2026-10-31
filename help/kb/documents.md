@@ -3,7 +3,7 @@ id: kb-documents
 title: Reading a document
 summary: Open a knowledge base document in its own tab, read it beside your work, and save edits where the source allows.
 keywords: [document, read, markdown, edit, save, kb, tab]
-context: [panel.ubiq.kb.doc]
+context: [panel.kubiq.kb.doc]
 order: 20
 status: current
 related: [kb-overview, kb-sources, workbench-panels]

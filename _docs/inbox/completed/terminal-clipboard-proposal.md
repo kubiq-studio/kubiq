@@ -32,7 +32,7 @@ There is no check for `Cmd` modifier at all — GPUI's `Keystroke::modifiers` ca
 
 **The key handler.** `TerminalView` exposes `with_key_handler()` (`view.rs:576-582`), a callback
 that runs before `keystroke_to_bytes`. If it returns `true`, the keystroke is consumed and never
-reaches the PTY. Ubiq's terminal creation (`crates/ubiq/src/app/wire.rs`) does not set a key
+reaches the PTY. Kubiq's terminal creation (`crates/kubiq/src/app/wire.rs`) does not set a key
 handler, so every keystroke flows through.
 
 **The clipboard wrapper.** `Clipboard` (`vendor/gpui-terminal/src/clipboard.rs`) wraps `arboard` with
@@ -40,7 +40,7 @@ handler, so every keystroke flows through.
 in the application layer.
 
 **OSC 52 store.** `ClipboardStoreCallback` (`view.rs:275-298`) is dispatched when a harness writes
-`ESC ] 52 ; <sel> ; <data> BEL` to request a clipboard write. Ubiq does not set this callback.
+`ESC ] 52 ; <sel> ; <data> BEL` to request a clipboard write. Kubiq does not set this callback.
 
 **OSC 52 load.** `TerminalEvent::ClipboardLoad` (`event.rs:68,138-141`) arrives when a harness reads
 `ESC ] 52 ; <sel> ; ? BEL` to request a clipboard read. The handler in `view.rs:821-823` is a
@@ -57,7 +57,7 @@ wrapping, wide characters, and tab stops. The selection is stored on the `Term` 
 
 ## 2. What this decides
 
-Not whether terminals need clipboard — they do. Whether Ubiq intercepts Cmd/Ctrl at the application
+Not whether terminals need clipboard — they do. Whether Kubiq intercepts Cmd/Ctrl at the application
 layer via the existing key handler, or whether it leaves copy/paste to the harness alone:
 
 - the shortcut set and platform mapping — §3;
@@ -86,8 +86,8 @@ with what the terminal already does, just intercepted at the application layer i
 the harness.
 
 **Why `Ctrl+Shift` and not `Ctrl+C` alone.** On Mac, `Ctrl+C` in a terminal means interrupt. That
-convention is older than Ubiq and more important than a clipboard shortcut. Breaking it would make
-every harness that catches SIGINT (vim, less, git, docker-compose) behave differently in Ubiq than
+convention is older than Kubiq and more important than a clipboard shortcut. Breaking it would make
+every harness that catches SIGINT (vim, less, git, docker-compose) behave differently in Kubiq than
 in any other terminal. The cost of `Shift` is one extra finger; the cost of breaking SIGINT is
 every TUI application.
 
@@ -142,7 +142,7 @@ The harness decides what to do with each line. This matches iTerm2, Kitty and Al
 ## 6. OSC 52 round-tripping
 
 **Store (harness writes to clipboard).** `TerminalEvent::ClipboardStore(text)` is already dispatched
-(`event.rs:134-136`). Ubiq wires `with_clipboard_store_callback(|window, cx, text| { Clipboard::copy(text) })`.
+(`event.rs:134-136`). Kubiq wires `with_clipboard_store_callback(|window, cx, text| { Clipboard::copy(text) })`.
 This enables tmux, vim, and any application using OSC 52 to write to the system clipboard.
 
 **Load (harness reads from clipboard).** `TerminalEvent::ClipboardLoad` is received but not handled
@@ -225,11 +225,11 @@ terminal level, and the clipboard shortcut is a different key.
 | `vendor/gpui-terminal/src/view.rs` | `on_mouse_down/up/move` call through to `TerminalState` selection methods |
 | `vendor/gpui-terminal/src/event.rs` | `TerminalEvent::ClipboardLoad` carries the base64 clipboard type from alacritty's `Event::ClipboardLoad` |
 | `vendor/gpui-terminal/src/terminal.rs` | Expose selection methods: `selection_to_string()`, `selection_new()`, `selection_update()`, `selection_clear()` — thin wrappers over `Term`'s own methods |
-| `crates/ubiq/src/app/wire.rs` | Wire the key handler, clipboard store callback, and clipboard load callback at terminal creation |
-| `crates/ubiq/src/app/wire.rs` | Instantiate `Clipboard` in the key handler closure |
+| `crates/kubiq/src/app/wire.rs` | Wire the key handler, clipboard store callback, and clipboard load callback at terminal creation |
+| `crates/kubiq/src/app/wire.rs` | Instantiate `Clipboard` in the key handler closure |
 
 **No new crates.** `arboard` is already a dependency of `gpui-terminal`. No new message types in
-`ubiq-proto` — clipboard is local to the UI process, not a bus concern.
+`kubiq-proto` — clipboard is local to the UI process, not a bus concern.
 
 ## 10. Failure
 
@@ -240,7 +240,7 @@ terminal level, and the clipboard shortcut is a different key.
 | Harness does not support bracketed paste | The `\x1b[200~` sequences are ignored; text arrives as literal bytes |
 | Harness does not support OSC 52 | The escape sequence is ignored |
 | Clipboard system is unavailable (headless CI) | `Clipboard::new()` returns `Err`; copy/paste silently fail; key handler returns `false` |
-| Mouse selection in a harness with mouse reporting | The harness receives both the selection and mouse events; the selection is for the application to use, not Ubiq to interpret |
+| Mouse selection in a harness with mouse reporting | The harness receives both the selection and mouse events; the selection is for the application to use, not Kubiq to interpret |
 | User drags to select in a harness with SGR mouse reporting | Mouse events go to the harness via `mouse_button_report()`; selection is visual only and copied on release if reporting is off |
 
 ## 11. Phases

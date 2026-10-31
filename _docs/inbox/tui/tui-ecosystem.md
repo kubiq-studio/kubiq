@@ -26,8 +26,8 @@ verdicts are the point, the versions are a snapshot.
    `ratatui-widgets`, the backends — and crossterm 0.28. The version was *chosen*: ratatui 0.29 pins a
    `unicode-width` that cannot coexist with the `^0.2.2` merman's renderer needs (`crates/agent-manager/Cargo.toml`).
    A widget pinning 0.29, or dragging a second `unicode-width`, forks the tree twice over.
-2. **It stays on the right side of the tree checks.** A candidate lives in `crates/ubiq-tui`, names
-   the contract crate and ratatui and nothing else of Ubiq's, and survives the terminal-only build —
+2. **It stays on the right side of the tree checks.** A candidate lives in `crates/kubiq-tui`, names
+   the contract crate and ratatui and nothing else of Kubiq's, and survives the terminal-only build —
    no GPUI, no window crate, no host crate. `just tui` and the phase-4 narrowed build are what
    enforce it.
 3. **It draws with our tokens or not at all.** `D164` makes the TUI's theme file the second file in
@@ -45,7 +45,7 @@ verdicts are the point, the versions are a snapshot.
 A TUI that re-draws the window screen for screen fails the [mode-fit scorecard](./mode-fit-analysis.md)
 twice over: it competes with incumbents for no reason, and it abandons what the medium does best. The
 seed's §2 rule carries the same reading — *a second interface is a second client, and nothing else* —
-and this map reads it as a **delegation line**: where the terminal already ships a better answer, Ubiq
+and this map reads it as a **delegation line**: where the terminal already ships a better answer, Kubiq
 does not port and does not buy; it composes. The Git drop was this rule applied once; here it is the
 general law:
 
@@ -91,7 +91,7 @@ away, and no crate and no screen is spent on it.
 
 | Part | Candidates | Verdict | Why |
 |---|---|---|---|
-| Columns and cards | built-in `List`/`Table`; `tui-cards` and `kanban-tui` as layout references | **write** on core | The board is host data end to end, and `kanban-tui`'s real trick is the one Ubiq already has: task state lives in a service crate, not the UI. Draw columns as lists of card rows |
+| Columns and cards | built-in `List`/`Table`; `tui-cards` and `kanban-tui` as layout references | **write** on core | The board is host data end to end, and `kanban-tui`'s real trick is the one Kubiq already has: task state lives in a service crate, not the UI. Draw columns as lists of card rows |
 | Field-at-a-time task panel | forms row (below) | see forms | One task, one field at a time — three form widgets, not a board crate |
 
 ### Phase 2 — agents and conversations
@@ -129,14 +129,14 @@ away, and no crate and no screen is spent on it.
 | Kept out | If reopened, the crate is | Note |
 |---|---|---|
 | Markdown | `tui-markdown` 0.3 | pulldown-cmark 0.13 + syntect + `ansi-to-tui` — all already resolve in the lockfile, so this is the cheapest reversal. Default style sheet is adapted to tokens |
-| Editing | a form field is `ratatui-textarea`; a *file* is `$EDITOR`'s — `ratatui-code-editor` and the tree-sitter road exist and are declined | The delegation line as a rule: Ubiq never ships an edit buffer. When editing returns, it is stored in a key that opens the file in the editor the user already has |
+| Editing | a form field is `ratatui-textarea`; a *file* is `$EDITOR`'s — `ratatui-code-editor` and the tree-sitter road exist and are declined | The delegation line as a rule: Kubiq never ships an edit buffer. When editing returns, it is stored in a key that opens the file in the editor the user already has |
 | Charts, plans, graphs | `ratatui-plt` (scientific plotting) and the core `Chart` family | Both exist and are deliberately unused: the modes that draw them were scored `no` or "no bars" |
 
 ## What is bought vs written, and why the division
 
 Adopt (four): **nucleo-matcher**, **ratatui-textarea**, **tui-tree-widget**, **ansi-to-tui** —
 each is maintained, small, sits on ratatui 0.30, and buys a shaped interaction (fuzzy pick, multi-line
-edit, collapse/select, ANSI→style) that Ubiq would otherwise reinvent. Syntect and pulldown-cmark are
+edit, collapse/select, ANSI→style) that Kubiq would otherwise reinvent. Syntect and pulldown-cmark are
 already resolving and are adopted by touch.
 
 Everything else is written on core widgets, for one of five reasons:
@@ -154,7 +154,7 @@ Everything else is written on core widgets, for one of five reasons:
 
 ## Housekeeping
 
-- Every buy lands in `crates/ubiq-tui` behind the `tui` feature. `crates/agent-manager` is untouched
+- Every buy lands in `crates/kubiq-tui` behind the `tui` feature. `crates/agent-manager` is untouched
   by all of this except the release scope's phase-2 question of whether the key loop borrows its stub's
   or the window's harness story.
 - The narrow-build checks are the seed's §7: `just tui` (no window/host crate in the tree) and the

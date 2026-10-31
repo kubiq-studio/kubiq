@@ -11,9 +11,9 @@ on:
         required: true
 
 env:
-  UBIQ_VERSION: ${{ inputs.version }}
-  UBIQ_CHANNEL: ${{ inputs.channel }}
-  UBIQ_UPDATE_PUBKEY: ${{ vars.UPDATE_PUBLIC_KEY }}
+  KUBIQ_VERSION: ${{ inputs.version }}
+  KUBIQ_CHANNEL: ${{ inputs.channel }}
+  KUBIQ_UPDATE_PUBKEY: ${{ vars.UPDATE_PUBLIC_KEY }}
 
 jobs:
   build:
@@ -35,10 +35,10 @@ jobs:
       - shell: bash
         run: just bundle-win
         env:
-          UBIQ_FEEDBACK_URL: ${{ vars.UBIQ_FEEDBACK_URL }}
-          UBIQ_FEEDBACK_API_KEY: ${{ secrets.UBIQ_FEEDBACK_API_KEY }}
+          KUBIQ_FEEDBACK_URL: ${{ vars.KUBIQ_FEEDBACK_URL }}
+          KUBIQ_FEEDBACK_API_KEY: ${{ secrets.KUBIQ_FEEDBACK_API_KEY }}
 
-      - run: Compress-Archive -Path target/ubiq-windows-x86_64 -DestinationPath Ubiq-windows-x86_64.zip -Force
+      - run: Compress-Archive -Path target/kubiq-windows-x86_64 -DestinationPath Kubiq-windows-x86_64.zip -Force
 
       # Per-user installer; Inno Setup 6 ships on the runner, installed from choco if it does not.
       - name: Build installer
@@ -58,13 +58,13 @@ jobs:
             ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           fi
           # Inno wants a numeric-friendly version; the full string is fine for AppVersion.
-          "$ISCC" "/DMyAppVersion=$UBIQ_VERSION" "/O$(cygpath -w "$PWD")" _devops/windows/ubiq.iss
-          test -f Ubiq-Setup-x86_64.exe
+          "$ISCC" "/DMyAppVersion=$KUBIQ_VERSION" "/O$(cygpath -w "$PWD")" _devops/windows/kubiq.iss
+          test -f Kubiq-Setup-x86_64.exe
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
           if-no-files-found: error
           path: |
-            Ubiq-windows-x86_64.zip
-            Ubiq-Setup-x86_64.exe
+            Kubiq-windows-x86_64.zip
+            Kubiq-Setup-x86_64.exe

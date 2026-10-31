@@ -3,11 +3,11 @@ id: wip-teams-cross-project
 title: Teams across projects
 kind: wip
 status: current
-summary: How the Teams screen draws every open project's agents at once — a second rail entry in the APP group that the span is read off, one merged projection built from each project's `live_work`, an owner map that answers "whose agent is this" for every write the screen makes, and what the rail, the titlebar and a `ubiq://` link keep meaning when the canvas is about more than one project.
+summary: How the Teams screen draws every open project's agents at once — a second rail entry in the APP group that the span is read off, one merged projection built from each project's `live_work`, an owner map that answers "whose agent is this" for every write the screen makes, and what the rail, the titlebar and a `kubiq://` link keep meaning when the canvas is about more than one project.
 read_when: you are changing what the Teams screen is scoped to, or adding a reader that must work when the canvas spans several projects
 updated: 2026-09-25
 verified: 2026-09-26
-code_anchors: [crates/ubiq/src/state/teams.rs, crates/ubiq/src/app/teams.rs, crates/ubiq/src/app/shell.rs, crates/ubiq/src/app/mod.rs, crates/ubiq/src/ui/teams/mod.rs, crates/ubiq/src/ui/teams/graph.rs, crates/ubiq/src/ui/kit/menu.rs, crates/ubiq/src/state/nav/text.rs, crates/ubiq/tests/teams.rs]
+code_anchors: [crates/kubiq/src/state/teams.rs, crates/kubiq/src/app/teams.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/mod.rs, crates/kubiq/src/ui/teams/mod.rs, crates/kubiq/src/ui/teams/graph.rs, crates/kubiq/src/ui/kit/menu.rs, crates/kubiq/src/state/nav/text.rs, crates/kubiq/tests/teams.rs]
 depends_on: [feat-workbench, tech-ui, wip-teams-layout-spike]
 ---
 
@@ -233,7 +233,7 @@ box) now uses in place of `GROUP_PAD` (T-105) — `card_bounds` already wraps a 
 `RING_PAD`, and each of these is the *only* outline drawn round what it encloses, so the two sit the
 same distance from what they hold without doubling a ring's own margin on top. Both answer with
 nothing under `TeamsSpan::Project`, which is how "the project span is unchanged" is a claim
-`crates/ubiq/tests/teams.rs` makes without a frame. The colour stays in `ui::teams::graph`, which is
+`crates/kubiq/tests/teams.rs` makes without a frame. The colour stays in `ui::teams::graph`, which is
 the rule that module has always kept: state names no colour.
 
 Under the project span the canvas is unchanged, chip, fences and all: a screen about one project
@@ -247,7 +247,7 @@ to rewrite them. The active project keeps its filled badge; the cross-project ca
 *from* that project, not a window with no project.
 
 **A link names the project of what it points at.** The grammar is
-`ubiq://<project-id>/teams/<kind>:<id>/<tab>[/<subagent>]` and it stays exactly that: a teams
+`kubiq://<project-id>/teams/<kind>:<id>/<tab>[/<subagent>]` and it stays exactly that: a teams
 destination names the project that owns the *selection*. Two of the three arms own an agent and
 resolve through `project_of_agent`; the session arm owns none, and resolves through
 `project_of_session` — the first held project with an agent under that session, which is the same
@@ -281,7 +281,7 @@ are a decision rather than a missing sibling.
 | W1 | `TeamsSpan`, `window_work`, the `AppState` fields, the four accessors switching on the span | `state/teams.rs`, `app/mod.rs`, `app/shell.rs`, `app/boot.rs` |
 | W2 | The writes: `settle_teams`, `end_teams_carry`, `select_in_teams`, `teams_conversation`, the composer's send, and the conversation component's readers | `app/teams.rs`, `app/agents.rs`, `app/nav.rs`, `ui/conversation/` |
 | W3 | The toolbar toggle, the project chip on cards and session pills | `app/teams_span.rs`, `ui/project_face.rs`, `ui/teams/mod.rs`, `ui/teams/graph.rs`, `ui/teams/status.rs` |
-| W4 | Tests and the documents this owes | `crates/ubiq/tests/teams.rs`, `_docs/features/workbench.md`, `_docs/tech/decisions.md`, `_docs/backlog.md` |
+| W4 | Tests and the documents this owes | `crates/kubiq/tests/teams.rs`, `_docs/features/workbench.md`, `_docs/tech/decisions.md`, `_docs/backlog.md` |
 
 All four are in the tree. What is open is `G325` — following a teams link that names a
 non-active project activates that project on arrival, which is right for the other eight modes and

@@ -11,11 +11,11 @@ depends_on: [tech-ui, feat-workbench, inbox-help, wip-help, inbox-personalisatio
 
 # Proposal — naming the interface
 
-Ubiq cannot name anything on its own screen. There are roughly 355 kebab-case strings scattered
-through `crates/ubiq/src/ui/`, and every one of them exists to satisfy GPUI: `icon_button` in
-`crates/ubiq/src/ui/kit/controls.rs` takes an id because a stateful element needs one for hover,
+Kubiq cannot name anything on its own screen. There are roughly 355 kebab-case strings scattered
+through `crates/kubiq/src/ui/`, and every one of them exists to satisfy GPUI: `icon_button` in
+`crates/kubiq/src/ui/kit/controls.rs` takes an id because a stateful element needs one for hover,
 scroll and focus bookkeeping. They are not unique, not hierarchical, and not semantic.
-`crates/ubiq/src/ui/rail.rs` — the most identifiable area in the product — carries none at all.
+`crates/kubiq/src/ui/rail.rs` — the most identifiable area in the product — carries none at all.
 There is no registry, no enum, and no map from any of those strings to a meaning.
 
 Three features want that map: an in-place, inspector-style help mode; targeted personalisation; and
@@ -167,7 +167,7 @@ The in-flight design binds help through the existing page frontmatter `context:`
 and each is a constraint the packer enforces today:
 
 1. **`context` answers a different question.** It is one rung of a five-rung fallback ladder in
-   `crates/ubiq/src/app/help.rs` that resolves *where the reader is* to exactly one page. Its
+   `crates/kubiq/src/app/help.rs` that resolves *where the reader is* to exactly one page. Its
    exactly-once validation exists because the ladder must return a single answer. A UI target is
    not a fallback and not exclusive — several pages may legitimately mention the same control, and
    one of them is primary.
@@ -219,7 +219,7 @@ one may add rows and may deliberately override one it declares, and never patche
 The scheme needs a denominator, and there is a good one available for free: **marking replaces the
 existing `.id(…)` call rather than sitting beside it.** The marking API returns the `ElementId` GPUI
 wanted anyway, so a marked element has one id and an unmarked one has the old bare string. That makes
-coverage greppable: every `.id("…")` under `crates/ubiq/src/ui/` that is not a marking call is an
+coverage greppable: every `.id("…")` under `crates/kubiq/src/ui/` that is not a marking call is an
 unmarked element, and there are 91 of them to work through today.
 
 Coverage is not required to reach 100%, and pretending otherwise is how a lint gets suppressed.
@@ -251,7 +251,7 @@ them. Four things it should change:
    explorer tree has none. Without §2's typed selector the design has nothing to say about the first
    two screens anyone will point the inspector at.
 
-One naming collision worth catching early: `crates/ubiq/src/ui/mark.rs` is the brand mark, and a
+One naming collision worth catching early: `crates/kubiq/src/ui/mark.rs` is the brand mark, and a
 marking API called `ui_mark` reads as being about that. `ui_id` and a module called `ident` cost
 nothing and confuse nobody.
 

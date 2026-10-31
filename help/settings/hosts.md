@@ -10,7 +10,7 @@ related: [settings, remote-overview, remote-connect]
 
 Three sections of [Settings](settings) cover working on other machines. **Hosts** lists the machines
 you can reach and picks where new work goes, **SSH profiles** keeps how to sign in to them, and
-**Drones** finds and stops the helpers Ubiq left running there. Using them is in
+**Drones** finds and stops the helpers Kubiq left running there. Using them is in
 [Remote hosts](remote-overview).
 
 ## The parts

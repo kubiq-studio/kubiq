@@ -7,7 +7,7 @@ summary: How a repository becomes a project — a connection's listing or a past
 read_when: you are changing how a repository is cloned, what an ephemeral project is, or how a connection chooses the application it authenticates as
 updated: 2026-09-10
 verified: 2026-09-29
-code_anchors: [crates/ubiq-proto/src/repos.rs, crates/ubiq-proto/src/connectors.rs, crates/ubiq-proto/src/projects.rs, crates/ubiq-host/src/repos/mod.rs, crates/ubiq-host/src/repos/list.rs, crates/ubiq-host/src/repos/clone.rs, crates/ubiq-host/src/projects.rs, crates/ubiq-host/src/connectors/app.rs, crates/ubiq/src/state/clone.rs, crates/ubiq/src/app/clone.rs, crates/ubiq/src/ui/clone.rs, crates/ubiq/src/ui/kit/menu.rs]
+code_anchors: [crates/kubiq-proto/src/repos.rs, crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-host/src/repos/mod.rs, crates/kubiq-host/src/repos/list.rs, crates/kubiq-host/src/repos/clone.rs, crates/kubiq-host/src/projects.rs, crates/kubiq-host/src/connectors/app.rs, crates/kubiq/src/state/clone.rs, crates/kubiq/src/app/clone.rs, crates/kubiq/src/ui/clone.rs, crates/kubiq/src/ui/kit/menu.rs]
 depends_on: [feat-workbench, feat-connectors, tech-transport, tech-version-control]
 ---
 
@@ -29,7 +29,7 @@ connection it lists that identity's repositories, filters them, picks a branch, 
 destination folder and a name, and clones. A public repository URL can be pasted instead, with no
 connection at all. Pasting a repository URL into the omni search and pressing Enter opens the same
 modal on that URL — a repository URL is an answer rather than a filter, so the list collapses to one
-row, the same short-circuit a pasted `ubiq://` link takes.
+row, the same short-circuit a pasted `kubiq://` link takes.
 
 **Two sources, one modal.** `RepoSource` is either a connection lending its token or a bare URL
 cloned anonymously. The two sit side by side rather than behind a wizard step, because either is
@@ -46,7 +46,7 @@ requests in the common case and still reaches a repository past the ceiling.
 call, so the host reads the refs anonymously through libgit2 — `Remote::create_detached`, `connect`,
 `list`. The same call yields the default branch, as a full `refs/heads/…` that has to be stripped.
 
-**Ephemeral clones.** A checkbox puts the clone under Ubiq's ephemeral root, shallow by default, and
+**Ephemeral clones.** A checkbox puts the clone under Kubiq's ephemeral root, shallow by default, and
 marks the record `temporary`: the case is a repository read once and thrown away — a pull request
 looked at, a dependency checked before it is trusted. Closing one raises the inline confirmation a
 project with unsaved work raises, saying the clone will be discarded. Confirming sends
@@ -66,7 +66,7 @@ means the host's own default, shown as placeholder rather than a path the interf
 
 ## The decisions that shaped it
 
-**`git2` gains `https`** (`D72`). It was compiled with no transport at all, because Ubiq only read
+**`git2` gains `https`** (`D72`). It was compiled with no transport at all, because Kubiq only read
 repositories. A clone is the one operation that creates a repository, and everything after it is
 still read-only. Verified before it was designed in: an anonymous ref listing, a shallow clone of a
 named branch, and `is_shallow` true on the result.

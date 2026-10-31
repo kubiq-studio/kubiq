@@ -7,7 +7,7 @@ summary: Every folder in the workspace, what belongs in it, what must never go i
 read_when: you are adding a file and are not certain where it goes, or you are new to the repository
 updated: 2026-10-29
 verified: 2026-10-29
-code_anchors: [crates/ubiq-proto/src/browser.rs, crates/ubiq-host/src/browser.rs, crates/ubiq-host/src/mcp/browser.rs, crates/ubiq/src/app/browser.rs, Cargo.toml, crates/ubiq-host/src/store/usage.rs, crates/ubiq-host/src/store/project_dir.rs, crates/ubiq-host/src/kb/mod.rs, crates/ubiq-host/src/lib.rs, crates/ubiq/Cargo.toml, crates/ubiq-proto/Cargo.toml, crates/ubiq-host/Cargo.toml, crates/ubiq-app/Cargo.toml, crates/ubiq-drone/Cargo.toml, crates/ubiq-tunnel/Cargo.toml, vendor/gpui-terminal/Cargo.toml, _tools/icns.py]
+code_anchors: [crates/kubiq-proto/src/browser.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq/src/app/browser.rs, Cargo.toml, crates/kubiq-host/src/store/usage.rs, crates/kubiq-host/src/store/project_dir.rs, crates/kubiq-host/src/kb/mod.rs, crates/kubiq-host/src/lib.rs, crates/kubiq/Cargo.toml, crates/kubiq-proto/Cargo.toml, crates/kubiq-host/Cargo.toml, crates/kubiq-app/Cargo.toml, crates/kubiq-drone/Cargo.toml, crates/kubiq-tunnel/Cargo.toml, vendor/gpui-terminal/Cargo.toml, _tools/icns.py]
 depends_on: [tech-architecture]
 review_cycle: quarterly
 ---
@@ -16,26 +16,26 @@ review_cycle: quarterly
 
 ## The workspace
 
-One Cargo workspace, six crates of Ubiq's own, the harness-management library they embed, one
+One Cargo workspace, six crates of Kubiq's own, the harness-management library they embed, one
 vendored third-party crate, and everything else is documentation or tooling.
 
 ```
-ubiq/
+kubiq/
 ├── AGENTS.md            the always-loaded preamble — read first
 ├── CLAUDE.md            one line: it includes AGENTS.md
 ├── README.md            the public face of the project
 ├── Cargo.toml           workspace manifest and the release agent definition
 ├── Justfile             every command anyone runs — see operations.md
 ├── crates/
-│   ├── ubiq-proto/      the contract, the bus, the log sink
-│   ├── ubiq-host/       the headless host: processes, pseudo-terminals, projects, the work
-│   ├── ubiq-db/         the database engine: model, SQL analysis, edit rendering, drivers behind a feature
-│   ├── ubiq-md/         the markdown engine: a source-ranged block table, a leaf with no GPUI
-│   ├── ubiq-draw/       the drawing engine: one diagram model, Excalidraw and draw.io onto it, a leaf
-│   ├── ubiq-tunnel/     forwarded ports over the tunnel channel: the mux, the window's listeners, the drone's dialer
-│   ├── ubiq/            the desktop interface (GPUI)
-│   ├── ubiq-app/        the binary, the only thing that names both halves
-│   ├── ubiq-drone/      the windowless binary that serves one machine over a byte stream
+│   ├── kubiq-proto/      the contract, the bus, the log sink
+│   ├── kubiq-host/       the headless host: processes, pseudo-terminals, projects, the work
+│   ├── kubiq-db/         the database engine: model, SQL analysis, edit rendering, drivers behind a feature
+│   ├── kubiq-md/         the markdown engine: a source-ranged block table, a leaf with no GPUI
+│   ├── kubiq-draw/       the drawing engine: one diagram model, Excalidraw and draw.io onto it, a leaf
+│   ├── kubiq-tunnel/     forwarded ports over the tunnel channel: the mux, the window's listeners, the drone's dialer
+│   ├── kubiq/            the desktop interface (GPUI)
+│   ├── kubiq-app/        the binary, the only thing that names both halves
+│   ├── kubiq-drone/      the windowless binary that serves one machine over a byte stream
 │   └── agent-manager/   the harness-management library and its `am` CLI
 ├── vendor/
 │   └── gpui-terminal/   the terminal emulator component, vendored
@@ -47,18 +47,18 @@ ubiq/
 ```
 
 Two conventions in that tree are worth stating outright. A leading underscore means **not shipped**:
-`_docs/` and `_tools/` exist for the people and agents working on Ubiq and are absent from any
+`_docs/` and `_tools/` exist for the people and agents working on Kubiq and are absent from any
 build. And `refs/` is **read-only** — it holds other projects checked out for comparison, and
 nothing in it is ever edited, imported, or treated as a claim about this tree.
 
 ## The config root
 
-The tree above is the source. The other tree Ubiq owns is the **config root** it writes at runtime —
-`~/.config/ubiq` unless a flag, `UBIQ_CONFIG_DIR` or a `ubiq.toml` moves it, and this repository's
-`ubiq.toml` points it at `_data/config` so a checkout never touches the catalogue a user works with
-([`operations.md`](./operations.md) owns the resolution order). Nothing Ubiq remembers goes inside a
+The tree above is the source. The other tree Kubiq owns is the **config root** it writes at runtime —
+`~/.config/kubiq` unless a flag, `KUBIQ_CONFIG_DIR` or a `kubiq.toml` moves it, and this repository's
+`kubiq.toml` points it at `_data/config` so a checkout never touches the catalogue a user works with
+([`operations.md`](./operations.md) owns the resolution order). Nothing Kubiq remembers goes inside a
 project's own folder — `D30` — with one exception the person creating a project chooses, which is
-`.ubiq/` below.
+`.kubiq/` below.
 
 ```
 <config root>/
@@ -105,7 +105,7 @@ project's own folder — `D30` — with one exception the person creating a proj
 
 **A project's data directory is two groups, not a list** (`G356`, closed). The question that sorts
 them is *would another person cloning this project want it?* — the shared half at the top, the
-whole derived half under `local/`. `crates/ubiq-host/src/store/project_dir.rs`'s `ProjectData` is
+whole derived half under `local/`. `crates/kubiq-host/src/store/project_dir.rs`'s `ProjectData` is
 the one place that knows which is which: no store joins a literal onto a project's directory, and
 a new per-project file is placed by answering that question rather than by picking a level.
 
@@ -127,7 +127,7 @@ file destroys data rather than costing work. It is a database rather than a file
 accumulates and is unbounded — `D78`, and
 [`../features/stats.md`](../features/stats.md) for what is in it.
 
-`local/kb/` is the one directory under a project that Ubiq fetches rather than the user writing: a
+`local/kb/` is the one directory under a project that Kubiq fetches rather than the user writing: a
 knowledge-base root cloned from a repository lands there and never inside the project's own folder,
 on `D30`. Losing it costs a re-clone, which is what puts it under `local/` while `kb.toml` — the
 list of roots, the user's data — stays on the shared side.
@@ -139,7 +139,7 @@ removes it with the project's directory.
 
 `local/db-agents.toml` sits beside it, under the config root whatever the storage mode, for a
 reason of its own: it says which connections an agent may read or write (`access`) and which it
-gets by default, and in `.ubiq/` it would be inside the project's folder, where the agents it
+gets by default, and in `.kubiq/` it would be inside the project's folder, where the agents it
 governs work and could grant themselves access. Each connection's `description` is shared, in
 `db.toml`. A connection the file does not name has no agent access.
 
@@ -149,24 +149,24 @@ directory goes with it, and that is the only thing the host ever does to it: eve
 is the interface's, is disposable, and is reached by the path on `ProjectSnapshot` rather than over
 the bus — rule 6 in [`architecture.md`](./architecture.md).
 
-## `.ubiq/` — a project that keeps its own data
+## `.kubiq/` — a project that keeps its own data
 
 `ProjectRecord::storage` names one of two modes, chosen in the creation panel and changed
 afterwards only by the move below.
-**Ubiq-managed** is the tree above and is what every project is unless it says otherwise.
-**Project-managed** is `D173`'s exception to `D30`: the project's data lives in a `.ubiq/` folder
+**Kubiq-managed** is the tree above and is what every project is unless it says otherwise.
+**Project-managed** is `D173`'s exception to `D30`: the project's data lives in a `.kubiq/` folder
 inside the project's own directory, so a team commits it and every clone arrives with it.
 
 ```
 <project folder>/
-└── .ubiq/
+└── .kubiq/
     ├── .gitignore        written once, and what keeps the per-machine half uncommitted
     ├── project.toml      the project's name and metadata, in the project itself
     ├── tasks/tasks.toml  that project's tasks — the same file, in the other tree
     └── local/            the derived half, if anything here has derived any
 ```
 
-`.ubiq/` has the same layout as `projects/<ulid>/` above, and the split is the layout rather than a
+`.kubiq/` has the same layout as `projects/<ulid>/` above, and the split is the layout rather than a
 list: everything tracked is at the top, everything derived is under `local/`, so `.gitignore` is
 
 ```
@@ -177,23 +177,23 @@ local/
 
 and where a future entry belongs is a lookup rather than a judgement. It is written when the folder
 is made and never rewritten, so a user's own edit to it stands. How far the data itself has
-followed a project-managed project into `.ubiq/` is `G355`.
+followed a project-managed project into `.kubiq/` is `G355`.
 
 The project still gets its `<config root>/projects/<ulid>/` directory, holding one file the tree
 above does not show — `storage.toml`, the pointer naming where the data went — and whatever has
 not moved. That is deliberate: Forget and the orphan collector sweep the same
-directory they always did, and `crates/ubiq-host/src/store/project_dir.rs`'s `ProjectDirs` resolves
+directory they always did, and `crates/kubiq-host/src/store/project_dir.rs`'s `ProjectDirs` resolves
 a store's path through that pointer rather than handing every store a catalogue to read.
 `project.toml` is the project's own copy of its name; the catalogue keeps one too, as the lookup a
 picker draws without opening a folder that may be unmounted, and where the two disagree the
 folder's copy wins and the catalogue is corrected on load.
 
-Forget leaves `.ubiq/` alone. It is inside the user's tree and it is committed, so removing it
-would be a change to their repository rather than to what Ubiq remembers.
+Forget leaves `.kubiq/` alone. It is inside the user's tree and it is committed, so removing it
+would be a change to their repository rather than to what Kubiq remembers.
 
 ### Moving a project between the two
 
-`SetProjectStorage` moves an existing project's data either way — into `.ubiq/` or back under the
+`SetProjectStorage` moves an existing project's data either way — into `.kubiq/` or back under the
 config root — and `project_dir::change_mode` is the whole of it. It is a migration, not a setting,
 which is why it is its own message and why `UpdateProject` still cannot express it (`D31`). The one
 surface that asks for it is project settings' "Project data" row, and because the move can be
@@ -213,7 +213,7 @@ The order is the design:
    destination nothing points at; a crash after leaves a copy at the source that is garbage, not
    data. There is no moment in which a store resolves a directory that does not hold the data.
 3. **Remove the source.** Past the commit, so a failure here is a log line and a directory somebody
-   can delete, never a failed move. Moving *out* of `.ubiq/` also removes the `.gitignore` and then
+   can delete, never a failed move. Moving *out* of `.kubiq/` also removes the `.gitignore` and then
    the folder itself — but only when nothing is left in it but `local/`, because anything else in
    there is the user's.
 
@@ -224,7 +224,7 @@ the user nothing either way: the preference store, the workarea and the index al
 config root whichever mode the project is in, so view state survives a move that the Forget-and-add
 workaround loses.
 
-A destination that holds one of those entries — a `.ubiq/` cloned from a teammate — is
+A destination that holds one of those entries — a `.kubiq/` cloned from a teammate — is
 refused rather than merged into. So is a project with a pane or a live conversation running in it:
 see [`transport-contract.md`](./transport-contract.md) for how the host knows.
 
@@ -232,7 +232,7 @@ see [`transport-contract.md`](./transport-contract.md) for how the host knows.
 it live in the process — one in the task store, two in the task-source family — that no message
 could reach to invalidate, so each re-reads once the pointer is gone. The check is on a file under
 the config root rather than on the project's own folder, so an unmounted volume still resolves into
-the `.ubiq/` it belongs in.
+the `.kubiq/` it belongs in.
 
 ## `vendor/`
 
@@ -241,25 +241,25 @@ possible. Each is a workspace member and is consumed by path.
 
 `vendor/gpui-terminal/` is the terminal emulator a pane is drawn by: it parses VT with
 `alacritty_terminal` and takes any `Read`/`Write` pair, which is what lets a pane be handed a bus
-endpoint rather than a pseudo-terminal. It is a copy of an upstream project, not Ubiq's own code,
+endpoint rather than a pseudo-terminal. It is a copy of an upstream project, not Kubiq's own code,
 and the rules that follow from that are the whole point of the folder:
 
 - **Keep it close to upstream.** A change here is either a rebase onto a newer upstream revision, or
   a minimal patch that upstream's version cannot carry — the crate is vendored because upstream
-  builds against the `gpui` published on crates.io while Ubiq builds against the `gpui-pre`
+  builds against the `gpui` published on crates.io while Kubiq builds against the `gpui-pre`
   snapshot of Zed's crates that gpui-component pins (`=0.3.8`).
 - **Record every divergence.** `vendor/gpui-terminal/README.md` names the upstream revision, the
   licence, and each file that differs and why. A rebase reapplies exactly that list, so a patch
   missing from it is a patch the next rebase drops.
-- **Never Ubiq's own code.** No `AppState`, no theme token, no message type. Anything Ubiq wants
-  from the emulator is passed in as configuration or a callback; anything Ubiq wants to add on top
-  belongs in `crates/ubiq/src/ui/`.
+- **Never Kubiq's own code.** No `AppState`, no theme token, no message type. Anything Kubiq wants
+  from the emulator is passed in as configuration or a callback; anything Kubiq wants to add on top
+  belongs in `crates/kubiq/src/ui/`.
 
 ## The two crates
 
 The division is sharp and worth learning before touching either.
 
-| | `crates/ubiq` | `crates/agent-manager` |
+| | `crates/kubiq` | `crates/agent-manager` |
 |---|---|---|
 | Is | The application | A library, plus a CLI over it |
 | Owns | Windows, panes, terminals, layout, focus, process supervision | Composing a harness run: skills, MCP servers, accounts, ephemeral config |
@@ -267,18 +267,18 @@ The division is sharp and worth learning before touching either.
 | Depends on | GPUI, `gpui-terminal`, `portable-pty` | No UI, no terminal emulation |
 | Documented in | `_docs/` — this library | `crates/agent-manager/_docs/` — its own |
 
-The dependency runs one way: the application embeds the library. The library has no idea Ubiq
+The dependency runs one way: the application embeds the library. The library has no idea Kubiq
 exists. That is what lets the same composition logic serve the terminal and the window, and it is
 the reason `agent-manager` builds with `--no-default-features` — the application needs the core, not
 the CLI or the TUI. The boundary in detail is in [`agent-manager.md`](./agent-manager.md).
 
-`ubiq-host` itself carries a matching split, in `crates/ubiq-host/Cargo.toml`'s `[features]` table:
+`kubiq-host` itself carries a matching split, in `crates/kubiq-host/Cargo.toml`'s `[features]` table:
 five features, each gating a slice of its module tree and the dependencies only that slice needs,
 plus `full` — what `default` turns on — which is all five together and what `coordinator` needs. An
-ordinary `cargo build` is unaffected; the split exists for a lean embedder that wants the pseudo-terminal, file and machine-facts core without the rest. `crates/ubiq-drone` is that embedder — a
-windowless binary Ubiq puts on another machine, serving its terminal, files, search and facts over
-one duplex byte stream. It depends on `ubiq-host` with `--no-default-features` and on `ubiq-proto`,
-never on `crates/ubiq`, and [`../features/drone.md`](../features/drone.md) is what it does.
+ordinary `cargo build` is unaffected; the split exists for a lean embedder that wants the pseudo-terminal, file and machine-facts core without the rest. `crates/kubiq-drone` is that embedder — a
+windowless binary Kubiq puts on another machine, serving its terminal, files, search and facts over
+one duplex byte stream. It depends on `kubiq-host` with `--no-default-features` and on `kubiq-proto`,
+never on `crates/kubiq`, and [`../features/drone.md`](../features/drone.md) is what it does.
 
 | Feature | Gates | Dependencies |
 |---|---|---|
@@ -286,7 +286,7 @@ never on `crates/ubiq`, and [`../features/drone.md`](../features/drone.md) is wh
 | `index` | `index/`, and the `Job.index` field in `search/` and `watch/` | `tantivy` |
 | `harness` | `agent`, `conversation`, `conversation_record`, `gc`, `quota`, `mcp`, `assist`, `cli_shortcut`, `work`, `store/usage.rs`, `plan::service` (`Plans`, `Handle`, `Target`, `Saver` — checks a task's level through `work`) | `agent-manager`, `rusqlite` |
 | `listener` | `remote`, `connectors`, `web_assets` | `rustls` and its certificate crates, `tiny_http`, `ureq`, `rand` |
-| `desktop` | `notifications`, `shell_integration` (beside `cli_shortcut`: *Open in Ubiq* on Explorer's right-click menu, through per-user registry keys), and deleting to the platform's trash | `notify-rust`, `trash`, `winreg` (Windows only) |
+| `desktop` | `notifications`, `shell_integration` (beside `cli_shortcut`: *Open in Kubiq* on Explorer's right-click menu, through per-user registry keys), and deleting to the platform's trash | `notify-rust`, `trash`, `winreg` (Windows only) |
 
 **`harness` and `listener` are not independently buildable, whatever the table above suggests**
 (T-235). Each gate is *written* as if its feature stood alone, but the lib does not compile with
@@ -295,7 +295,7 @@ though `connectors` sits behind `listener`; `assist/` names `crate::connectors`,
 `listener` even though `assist` sits behind `harness`. The configurations this crate really builds
 in are nothing, `git`, `index`, `desktop`, the `harness` + `listener` pair, and `full` — and a
 `[[test]]` naming a module behind either half of that pair has to require **both**, which is why
-`tasksrc_sync` and `tasksrc_outbound` do. The `[features]` table in `crates/ubiq-host/Cargo.toml`
+`tasksrc_sync` and `tasksrc_outbound` do. The `[features]` table in `crates/kubiq-host/Cargo.toml`
 carries the same warning; untangling it is not filed as work.
 
 `coordinator` itself is gated on `full`, because it needs all five. `links` is deliberately **not**
@@ -310,21 +310,21 @@ lacks, rather than going unanswered. `just relay` builds this lean configuration
 none of the five features' crates reached its tree — [`operations.md`](./operations.md) owns the
 recipe.
 
-`crates/ubiq` carries one feature of its own, `quickjs`, which pulls in `rquickjs` — the embedded
+`crates/kubiq` carries one feature of its own, `quickjs`, which pulls in `rquickjs` — the embedded
 interpreter behind the kitchen sink's script page — and a `[[test]]` target that requires it, so a
 build without the feature compiles no test that needs an interpreter. It is **not** in that
-crate's `default`: `crates/ubiq-app` turns it on, so the one manifest that names both halves is
-the one place it is switched off — asked for weakly, `ubiq?/quickjs` (`D162`), so naming it on a
-headless build does not drag the interface crate back in. A build against `crates/ubiq` (the `ui`
-feature on) with `quickjs` off is a complete Ubiq with no C interpreter in the process, and the
-script page reads correctly against that — it says the build carries none. `ubiq-app`'s own `ui`
-feature (`D162`) is the coarser switch, gating `crates/ubiq` itself: off, the process is the
+crate's `default`: `crates/kubiq-app` turns it on, so the one manifest that names both halves is
+the one place it is switched off — asked for weakly, `kubiq?/quickjs` (`D162`), so naming it on a
+headless build does not drag the interface crate back in. A build against `crates/kubiq` (the `ui`
+feature on) with `quickjs` off is a complete Kubiq with no C interpreter in the process, and the
+script page reads correctly against that — it says the build carries none. `kubiq-app`'s own `ui`
+feature (`D162`) is the coarser switch, gating `crates/kubiq` itself: off, the process is the
 headless build `operations.md` describes, with no script page and no interpreter question to ask. The facade's `validate` and `transpile` go through `oxc`, an ungated dependency of
-`crates/ubiq` — pure Rust, no C, and a parse rather than an evaluation — so a build with no
+`crates/kubiq` — pure Rust, no C, and a parse rather than an evaluation — so a build with no
 interpreter still syntax-checks a buffer and still compiles TypeScript to JavaScript. `D127` is the
 interpreter and its cost, `D128` the front end in front of it.
 
-## Inside Ubiq's six crates
+## Inside Kubiq's six crates
 
 Module by module, and what must never appear in each. The generated tree, with every file, is in
 [`code-map.md`](./code-map.md). Which crate a module sits in is itself the first rule: the
@@ -332,85 +332,85 @@ interface does not depend on the host, so a module in the wrong crate does not c
 
 | Path | Holds | Never holds |
 |---|---|---|
-| `ubiq-proto/src/messages.rs` | The transport contract enum and its payload records | Anything that fails to serialise |
-| `ubiq-proto/src/settings.rs` | Which half owns a settings blob, and the host's own record | A Ui-layer field |
-| `ubiq-proto/src/ids.rs` | The contract's id newtypes, and the one generator behind them | A second id scheme |
-| `ubiq-proto/src/bus.rs` | The hub, a client's end of it, and a pane's `Read`/`Write` byte-stream ends | A pane's contents, a descriptor, or any knowledge of what the bytes mean |
-| `ubiq-proto/src/wire.rs` | The socket wire format — a length-prefixed MessagePack frame, via `rmp-serde` — that a later network pump drives over `bus::detached()`'s endpoints | A socket, a thread, or any notion of a connection |
-| `ubiq-proto/src/log.rs` | The process-wide sink every subsystem writes to | Anything either half has to be handed |
-| `ubiq-proto/src/blocks.rs` | The mdast walk that splits a markdown document into annotatable blocks — shared logic rather than a message, because the host's index and the window's optimistic cache must split a document identically and neither half may depend on the other (`D163`) | A block id, a sidecar, or anything about what an annotation *says* |
-| `ubiq-proto/src/repos.rs` | A remote repository, a clone's request, its stages and its errors, and the one repository-URL parser both halves call | A token, a credential, or a `git2` type |
-| `ubiq-proto/src/browser.rs` | The browser records: `BrowserCmd`, `BrowserContentFormat`, `BrowserHistoryEntry` and the history and timeout constants | A webview type, or a reply's JSON shape beyond the command it answers |
-| `ubiq-proto/src/git.rs` | A project's repository as it crosses the bus: overview, working-tree map, errors | A `git2` type, a path on disk |
-| `ubiq-proto/src/drone/` | The generated manifest of cross-built drone binaries, the `uname -sm` → triple map, the local cache path and the hash verifier — here rather than in `ubiq-host` because `crates/ubiq` shells to `ssh` itself and cannot name that crate | A signature, a fetch, or a path on a remote machine |
-| `ubiq-host/src/coordinator.rs` | Spawn, supervise and reap harness processes; answer the bus | Rendering, layout, colour |
-| `ubiq-host/src/remote.rs` | The listener that lets a UI on another machine attach: an accept thread, a thread per connection, a token handshake over HTTP, then raw `wire` frames onto an ordinary `Hub::connect()` client | A special case for any message family, TLS, or a second kind of client |
-| `ubiq-host/src/git/` | A project's repository, observed off the coordinator's thread | A write into the repository, including the index stat cache |
-| `ubiq-host/src/repos/` | Listing a remote's repositories, and cloning one into a folder, on a thread of its own per clone | A read of an existing repository — that is `git/` — or a write into one |
-| `ubiq-db/src/` | The database engine: `model.rs`/`plan.rs` (the types the wire carries), `conn.rs`, `value.rs`, `sql.rs`, `edit.rs`, and, behind the `drivers` feature, `driver/` — the four engines | A GPUI type, an Ubiq crate, or a driver outside `driver/` |
-| `ubiq-md/src/` | The markdown engine: `build.rs` (the block table), `find.rs`, `autolink.rs`; every block carries its source byte range | A GPUI type or an Ubiq crate |
-| `ubiq-draw/src/` | The drawing engine (`D222`): `model.rs` (the group tree a painter walks), `excalidraw.rs` (the scene parser and its stacking order), `drawio.rs` (mxGraph, compressed and multi-page), `colour.rs`, `codec.rs` | A GPUI type, an Ubiq crate, or a theme colour |
-| `ubiq-tunnel/src/` | Forwarded ports (`D227`) over any `Read`/`Write` duplex, std threads: `mux.rs` (the multiplexer, its credit and in-flight cap), `rate.rs` (the link's token bucket), `local.rs` (`TunnelManager`, the window's loopback listeners and their status), `remote.rs` (`serve` and its `AllowList`, the drone's dialer), `http.rs` (the HTTP kind's rewrites, both directions: `Host`, the host-bearing headers, response bodies), `tls.rs` (`upstream_tls`), `pipe.rs` (a socket spliced to a stream). Depends on `ubiq-proto` only | A GPUI type, a host or drone type, a carrier's channel setup, or a `Message` |
-| `ubiq-host/src/db/` | A project's databases, host side: `mod.rs`'s `Db` service, `store.rs` (`db.toml`), `secrets.rs` (the sealed passwords), `session.rs` (a worker thread per tab) and `jobs.rs` (each message as a job, the read-only layers), behind the `db` feature | A call on the coordinator's thread, a decrypted password sent to the interface |
-| `ubiq-host/src/kb/` | A project's knowledge-base roots: `mod.rs`'s `Kb` holds the list (one TOML file per project, in `store.rs`) and derives each root's state; `sync.rs` fetches or refreshes a git root on a thread of its own, behind `git`. Listing and reading still run on `files/`'s worker | A project's own tree — that is `files/` — or a second implementation of the glob `KbRoot::admits` is |
-| `ubiq-host/src/files/browse.rs` | Listing one absolute directory on the host's own filesystem before any project exists — the host browse family's worker logic, with its own 2,000-entry ceiling independent of the file family's | A project-relative path, or the containment `path.rs` enforces once a project's root is known |
-| `ubiq-host/src/host_path.rs` | Absolute host paths as they cross the wire: stripping the verbatim prefix for display and normalising separators before a filesystem call, on every platform by doing nothing elsewhere | A project-relative path, or any knowledge of what the path is for |
-| `ubiq-host/src/pty/` | Pseudo-terminal streams, reading, writing, backpressure | Terminal emulation |
-| `ubiq-host/src/config.rs` | Where the config root is, and how it is found | A setting; the bootstrap file names a directory and nothing else |
-| `ubiq-host/src/store/` | What the host writes down: the catalogue, a project's tasks, the view state and settings behind four traits, and the concrete stores that need no trait beside them | Any opinion about what a Ui-layer blob means |
-| `ubiq-host/src/store/project_dir.rs` | Where one project's data directory is — the pointer a store resolves through, the `.ubiq/` folder, its `.gitignore` and its `project.toml` | A catalogue read, or any opinion about what is in the files it places |
-| `ubiq-host/src/store/usage.rs` | The usage meter: `usage.db`, its two tables, its `PRAGMA user_version` migrations and the accumulating upsert into them | A trait, a second implementation, or an opinion about how a bucket is drawn |
-| `ubiq-host/src/projects.rs` | The catalogue as the host runs it, the reservation of each project's `ui/` workarea, and the palette index a project gets when its creator names none | What a palette index looks like, an opinion about layout, or a read of anything inside a workarea |
-| `ubiq-host/src/settings.rs` | Application settings as the host runs them: Ui opaque, Host parsed | An opinion about what a Ui-layer blob means |
-| `ubiq-host/src/work/` | A project's tasks as the host keeps them, and the sessions and agents it mocks over them | Where anything is drawn, or an invented reply from an agent |
-| `ubiq-host/src/watch/` | One `notify` watch per open project, debounced and coalesced, and the project-relative paths it reports | An absolute path on the wire, an opinion about what a reader should redraw |
-| `ubiq-host/src/agent.rs` | Agent-type definitions and the registry over them | Hard-coded harness knowledge that belongs in the library |
-| `ubiq-host/src/browser.rs` | The internal browser's host half: the history worker over `store/browser_history.rs` (`local/browser-history.json`), and the table an `ubiq-browser` command waits in until its window replies | A web view, or a choice of window — the coordinator addresses a command |
-| `ubiq-host/src/mcp/` | The MCP surface Ubiq exposes to the agents it hosts: one loopback listener, the built-in `test`, `project-info`, `manage-ubiq-tasks`, `use-task`, `ubiq-kb` and `ubiq-browser` servers, and the registry that says which agent is calling | Anything the hosted agent should not reach |
-| `ubiq/src/app/` | `AppState`: the panes, the focused pane, the dock and its panels, the workbench state, and window creation. `mod.rs` holds the struct, the free window functions and the key bindings; `boot.rs` the constructor; `shell.rs` chrome and the `Render` impl; `wire.rs` `receive()` and the pane calls; `panels.rs` the dock; and one file per screen — `explorer`, `editor`, `git`, `agents`, `graph`, `board`, `chat`, `sink`, `picker`, `projects`, `settings` | Process handles, PTY handles, disk |
-| `ubiq/src/app/hosts.rs` | `Bus`, the window's multiplexer over every host it is attached to; `HostRef`, the UI-local `HostId`, and the routing that resolves a message to one host | A `HostId` in a `Message`, or any knowledge that a host has of another host |
-| `ubiq/src/state/remote.rs` | The "Connect to a remote host" modal's state and steps, the `AttemptId` a stale dial result is checked against, and the pure `parse_connection_string` / `with_default_port` a test pins down with no socket | A socket, a thread, or any blocking call |
-| `ubiq/src/app/remote_connect.rs` | The client half of the remote-attach transport: dial, the `GET /attach` handshake, and the two pump threads that drive a dialled `TcpStream` through `bus::detached()` onto a `Client` the modal registers | A special case for any message family, or a GPUI type |
-| `ubiq/src/ui/remote_connect.rs` | The modal itself: its four steps drawn as the body and footer change | A socket call, or parsing of a connection string |
-| `ubiq/src/{state,app,ui}/db/` | DB mode, one folder per layer: the state on the open project, the handlers that are the only senders and receivers of the database family, and the explorer, table tab, SQL tab and connection form | A `ubiq_db::driver` name — the interface links the pure half only — or a decrypted password |
-| `ubiq/src/{state,app,ui}/browser.rs` | The internal browser, one file per layer: the tabs, history and address rules; the lifecycle and the API the MCP handler calls; the action bar over `ui/web_view.rs`'s native webview | A proto type outside the browser family, or a page served from `web_export` |
-| `ubiq/src/web_export/` | The on-demand local HTTP server that serves a project's own files read-only, for browsing in a web browser — its own project-root reads, its own `tiny_http` thread, no bus traffic | A proto message, a call into `ubiq-host` |
-| `ubiq/src/ui/` | One module per screen area: shell, titlebar, project menu, rail, explorer, editor, terminal, logs, status bar, empty page, settings overlay, `chat/`, `agents/`, `teams/`, `board/` | Anything that names the host |
-| `ubiq/src/ui/agents/` | The Agents screen: the sidebar of every agent the host reports, and one column per conversation — its tabs, its thread and its composer | Anything that ends an agent; a close that means more than benching one |
-| `ubiq/src/ui/teams/` | The Teams screen: the graph of who spawned whom and its tasks drawer | A position a record would have to carry |
-| `ubiq/src/ui/work.rs` | What a work record reads as: the token an activity, a bucket or a role takes | A second mapping for a state one screen wants to draw differently |
-| `ubiq/src/ui/dock/` | The window's arrangement: the panel adapter over those areas, and Ubiq's skin over the component library's dock | State of its own — a panel holds what identifies it and reads the rest |
-| `ubiq/src/ui/kit/` | Reusable primitives, and only what the component library lacks | Application state, sample data, or the name `AppState` |
-| `ubiq/src/theme.rs` | The colour palette and its tokens | A literal colour used anywhere else |
-| `ubiq/src/state/` | Pane and application state machines, the workbench, explorer, editor and chat state, what a panel is and where it may sit, the projections of the host's catalogue and of a project's work, the three views over that work — `agents.rs` for the columns, `orchestration.rs` for the graph, `board.rs` for the board — and the fixture that still seeds the chat | Rendering, or any component-library type |
-| `ubiq-app/src/lib.rs` | The boot as a library: `Stores` (the four boxed store traits), `Boot` (what an edition composes — the stores it hands in) and `run(boot)`, the whole start sequence: config root, host, theme, key bindings, the first window | Any logic, including window construction — that is `app::open_project_window` |
-| `ubiq-app/src/main.rs` | Three lines: `run(Boot::default())`. The base edition's binary, entire | A step of the boot — a second binary composing these crates must not be able to skip one |
-| `ubiq-drone/src/relay.rs` | The run loop that answers the bus on a machine Ubiq is not running on: the pty map, a `files` worker, a `host_meta` sampler, the seeded catalogue, and a catch-all arm that refuses every family it does not serve | A coordinator, an index, a keychain, or any knowledge of a harness |
-| `ubiq-drone/src/socket.rs` | The unix socket a detached drone is found again through, its `0600`/`0700` modes, the two-verb preamble, and the multiplexer that only *holds* the process | A protocol change, or anything that talks to a multiplexer rather than through the socket |
-| `ubiq-drone/src/state.rs` | The JSON state file beside that socket, written atomically and refreshed on a slow cadence, and the list-and-prune a caller adopts by | The authority on whether a drone is there — that is the socket answering |
-| `ubiq-drone/src/search.rs` | One-shot execs of `rg`, `ag` or `grep`, translated into the search family's own messages | A walker, a matcher, or any index |
+| `kubiq-proto/src/messages.rs` | The transport contract enum and its payload records | Anything that fails to serialise |
+| `kubiq-proto/src/settings.rs` | Which half owns a settings blob, and the host's own record | A Ui-layer field |
+| `kubiq-proto/src/ids.rs` | The contract's id newtypes, and the one generator behind them | A second id scheme |
+| `kubiq-proto/src/bus.rs` | The hub, a client's end of it, and a pane's `Read`/`Write` byte-stream ends | A pane's contents, a descriptor, or any knowledge of what the bytes mean |
+| `kubiq-proto/src/wire.rs` | The socket wire format — a length-prefixed MessagePack frame, via `rmp-serde` — that a later network pump drives over `bus::detached()`'s endpoints | A socket, a thread, or any notion of a connection |
+| `kubiq-proto/src/log.rs` | The process-wide sink every subsystem writes to | Anything either half has to be handed |
+| `kubiq-proto/src/blocks.rs` | The mdast walk that splits a markdown document into annotatable blocks — shared logic rather than a message, because the host's index and the window's optimistic cache must split a document identically and neither half may depend on the other (`D163`) | A block id, a sidecar, or anything about what an annotation *says* |
+| `kubiq-proto/src/repos.rs` | A remote repository, a clone's request, its stages and its errors, and the one repository-URL parser both halves call | A token, a credential, or a `git2` type |
+| `kubiq-proto/src/browser.rs` | The browser records: `BrowserCmd`, `BrowserContentFormat`, `BrowserHistoryEntry` and the history and timeout constants | A webview type, or a reply's JSON shape beyond the command it answers |
+| `kubiq-proto/src/git.rs` | A project's repository as it crosses the bus: overview, working-tree map, errors | A `git2` type, a path on disk |
+| `kubiq-proto/src/drone/` | The generated manifest of cross-built drone binaries, the `uname -sm` → triple map, the local cache path and the hash verifier — here rather than in `kubiq-host` because `crates/kubiq` shells to `ssh` itself and cannot name that crate | A signature, a fetch, or a path on a remote machine |
+| `kubiq-host/src/coordinator.rs` | Spawn, supervise and reap harness processes; answer the bus | Rendering, layout, colour |
+| `kubiq-host/src/remote.rs` | The listener that lets a UI on another machine attach: an accept thread, a thread per connection, a token handshake over HTTP, then raw `wire` frames onto an ordinary `Hub::connect()` client | A special case for any message family, TLS, or a second kind of client |
+| `kubiq-host/src/git/` | A project's repository, observed off the coordinator's thread | A write into the repository, including the index stat cache |
+| `kubiq-host/src/repos/` | Listing a remote's repositories, and cloning one into a folder, on a thread of its own per clone | A read of an existing repository — that is `git/` — or a write into one |
+| `kubiq-db/src/` | The database engine: `model.rs`/`plan.rs` (the types the wire carries), `conn.rs`, `value.rs`, `sql.rs`, `edit.rs`, and, behind the `drivers` feature, `driver/` — the four engines | A GPUI type, a Kubiq crate, or a driver outside `driver/` |
+| `kubiq-md/src/` | The markdown engine: `build.rs` (the block table), `find.rs`, `autolink.rs`; every block carries its source byte range | A GPUI type or a Kubiq crate |
+| `kubiq-draw/src/` | The drawing engine (`D222`): `model.rs` (the group tree a painter walks), `excalidraw.rs` (the scene parser and its stacking order), `drawio.rs` (mxGraph, compressed and multi-page), `colour.rs`, `codec.rs` | A GPUI type, a Kubiq crate, or a theme colour |
+| `kubiq-tunnel/src/` | Forwarded ports (`D227`) over any `Read`/`Write` duplex, std threads: `mux.rs` (the multiplexer, its credit and in-flight cap), `rate.rs` (the link's token bucket), `local.rs` (`TunnelManager`, the window's loopback listeners and their status), `remote.rs` (`serve` and its `AllowList`, the drone's dialer), `http.rs` (the HTTP kind's rewrites, both directions: `Host`, the host-bearing headers, response bodies), `tls.rs` (`upstream_tls`), `pipe.rs` (a socket spliced to a stream). Depends on `kubiq-proto` only | A GPUI type, a host or drone type, a carrier's channel setup, or a `Message` |
+| `kubiq-host/src/db/` | A project's databases, host side: `mod.rs`'s `Db` service, `store.rs` (`db.toml`), `secrets.rs` (the sealed passwords), `session.rs` (a worker thread per tab) and `jobs.rs` (each message as a job, the read-only layers), behind the `db` feature | A call on the coordinator's thread, a decrypted password sent to the interface |
+| `kubiq-host/src/kb/` | A project's knowledge-base roots: `mod.rs`'s `Kb` holds the list (one TOML file per project, in `store.rs`) and derives each root's state; `sync.rs` fetches or refreshes a git root on a thread of its own, behind `git`. Listing and reading still run on `files/`'s worker | A project's own tree — that is `files/` — or a second implementation of the glob `KbRoot::admits` is |
+| `kubiq-host/src/files/browse.rs` | Listing one absolute directory on the host's own filesystem before any project exists — the host browse family's worker logic, with its own 2,000-entry ceiling independent of the file family's | A project-relative path, or the containment `path.rs` enforces once a project's root is known |
+| `kubiq-host/src/host_path.rs` | Absolute host paths as they cross the wire: stripping the verbatim prefix for display and normalising separators before a filesystem call, on every platform by doing nothing elsewhere | A project-relative path, or any knowledge of what the path is for |
+| `kubiq-host/src/pty/` | Pseudo-terminal streams, reading, writing, backpressure | Terminal emulation |
+| `kubiq-host/src/config.rs` | Where the config root is, and how it is found | A setting; the bootstrap file names a directory and nothing else |
+| `kubiq-host/src/store/` | What the host writes down: the catalogue, a project's tasks, the view state and settings behind four traits, and the concrete stores that need no trait beside them | Any opinion about what a Ui-layer blob means |
+| `kubiq-host/src/store/project_dir.rs` | Where one project's data directory is — the pointer a store resolves through, the `.kubiq/` folder, its `.gitignore` and its `project.toml` | A catalogue read, or any opinion about what is in the files it places |
+| `kubiq-host/src/store/usage.rs` | The usage meter: `usage.db`, its two tables, its `PRAGMA user_version` migrations and the accumulating upsert into them | A trait, a second implementation, or an opinion about how a bucket is drawn |
+| `kubiq-host/src/projects.rs` | The catalogue as the host runs it, the reservation of each project's `ui/` workarea, and the palette index a project gets when its creator names none | What a palette index looks like, an opinion about layout, or a read of anything inside a workarea |
+| `kubiq-host/src/settings.rs` | Application settings as the host runs them: Ui opaque, Host parsed | An opinion about what a Ui-layer blob means |
+| `kubiq-host/src/work/` | A project's tasks as the host keeps them, and the sessions and agents it mocks over them | Where anything is drawn, or an invented reply from an agent |
+| `kubiq-host/src/watch/` | One `notify` watch per open project, debounced and coalesced, and the project-relative paths it reports | An absolute path on the wire, an opinion about what a reader should redraw |
+| `kubiq-host/src/agent.rs` | Agent-type definitions and the registry over them | Hard-coded harness knowledge that belongs in the library |
+| `kubiq-host/src/browser.rs` | The internal browser's host half: the history worker over `store/browser_history.rs` (`local/browser-history.json`), and the table an `kubiq-browser` command waits in until its window replies | A web view, or a choice of window — the coordinator addresses a command |
+| `kubiq-host/src/mcp/` | The MCP surface Kubiq exposes to the agents it hosts: one loopback listener, the built-in `test`, `project-info`, `manage-kubiq-tasks`, `use-task`, `kubiq-kb` and `kubiq-browser` servers, and the registry that says which agent is calling | Anything the hosted agent should not reach |
+| `kubiq/src/app/` | `AppState`: the panes, the focused pane, the dock and its panels, the workbench state, and window creation. `mod.rs` holds the struct, the free window functions and the key bindings; `boot.rs` the constructor; `shell.rs` chrome and the `Render` impl; `wire.rs` `receive()` and the pane calls; `panels.rs` the dock; and one file per screen — `explorer`, `editor`, `git`, `agents`, `graph`, `board`, `chat`, `sink`, `picker`, `projects`, `settings` | Process handles, PTY handles, disk |
+| `kubiq/src/app/hosts.rs` | `Bus`, the window's multiplexer over every host it is attached to; `HostRef`, the UI-local `HostId`, and the routing that resolves a message to one host | A `HostId` in a `Message`, or any knowledge that a host has of another host |
+| `kubiq/src/state/remote.rs` | The "Connect to a remote host" modal's state and steps, the `AttemptId` a stale dial result is checked against, and the pure `parse_connection_string` / `with_default_port` a test pins down with no socket | A socket, a thread, or any blocking call |
+| `kubiq/src/app/remote_connect.rs` | The client half of the remote-attach transport: dial, the `GET /attach` handshake, and the two pump threads that drive a dialled `TcpStream` through `bus::detached()` onto a `Client` the modal registers | A special case for any message family, or a GPUI type |
+| `kubiq/src/ui/remote_connect.rs` | The modal itself: its four steps drawn as the body and footer change | A socket call, or parsing of a connection string |
+| `kubiq/src/{state,app,ui}/db/` | DB mode, one folder per layer: the state on the open project, the handlers that are the only senders and receivers of the database family, and the explorer, table tab, SQL tab and connection form | A `kubiq_db::driver` name — the interface links the pure half only — or a decrypted password |
+| `kubiq/src/{state,app,ui}/browser.rs` | The internal browser, one file per layer: the tabs, history and address rules; the lifecycle and the API the MCP handler calls; the action bar over `ui/web_view.rs`'s native webview | A proto type outside the browser family, or a page served from `web_export` |
+| `kubiq/src/web_export/` | The on-demand local HTTP server that serves a project's own files read-only, for browsing in a web browser — its own project-root reads, its own `tiny_http` thread, no bus traffic | A proto message, a call into `kubiq-host` |
+| `kubiq/src/ui/` | One module per screen area: shell, titlebar, project menu, rail, explorer, editor, terminal, logs, status bar, empty page, settings overlay, `chat/`, `agents/`, `teams/`, `board/` | Anything that names the host |
+| `kubiq/src/ui/agents/` | The Agents screen: the sidebar of every agent the host reports, and one column per conversation — its tabs, its thread and its composer | Anything that ends an agent; a close that means more than benching one |
+| `kubiq/src/ui/teams/` | The Teams screen: the graph of who spawned whom and its tasks drawer | A position a record would have to carry |
+| `kubiq/src/ui/work.rs` | What a work record reads as: the token an activity, a bucket or a role takes | A second mapping for a state one screen wants to draw differently |
+| `kubiq/src/ui/dock/` | The window's arrangement: the panel adapter over those areas, and Kubiq's skin over the component library's dock | State of its own — a panel holds what identifies it and reads the rest |
+| `kubiq/src/ui/kit/` | Reusable primitives, and only what the component library lacks | Application state, sample data, or the name `AppState` |
+| `kubiq/src/theme.rs` | The colour palette and its tokens | A literal colour used anywhere else |
+| `kubiq/src/state/` | Pane and application state machines, the workbench, explorer, editor and chat state, what a panel is and where it may sit, the projections of the host's catalogue and of a project's work, the three views over that work — `agents.rs` for the columns, `orchestration.rs` for the graph, `board.rs` for the board — and the fixture that still seeds the chat | Rendering, or any component-library type |
+| `kubiq-app/src/lib.rs` | The boot as a library: `Stores` (the four boxed store traits), `Boot` (what an edition composes — the stores it hands in) and `run(boot)`, the whole start sequence: config root, host, theme, key bindings, the first window | Any logic, including window construction — that is `app::open_project_window` |
+| `kubiq-app/src/main.rs` | Three lines: `run(Boot::default())`. The base edition's binary, entire | A step of the boot — a second binary composing these crates must not be able to skip one |
+| `kubiq-drone/src/relay.rs` | The run loop that answers the bus on a machine Kubiq is not running on: the pty map, a `files` worker, a `host_meta` sampler, the seeded catalogue, and a catch-all arm that refuses every family it does not serve | A coordinator, an index, a keychain, or any knowledge of a harness |
+| `kubiq-drone/src/socket.rs` | The unix socket a detached drone is found again through, its `0600`/`0700` modes, the two-verb preamble, and the multiplexer that only *holds* the process | A protocol change, or anything that talks to a multiplexer rather than through the socket |
+| `kubiq-drone/src/state.rs` | The JSON state file beside that socket, written atomically and refreshed on a slow cadence, and the list-and-prune a caller adopts by | The authority on whether a drone is there — that is the socket answering |
+| `kubiq-drone/src/search.rs` | One-shot execs of `rg`, `ag` or `grep`, translated into the search family's own messages | A walker, a matcher, or any index |
 
 The "never holds" column is the enforcement of the architecture's rules in file terms. A
 `portable-pty` type under `ui/`, or a GPUI type in `messages.rs`, is a violation you can grep for —
 and the crate split makes most of them a violation you cannot compile.
 
-`ubiq-proto/Cargo.toml` carries two dependencies for `wire.rs`: `rmp-serde` encodes and decodes the
+`kubiq-proto/Cargo.toml` carries two dependencies for `wire.rs`: `rmp-serde` encodes and decodes the
 MessagePack body a frame carries, and `serde_bytes` is what keeps the three byte-vector fields on
 the hot path a single `bin` blob apiece instead of one MessagePack integer per byte.
 [`transport-contract.md`](./transport-contract.md)'s framing section says why this format and not
 postcard or bincode.
 
-`ubiq/Cargo.toml` carries three dependencies for the embedded web panel, all gated to
+`kubiq/Cargo.toml` carries three dependencies for the embedded web panel, all gated to
 `[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]`: `gpui-wry`
 (gpui-component's own wry binding, so a child webview is laid out by a GPUI element rather than a
 second window), `wry` itself (published as `lb-wry` 0.53.3) and `raw-window-handle`. Every other
 platform compiles none of the three and keeps the external browser a web panel falls back to —
 `gpui-wry`'s Unix path is unfinished upstream. Every dependency drawn from
 `github.com/longbridge/gpui-component` is pinned by `rev`: `gpui-component` and `gpui-kit-assets`
-in both `crates/ubiq/Cargo.toml` and `crates/ubiq-app/Cargo.toml` at one revision, and `gpui-wry`
+in both `crates/kubiq/Cargo.toml` and `crates/kubiq-app/Cargo.toml` at one revision, and `gpui-wry`
 at `dc00da18`, the last revision before upstream renamed it `gpui-webview` and made it require
 GPUI Fast — a fork of GPUI that, through feature unification, would move gpui-component onto a
-GPUI other than the one Ubiq names. GPUI itself is the `gpui-pre` crates.io snapshot
+GPUI other than the one Kubiq names. GPUI itself is the `gpui-pre` crates.io snapshot
 (`gpui = { package = "gpui-pre", version = "=0.3.8" }`, likewise `gpui_platform`) that
 gpui-component pins exactly; every crate naming `gpui` names that same requirement, and
 `zed-scap` is the crates.io release it resolves to.
@@ -420,8 +420,8 @@ gpui-component pins exactly; every crate naming `gpui` names that same requireme
 1. Is it a colour, a font, or a size the layout depends on? → `theme.rs`, referenced everywhere else.
 2. Does it draw, and does it know about the workbench? → a module under `ui/`.
 3. Does it draw, and would a second caller want it? → `ui/kit/`, naming no application type.
-4. Does it own a process, a file descriptor or a path on disk? → `crates/ubiq-host/`.
-5. Does it cross the bus? → its type goes in `crates/ubiq-proto/`, its handling on both sides.
+4. Does it own a process, a file descriptor or a path on disk? → `crates/kubiq-host/`.
+5. Does it cross the bus? → its type goes in `crates/kubiq-proto/`, its handling on both sides.
 6. Does it know how a *harness* is configured or launched? → `crates/agent-manager`, not here.
 7. Is it a patch to somebody else's crate? → `vendor/`, with a line in that crate's `README.md`.
 8. Is it a script a person runs? → `_tools/`, with a `just` recipe in front of it.
@@ -444,19 +444,19 @@ Nothing in `_tools/` is imported by the crates, and nothing in the crates is imp
 ## `_docs/` and `refs/`
 
 `_docs/` is described by its own map, [`../INDEX.md`](../INDEX.md), and governed by
-`_docs/_meta/librarian.md`. Two of its folders hold something other than Ubiq's own knowledge:
+`_docs/_meta/librarian.md`. Two of its folders hold something other than Kubiq's own knowledge:
 `_docs/design/` holds wireframes, prototypes and captured artifacts rather than documents, and is
-excluded from documentation checks; `_docs/references/` holds the specifications of protocols Ubiq
+excluded from documentation checks; `_docs/references/` holds the specifications of protocols Kubiq
 speaks but does not own, kept close to the code that implements them and exempt from the length and
 fence caps that shape a document written here.
 
 `refs/` holds other repositories checked out for reference. Its contents are never edited and never
 cited as if they were part of this tree — the documentation linter treats a path under `refs/` as
-external precisely so nobody mistakes one for a claim about Ubiq.
+external precisely so nobody mistakes one for a claim about Kubiq.
 
 ## Rationale
 
-**Why a workspace rather than one crate?** Because `agent-manager` has a life outside Ubiq: it ships
+**Why a workspace rather than one crate?** Because `agent-manager` has a life outside Kubiq: it ships
 its own `am` CLI and is meant to be embedded by other tools. Folding it into the application would
 make every harness-configuration fix an application release, and would let application types leak
 into a library that must stay front-end agnostic.

@@ -1,19 +1,19 @@
 ---
 id: inbox-qa-checks
-title: Proposal — custom tests as QA checks (HTTP, SQL, script) that agents author and Ubiq executes
+title: Proposal — custom tests as QA checks (HTTP, SQL, script) that agents author and Kubiq executes
 kind: proposal
 status: proposal
-summary: A check is a test Ubiq runs itself, without a test framework; agents write checks as declarative files (http, sql and script kinds with assertions, captures, environments and secret references), the test worker runs them with native host-side executors, and they appear in the same explorer, run model, dashboard and ubiq-tests MCP server as framework tests, with approval gates for real environments, a QA-project workflow, interop with Hurl, Postman and JUnit, a phased build order, the decisions it would add and the open questions.
-read_when: you are deciding how Ubiq runs HTTP, database or script checks that are not unit tests, how an agent authors and runs them, how they touch real environments safely, or what a QA project is
+summary: A check is a test Kubiq runs itself, without a test framework; agents write checks as declarative files (http, sql and script kinds with assertions, captures, environments and secret references), the test worker runs them with native host-side executors, and they appear in the same explorer, run model, dashboard and kubiq-tests MCP server as framework tests, with approval gates for real environments, a QA-project workflow, interop with Hurl, Postman and JUnit, a phased build order, the decisions it would add and the open questions.
+read_when: you are deciding how Kubiq runs HTTP, database or script checks that are not unit tests, how an agent authors and runs them, how they touch real environments safely, or what a QA project is
 updated: 2026-10-26
 depends_on: [inbox-test-runner, inbox-debugger, inbox-hitl-dialogs, inbox-agents-definitions, feat-workbench-db, feat-workbench-ide, tech-architecture, tech-transport, tech-decisions]
 ---
 
-**A check is a test that Ubiq executes itself, with no test framework behind it: an HTTP request
+**A check is a test that Kubiq executes itself, with no test framework behind it: an HTTP request
 with assertions, a SQL query with assertions, or a script whose exit code decides.** Agents author
-checks as plain files; the same explorer, run model, results view, dashboard and `ubiq-tests` MCP
+checks as plain files; the same explorer, run model, results view, dashboard and `kubiq-tests` MCP
 server that show framework tests show checks, per the [test-runner proposal](./test-runner-proposal.md).
-A **QA project** is then a Ubiq project whose content is checks against environments, with no
+A **QA project** is then a Kubiq project whose content is checks against environments, with no
 application code in it.
 
 "Task" means a kanban card here, so an execution is a **run**, as in the test-runner proposal.
@@ -23,28 +23,28 @@ application code in it.
 | Want | Today |
 |---|---|
 | Call an endpoint and assert on the answer | An agent writes `curl` in a pane and reads text; nothing is kept or rerun |
-| Assert on data (an invariant, a row count) | The DB mode runs SQL by hand; `ubiq-sql-read` lets an agent query, but nothing remembers an expectation |
+| Assert on data (an invariant, a row count) | The DB mode runs SQL by hand; `kubiq-sql-read` lets an agent query, but nothing remembers an expectation |
 | A repeatable smoke suite per environment | Nothing |
 | A check authored by an agent, reviewed by a human | Nothing |
 
 The pieces exist apart. The host already opens database connections for the DB mode
 ([the DB workbench](../features/workbench-db.md)) with a read-only flag per connection and an agent
 access level; the host links an HTTP client (`ureq`, behind the `listener` feature in
-`crates/ubiq-host/Cargo.toml`, used for the feedback POST and update checks) and a keychain
+`crates/kubiq-host/Cargo.toml`, used for the feedback POST and update checks) and a keychain
 (`keyring`). What is missing is the declarative check, its executors, and the model that holds the
 results. The test-runner proposal supplies the last.
 
 ## 2. Positioning: when a check, when a recipe
 
-Anything that already emits JUnit XML, TAP, TRX or the Ubiq NDJSON schema runs through a **test
+Anything that already emits JUnit XML, TAP, TRX or the Kubiq NDJSON schema runs through a **test
 recipe**: Playwright, Robot Framework, k6 thresholds, Schemathesis, dbt tests, Soda, Great
-Expectations, Newman. Ubiq does not reimplement them. Native checks exist for four things a recipe
+Expectations, Newman. Kubiq does not reimplement them. Native checks exist for four things a recipe
 does not give:
 
 | Property | Why a recipe is not enough |
 |---|---|
 | Zero install | Nothing to `pip install` to check that `/health` returns 200 |
-| Agent-authored | A small closed schema an agent writes and Ubiq validates, instead of a framework's whole API |
+| Agent-authored | A small closed schema an agent writes and Kubiq validates, instead of a framework's whole API |
 | Secrets-aware | Credentials resolved host-side from references, masked everywhere |
 | Inspectable | The exact request, response and rows are attached to the result, not scrolled away |
 
@@ -53,27 +53,27 @@ recipe, not a richer schema (open question 4).
 
 ## 3. Check kinds
 
-A closed set, with Ubiq-owned executors running on the host's side, so a remote host works
+A closed set, with Kubiq-owned executors running on the host's side, so a remote host works
 unchanged.
 
 | Kind | What it does | Assertions |
 |---|---|---|
 | `http` | One request or a chain of steps: method, URL, headers, query, body; captures from a response feed later steps (login, then token, then call) | Status, header, JSON path, regex on the body, JSON schema, latency budget |
 | `sql` | A query on a saved DB connection | Row count, scalar equals or compare, column values, empty or non-empty, snapshot of the rows |
-| `script` | Any command (shell, Python, Node); stdout and stderr captured | Exit code; or the Ubiq NDJSON event schema for a script that reports many results |
+| `script` | Any command (shell, Python, Node); stdout and stderr captured | Exit code; or the Kubiq NDJSON event schema for a script that reports many results |
 
 Later, not in the first phases: `browser` (Playwright through a recipe rather than embedded), `grpc`,
 and `mcp` (call a tool on an MCP server and assert on the answer).
 
 **`sql` reuses the DB mode's connection.** A check names a connection of the project's DB mode; it
-never carries a connection string. The engine and drivers are `crates/ubiq-db` behind the host's
-`db` feature, and the session code in `crates/ubiq-host/src/db/` already honours a connection's
-read-only flag; the SQL MCP servers in `crates/ubiq-host/src/mcp/sql/` already answer through it.
+never carries a connection string. The engine and drivers are `crates/kubiq-db` behind the host's
+`db` feature, and the session code in `crates/kubiq-host/src/db/` already honours a connection's
+read-only flag; the SQL MCP servers in `crates/kubiq-host/src/mcp/sql/` already answer through it.
 A check run is another client of that session code, not a second driver stack.
 
 ## 4. The check file
 
-**TOML**, because `ubiq.toml` and `projects.toml` are TOML and the repository already parses it
+**TOML**, because `kubiq.toml` and `projects.toml` are TOML and the repository already parses it
 (open question 1). The shape is suites, then checks, then steps, then assertions.
 
 ```toml
@@ -107,7 +107,7 @@ expect = { status = 200, "$.id" = 1, latency_ms = 800 }
 
 **Location.** A folder in the project, committed, so a team shares it and a clone just works. That
 is the same trade the test-runner proposal states for the recipe: shareable, but a cloned check runs
-requests against real systems, which makes the gates in section 6 matter. The alternative is Ubiq's
+requests against real systems, which makes the gates in section 6 matter. The alternative is Kubiq's
 project store (open question 2).
 
 ## 5. Execution and results
@@ -119,14 +119,14 @@ explorer, results view, dashboard, history and flaky detection need no second pa
 | Executor | Built on |
 |---|---|
 | `http` | The host's HTTP client, behind a host-only feature; timeouts, redirects and TLS settings are check fields. The client is blocking, like the worker threads. Whether `ureq` is reused or another client chosen is open question 5 |
-| `sql` | The DB session code and `ubiq-db` drivers, behind the `db` feature |
+| `sql` | The DB session code and `kubiq-db` drivers, behind the `db` feature |
 | `script` | The worker's own piped process path; the NDJSON parser from the closed set |
 
 Each result carries an **attachment** beside the usual message and location: for `http`, the request
 as sent (secrets masked), the response status, headers and body (truncated with a count), and the
 failing assertion as expected against actual; for `sql`, the query, the timing and the rows (capped).
 The results tab shows them: a request and response viewer, and a rows grid reusing
-`crates/ubiq/src/ui/db/grid.rs`. A failing JSON assertion shows a diff, not a message.
+`crates/kubiq/src/ui/db/grid.rs`. A failing JSON assertion shows a diff, not a message.
 
 ## 6. Secrets and safety
 
@@ -136,7 +136,7 @@ check file, a result, a log line or an MCP answer; the same value is masked wher
 echoed, including inside a response body that reflects it.
 
 The provider is the open part. The DB mode already seals passwords with AES-256-GCM under a key in
-the OS keychain (`crates/ubiq-host/src/db/secrets.rs`, in `<config root>/projects/<ulid>/local/`,
+the OS keychain (`crates/kubiq-host/src/db/secrets.rs`, in `<config root>/projects/<ulid>/local/`,
 never inside the project). A check's `sql` kind uses exactly that, by connection name. For `http`
 and `script` secrets there is no store yet; the candidates are the same sealed-file mechanism, the
 keychain directly, or environment variables of the host (open question 6).
@@ -151,19 +151,19 @@ Checks touch real environments, so the defaults are conservative.
 | Agent-authored checks | A new or changed check needs the user's approval before its first run against a non-local environment, shown as a diff |
 | Dry run | Shows every request and query that would be sent, with secrets masked, and sends none |
 
-Approval is a registered dialog through `ubiq-ask`, as in the [debugger proposal](./debugger-proposal.md)
+Approval is a registered dialog through `kubiq-ask`, as in the [debugger proposal](./debugger-proposal.md)
 and [HITL dialogs](./hitl-registered-dialogs.md). Which environments count as `prod`, and whether a
 human-started run also asks, is open question 7.
 
 ## 7. The agent surface
 
-The `ubiq-tests` server of the test-runner proposal grows check tools. Answers are TOON, bodies
+The `kubiq-tests` server of the test-runner proposal grows check tools. Answers are TOON, bodies
 truncated with a count, secrets masked.
 
 | Tool | What it does |
 |---|---|
 | checks_list | Suites and checks with the last status per environment |
-| check_propose | Submit a check file; Ubiq validates it against the schema and the user approves a diff before it is saved |
+| check_propose | Submit a check file; Kubiq validates it against the schema and the user approves a diff before it is saved |
 | check_run | A selector (suite, check, tag) and an environment; waiting or async; answers a run id and a summary |
 | check_explain_failure | The failing step's request, response or rows, trimmed, with the assertion's expected and actual |
 | check_from | Generate checks from a source: an OpenAPI document, a HAR file, a curl command, a SQL statement, a bug report or acceptance criteria |
@@ -183,9 +183,9 @@ human sees it.
 | Data quality | `sql` invariants: no orphan rows, counts within bounds, no nulls in a key column |
 | Contract checks | Checks generated from an OpenAPI document; drift shows as new failures |
 | Reporting | JUnit XML out for CI, and a markdown summary of a run for a card or a pull request |
-| A QA agent | An agent definition ([agent definitions](./agents-definitions.md)) with a QA skill and the `ubiq-tests`, `ubiq-sql-read` and `ubiq-ask` servers preset |
+| A QA agent | An agent definition ([agent definitions](./agents-definitions.md)) with a QA skill and the `kubiq-tests`, `kubiq-sql-read` and `kubiq-ask` servers preset |
 
-**Triggers.** Ubiq is a desktop application, so a scheduled run on a closed machine is not
+**Triggers.** Kubiq is a desktop application, so a scheduled run on a closed machine is not
 available. The first triggers are manual, on project open, and by an agent; scheduling is later and
 open question 3.
 
@@ -220,14 +220,14 @@ After phase 0 of the test-runner proposal (the worker, the Test family, the expl
 | Phase | Scope |
 |---|---|
 | 0 | `script` and `http` checks, the file format, environments, secret references, the results viewer, the check MCP tools |
-| 1 | `sql` checks through `ubiq-db` and the DB mode's connections |
+| 1 | `sql` checks through `kubiq-db` and the DB mode's connections |
 | 2 | Approval gates hardened, scratch and promote, generation from OpenAPI, curl and HAR |
 | 3 | Importers (Postman collection, HAR, curl), JUnit and markdown export, the QA agent definition |
 | Later | `browser`, `grpc` and `mcp` kinds; scheduling |
 
 ## 12. Decisions this would add
 
-- A check is a first-class test: Ubiq executes `http`, `sql` and `script` checks natively and
+- A check is a first-class test: Kubiq executes `http`, `sql` and `script` checks natively and
   reports them through the test run model, not as a pane. **Cost:** a second source of run events
   beside the parsers, and executors to maintain.
 - Checks are declarative files with references to secrets and environments, never inline credentials.
@@ -241,9 +241,9 @@ After phase 0 of the test-runner proposal (the worker, the Test family, the expl
 
 ## 13. Open questions
 
-1. TOML or YAML for the check file. TOML matches `ubiq.toml`; YAML is what most HTTP tooling users
+1. TOML or YAML for the check file. TOML matches `kubiq.toml`; YAML is what most HTTP tooling users
    expect and nests request bodies more naturally.
-2. Where checks live: a committed folder in the project, or Ubiq's project store.
+2. Where checks live: a committed folder in the project, or Kubiq's project store.
 3. Scheduling: none, on project open, or a background schedule while the application runs; and how a
    closed laptop is reported.
 4. How far assertions go before a check should be a script; whether a small expression language is
@@ -254,7 +254,7 @@ After phase 0 of the test-runner proposal (the worker, the Test family, the expl
    the host's environment.
 7. The prod policy: which environments are `prod`, whether a human-started run asks too, and whether
    a cloned repository's checks are trusted until a human has seen them.
-8. Hurl as the engine for `http`, with Ubiq as its runner and viewer, against a native executor.
+8. Hurl as the engine for `http`, with Kubiq as its runner and viewer, against a native executor.
 9. Which kinds ship first, and whether `sql` can precede `http`.
 10. How a check's attachment is persisted in run history without keeping response bodies forever.
 

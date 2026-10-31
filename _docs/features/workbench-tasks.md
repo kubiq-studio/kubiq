@@ -7,7 +7,7 @@ summary: The rail's Tasks mode — a column per status, a card per task, what a 
 read_when: you are changing the tasks board — its columns, its cards, what a drag means, the task panel, a task's attachments or labels, a mission, or the plan surface and its annotations
 updated: 2026-10-12
 verified: 2026-10-12
-code_anchors: [crates/ubiq/src/state/board.rs, crates/ubiq/src/app/board.rs, crates/ubiq/src/ui/board/mod.rs, crates/ubiq/src/state/tasksrc.rs, crates/ubiq/src/app/tasksrc.rs, crates/ubiq/src/ui/tasksrc.rs, crates/ubiq/tests/tasksrc.rs, crates/ubiq/src/ui/board/detail.rs, crates/ubiq/src/ui/board/form.rs, crates/ubiq/tests/board.rs, crates/ubiq/src/state/work.rs, crates/ubiq-host/src/work/mod.rs, crates/ubiq-host/src/store/file.rs, crates/ubiq-host/src/mcp/tasks.rs, crates/ubiq-host/src/plan/mod.rs, crates/ubiq-host/src/plan/service.rs, crates/ubiq-host/src/plan/queue.rs, crates/ubiq-host/src/plan/blocks.rs, crates/ubiq-proto/src/blocks.rs, crates/ubiq-proto/src/plan.rs, crates/ubiq-host/src/store/plan.rs, crates/ubiq-host/src/mcp/plan.rs, crates/ubiq/src/app/plan.rs, crates/ubiq/src/app/editor.rs, crates/ubiq/src/state/plan.rs, crates/ubiq/src/state/document.rs, crates/ubiq/src/ui/plan.rs, crates/ubiq/src/ui/document.rs, crates/ubiq/src/ui/mdview/annotation.rs, crates/ubiq/tests/plan.rs, crates/ubiq/src/state/new_mission.rs, crates/ubiq/src/app/new_mission.rs, crates/ubiq/src/ui/new_mission.rs, crates/ubiq/src/state/mission.rs, crates/ubiq/src/app/mission.rs, crates/ubiq/src/ui/mission/mod.rs, crates/ubiq/src/ui/mission/panel.rs, crates/ubiq/src/ui/mission/full.rs, crates/ubiq/src/ui/mission/wbs.rs, crates/ubiq/src/ui/mission/settings.rs, crates/ubiq/src/ui/mission/menu.rs, crates/ubiq/src/ui/mission/note.rs, crates/ubiq/src/state/wbs.rs, crates/ubiq/src/app/wire.rs, crates/ubiq-host/src/mission/mod.rs, crates/ubiq-host/src/mission/runner.rs, crates/ubiq-host/src/mission/prompts.rs, crates/ubiq-host/src/mcp/mission.rs, crates/ubiq-host/src/mcp/catalogue.rs, crates/ubiq-host/src/mcp/registry.rs, crates/ubiq-host/src/coordinator.rs]
+code_anchors: [crates/kubiq/src/state/board.rs, crates/kubiq/src/app/board.rs, crates/kubiq/src/ui/board/mod.rs, crates/kubiq/src/state/tasksrc.rs, crates/kubiq/src/app/tasksrc.rs, crates/kubiq/src/ui/tasksrc.rs, crates/kubiq/tests/tasksrc.rs, crates/kubiq/src/ui/board/detail.rs, crates/kubiq/src/ui/board/form.rs, crates/kubiq/tests/board.rs, crates/kubiq/src/state/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/plan/service.rs, crates/kubiq-host/src/plan/queue.rs, crates/kubiq-host/src/plan/blocks.rs, crates/kubiq-proto/src/blocks.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq/src/app/plan.rs, crates/kubiq/src/app/editor.rs, crates/kubiq/src/state/plan.rs, crates/kubiq/src/state/document.rs, crates/kubiq/src/ui/plan.rs, crates/kubiq/src/ui/document.rs, crates/kubiq/src/ui/mdview/annotation.rs, crates/kubiq/tests/plan.rs, crates/kubiq/src/state/new_mission.rs, crates/kubiq/src/app/new_mission.rs, crates/kubiq/src/ui/new_mission.rs, crates/kubiq/src/state/mission.rs, crates/kubiq/src/app/mission.rs, crates/kubiq/src/ui/mission/mod.rs, crates/kubiq/src/ui/mission/panel.rs, crates/kubiq/src/ui/mission/full.rs, crates/kubiq/src/ui/mission/wbs.rs, crates/kubiq/src/ui/mission/settings.rs, crates/kubiq/src/ui/mission/menu.rs, crates/kubiq/src/ui/mission/note.rs, crates/kubiq/src/state/wbs.rs, crates/kubiq/src/app/wire.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mission/prompts.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/coordinator.rs]
 depends_on: [feat-workbench, tech-ui]
 review_cycle: monthly
 ---
@@ -19,12 +19,12 @@ review_cycle: monthly
 Tasks is the rail mode that answers what there is to do in a project and where each piece of it
 has got to: one column per status, one card per task, and a panel beside them reporting the
 selected task whole. It writes the same set of tasks the graph modes draw under their canvas, and
-the same set an agent reaches through the Manage Ubiq tasks server.
+the same set an agent reaches through the Manage Kubiq tasks server.
 
 ## Behaviour
 
-**The board and the graph are two views of one set of tasks.** An agent started with Manage Ubiq
-tasks or Use ubiq tasks ticked writes that same set: a card it creates, moves or deletes arrives as the
+**The board and the graph are two views of one set of tasks.** An agent started with Manage Kubiq
+tasks or Use kubiq tasks ticked writes that same set: a card it creates, moves or deletes arrives as the
 ordinary `TaskCreated` / `TaskChanged` / `TaskDeleted` the board applies. A comment typed in the
 task panel is authored `user`; one posted through those servers is authored `agent`. The graph answers "who is doing
 what"; the board answers "what is there, and where has it got to" — the same tasks, at the scale of
@@ -53,7 +53,7 @@ decides which cards qualify (`Done` or `Abandoned`, and no `level` — a mission
 are not this act's to carry anywhere, so a finished mission stays on the board) and answers with the
 same `TaskDeleted` a delete would, once per card, which is why the panel needs no new rule to stop
 showing them. What leaves the board lands in the project's own paged archive under
-`tasks/archive/`, a hundred tasks to a page (`ubiq-host/src/store/file.rs`), never read back on this
+`tasks/archive/`, a hundred tasks to a page (`kubiq-host/src/store/file.rs`), never read back on this
 wire — there is no browse, search or restore yet (`G353`). A reference, a prerequisite or a parent
 naming a card that just left is dropped from whatever still holds it, reported as an ordinary
 `TaskChanged`, the same cleanup a load already gives a hand-edited file.
@@ -69,7 +69,7 @@ board's task edits travel in `OnBoard` and come back in it; a level is refused t
 makes a mission. A named board can be created, disabled and — once it holds no task, live or
 archived — deleted with its directory; the default board can be neither disabled nor deleted. The
 registry is re-read on every disk sync, broadcasting `Boards` when it moved, and again before each
-change, so a row another Ubiq or a pull added is kept; a row whose id is not a slug (`a-z`, `0-9`,
+change, so a row another Kubiq or a pull added is kept; a row whose id is not a slug (`a-z`, `0-9`,
 `-`, non-empty), or repeats one, is ignored, since `boards.toml` travels with a project-managed
 project and an id becomes a directory name. The window draws them in two places. **A dock tab per board**: the default board is the centre's "Tasks" tab and
 each enabled named board is a `PanelKind::Board(slug)` centre tab beside it, labelled with its name;
@@ -209,7 +209,7 @@ user never selected and refusing would leave a board that can never be cleared.
 
 **A task can wait on another, typed and directed, and readiness is never stored.** Prerequisites
 are `references`' typed sibling: a chip list on the panel naming the tasks this one needs
-to satisfy it before work should start (`ubiq_proto::mission::satisfies`: `Done`, `Abandoned`, or `InReview` with no pending `approve`, and always the task this one reviews), refused by the host for a self-reference, a task in
+to satisfy it before work should start (`kubiq_proto::mission::satisfies`: `Done`, `Abandoned`, or `InReview` with no pending `approve`, and always the task this one reviews), refused by the host for a self-reference, a task in
 another project, or one that would close a cycle in the DAG — three checks `parent`'s single-level
 cap never needed. Whether a task is ready, and what it is waiting on if it is not, is computed on
 demand rather than written down or sent as its own fact on the record, so it can never drift from
@@ -237,10 +237,10 @@ settings (`driver`, `planner`, `worker`, `parallel`, `approve`), its subtasks ar
 prerequisites, and its **phase is the parent's status**: *Planning* is `backlog`, *Breakdown*
 `ready`, *Running* `in progress`, *Paused* `blocked`, *Review* `in review`, then `done` or
 `abandoned`. There is no coordinator agent: a planner agent writes the plan and drafts the tasks and
-then exits, and Ubiq's own runner does the rest.
+then exits, and Kubiq's own runner does the rest.
 
 1. **Planning.** The user chats with the planner, which writes the plan and any detail documents
-   through `ubiq-plan` and `ubiq-mission`. **Approve plan** moves to Breakdown. Open annotation
+   through `kubiq-plan` and `kubiq-mission`. **Approve plan** moves to Breakdown. Open annotation
    threads show as a warning on the approval and do not block it.
 2. **Breakdown.** The planner drafts the subtasks in `backlog`: prerequisites, an `approve` flag per
    task, human tasks (assigned to a person) and review tasks. The runner ignores the draft. The user
@@ -278,7 +278,7 @@ then exits, and Ubiq's own runner does the rest.
 7. **App restart.** The state is the board plus the documents, so only the agents are lost. The
    runner resumes by itself and marks each task left `in progress` with no live worker as gone;
    nothing restarts on its own. A planner that stopped in Planning or Breakdown shows **Resume
-   planner**, which revives its conversation with *Ubiq restarted. Read the plan and the mission
+   planner**, which revives its conversation with *Kubiq restarted. Read the plan and the mission
    state, and continue.*
 8. **Abandon** stops the mission's workers and sets open subtasks and the parent to `abandoned`;
    **Complete** (the `⋯` menu, any phase) is **Mark reviewed**.
@@ -364,7 +364,7 @@ and cleared rather than left pointing at nothing when the mission it names is de
 off `Level::Mission`.
 
 **The plan surface is a markdown view with its annotation layer on** (T-302). The page is an
-`MdView` — the same view a markdown tab's preview is: one row per root block of the `ubiq_md`
+`MdView` — the same view a markdown tab's preview is: one row per root block of the `kubiq_md`
 parse, virtualized, with its own minimap and heading navigator — and the annotation layer draws in
 its margins without moving a line of text. Every row with threads carries a **count marker** in the
 far margin, in the open colour while any thread on it is still asking and the resolved colour once
@@ -382,14 +382,14 @@ as in every markdown view (`_docs/features/workbench-ide.md`); a selection quote
 (`G406`).
 
 **Two block models meet in the margin.** The host indexes the document into `PlanBlock`s and owns
-their ids; the view lays out `ubiq_md` rows. A host block belongs to the row holding the start of
+their ids; the view lays out `kubiq_md` rows. A host block belongs to the row holding the start of
 its text, so a row can carry several — a list is one row and each item a block — and a row sums the
 threads of every block in it. A new thread on a row is about the row's first block; a highlight on
 a row colours every block in it; marking a row flips the mark on its focused thread, else its
 first, and on a row with no thread opens the composer with the mark preset, so marking never posts
 an empty thread. A block typed since the last save has no host id yet, and the surface says to save
 first rather than posting a thread that would be orphaned on arrival (`D203`). Frontmatter is a
-block kind in the host's index (T-154, `ubiq_proto::blocks::options`), so a thread anchors on it
+block kind in the host's index (T-154, `kubiq_proto::blocks::options`), so a thread anchors on it
 like on any other block.
 
 **A source edit no longer warns about annotations that do not exist** (T-183). Two independent
@@ -481,10 +481,10 @@ opened the thread.
 **A thread that has lost its block is marked, never dropped**: an orphan banner says so, and the
 thread keeps its replies and its state exactly as they were, because a passage rewritten out of
 existence is not the same fact as an answered question. An agent answers what the user opened
-through the `ubiq-plan` MCP server's `list_annotations`, `reply_annotation` and
+through the `kubiq-plan` MCP server's `list_annotations`, `reply_annotation` and
 `resolve_annotation`, and opens one with `annotate_plan` (anchored by a unique quote or a block id,
 optional marks, author Agent).
-**Any markdown file in the project is the same collaboration** (T-348): the `ubiq-doc` MCP server
+**Any markdown file in the project is the same collaboration** (T-348): the `kubiq-doc` MCP server
 answers the same tools with the document named by a project-relative `path` instead of a
 `task_id` — `list_annotated_docs` (the files carrying open threads), `read_doc`, `write_doc`,
 `doc_changes`, `list_annotations`, `annotate_doc`, `reply_annotation`, `resolve_annotation`. An
@@ -492,7 +492,7 @@ agent edits an annotated file through `write_doc`, so the threads re-anchor; an 
 leaves the block index as it was until the next save.
 **An agent's write never clobbers the user's newer text** (`D208`). The host remembers the body each
 agent last read (`read_doc`, `read_plan`) or wrote, and a `write_doc`/`write_plan` over a document
-that moved since is a three-way merge (`Handle::agent_save`, `ubiq_proto::merge`): disjoint edits all
+that moved since is a three-way merge (`Handle::agent_save`, `kubiq_proto::merge`): disjoint edits all
 land; where both changed the same words the user's text is kept and the agent's version becomes a
 thread on that block, authored by the agent, and the tool result says so (`conflicts.threads`); a
 result that is not what the agent sent carries `merged: true` and a note to read again. A tab save of
@@ -513,13 +513,13 @@ as its comment, and is not queued for the agent again; the expanded thread offer
 needs more work, which queues it back). The user reaches a file's annotation mode from
 its tab's `Annotation` layout or the explorer's **Open in annotation mode** (offered on any `.md`
 row), and the rail's **Agent** button opens the agent menu, whose *New agent…* row opens the New agent form aimed at the chat dock, with
-`ubiq-doc` and `ubiq-ask` ticked and an opening turn naming the file — the user still picks the
+`kubiq-doc` and `kubiq-ask` ticked and an opening turn naming the file — the user still picks the
 harness and presses Start.
 **A document may be bound to one agent** (T-354, `D207`); an agent may own many. The binding and
 an `auto_send` switch live in the document's sidecar and ride on every annotation snapshot. An agent
-finds its own with `ubiq-doc`'s `list_my_docs`; another agent's `write_doc`, `annotate_doc`,
-`reply_annotation` or `resolve_annotation` on a bound document (and the `ubiq-plan` twins on a bound
-plan, and `ubiq-mission`'s `write_document`) is refused with the owner named and an instruction to
+finds its own with `kubiq-doc`'s `list_my_docs`; another agent's `write_doc`, `annotate_doc`,
+`reply_annotation` or `resolve_annotation` on a bound document (and the `kubiq-plan` twins on a bound
+plan, and `kubiq-mission`'s `write_document`) is refused with the owner named and an instruction to
 ask the user, and the windows are told so they can offer to reassign it. The check keeps
 cooperating agents apart; it is not a security boundary, since an agent's own file tools still
 reach the file. `list_annotations` shows each comment's `id` and `edited_at` — the
@@ -608,7 +608,7 @@ add and every drop is a message, and the chips come back on the answer. A chip n
 it on a click, and is drawn in the accent when it points into the knowledge base, because *attached
 from the KB* is the one thing about an attachment its file name cannot say. Two controls add one:
 `+` raises the file picker, and the clipboard control takes what is on the pasteboard — a copied
-file by its path, a screenshot written into `.ubiq/pasted/` first, exactly as a composer's paste
+file by its path, a screenshot written into `.kubiq/pasted/` first, exactly as a composer's paste
 does it.
 
 **The attachment picker is the one that offers two key spaces at once.** A task may point at a
@@ -640,10 +640,10 @@ by — the same sixteen, so the board and the picker read in one vocabulary. The
 derived from the cards themselves; there is no list of labels kept anywhere, so a label stops
 existing when the last card carrying it lets it go.
 
-**The link is a string the user pastes, and nothing more.** Ubiq reads the host out of it to pick a
+**The link is a string the user pastes, and nothing more.** Kubiq reads the host out of it to pick a
 glyph — Azure DevOps, Jira, GitHub, or a plain link for anything else — and never fetches it, parses
 it or keeps anything in step with it. A task standing for an issue somewhere else is a fact worth
-writing down long before Ubiq could do anything with it.
+writing down long before Kubiq could do anything with it.
 
 **A task's key is the one a human says out loud.** Every task already has an id; nobody can read it.
 The key is the user's own — `UBQ-123`, `#4711`, whatever their tracker calls it — and `key:` in the
@@ -730,14 +730,14 @@ assignment dialog.
 
 **`Assign to an agent`** (`AppState::assign_task_to_agent`, `T-64`) raises the same New agent modal
 every other `+` in the window does — never a second dialog — and overlays three things onto it: the
-board and feedback MCPs (`manage-ubiq-tasks`, `ubiq-ask`) preselected onto the checklist, two
+board and feedback MCPs (`manage-kubiq-tasks`, `kubiq-ask`) preselected onto the checklist, two
 checkboxes drawn only on this path (`NewAgentForm::for_task`, `ask_for_feedback`, `plan_mode`), and
 an initial prompt (sent as the first user message, so the agent starts on its own) composed from the
 task's key and both checkboxes (`state::new_agent::task_assignment_prompt`). Ticking *Ask for
 feedback* tells the agent to ask when it needs to; unticked, to assume as much as it reasonably
-can instead. *Plan mode* is a sentence in the prompt only — no `ubiq-plan` server is ticked for it,
+can instead. *Plan mode* is a sentence in the prompt only — no `kubiq-plan` server is ticked for it,
 since this form attaches no plan tool yet. The prompt also tells the agent to keep the task's
-status and comments updated through `manage-ubiq-tasks`. A toggle recomposes the prompt; the
+status and comments updated through `manage-kubiq-tasks`. A toggle recomposes the prompt; the
 feedback line of a *Feedback* assignment (`NewAgentForm::prompt_suffix`) is kept across it, other
 edits are not. The start is aimed at the chat surface (`NewAgentSurface::Chat`), so the agent lands
 in a `Chat` tab in the right dock next to the task that named it.
@@ -770,7 +770,7 @@ belongs to [`../inbox/task-sources-proposal.md`](../inbox/task-sources-proposal.
   pass would still refuse to push. **Which fields are locked is `outbound::FIELDS`, not a guess** —
   title, description, status, labels, assignee, kind, priority, key and link. `checklist` and
   `comments` sit outside that table by the sync pass's own decision, so sub-tasks and comments stay
-  Ubiq's own annotations and stay editable; so do shape, level, complexity, colour, session,
+  Kubiq's own annotations and stay editable; so do shape, level, complexity, colour, session,
   parent, references, prerequisites and attachments, which the remote has never heard of. A locked
   field is **inert rather than refused**: no click, no hover, no text cursor, and the reason in its
   tooltip, on `direction_row`'s own `greyed` idiom — with the whole sentence said once over the
@@ -874,7 +874,7 @@ other reader goes through. `ui/settings.rs`'s `mission_term_input` and
 `mission_term_row()` draws the project's Default/Custom pill pair, and
 `app/projects.rs::set_project_mission_term` sends the change and updates the window's own snapshot
 at once, on `set_project_index`'s rule, so a board's mission chips relabel before the host echoes
-back. `TaskField::Level(Option<Level>)` carries the task's own axis — `ubiq_proto::work::Level` has
+back. `TaskField::Level(Option<Level>)` carries the task's own axis — `kubiq_proto::work::Level` has
 one arm, `Mission` — set from the panel's `form::level_pill()` and drawn first in
 `ui/board/mod.rs::task_card()`'s marks row.
 
@@ -886,7 +886,7 @@ line), so a `tasks.toml` written before this slice loads unchanged with no envel
 `TaskField::Parent` and `TaskField::References` carry the edits — the References arm replaces the
 whole set, dropping a self-reference and a duplicate, the same posture `Labels` takes. The host is
 the one place the one-level rule is enforced: `Work::parent_refusal()`
-(`crates/ubiq-host/src/work/mod.rs`) refuses a `Parent` set with a `Message::WorkError` when the
+(`crates/kubiq-host/src/work/mod.rs`) refuses a `Parent` set with a `Message::WorkError` when the
 named parent carries no task, has no `Level`, is itself somebody's child, or when the task being
 given a parent already has children — the two depth checks between them are what removes any need
 for a cycle walk, since a chain three deep would need one of the two ends to be both a parent and a
@@ -897,7 +897,7 @@ hand-edited into something the live rule would refuse still loads rather than be
 `TaskRecord::prerequisites: Vec<TaskId>` (`#[serde(rename = "prerequisite")]`, absent when empty) is
 `references`' typed, directed sibling. `TaskField::Prerequisites(Vec<TaskId>)` replaces the whole
 set on `References`' own posture — trimmed, deduplicated, any self-reference dropped — but the
-refusal runs first: `Work::prerequisite_refusal()` (`crates/ubiq-host/src/work/mod.rs`) checks the
+refusal runs first: `Work::prerequisite_refusal()` (`crates/kubiq-host/src/work/mod.rs`) checks the
 raw list against the loaded project for a task naming itself, a task absent from the project (the
 same "no such task" test `parent_refusal` uses), or a candidate `prerequisite_cycle()` can already
 reach — a DFS over each candidate's existing prerequisite edges, bounded by the project's task
@@ -908,7 +908,7 @@ task in the project on every load and poll, `references`' own posture.
 `TaskRecord::ready()` and `::waiting_on()` are the derived readiness the record never stores: a task
 is ready when every prerequisite's own record reads `Status::InReview` or `Status::Done`, and
 `waiting_on()` is the subset that does not. Both take the project's whole loaded task list and
-touch nothing on the wire, so `crates/ubiq-host`'s MCP tools and `crates/ubiq`'s board and panel all
+touch nothing on the wire, so `crates/kubiq-host`'s MCP tools and `crates/kubiq`'s board and panel all
 call the one implementation rather than each recomputing it — and it is **not** `Status::Blocked`,
 which stays whatever a person or an agent said about the card; a card can be both.
 `ui/board/mod.rs::waits_on_chip()` draws a not-ready card's mark, muted and ahead of its labels, and
@@ -926,13 +926,13 @@ close a cycle with, so the picker never offers a choice the host would refuse. `
 draws the reverse list — every task naming this one as a prerequisite — read-only (`kit::tag`, not
 `kit::removable_tag`), because it is derived, a scan of the project's task list, and not a field on
 this one. `AppState::add_task_prerequisite()`, `::remove_task_prerequisite()` and
-`::toggle_prerequisite_picker()` (`crates/ubiq/src/app/board.rs`) wire the panel;
+`::toggle_prerequisite_picker()` (`crates/kubiq/src/app/board.rs`) wire the panel;
 `AppState::toggle_board_ready_only()` flips `BoardState::ready_only` for the toolbar's tick. On the
-MCP side, `manage-ubiq-tasks` and `use-task`'s `create_task`/`update_task` take `prerequisites`
+MCP side, `manage-kubiq-tasks` and `use-task`'s `create_task`/`update_task` take `prerequisites`
 (and, T-165, `shape`, `level`, `parent` and `references` — the same set the form edits, minus
 `colour`, which is a swatch pick with nothing for an agent to reason about and is left off the
 schema on purpose), `get_task` and `search_tasks` report `ready` and `waiting_on` as task keys, and
-`search_tasks` takes a `ready_only` filter (`crates/ubiq-host/src/mcp/tasks.rs`). `get_task`'s
+`search_tasks` takes a `ready_only` filter (`crates/kubiq-host/src/mcp/tasks.rs`). `get_task`'s
 `task_id` also reads a task's `key` (`T-166`) when the raw id is not one — `find_task()` tries the
 id first (a key is never a valid ULID) and the key second, so a model that only ever saw the key a
 human wrote can still look the task up.
@@ -960,31 +960,31 @@ owner whose answer leaves the window. A pasted picture takes the opposite bet fr
 `app/picker.rs::paste_image_into_task()` sends the `WriteProjectFile` and attaches nothing, and the
 `SetTaskField` goes out from `pasted_write_settled()` once the write is answered — a chip in a draft
 can be taken back off, a path written into `tasks.toml` outlives the mistake. On the MCP side
-`manage-ubiq-tasks`' `create_task` and `update_task` both take `attachments`, so an agent adds one
+`manage-kubiq-tasks`' `create_task` and `update_task` both take `attachments`, so an agent adds one
 with the same verb a human does.
 `Work::orphan_children()` runs on delete, clearing `parent` on every child and sending each its own
 `TaskChanged` so a window's board redraws it without the breadcrumb, rather than the store losing the
 link silently underneath it. On the UI side, `WorkProjection::eligible_parents()` and
-`::eligible_references()` (`crates/ubiq/src/state/work.rs`) mirror the host's rule exactly so neither
+`::eligible_references()` (`crates/kubiq/src/state/work.rs`) mirror the host's rule exactly so neither
 picker ever offers a choice the host would refuse: `form::parent()` draws the parent picker on
 `session()`'s idiom, and `form::references()` draws the chip list, `form::reference_picker()` its
 `+` menu, wired through `AppState::set_task_parent()`, `::add_task_reference()` and
-`::remove_task_reference()` (`crates/ubiq/src/app/board.rs`). The card's child-count chip is
+`::remove_task_reference()` (`crates/kubiq/src/app/board.rs`). The card's child-count chip is
 `ui/board/mod.rs::task_card()` reading `WorkProjection::child_count()`.
 
 A plan is stored as one markdown file, `<config root>/projects/<ProjectId>/plans/<TaskId>.md`,
-beside `tasks.toml` and `kb.toml` — `crates/ubiq-host/src/store/plan.rs`'s `FilePlanStore`, written
+beside `tasks.toml` and `kb.toml` — `crates/kubiq-host/src/store/plan.rs`'s `FilePlanStore`, written
 and read whole, atomically, with a corrupt file preserved aside rather than clobbered. The level
-check is not the store's: `crates/ubiq-host/src/plan/mod.rs`'s `Plans` holds a `work::Handle`
+check is not the store's: `crates/kubiq-host/src/plan/mod.rs`'s `Plans` holds a `work::Handle`
 alongside the store and refuses `load`, `save` and `body` with `Message::PlanError` for a task with
 no `level`, the same posture `Work::parent_refusal` takes; `delete` skips that check on purpose,
 because `Work::delete` calls it to keep a removed task's plan from being orphaned on disk, and a
 task already gone cannot be asked what its `level` was. `crate::plan::Handle` mirrors
 
-`FileTaskStore::save` (`crates/ubiq-host/src/store/file.rs`) round-trips a key it does not itself
+`FileTaskStore::save` (`crates/kubiq-host/src/store/file.rs`) round-trips a key it does not itself
 know: on every save it reads whatever `tasks.toml` holds before the write and, for each `[[task]]`
 row it is about to rewrite, copies forward any key that is not one of `TaskRecord`'s own (`D179`) —
-a field a newer Ubiq wrote, or one a Studio sidecar keeps on the same row, survives a base
+a field a newer Kubiq wrote, or one a Studio sidecar keeps on the same row, survives a base
 load/modify/save cycle instead of being dropped as an unrecognised field. `FileProjectStore::flush`
 does the same for `[[project]]` rows in `projects.toml`, keyed by `id` the same way. Neither store
 carries the extra keys in memory between reads — the merge is a list of records keyed by `id` — so a key survives only from
@@ -993,14 +993,14 @@ refused a file whose `version` is above `TASKS_VERSION`/`CATALOGUE_VERSION` rath
 from before this change (`StoreError::UnknownVersion`); `D179`'s addition is the unknown-field bag,
 not the version refusal.
 `crate::work::Handle`'s own shape — an `Arc<Mutex<Plans>>` clone held by the coordinator and by the
-MCP listener's `ubiq-plan` server. The coordinator's `plan_job()` (`crates/ubiq-host/src/coordinator.rs`)
+MCP listener's `kubiq-plan` server. The coordinator's `plan_job()` (`crates/kubiq-host/src/coordinator.rs`)
 answers `LoadPlan`, `SavePlan` and `DeletePlan` on `work_job()`'s own footing; `export_plan()` reads
 the body through `Plans::body()` and writes a copy through `crate::store::plan::export_to()`
 wherever `ExportPlan::rel_path` resolves to, the same containment `WriteProjectFile`'s path already
 gets.
 
 **The family is keyed by a document, not by a task** (`D161`). Every message in it names a
-`ubiq_proto::plan::DocumentHandle` — `Plan { project_id, task_id }`, or
+`kubiq_proto::plan::DocumentHandle` — `Plan { project_id, task_id }`, or
 `File { project_id, rel_path }` for an ordinary markdown file in the project's own tree. `plan_job()`
 resolves the handle to a `crate::plan::Target` once, against the project's root, and that is the
 only place a `rel_path` is contained and checked for being markdown; everything below it reads
@@ -1012,7 +1012,7 @@ never the thing that removes it. `Plans` is otherwise unchanged: one block match
 rule, one conflict arbitration, one provenance layer, for both kinds. On the interface side the surface is **generic over a document**: `crate::state::document`'s
 `DocumentEditor` holds a `DocumentHandle`, a `DocumentBody` (`Loading`, `Loaded`, `Failed`), the
 text the host last stated, and the flags that make a save mean something (`dirty`, `stale`,
-`saving`); `DocumentHandle` is the contract's own type (`crates/ubiq-proto/src/plan.rs`), re-exported from
+`saving`); `DocumentHandle` is the contract's own type (`crates/kubiq-proto/src/plan.rs`), re-exported from
 `state::document`, with a `Plan` and a `File` variant — native on the file viewer's own editor
 rather than a web-panel tenant (`D160`) — and `app/plan.rs`'s `DocumentWire` trait is the only
 place a handle becomes a message. `state::plan::plan_document()` and `::file_document()` mint the
@@ -1058,15 +1058,15 @@ a `Window`, then tells the dialog's view to reparse at once (`MdView::resync`, s
 raises no change event), focuses a composer an event opened, and remaps a stale margin.
 `open_export_plan_dialog()` raises `FileDialog::ExportPlan`
 over it, `SaveAs`'s own route. The
-`ubiq-plan` MCP server (`crates/ubiq-host/src/mcp/plan.rs`, catalogued as `mcp::catalogue::UBIQ_PLAN`)
+`kubiq-plan` MCP server (`crates/kubiq-host/src/mcp/plan.rs`, catalogued as `mcp::catalogue::KUBIQ_PLAN`)
 carries `read_plan` and `write_plan` over the same `Plans`, reached through `PlanReach`, which holds
 the plan handle and nothing else — not a `work::Handle` of its own, since `Plans` already carries
 one.
 
 Annotations hang off the same `Plans`: its block index and its threads live in a sidecar,
 `<TaskId>.annotations.json` beside the `.md` for a plan and `<file>.md.annotation.json` beside the
-file for a project document (`crates/ubiq-host/src/store/plan.rs`'s `PlanSidecar`, `save_sidecar()`
-and `sidecar_beside()`), so the markdown itself stays untouched by anything of Ubiq's, on a stable
+file for a project document (`crates/kubiq-host/src/store/plan.rs`'s `PlanSidecar`, `save_sidecar()`
+and `sidecar_beside()`), so the markdown itself stays untouched by anything of Kubiq's, on a stable
 block id rather than a quoted-context match or a per-run id (`D159`). The two spellings differ —
 singular for the file, plural for the plan — and that is kept rather than migrated (`D161`).
 **A file document's sidecar exists only while it carries content** (T-183, `Plans::write_sidecar`):
@@ -1081,14 +1081,14 @@ annotation carries `marks` (`Agent`, `Todo`, `Question`) and each comment an opt
 addressee (`Plans::annotate`, `reply_to`, `set_mark`, `set_highlights`; the wire is in
 `_docs/tech/transport-contract.md`). A save that changes the block index always announces
 `PlanAnnotationsChanged`.
-**What a document splits into is `crates/ubiq-proto/src/blocks.rs`, and there is exactly one copy of
+**What a document splits into is `crates/kubiq-proto/src/blocks.rs`, and there is exactly one copy of
 it.** The walk — container nodes walked through so a list annotates per item, a table one block, a
 block's text its own trimmed source at `blocks::options()`, GFM plus the frontmatter construct —
 lives in the contract crate because
 the host's index and the window's optimistic cache have to split a document identically and neither
 half may depend on the other. Two copies of those rules is drift that would show up as the preview
 disagreeing with the host's re-index, silently (`T-114`).
-`crates/ubiq-host/src/plan/blocks.rs::match_blocks()` is the layer over it, and re-indexes the
+`crates/kubiq-host/src/plan/blocks.rs::match_blocks()` is the layer over it, and re-indexes the
 document on every save — identical blocks keep their id, an edited block keeps it by word-overlap similarity, and a
 block nothing matches is reported in `Matching::vanished` so `Plans::save()` can flag its
 annotations `orphaned` rather than drop them. `Plans::annotations()`, `::annotate()`, `::reply_to()`
@@ -1098,7 +1098,7 @@ other window. On the interface side, `crate::state::document::AnnotationsBody` a
 track the block index, the threads, the highlights and which composer (if any) is open. The block
 ids are the host's and the rows are the view's, so `state::document::row_map()` places each block in
 the row holding the start of its source range — `block_ranges()`'s forward scan in document order,
-then `ubiq_md::Document::block_at_offset` — into a `RowMap` (`D203`). `row_decor()` sums each row's
+then `kubiq_md::Document::block_at_offset` — into a `RowMap` (`D203`). `row_decor()` sums each row's
 threads, marks and highlight into the `RowDecor` list `AppState::refresh_document_decor()` pushes
 through `MdView::set_decor`, on every reparse (`MdViewEvent::DocumentChanged`), every fresh block
 index and every focus change. `AppState::document_md_event()` turns the view's intents into the
@@ -1110,14 +1110,14 @@ sends `MarkAnnotation` on `mark_target()` or opens the composer with the mark pr
 `follow_target()`. The rail is `ui/document.rs::rail()`: `thread_list()` over
 `DocumentEditor::rail_threads()` (`ordered()`, filtered by `show_resolved`), `collapsed()` and
 `expanded()` per row, and `foot()`'s composer, whose post goes through
-`submit_annotation_composer()` and `state::document::addressed()` for the `@agent` tag. The `ubiq-plan` MCP server adds
+`submit_annotation_composer()` and `state::document::addressed()` for the `@agent` tag. The `kubiq-plan` MCP server adds
 `list_annotations` (with `marks`, per-comment `to` and a `mark` filter), `annotate_plan`,
-`reply_annotation` and `resolve_annotation` (`crates/ubiq-host/src/mcp/plan.rs`) over the same
+`reply_annotation` and `resolve_annotation` (`crates/kubiq-host/src/mcp/plan.rs`) over the same
 `Plans`; `annotate_plan` resolves its block through `Plans::block_for_quote` and refuses a quote
 that matches no block or several. Every handler in `mcp/plan.rs` takes a resolved `plan::Target`:
-`call()` resolves `task_id` to `Target::Plan` for `ubiq-plan`, `doc_call()` resolves `path` through
-`Target::resolve` on a `DocumentHandle::File` against `AgentFacts::project.path` for `ubiq-doc`
-(`mcp::catalogue::UBIQ_DOC`, in no default set), and each answer echoes `task_id` or `path`
+`call()` resolves `task_id` to `Target::Plan` for `kubiq-plan`, `doc_call()` resolves `path` through
+`Target::resolve` on a `DocumentHandle::File` against `AgentFacts::project.path` for `kubiq-doc`
+(`mcp::catalogue::KUBIQ_DOC`, in no default set), and each answer echoes `task_id` or `path`
 accordingly. `list_annotated_docs` walks the project with `ignore::WalkBuilder` for
 `*.md.annotation.json` sidecars, capped at 500; `list_my_docs` filters the same walk on
 `Plans::binding()`, and `mcp::plan::owned()` is the refusal in front of every write. The doc queue
@@ -1145,7 +1145,7 @@ The new-mission dialog is three modules on the New agent form's own division: `s
 `NewMissionForm` holds what was typed and turns it into one `NewMission` (`ready()` needs a title),
 `ui/new_mission.rs` draws it titled with `AppState::mission_term`, and `app/new_mission.rs` carries
 the mutators and `start_new_mission()`, which sends one `CreateMission`. The host does everything
-else — `Missions::create` (`crates/ubiq-host/src/mission/mod.rs`) makes the parent, writes the brief
+else — `Missions::create` (`crates/kubiq-host/src/mission/mod.rs`) makes the parent, writes the brief
 (the requirements are its `description`, the attachments its `attachments`), adopts the included
 tasks, saves the initial plan as revision one, reading a picked file itself, and posts the planner's
 `MissionLaunch`. The planner and worker pickers list every agent definition the project can see
@@ -1195,7 +1195,7 @@ needs the identical rule and not a second one that drifts from it. `lane_list()`
 `lane_lists: RefCell<Vec<(Status, ListState)>>` across renders — a `RefCell` because a lane is drawn
 from `&BoardState`, and rebuilding the list state on every frame would throw its row-height cache
 away. `end_carry()` answers the task and the column it landed in. It is tested without a frame
-in `crates/ubiq/tests/board.rs`.
+in `crates/kubiq/tests/board.rs`.
 
 `ui/board/mod.rs::column()` flattens a lane's drop-gap marker, its cards and its end-of-column drop
 zone into one `Row` enum (`Marker`, `Card(TaskId, Option<TaskId>)`, `Tail`) — the `Flat` pattern
@@ -1321,9 +1321,9 @@ card chips. `crate::state::work::WorkProjection::work_state` and `work_state_cou
 the progress bar and the Tasks tab read. `app/wire.rs`'s `MissionList`/`MissionChanged`/
 `MissionDeleted`/`MissionHistory`/`MissionError`/`MissionLaunch` arms are the receive path.
 
-`crate::mission::Missions` (`crates/ubiq-host/src/mission/mod.rs`) is the family's own service,
+`crate::mission::Missions` (`crates/kubiq-host/src/mission/mod.rs`) is the family's own service,
 reached the way `Plans` reaches its store and held behind a `Handle` so the coordinator and the
-`ubiq-mission` listener share one instance (`D120`). It keeps no store: the mission is the parent
+`kubiq-mission` listener share one instance (`D120`). It keeps no store: the mission is the parent
 task, its `MissionSettings` and its documents under `missions/<TaskId>/docs/` (the guidance document
 among them, `ProjectData::mission_docs`). **The runner is `mission/runner.rs`, a pure pass.**
 `runner::pass()` takes the parent, the project's tasks, the liveness of their agents, the launches
@@ -1331,17 +1331,17 @@ in flight, the tasks whose launch failed and the project's definition ids, and a
 (launch, move the parent, act on a verdict, write a `Finished` or `Gone` line, unload a closed
 task's worker, abandon an orphaned review); `needs_you()` and `snapshot()` derive what a window
 draws from the same inputs. `Missions` carries the steps out on the coordinator's thread, writing
-each transition as a `RunEvent` comment (`CommentAuthor::Ubiq`) on the task it concerns. The
+each transition as a `RunEvent` comment (`CommentAuthor::Kubiq`) on the task it concerns. The
 coordinator wakes it (`Coordinator::wake_runner`) on a task change, an agent's end, a setting
 change, `MissionLaunched` and `MissionSchedule`; it keeps no thread and no timer. `AUTO_FAIL_CAP` is
 two. `mission/prompts.rs` composes what the runner says to the agents it launches: a worker gets the
 task, the plan and the guidance inline, because it has no mission server; the planner and the mission
-reviewer carry `ubiq-mission` and `ubiq-plan` and are pointed at the tools. Everything held only in
+reviewer carry `kubiq-mission` and `kubiq-plan` and are pointed at the tools. Everything held only in
 memory — launches in flight, the window to address, failed launches, feedback waiting on a busy
 worker — is lost on a restart, and the first pass afterwards marks tasks with no live worker as gone.
 
-**The `ubiq-mission` server is the planner's and the final reviewer's, and it is small.**
-`crates/ubiq-host/src/mcp/mission.rs`, catalogued as `mcp::catalogue::UBIQ_MISSION`, offers
+**The `kubiq-mission` server is the planner's and the final reviewer's, and it is small.**
+`crates/kubiq-host/src/mcp/mission.rs`, catalogued as `mcp::catalogue::KUBIQ_MISSION`, offers
 `mission_overview`, `read_brief`, `list_documents`, `read_document`, `write_document`,
 `attach_document`, `detach_document`, `create_mission_task`, `create_mission_tasks` (the batch form,
 resolving a prerequisite named by a key or an id created earlier in the same call) and

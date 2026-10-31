@@ -4,7 +4,7 @@ title: Proposal — workspaces, a folder and a branch, for a mission, a task or 
 kind: inbox
 status: proposal
 summary: A workspace is a folder plus a branch. Every project has one already — its main working directory, the default workspace — and may add more, each a git linked worktree, free-standing or bound to a mission or a task. The project owns the list; on the wire a workspace is addressed by the id the rooted families already carry, the main workspace's id being the project's own, so the explorer, search, the Git screen, terminals and agents follow the active workspace with no new field and every existing path keeps working. The host owns every git operation (create from a new or existing branch, adopt from `git worktree list`, remove, prune); linked worktrees live outside the project folder; work (tasks, missions, plans) stays the project's. A branch already checked out elsewhere is refused with git's reason and offered as a new branch or a detached head at its tip. The glossary's "workspace = one running agent" retires in favour of "agent". Merge-back is surfaced, never performed. Every fork is a numbered decision with a recommendation.
-read_when: you are designing how Ubiq creates, opens or removes a workspace or git worktree, how an agent is started on a branch other than the project's checkout, or how a mission or task gets an isolated working tree
+read_when: you are designing how Kubiq creates, opens or removes a workspace or git worktree, how an agent is started on a branch other than the project's checkout, or how a mission or task gets an isolated working tree
 updated: 2026-10-12
 depends_on: [feat-workbench, feat-workbench-git, feat-workbench-agents, feat-sessions, tech-version-control, tech-transport, tech-architecture, tech-agent-manager, inbox-mission, inbox-agent-graph-final]
 ---
@@ -19,21 +19,21 @@ branch. The project's main working directory is a workspace — the default one,
 has. Linked git worktrees are additional workspaces of the same project, free-standing or bound to a
 mission or a task.
 
-> Everything in Ubiq that roots on a project — the explorer, search, the Git screen, a terminal, an
+> Everything in Kubiq that roots on a project — the explorer, search, the Git screen, a terminal, an
 > agent — roots on a workspace instead, and a project that never adds one sees no difference.
 
 ## 1. What the tree does today
 
 | Fact | Where |
 |---|---|
-| Every rooted family keys on `ProjectId` + a project-relative `rel_path`; the host resolves against the record's `path` | `ubiq-files` skill, `crates/ubiq-host/src/files/path.rs` |
+| Every rooted family keys on `ProjectId` + a project-relative `rel_path`; the host resolves against the record's `path` | `kubiq-files` skill, `crates/kubiq-host/src/files/path.rs` |
 | A pane's and a conversation's working directory **is its project's** — `SpawnWorkspace` and `StartConversation` name a `project_id` and an optional `rel_path`, never a folder | [`../features/sessions-and-workspaces.md`](../features/sessions-and-workspaces.md) |
 | A window holds several projects (`OpenProject` each) — explorer tree, buffers, panes, Git screen, view state — switching is a lookup, an unseen project's terminals keep running, and a project is open in one window at a time | [`../features/workbench.md`](../features/workbench.md) `## What a window owns` |
-| `Missing` / Locate, view-state collection and the watch are per `ProjectId` | `crates/ubiq-host/src/projects.rs`, `gc.rs`, `watch/` |
-| `WorkSession { id, name, branch, worktree: bool }` is on the wire and drawn — the Agents sidebar labels a session "worktree", an agent column reads `identity · branch · worktree`, the task detail prints `(worktree)` — but the host always sends `branch: ""`, `worktree: false`, and the other sessions come from `work/mock.rs` | `crates/ubiq-proto/src/work.rs`, `crates/ubiq-host/src/coordinator.rs`, `crates/ubiq/src/ui/agents/{sidebar,column}.rs`, `ui/board/detail.rs` |
-| The glossary's **workspace** is one running agent; the wire says so (`SpawnWorkspace`, `WorkspaceSpawned`, `CloseWorkspace`, `WorkspaceInfo`). No UI string says "workspace" — the interface already says **agent** ("New agent") and **pane** | [`../product/glossary.md`](../product/glossary.md), `crates/ubiq/src/ui/new_agent.rs` |
+| `Missing` / Locate, view-state collection and the watch are per `ProjectId` | `crates/kubiq-host/src/projects.rs`, `gc.rs`, `watch/` |
+| `WorkSession { id, name, branch, worktree: bool }` is on the wire and drawn — the Agents sidebar labels a session "worktree", an agent column reads `identity · branch · worktree`, the task detail prints `(worktree)` — but the host always sends `branch: ""`, `worktree: false`, and the other sessions come from `work/mock.rs` | `crates/kubiq-proto/src/work.rs`, `crates/kubiq-host/src/coordinator.rs`, `crates/kubiq/src/ui/agents/{sidebar,column}.rs`, `ui/board/detail.rs` |
+| The glossary's **workspace** is one running agent; the wire says so (`SpawnWorkspace`, `WorkspaceSpawned`, `CloseWorkspace`, `WorkspaceInfo`). No UI string says "workspace" — the interface already says **agent** ("New agent") and **pane** | [`../product/glossary.md`](../product/glossary.md), `crates/kubiq/src/ui/new_agent.rs` |
 | The nested-repo walk recognises a linked worktree's gitlink file, but the overview reads it as if it were the only repository, and its real `HEAD`/index under `<common>/.git/worktrees/<name>/` sit outside the watched root (`G125`) | [`../tech/version-control.md`](../tech/version-control.md) §6 |
-| Ubiq writes nothing inside a project's folder but its reserved workarea (`D30`) | [`../tech/decisions.md`](../tech/decisions.md) |
+| Kubiq writes nothing inside a project's folder but its reserved workarea (`D30`) | [`../tech/decisions.md`](../tech/decisions.md) |
 | `agent-graph-final` sketched "workspace = folder + branch + worktree" with a `may_create_workspace` grant, phase 11, never built | [`./backlog/agent-graph-final.md`](./backlog/agent-graph-final.md) §2, §16 |
 
 The host uses `git2` 0.21, which has `Repository::worktree`, `worktrees()`, `find_worktree`,
@@ -49,8 +49,8 @@ mechanism behind a non-main workspace.
 |---|---|---|---|---|
 | **Main** (default, implicit) | the project's own path | adding the project | nothing | whatever is checked out there |
 | Free-standing | a linked worktree | the user, from the switcher | nothing | anything the user types or picks |
-| Task | a linked worktree | the user from a board card, or the mission runner | one `TaskId` | `ubiq/<task-key>-<slug>` |
-| Mission | a linked worktree | the mission's settings, at Start mission | the mission's parent `TaskId` | `ubiq/<mission-slug>` |
+| Task | a linked worktree | the user from a board card, or the mission runner | one `TaskId` | `kubiq/<task-key>-<slug>` |
+| Mission | a linked worktree | the mission's settings, at Start mission | the mission's parent `TaskId` | `kubiq/<mission-slug>` |
 
 The main workspace's branch is read from git, never stored: switching branch there (the Git
 screen's `Checkout`) changes the main workspace's branch, which is what the user means.
@@ -68,7 +68,7 @@ pub struct WorkspaceRecord {
     pub path: String,               // host-resolved, like ProjectRecord::path — a label to the UI
     pub branch: Option<String>,     // None = detached HEAD (W5)
     pub base: Option<String>,       // the ref it was branched from, for ahead/behind and hand-off
-    pub origin: WorkspaceOrigin,    // Created (Ubiq ran `worktree add`) | Adopted
+    pub origin: WorkspaceOrigin,    // Created (Kubiq ran `worktree add`) | Adopted
     pub binding: Option<WorkspaceBinding>, // Mission(TaskId) | Task(TaskId)
 }
 ```
@@ -84,7 +84,7 @@ The honest weighing:
 | **List on the project, addressed by a `ProjectId`-typed workspace id** | One additive catalogue field (the `runs_on` precedent, no version bump); `root()` and `project_of()` in the host; the window builds one `OpenProject` per open workspace, which is what it already builds per id. Explorer, search, index, watch, git, panes, conversations, view state and `Missing`/Locate work per id unchanged | **Chosen** |
 | `ProjectId` + `WorkspaceId` pair on every rooted message, main = `None` | `messages.rs` names `project_id` ~320 times; every file, search, git, watch, spawn and conversation message grows a field, and `OpenProject` grows a per-workspace sub-state that is a second `OpenProject`. Explicit, but nothing it buys the chosen option lacks | Rejected for now; renaming the field `root` is a later mechanical card if the double reading confuses |
 | Each worktree a top-level project record with a parent link (this proposal's first draft) | Same engine as the chosen option, but the catalogue lies: a workspace would look like a project, and the main checkout would be the odd one out | Rejected — contradicts "the main directory is a workspace" |
-| Extend Ubiq's session | A pane's cwd is deliberately its project's, not its session's; nothing roots files or git on a session; sessions are still mocks | Rejected |
+| Extend Kubiq's session | A pane's cwd is deliberately its project's, not its session's; nothing roots files or git on a session; sessions are still mocks | Rejected |
 
 Per-workspace: explorer tree, open files, panes, Git screen, view prefs, index, `Missing`.
 Per-project: name, colour, tasks, boards, missions, plans, KB, run history, settings
@@ -141,7 +141,7 @@ corrupt each other's view of it. The common case is the obvious one: the user wa
    for reading, running or reviewing. Committing there is allowed by git; the workspace's chip turns
    to the warning colour and the Git screen offers *Create branch here* so the work is not orphaned.
 
-If the branch is held by another *linked* workspace, a third row offers **Switch to it**. Ubiq never
+If the branch is held by another *linked* workspace, a third row offers **Switch to it**. Kubiq never
 passes git's force flag.
 
 ### W6 — Close, remove, forget, prune
@@ -149,7 +149,7 @@ passes git's force flag.
 | Action | Effect | Guard |
 |---|---|---|
 | **Close** | Drops the workspace from the window, exactly as closing a project | Existing "terminals running" question |
-| **Remove** | `git worktree remove` + drops the record and its view state | Refused while any pane or conversation runs in it. Uncommitted changes → confirm naming the count. `Adopted` → the confirm says Ubiq did not create it |
+| **Remove** | `git worktree remove` + drops the record and its view state | Refused while any pane or conversation runs in it. Uncommitted changes → confirm naming the count. `Adopted` → the confirm says Kubiq did not create it |
 | **Forget** | Drops the record only; folder and branch stay (default for an adopted one) | none — it deletes nothing |
 | **Prune** | `Worktree::prune` for every worktree git reports prunable | A workspace whose folder vanished goes `Missing` first, with Locate / Forget, as a project does |
 
@@ -161,7 +161,7 @@ workspace bound to an open task or mission asks once more.
 
 ### Merge-back is a hand-off, not a tool
 
-When a bound task reaches `in review`, a mission reaches Review, or the user asks, Ubiq shows one
+When a bound task reaches `in review`, a mission reaches Review, or the user asks, Kubiq shows one
 row: `feat/x · 4 ahead, 1 behind main · clean`. Its actions are what already exists — **Open in
 Git** (the main workspace's Git screen with the branch selected in refs, where `Merge` lives),
 **Copy branch name**, **Push**, and the project's web link for a pull request. No merge UI.
@@ -200,7 +200,7 @@ already carry `project_id`; the active workspace's id is the whole change. `agen
 The mission's settings gain `workspace: Main | PerMission | PerTask` (default `Main`; the dialog
 suggests `PerMission`).
 
-- `PerMission`: at **Start mission** the host creates `ubiq/<mission-slug>` from the main
+- `PerMission`: at **Start mission** the host creates `kubiq/<mission-slug>` from the main
   workspace's branch, bound to the mission. The planner and every worker launch there.
 - `PerTask`: each worker gets its own workspace branched from the mission's branch (or the base),
   bound to its task; a reviewer launches in the task it reviews. Useful only with `parallel > 1`.
@@ -231,10 +231,10 @@ change: the field exists and three screens draw it.
 
 | Concern | Owner |
 |---|---|
-| `worktree add / list / remove / prune`, branch create/delete, ahead/behind, change count | `crates/ubiq-host/src/git/worktree.rs`, on the git worker thread |
-| The records, `root()`, `project_of()`, location policy, reconciliation with git on load | `crates/ubiq-host/src/projects.rs` |
-| Wire types and messages | `crates/ubiq-proto/src/projects.rs` (`WorkspaceRecord`), `messages.rs` |
-| Switcher, chips, dialogs, picker rows | `crates/ubiq` |
+| `worktree add / list / remove / prune`, branch create/delete, ahead/behind, change count | `crates/kubiq-host/src/git/worktree.rs`, on the git worker thread |
+| The records, `root()`, `project_of()`, location policy, reconciliation with git on load | `crates/kubiq-host/src/projects.rs` |
+| Wire types and messages | `crates/kubiq-proto/src/projects.rs` (`WorkspaceRecord`), `messages.rs` |
+| Switcher, chips, dialogs, picker rows | `crates/kubiq` |
 | Harness launch | `crates/agent-manager`, unchanged — handed a folder, as now |
 
 The UI holds ids and display strings (branch, name, the path as a label, as projects already do). It

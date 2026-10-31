@@ -21,7 +21,7 @@ duration of the file family's existence, it did not.
 
 ## 1. The drift, as found
 
-`crates/ubiq-proto/src/messages.rs` defines **32 variants**. The document accounted for 28, seven of
+`crates/kubiq-proto/src/messages.rs` defines **32 variants**. The document accounted for 28, seven of
 which did not exist, and missed seven that did.
 
 | Class | Count | What |
@@ -40,14 +40,14 @@ said those variants "exist in the contract", when they exist in the *document* a
 
 ## 2. The root cause — the part that generalises
 
-`crates/ubiq-proto/src/files.rs` was named in **no document's `code_anchors`**. So the commit that
+`crates/kubiq-proto/src/files.rs` was named in **no document's `code_anchors`**. So the commit that
 added the file family was told it owed no document an update, and that was true given what the
 frontmatter said:
 
 ```
-$ just docs-touched crates/ubiq-proto/src/files.rs
+$ just docs-touched crates/kubiq-proto/src/files.rs
 Anchored by no document — the missing-document case:
-  crates/ubiq-proto/src/files.rs
+  crates/kubiq-proto/src/files.rs
 ```
 
 Nobody skipped the duty in `_meta/authoring.md`. The mechanism that reports the duty had a hole in
@@ -59,8 +59,8 @@ the decision.
 The anchor is now in place, so this particular drift cannot recur:
 
 ```
-$ just docs-touched crates/ubiq-proto/src/files.rs
-crates/ubiq-proto/src/files.rs → _docs/tech/transport-contract.md
+$ just docs-touched crates/kubiq-proto/src/files.rs
+crates/kubiq-proto/src/files.rs → _docs/tech/transport-contract.md
 ```
 
 ## 3. What was applied
@@ -76,7 +76,7 @@ Six edits, all landed and verified against the current file.
 | 5 | The file family's ordering guarantee — one worker, one queue, replies in ask order | Framing |
 | 6 | `Adding a variant` step 1 rerouted for four families; it previously sent every file message to the project family | Adding a variant |
 
-Frontmatter gained `crates/ubiq-proto/src/files.rs` and a fourth family in its `summary`; `updated`
+Frontmatter gained `crates/kubiq-proto/src/files.rs` and a fourth family in its `summary`; `updated`
 and `verified` were re-stamped. `G19` was reworded to "exist in the transport contract document and
 in no code".
 
@@ -93,14 +93,14 @@ A full comparison of the document against `messages.rs` as it now stands:
 
 ## 5. Still open
 
-`crates/ubiq-host/src/files/mod.rs` and `crates/ubiq-host/src/files/path.rs` are anchored by no
+`crates/kubiq-host/src/files/mod.rs` and `crates/kubiq-host/src/files/path.rs` are anchored by no
 document — the same hole as §2, one crate over:
 
 ```
-$ just docs-touched crates/ubiq-host/src/files/mod.rs crates/ubiq-host/src/files/path.rs
+$ just docs-touched crates/kubiq-host/src/files/mod.rs crates/kubiq-host/src/files/path.rs
 Anchored by no document — the missing-document case:
-  crates/ubiq-host/src/files/mod.rs
-  crates/ubiq-host/src/files/path.rs
+  crates/kubiq-host/src/files/mod.rs
+  crates/kubiq-host/src/files/path.rs
 ```
 
 These are the host's side, not the contract's, so they do not belong in

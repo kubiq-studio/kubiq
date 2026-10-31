@@ -10,7 +10,7 @@
 //! home by [`crate::harness::Harness::login_home`] and read back by nobody;
 //! [`login_validity`] is the single, deliberate exception, and reads in place.
 //!
-//! The layout is `<root>/<account>/<harness>/`. The root is the embedder's: Ubiq constructs a
+//! The layout is `<root>/<account>/<harness>/`. The root is the embedder's: Kubiq constructs a
 //! [`HomeStore`] with its own, and the CLI uses [`resolve_homes_root`].
 
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ use crate::credentials::{CredentialBlob, Validity, credential_validity};
 use crate::harness::Harness;
 
 /// The file a finished sign-in leaves in a home. Empty: it is a fact, not a credential.
-const SIGNED_IN_MARKER: &str = ".ubiq-signed-in";
+const SIGNED_IN_MARKER: &str = ".kubiq-signed-in";
 
 /// The account-keyed config homes under one root.
 ///

@@ -3,7 +3,7 @@ id: inbox-capture
 title: Proposal — capture, and the image editor it opens into
 kind: proposal
 status: proposal
-summary: A capture control in the titlebar that photographs the whole window and opens the result as an untitled tab, and the image editor that tab is — crop, arrows, boxes, freehand and text over the picture, undo and redo, saved by the path an untitled text file already takes — built on the Excalidraw scene model Ubiq already parses and paints, with the clipboard as a second source through a new-file keystroke that asks what it is holding — designed Windows-first, because that is what forces the one capture route that crosses all three platforms.
+summary: A capture control in the titlebar that photographs the whole window and opens the result as an untitled tab, and the image editor that tab is — crop, arrows, boxes, freehand and text over the picture, undo and redo, saved by the path an untitled text file already takes — built on the Excalidraw scene model Kubiq already parses and paints, with the clipboard as a second source through a new-file keystroke that asks what it is holding — designed Windows-first, because that is what forces the one capture route that crosses all three platforms.
 read_when: you are deciding what a capture becomes, how an image is edited or cropped, what an untitled binary buffer means, or how the scene painter grows an editing mode
 updated: 2026-09-07
 depends_on: [feat-workbench, tech-ui, tech-architecture, tech-transport, tech-diagrams, wip-windows-build]
@@ -11,7 +11,7 @@ depends_on: [feat-workbench, tech-ui, tech-architecture, tech-transport, tech-di
 
 # Proposal — capture, and the image editor it opens into
 
-**Ubiq is the one application whose screenshots are the product.** A pane is a real terminal with a
+**Kubiq is the one application whose screenshots are the product.** A pane is a real terminal with a
 harness driving it; when it goes wrong, the wrongness is on the screen and nowhere else — not in the
 log ring, not in the transcript, not in anything `just verify` can be pointed at. Today the only way
 to get that picture out is the operating system's screenshot key, which knows nothing about where a
@@ -28,10 +28,10 @@ The second is the larger of the two, and almost all of it is already in the tree
 ## 1. Where it stands
 
 **Nothing captures anything.** No `screenshot`, no `capture`, no render-to-image path in
-`crates/ubiq/`, and no message family for it in `crates/ubiq-proto/src/messages.rs`.
+`crates/kubiq/`, and no message family for it in `crates/kubiq-proto/src/messages.rs`.
 
 **The titlebar's right cluster is a flat row that has been growing.**
-`crates/ubiq/src/ui/titlebar.rs` draws three region switches, a rule, then search, a bell,
+`crates/kubiq/src/ui/titlebar.rs` draws three region switches, a rule, then search, a bell,
 remote-connect, web-export, settings and the theme toggle — eight `icon_button`s, one of which
 (`"bell"`, `|_, _, _| {}`) does nothing at all. Every capability that wanted a home in the top right
 took one by appending a button.
@@ -48,7 +48,7 @@ with `expected: None`, which already means *create, refuse if something is there
 touching the buffer, and `ProjectFileWritten` (`app/wire.rs:496-524`) rebases the baseline. No host
 change anywhere in that path.
 
-**And the save-as dialog is Ubiq's own, inside the project** — a `prompt_modal` titled *Save as*
+**And the save-as dialog is Kubiq's own, inside the project** — a `prompt_modal` titled *Save as*
 asking for a project-relative path (`ui/file_dialog.rs:63-77`), not a native panel.
 `prompt_for_new_path` is called nowhere in the tree, and this proposal does not need it.
 
@@ -64,30 +64,30 @@ decode **from the path's extension alone** (`ui/viewer/image.rs:20-37`), with no
 so a picture with no filename cannot be drawn at all. §5 and §7 are where each of those lands.
 
 **The annotation model exists, in full, and is not this feature's to invent.**
-`crates/ubiq/src/state/scene.rs` parses an Excalidraw scene into `Element` (`:214`) — `x`, `y`,
+`crates/kubiq/src/state/scene.rs` parses an Excalidraw scene into `Element` (`:214`) — `x`, `y`,
 `width`, `height`, `angle`, `stroke`, `fill`, `stroke_width`, `stroke_style`, `opacity` — over
 `ElementKind` (`:152`): `Rectangle`, `Ellipse`, `Diamond`, `Frame`, `Line`, `Arrow`, `Text`,
-`FreeDraw`, `Image`. `crates/ubiq/src/ui/viewer/scene.rs` paints all of it with `canvas()` and
+`FreeDraw`, `Image`. `crates/kubiq/src/ui/viewer/scene.rs` paints all of it with `canvas()` and
 `PathBuilder`. `.claude/excalidraw.py` renders the same subset for the wireframes, and
 [`../tech/diagram-format.md`](../tech/diagram-format.md) documents exactly what it reproduces.
 
-**So does the camera.** `crates/ubiq/src/ui/viewer/viewport.rs` is the surface a picture sits on —
+**So does the camera.** `crates/kubiq/src/ui/viewer/viewport.rs` is the surface a picture sits on —
 fits on open, wheel zooms about the pointer, drag pans, double-click restores the fit, pinch zooms.
 Mermaid and Excalidraw already share it. An image editor needs precisely this and nothing more.
 
 **Two gaps, and one of them has expired.** `ElementKind::Image` paints a placeholder box
 (`ui/viewer/scene.rs:276`), and the module's own doc gives the reason: decoding PNG *"would mean a
 new dependency in the interface crate for a case `_docs/design/` does not contain."* That reason no
-longer holds — `image` with the `png` feature is at `crates/ubiq/Cargo.toml:108`, and
+longer holds — `image` with the `png` feature is at `crates/kubiq/Cargo.toml:108`, and
 `ui/ribbon.rs:76-97` already encodes with it. The other gap is stated twice in that same file: **the
 scene viewer is read-only, and editing "is not proposed and is not built."** §5 is about how far this
 reverses that, and it is less far than it sounds.
 
-**The clipboard already carries images, and Ubiq has simply never asked.** GPUI's `ClipboardEntry`
+**The clipboard already carries images, and Kubiq has simply never asked.** GPUI's `ClipboardEntry`
 is *"either a `ClipboardString` or a `ClipboardImage`"*, there is a `ClipboardItem::new_image`
 constructor, `ClipboardImage` carries an `ImageFormat` whose variants include `Png`, and the macOS
 backend handles `NSPasteboardTypePNG` and `NSPasteboardTypeTIFF` beside `NSPasteboardTypeString` in
-both `read_from_clipboard` and `write_to_clipboard`. Ubiq uses `ClipboardItem::new_string` at nine
+both `read_from_clipboard` and `write_to_clipboard`. Kubiq uses `ClipboardItem::new_string` at nine
 call sites and nothing else. §7 needs both directions and gets them.
 
 **Rendering an element tree to an image is the one thing GPUI does not offer.** There is no
@@ -108,7 +108,7 @@ that.
 
 - What a capture **becomes** — §3, and it is the decision the rest falls out of;
 - what the titlebar control is, and how much of it phase 1 needs — §4;
-- what editing an image means, in a model Ubiq already has — §5;
+- what editing an image means, in a model Kubiq already has — §5;
 - what a save writes, and the trap in the alternative — §6;
 - what the clipboard is allowed to start — §7;
 - and what the setting removes — §8.
@@ -148,14 +148,14 @@ the first custom icon asset in the repository, for one button.
 
 ### What the capture costs, now that it is known
 
-An earlier draft hoped Ubiq could photograph itself for free by rendering its own element tree, and
+An earlier draft hoped Kubiq could photograph itself for free by rendering its own element tree, and
 treated the operating system's capture as the fallback. **That hope is gone**: GPUI has no
 render-to-image, so there is exactly one route and it is the operating system's.
 
 Three consequences, and they are the substance of this section.
 
 **On macOS a capture costs a screen-recording permission from the first one.** Not at phase 5, not
-only for the desktop subjects — for photographing Ubiq's own window. It is a system prompt, granted
+only for the desktop subjects — for photographing Kubiq's own window. It is a system prompt, granted
 once and revocable, asked the first time the button is pressed and never at startup. It is also
 **not a universal cost**, which is what the next subsection is about.
 
@@ -171,7 +171,7 @@ worth naming as a shape that will read oddly to whoever implements it.
 **And it makes §4's own argument stronger.** Whether a source can be a single window or only a
 display is unresolved — `SourceMetadata` carries `is_main` and a `resolution`, which reads like a
 display — and it does not much matter, because **if the capture is of a display, then capturing "the
-window" is already a crop**, and Ubiq knows its own window's bounds. The crop-in-the-editor model was
+window" is already a crop**, and Kubiq knows its own window's bounds. The crop-in-the-editor model was
 argued below on its own merits; it turns out to also be the mechanism.
 
 ### Windows first
@@ -181,7 +181,7 @@ build rarely runs on. **This feature should be designed the other way round**, a
 even-handedness — it is that designing it macOS-first produces the wrong technical choice.
 
 **Because the macOS-only route is the tempting one.** ScreenCaptureKit through the `objc2` stack is
-already linked (`crates/ubiq/Cargo.toml:99` is a `cfg(target_os = "macos")` block, and the dock-icon
+already linked (`crates/kubiq/Cargo.toml:99` is a `cfg(target_os = "macos")` block, and the dock-icon
 code lives in it), it is less code for a one-shot, and it would work perfectly on the machine this is
 built on. It also cannot cross, and the second platform would then need a second implementation
 against a second API with a different frame type and a different consent model — which is the point
@@ -222,7 +222,7 @@ one thing the spike must answer, because it decides whether the fallback is the 
 rare one.
 
 **A Windows capture may photograph its own capture border.** WGC draws one around the captured
-window, and suppressing it needs a recent enough Windows 11. Ubiq cannot control that, and a
+window, and suppressing it needs a recent enough Windows 11. Kubiq cannot control that, and a
 screenshot with a stray yellow rectangle in it is a bug report waiting to happen — so the crop tool
 matters more here than anywhere, and phase 3 stops being a nicety on the platform that goes first.
 
@@ -231,7 +231,7 @@ matters more here than anywhere, and phase 3 stops being a nicety on the platfor
 `ctrl-shift-2` the same way.
 
 **Linux is the platform this leaves behind, and it should be said plainly.** `zed-scap` reaches X11
-through `x11` and `xcb` and has no Wayland backend, while `crates/ubiq/Cargo.toml:14-19` enables both
+through `x11` and `xcb` and has no Wayland backend, while `crates/kubiq/Cargo.toml:14-19` enables both
 `wayland` and `x11` on `gpui_platform`. A Wayland session captures through
 `xdg-desktop-portal`'s ScreenCast interface or not at all, and nothing in this dependency graph does
 that. So on Wayland `is_screen_capture_supported()` is expected to say no, the button is not offered,
@@ -242,7 +242,7 @@ independently of the capture half.
 **No chevron yet, and no clip-before-capture.** Both were in an earlier draft and both are wrong at
 this stage, for the same reason: **cropping is an edit.** A clip tool that runs before the capture
 needs a full-screen transparent overlay window that takes the whole display's input — a window kind
-Ubiq does not have — and it produces a rectangle the user cannot revise. A crop in the editor is one
+Kubiq does not have — and it produces a rectangle the user cannot revise. A crop in the editor is one
 more entry on an undo stack, needs no new window, can be redone against the full picture, and is the
 same tool whether the picture came from the capture button, the clipboard or a file. One
 implementation, strictly more capable, and it is not in the titlebar.
@@ -323,11 +323,11 @@ scene coordinates the camera maps for it.
 ### How far this reverses "read-only"
 
 `ui/viewer/scene.rs` says, twice, that the scene viewer is read-only and that editing is not proposed.
-This reverses that **for a scene Ubiq authored in this session, and not for a file it read.** Opening
+This reverses that **for a scene Kubiq authored in this session, and not for a file it read.** Opening
 an `.excalidraw` document from the explorer still draws and does not edit.
 
 The line is: **the editor edits a capture, not a document.** It is a real line — a captured scene has
-no file on disk to be consistent with, no `appState` Ubiq did not write, and no round-trip fidelity to
+no file on disk to be consistent with, no `appState` Kubiq did not write, and no round-trip fidelity to
 preserve through the parser's stated losses (roughness renders clean, hachure renders solid, text is
 never rotated). A document has all three. Whether the line should later move — whether
 `.excalidraw` files become editable, now that the machinery is there — is a real question and a
@@ -362,7 +362,7 @@ does not, because the suggested name is the only thing standing between the user
 is already linked.
 
 **Saving the scene instead is tempting and has a trap in it.** The edit list *is* an Excalidraw
-scene — Ubiq could write `.excalidraw`, read it back, and keep every annotation editable forever,
+scene — Kubiq could write `.excalidraw`, read it back, and keep every annotation editable forever,
 which is genuinely elegant and solves the one real cost of §5's model (close the tab and the arrows
 become pixels). But **the base image stays whole in `Scene::files`**. So a rectangle drawn over a
 token to hide it is a redaction in the flattened PNG and **is not one in the `.excalidraw` file** —
@@ -380,7 +380,7 @@ ends its annotations' editability**, and the tab is dirty until saved, so the us
 ## 7. The clipboard, and `⌘N`
 
 **A capture is not the only picture worth editing.** Anything on the clipboard — from a browser, from
-another application, from Ubiq's own copy-region — should be able to start a tab.
+another application, from Kubiq's own copy-region — should be able to start a tab.
 
 So: **`⌘N` asks what the clipboard is holding, but only when it is holding an image.** With text on
 the clipboard, or nothing, `⌘N` opens an untitled text buffer exactly as it does now. With an image, a
@@ -405,13 +405,13 @@ genuinely a choice to make costs nothing and needs no second shortcut to remembe
 image starts a tab; writing one is *copy region*. `ClipboardEntry` has an image arm,
 `ClipboardItem::new_image` exists, `ImageFormat::Png` is one of its formats, and the macOS backend
 already speaks `NSPasteboardTypePNG` and `NSPasteboardTypeTIFF` in both directions. Nothing here
-needs a fork, a feature or an upstream change — only that Ubiq stop assuming the clipboard is a
+needs a fork, a feature or an upstream change — only that Kubiq stop assuming the clipboard is a
 string. **What arrives on the clipboard is per-platform, and it decides a line in `Cargo.toml`.**
 `image` is compiled here with `default-features = false, features = ["png"]`
-(`crates/ubiq/Cargo.toml:108`), which is enough for a PNG and nothing else: a macOS screenshot lands
+(`crates/kubiq/Cargo.toml:108`), which is enough for a PNG and nothing else: a macOS screenshot lands
 on the pasteboard as TIFF as often as PNG, and Windows offers a device-independent bitmap beside
 whatever registered format the copying application used. Either GPUI normalises all of that into
-`ImageFormat` before Ubiq sees it — which the macOS backend's handling of `NSPasteboardTypePNG` and
+`ImageFormat` before Kubiq sees it — which the macOS backend's handling of `NSPasteboardTypePNG` and
 `NSPasteboardTypeTIFF` suggests it does — or the feature list here grows to match. It is a small
 question with a definite answer, and it is Windows and macOS that ask it, not Linux.
 
@@ -426,12 +426,12 @@ what it is for: a blob written by an older build reads as on. Bumping the schema
 user's settings to add one field.
 
 **The setting gates the capture control, not the editor.** An image tab is reachable by opening a PNG
-and by `⌘N`, and neither is what an environment that would rather Ubiq could not photograph itself is
+and by `⌘N`, and neither is what an environment that would rather Kubiq could not photograph itself is
 asking about. It also does a different amount of work per platform, which is worth knowing: on macOS
 the operating system asks its own question and the user can revoke the answer, so the setting is a
 second lock on a door that already has one. **On Windows and on X11 nothing else asks**, and this
 switch is the only thing standing between the application and a screenshot — which is the strongest
-argument for it defaulting to on but existing at all. That the tool exists at all is the thing worth a switch: Ubiq holds accounts, connector
+argument for it defaulting to on but existing at all. That the tool exists at all is the thing worth a switch: Kubiq holds accounts, connector
 fields and panes in which a harness may have printed a token, and §5 gives it a filled rectangle to
 cover them with, which is a mitigation and not a guarantee.
 
@@ -491,7 +491,7 @@ flatten what an opaque element covers, or must not be offered.
 4. **The clipboard.** `⌘N`'s modal, paste-to-tab, and copy-region, over `ClipboardEntry`'s image arm
    and `ClipboardItem::new_image`. Nothing here is gated on anything.
 5. **The desktop.** A region of the screen and another application's window: a full-screen overlay
-   window Ubiq does not have today, a source picker, and the chevron the titlebar control does not
+   window Kubiq does not have today, a source picker, and the chevron the titlebar control does not
    need before then.
 
 Phase 2 stands alone. Phase 1 is worth doing whatever happens to the rest.
@@ -505,7 +505,7 @@ and it does not.
 ## 12. What this asks to be decided
 
 - A capture is taken with the operating system's screen capture, because GPUI offers no other route,
-  and therefore costs a screen-recording permission asked at first use — for Ubiq's own window, not
+  and therefore costs a screen-recording permission asked at first use — for Kubiq's own window, not
   only for the desktop.
 - That capture arrives by turning on gpui's `scap_screen_capture` feature, and **not** by calling
   ScreenCaptureKit through the `objc2` stack already linked — the second is less code and cannot
@@ -522,9 +522,9 @@ and it does not.
   overlay window from everything before the desktop phase.
 - Phase 1's capture is the whole window; the panel, pane and region subjects are reached by cropping
   and may never need to exist.
-- The annotation model is the Excalidraw scene Ubiq already parses and paints; the tools are a subset
+- The annotation model is the Excalidraw scene Kubiq already parses and paints; the tools are a subset
   of `ElementKind` and nothing new is invented.
-- Editing is enabled for a scene Ubiq authored, and `.excalidraw` files stay read-only.
+- Editing is enabled for a scene Kubiq authored, and `.excalidraw` files stay read-only.
 - A save writes a flattened PNG only; saving the scene waits on the redaction rule.
 - `⌘N` asks its question only when the clipboard holds an image.
 - The control wears `IconName::Frame`, and adding it costs the dead bell and tooltips across the
@@ -536,8 +536,8 @@ display**, which decides whether the window capture is a source or a crop of one
 git dependency, and whether gpui's Windows backend wires that feature up at all — `gpui_windows` does
 not list `zed-scap` among its dependencies while `gpui_linux` does, which is the first thing the
 spike should check; whether a Wayland backend through `xdg-desktop-portal` is worth proposing
-upstream, or whether Wayland stays a platform where Ubiq does not capture; whether Windows' capture
-border can be suppressed on the versions Ubiq intends to support, and what the picture looks like
+upstream, or whether Wayland stays a platform where Kubiq does not capture; whether Windows' capture
+border can be suppressed on the versions Kubiq intends to support, and what the picture looks like
 where it cannot; whether an image read from the clipboard as TIFF can be decoded, given that `image`
 is compiled with `png` alone here; whether `⌘⇧2` is free of the component library's
 bindings, and GPUI's precedence rules for a binding registered after `gpui_component::init`; whether
@@ -547,7 +547,7 @@ around rather than fixes; whether
 should be savable as a scene, and the flatten-what-is-covered rule that would have to come with it;
 whether a capture can be sent to a conversation — the obvious reason to photograph a pane is to show
 an agent what it did, and no message in the transport carries an image today, which is a
-`ubiq-proto` question and a `crates/agent-manager` one before it is a capture question; what a capture
+`kubiq-proto` question and a `crates/agent-manager` one before it is a capture question; what a capture
 is on Windows and Linux, where neither the `objc2` path nor the permission model transfers; blur and
 pixelate as redaction tools, which are pixel operations and do not fit the element model; and whether
 the crop tool should snap to panel and pane bounds, which is the only thing §4 gives up.

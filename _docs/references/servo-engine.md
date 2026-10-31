@@ -3,7 +3,7 @@ id: ref-servo-engine
 title: Servo — the embeddable web engine
 kind: reference
 status: current
-summary: Servo as an external dependency Ubiq could embed — the libservo embedding API and its stability, the window and offscreen rendering contexts and what a Metal/GPUI bridge would take, platform and build cost, web-platform completeness measured against WPT, the multiprocess and sandbox model, licensing, and the reference embedders that exist.
+summary: Servo as an external dependency Kubiq could embed — the libservo embedding API and its stability, the window and offscreen rendering contexts and what a Metal/GPUI bridge would take, platform and build cost, web-platform completeness measured against WPT, the multiprocess and sandbox model, licensing, and the reference embedders that exist.
 read_when: you are weighing an embedded web engine for a panel or a plugin surface, or you need Servo's actual capabilities before assuming them
 updated: 2026-09-10
 verified: 2026-09-10
@@ -18,7 +18,7 @@ GPU compositor — published as a library (`libservo`) for other applications to
 [servo.org](https://servo.org/) and design documentation at [book.servo.org](https://book.servo.org/).
 
 It is the only production-track web engine that a Rust application can link directly, which is what
-makes it interesting to Ubiq: the alternatives are the platform's own view (WKWebView on macOS,
+makes it interesting to Kubiq: the alternatives are the platform's own view (WKWebView on macOS,
 WebView2 on Windows, WebKitGTK on Linux) reached through a C or Objective-C boundary, or a
 Chromium embedding.
 
@@ -26,7 +26,7 @@ Chromium embedding.
 
 ## What this is not
 
-Servo is not a browser Ubiq would ship, and not a replacement for the interface. Ubiq draws its own
+Servo is not a browser Kubiq would ship, and not a replacement for the interface. Kubiq draws its own
 tree with GPUI; the question a reader comes here with is narrower — whether a *region* of that tree
 can be a web engine's output, and at what cost.
 
@@ -65,7 +65,7 @@ gap between the design and the shipped code is widest.
 - The path that needs no new work is a **CPU readback** of the offscreen frame, re-uploaded to the
   host renderer's texture — a GPU→CPU→GPU round trip per frame.
   *Unverified: the exact readback entry point was not confirmed against `doc.servo.org`.*
-- **No Servo/GPUI integration exists.** For Ubiq's stack the realistic options are the readback
+- **No Servo/GPUI integration exists.** For Kubiq's stack the realistic options are the readback
   path or a custom Metal texture-sharing bridge written and maintained in-tree. Both are
   unprecedented work, and GPUI is itself pre-1.0.
 
@@ -140,7 +140,7 @@ files it patched. There is no whole-binary copyleft effect.
 - The iced and Bevy integrations mentioned in §2 are the other public examples, and are
   proof-of-concept.
 
-## 8. Where this bears on Ubiq
+## 8. Where this bears on Kubiq
 
 Three existing positions frame any use of Servo here, and this document changes none of them.
 
@@ -158,7 +158,7 @@ Three existing positions frame any use of Servo here, and this document changes 
   realistic panel size, against the child-view approach.
 - For **plugin UI**, the completeness gap (§4) and the sandbox maturity gap (§5) both fall on the
   wrong side, because plugin markup is third-party by definition. A declarative contribution set is
-  a contract Ubiq can honour completely; a web engine is one it cannot.
+  a contract Kubiq can honour completely; a web engine is one it cannot.
 
 ## Related docs
 

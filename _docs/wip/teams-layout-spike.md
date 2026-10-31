@@ -7,7 +7,7 @@ summary: Why the teams graph grows into a tower nobody can read in a rectangular
 read_when: you are changing how the teams graph arranges its blocks, adding an arrangement, or picking up what this spike left open
 updated: 2026-09-23
 verified: 2026-09-26
-code_anchors: [crates/ubiq/src/state/layout.rs, crates/ubiq/src/state/shapes.rs, crates/ubiq/src/state/teamsim.rs, crates/ubiq/src/ui/sink/teamsim.rs, crates/ubiq/src/ui/kit/blocks.rs, crates/ubiq/src/ui/teams/graph.rs, _tools/teamsim/algos.py, _tools/teamsim/shapes.py, _tools/teamsim/FORMAT.md]
+code_anchors: [crates/kubiq/src/state/layout.rs, crates/kubiq/src/state/shapes.rs, crates/kubiq/src/state/teamsim.rs, crates/kubiq/src/ui/sink/teamsim.rs, crates/kubiq/src/ui/kit/blocks.rs, crates/kubiq/src/ui/teams/graph.rs, _tools/teamsim/algos.py, _tools/teamsim/shapes.py, _tools/teamsim/FORMAT.md]
 depends_on: [feat-workbench, tech-ui]
 ---
 
@@ -20,7 +20,7 @@ and a way to measure one.
 
 ## The two halves
 
-**`_tools/teamsim/`** is a Python port of [`state/layout.rs`](../../crates/ubiq/src/state/layout.rs)
+**`_tools/teamsim/`** is a Python port of [`state/layout.rs`](../../crates/kubiq/src/state/layout.rs)
 that renders an arrangement to a PNG and scores it. The port is faithful constant for constant, and
 the Rust unit tests are ported with it, so the picture can be trusted to be the picture the
 application draws. An arrangement is three small functions in a registry — what a container's cards
@@ -37,7 +37,7 @@ are the sink's presets and the tool's fixtures, and a scenario copied out of the
 can render.
 
 **Neither draws its own canvas.** The block, fence and connector drawing lifted out of
-`ui/teams/graph.rs` into [`ui/kit/blocks.rs`](../../crates/ubiq/src/ui/kit/blocks.rs), which takes
+`ui/teams/graph.rs` into [`ui/kit/blocks.rs`](../../crates/kubiq/src/ui/kit/blocks.rs), which takes
 rects and labels and knows nothing about an agent; the teams graph draws through it, which is the
 only thing that keeps the two from drifting.
 

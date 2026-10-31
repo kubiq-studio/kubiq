@@ -3,7 +3,7 @@ id: inbox-editions
 title: Proposal — two editions, one architecture
 kind: proposal
 status: proposal
-summary: Ubiq split into a source-available base under the Sustainable Use License and a closed Pro edition in a second repository — the composition root moved out of the binary so a second binary can compose the same halves with more in them, three registration points that each already have a base-side user, one opaque message family for everything a Pro feature says, and the rule that keeps the base working with nothing registered.
+summary: Kubiq split into a source-available base under the Sustainable Use License and a closed Pro edition in a second repository — the composition root moved out of the binary so a second binary can compose the same halves with more in them, three registration points that each already have a base-side user, one opaque message family for everything a Pro feature says, and the rule that keeps the base working with nothing registered.
 read_when: you are deciding what belongs in the base repository and what belongs in Pro, how a closed feature reaches into the interface or the host, or how the two are developed and built together
 updated: 2026-09-04
 depends_on: [tech-architecture, tech-transport, tech-structure, tech-agent-manager, feat-workbench, inbox-routing]
@@ -11,7 +11,7 @@ depends_on: [tech-architecture, tech-transport, tech-structure, tech-agent-manag
 
 # Proposal — two editions, one architecture
 
-Ubiq is one workspace, five crates and one binary, licensed under the Sustainable Use License with a
+Kubiq is one workspace, five crates and one binary, licensed under the Sustainable Use License with a
 contributor agreement already in place. This proposes the second half of that arrangement: a **Pro
 edition** in a second, closed repository, which composes the same crates and adds features the base
 does not have — integrations with issue trackers, single sign-on, central account registration,
@@ -19,7 +19,7 @@ encryption at rest, team features — and later hosts a runtime plugin registry 
 about.
 
 The load-bearing claim is that **this needs almost no new architecture**, because the split the base
-already draws for other reasons is the split an edition needs. `crates/ubiq-app` is the only crate
+already draws for other reasons is the split an edition needs. `crates/kubiq-app` is the only crate
 that names both halves; make it a library with a three-line `main.rs` and a second binary can name
 both halves with more in each. The bus already carries an opaque blob the host does not parse, and
 one more family of those is all a closed feature needs to say. The stores are already boxed traits
@@ -40,16 +40,16 @@ There is one deliberate exception, named in §5.
 no `[workspace.package]`; every crate `0.1.0`, `publish = false` — except `crates/agent-manager`,
 which has no `publish` key at all.
 
-**The licence is settled.** `LICENSE` is the Sustainable Use License 1.0, the four Ubiq crates point
+**The licence is settled.** `LICENSE` is the Sustainable Use License 1.0, the four Kubiq crates point
 at it with `license-file = "../../LICENSE"`, and `CONTRIBUTOR_LICENSE_AGREEMENT.md` gives the project
 permission to license contributions on any terms — the clause the whole of §12 rests on. Two things
 sit outside it: `vendor/gpui-terminal` keeps its upstream `MIT OR Apache-2.0`, and
 `crates/agent-manager` is `MIT` with a licence file of its own, because it is a standalone library
-Ubiq embeds rather than a part of Ubiq.
+Kubiq embeds rather than a part of Kubiq.
 
-**Four seams exist and are proven.** The store traits in `crates/ubiq-host/src/store/mod.rs` —
+**Four seams exist and are proven.** The store traits in `crates/kubiq-host/src/store/mod.rs` —
 `ProjectStore:70`, `TaskStore:77`, `PreferenceStore:86`, `SettingsStore:98`, each `Send + Sync`, each
-boxed into its subsystem by `Stores::files` in `crates/ubiq-app/src/lib.rs`, each with a file and a
+boxed into its subsystem by `Stores::files` in `crates/kubiq-app/src/lib.rs`, each with a file and a
 memory implementation. `agent_manager::harness::Harness` (`harness/mod.rs:456`), resolved by string.
 `IoBridge` and `AgentInputSink` (`io/model.rs:758,769`), already substituted by
 `tests/conversation.rs:72`. And `agent_manager::registry`, a trait precisely so an embedder can back
@@ -58,7 +58,7 @@ indistinguishable to the provisioner.
 
 **The interface has two of its own — the prior art §4.2 copies.** `ui/kit/mod.rs:12`'s
 `Action = Rc<dyn Fn(&mut Window, &mut App)>`, and `ui/dock/skin.rs:71`'s `NewPane`, a struct of five
-such closures handed *across* a seam to the component library. Nothing else in `crates/ubiq` is
+such closures handed *across* a seam to the component library. Nothing else in `crates/kubiq` is
 dynamic: no handler registry, no plugin list, no trait-object screen table.
 
 **Two blobs already cross the bus unparsed.** `SetPreferences`/`Preferences` carry a `String` under
@@ -70,10 +70,10 @@ names and never looks inside.
 
 | Closed set | Where | Shape today | Cost of a new member |
 |---|---|---|---|
-| `Message` | `crates/ubiq-proto/src/messages.rs:23` | One flat `#[serde(tag, content)]` enum, 88 variants, 10 families that are comment banners | One arm in `coordinator.rs:383`'s single `match`, which runs to `:816` |
-| `RailMode` | `crates/ubiq/src/state/workbench.rs:29` | `Copy` enum, 8 variants, `Serialize`/`Deserialize`, with `label`, `note`, `groups`, `is_ide` and `ui/rail.rs:22`'s icon | Six or seven edits across five files. One screen-dispatch match, `ui/dock/mod.rs:451`; three `==` comparisons in `ui/status_bar.rs`; and it is a `HashMap` key in `ViewPrefs::modes` |
-| `PanelKind` | `crates/ubiq/src/state/dock.rs:81` | Enum with `name() -> &'static str` (`"ubiq.logs"`, …), `from_name`, `class`, `home`, `is_drawn` | Five small matches, and a saved layout that cannot rebuild an unknown name already drops it |
-| `Palette` | `crates/ubiq/src/theme.rs:138` | Seven `Copy` structs of colour fields, behind a thread-local `Theme::current()`, with ~30 zero-argument accessors and 30 `pub const f32` sizes beside them | A field, an accessor, and both of `dark()`/`light()`. `ThemeId` is a closed pair and `palette_for` is a match, so a third palette cannot be registered either |
+| `Message` | `crates/kubiq-proto/src/messages.rs:23` | One flat `#[serde(tag, content)]` enum, 88 variants, 10 families that are comment banners | One arm in `coordinator.rs:383`'s single `match`, which runs to `:816` |
+| `RailMode` | `crates/kubiq/src/state/workbench.rs:29` | `Copy` enum, 8 variants, `Serialize`/`Deserialize`, with `label`, `note`, `groups`, `is_ide` and `ui/rail.rs:22`'s icon | Six or seven edits across five files. One screen-dispatch match, `ui/dock/mod.rs:451`; three `==` comparisons in `ui/status_bar.rs`; and it is a `HashMap` key in `ViewPrefs::modes` |
+| `PanelKind` | `crates/kubiq/src/state/dock.rs:81` | Enum with `name() -> &'static str` (`"kubiq.logs"`, …), `from_name`, `class`, `home`, `is_drawn` | Five small matches, and a saved layout that cannot rebuild an unknown name already drops it |
+| `Palette` | `crates/kubiq/src/theme.rs:138` | Seven `Copy` structs of colour fields, behind a thread-local `Theme::current()`, with ~30 zero-argument accessors and 30 `pub const f32` sizes beside them | A field, an accessor, and both of `dark()`/`light()`. `ThemeId` is a closed pair and `palette_for` is a match, so a third palette cannot be registered either |
 
 The dock is already almost open — a panel is a namespaced string plus a payload, and `from_name`
 returning `None` for a name this build cannot rebuild is behaviour the base needs for its own
@@ -92,12 +92,12 @@ Both matter below.
 
 Two repositories, three tiers of extension, and one binary per edition.
 
-| | Base — `ubiq` | Pro — `ubiq-pro` |
+| | Base — `kubiq` | Pro — `kubiq-pro` |
 |---|---|---|
 | Licence, visibility | Sustainable Use License 1.0, public | Proprietary and private, naming the base's licence |
 | Holds | Everything today: four crates, `agent-manager`, the vendored terminal | Three crates — a host half, an interface half, a binary |
 | Names the other | Never, and nothing in it is conditional on Pro | Always: it depends on the base's crates |
-| Ships | `ubiq` | `ubiq` — a different bundle, the same config root (§11) |
+| Ships | `kubiq` | `kubiq` — a different bundle, the same config root (§11) |
 
 The tiers say how much of this is work.
 
@@ -121,18 +121,18 @@ doing six things — config root, stores, host, component library and palette, q
 six the same in both editions. So the file became two:
 
 ```rust
-// crates/ubiq-app/src/lib.rs — the boot, and the only crate that names both halves.
+// crates/kubiq-app/src/lib.rs — the boot, and the only crate that names both halves.
 pub struct Stores { projects, preferences, tasks, settings }  // the four boxed store traits
 impl Stores { pub fn files(root: &Path) -> Stores { /* the Box::new the boot made inline */ } }
 pub struct Boot { pub stores: Box<dyn FnOnce(&Path) -> Stores> }  // an edition may wrap them
 impl Default for Boot { /* Stores::files */ }
 pub fn run(boot: Boot) { /* the former main(), verbatim, and its private helpers */ }
 
-// crates/ubiq-app/src/main.rs, entire.                    // pro: crates/ubiq-pro-app/src/main.rs.
-fn main() { ubiq_app::run(ubiq_app::Boot::default()) }     // ubiq_app::run(ubiq_pro::boot())
+// crates/kubiq-app/src/main.rs, entire.                    // pro: crates/kubiq-pro-app/src/main.rs.
+fn main() { kubiq_app::run(kubiq_app::Boot::default()) }     // kubiq_app::run(kubiq_pro::boot())
 ```
 
-`Cargo.toml` gained `[lib] name = "ubiq_app"` beside `[[bin]] name = "ubiq"`; `stores` is a
+`Cargo.toml` gained `[lib] name = "kubiq_app"` beside `[[bin]] name = "kubiq"`; `stores` is a
 `FnOnce(&Path)` because the config root is resolved inside `run`. **`Boot` has one field, not
 three:** `features` and `contributions` await `Feature` and `Contribution` — the rule above, that an
 extension point with no base-side user is not built. §14's phases 4 and 2 add them.
@@ -144,8 +144,8 @@ works because something was registered is a bug `just verify` catches by never r
 of the boot, because `run` is the whole sequence and Pro's only input is the value it hands in.
 
 **And Pro mirrors the base's crate split, so the base's boundary checks keep their meaning.**
-`ubiq-pro-host` may name `ubiq-host` and never `ubiq`; `ubiq-pro` may name `ubiq` and never
-`ubiq-host`; `ubiq-pro-app` names both, exactly once, in the line above — and Pro's own `just host`
+`kubiq-pro-host` may name `kubiq-host` and never `kubiq`; `kubiq-pro` may name `kubiq` and never
+`kubiq-host`; `kubiq-pro-app` names both, exactly once, in the line above — and Pro's own `just host`
 and `just ui` are the two `cargo tree` greps from `Justfile:48-57`. A closed edition that broke
 architecture rule 1 is one nobody could later split into two processes, which is the reason the rule
 exists.
@@ -161,7 +161,7 @@ Two traits, one per half. Neither names the other's.
 ### 4.1 A host feature
 
 ```rust
-// crates/ubiq-host/src/feature.rs
+// crates/kubiq-host/src/feature.rs
 pub trait Feature: Send {
     /// `vendor.name`. Every message name, directory and preference key this feature owns is
     /// under it, and the coordinator checks that prefix rather than trusting it.
@@ -185,7 +185,7 @@ impl Ctx {
 Three methods and three accessors, and it is that small because **a Pro host feature is compiled
 in**: it needs no API to spawn a thread or open a connection, only its messages, a way to answer, and
 somewhere to write. Anything richer has grown into a subsystem, and a subsystem in Pro is a module of
-`ubiq-pro-host` it owns outright. `Reply` is `reply.rs`'s `{ Asker, Everyone }`; dispatch gains one
+`kubiq-pro-host` it owns outright. `Reply` is `reply.rs`'s `{ Asker, Everyone }`; dispatch gains one
 arm before the fallback at `coordinator.rs:811`, which keeps its job of warning about a message
 naming a feature this build lacks.
 
@@ -196,7 +196,7 @@ descriptor with a **factory**, not a screen, and `Box<dyn Screen>` is the only w
 can hold state at all.
 
 ```rust
-// crates/ubiq/src/ext.rs
+// crates/kubiq/src/ext.rs
 pub trait Contribution {
     fn id(&self) -> &'static str;                 // `vendor.name`, the same namespace
     fn screens(&self) -> Vec<ScreenSpec> { vec![] }   // and panels(), and commands()
@@ -248,7 +248,7 @@ placeholder, no greyed row, no "available in Pro" anywhere. §13 makes that non-
 ## 5. The one new message family
 
 A Pro feature has to talk to its own half, and must not fork `messages.rs`: the contract is the one
-piece of Ubiq expensive to change, and a second edition with a second message set is two products. So
+piece of Kubiq expensive to change, and a second edition with a second message set is two products. So
 one family, four variants, and the payload is a string the base never parses:
 
 | Message | Direction | Payload | Meaning |
@@ -305,7 +305,7 @@ hole.
 |---|---|---|---|
 | **GitHub / Jira / Azure DevOps as a task source** | A feature that polls the API, maps issues to `TaskRecord`, and a `Box<dyn TaskStore>` that reads through it | A settings section, a badge on a card, an `Import` command | Tier 0 for the store, `Feature` for the poll, `Extension` messages for the connect flow, one `CommandSpec` |
 | **Single sign-on** | A feature whose `start` blocks the boot until an identity is established, and which owns the token in its own directory | A sign-in surface, drawn as a screen | `Feature::start`, one `ScreenSpec`. Nothing else — the base has no notion of an identity, and must not gain one |
-| **Central agent account registration** | An `agent_manager::registry` implementation over the company's service, plus a `credentials::SecretStore` that resolves references rather than holding material | The existing account list in the settings overlay, unchanged | Tier 0 entirely, and it belongs in `agent-manager` because `AGENTS.md` says Ubiq never names a harness config path |
+| **Central agent account registration** | An `agent_manager::registry` implementation over the company's service, plus a `credentials::SecretStore` that resolves references rather than holding material | The existing account list in the settings overlay, unchanged | Tier 0 entirely, and it belongs in `agent-manager` because `AGENTS.md` says Kubiq never names a harness config path |
 | **Encryption at rest** | Four decorators over the file stores, and the key in the OS keychain through `credentials` | Nothing | `Boot::stores`. No new code in the base at all |
 | **Team features — shared sessions, presence** | A feature holding a connection, pushing through `Ctx::everyone()` | A presence panel, a teammate's cursor on the graph | `Feature`, `Extension` messages, one `PanelSpec` |
 
@@ -315,7 +315,7 @@ were drawn in the right places. **Nothing wanted a new store trait, theme token 
 three things §4 forbids are the three no hypothetical feature asked for. **Only SSO wants something
 structural**, and it is a scheduling fact rather than an API — `start` runs before the first window,
 so a feature that must gate the boot can, by not returning. **And `mcp_server.rs` is a fifth surface
-that should be a base concern**: tools Ubiq exposes to the agents it hosts are the product, not an
+that should be a base concern**: tools Kubiq exposes to the agents it hosts are the product, not an
 edition. Named here so it is not later mistaken for a Pro extension point.
 
 ## 8. The runtime plugin registry
@@ -346,7 +346,7 @@ the wrong place, which is why §14 puts it last.
 The base has to be a product on its own, or the licence is a marketing device and contributors know
 it. One test, applied to a feature and not to a user:
 
-> **A feature belongs to Pro when it serves somebody other than the person running Ubiq** — an
+> **A feature belongs to Pro when it serves somebody other than the person running Kubiq** — an
 > organisation, a team, a fleet, a purchasing department. A feature that makes one developer's own
 > work better belongs to the base, whatever it costs to build.
 
@@ -362,21 +362,21 @@ has — which is also what keeps the two documentation libraries separable.
 ## 10. Working on both at once
 
 **Sibling checkouts, a git dependency, and one committed `[patch]`** — the least machinery that
-survives CI. `works/ubiq/` is the base; `works/ubiq-pro/` is Pro, its own workspace and lock, naming
+survives CI. `works/kubiq/` is the base; `works/kubiq-pro/` is Pro, its own workspace and lock, naming
 the base by revision and patching it next door:
 
 ```toml
-[patch."https://github.com/mdnmdn/ubiq"]
-ubiq       = { path = "../ubiq/crates/ubiq" }
-ubiq-app   = { path = "../ubiq/crates/ubiq-app" }
-ubiq-host  = { path = "../ubiq/crates/ubiq-host" }
-ubiq-proto = { path = "../ubiq/crates/ubiq-proto" }
+[patch."https://github.com/kubiq-studio/kubiq"]
+kubiq       = { path = "../kubiq/crates/kubiq" }
+kubiq-app   = { path = "../kubiq/crates/kubiq-app" }
+kubiq-host  = { path = "../kubiq/crates/kubiq-host" }
+kubiq-proto = { path = "../kubiq/crates/kubiq-proto" }
 ```
 
 So `cargo build` in Pro compiles the base's working tree — edit either side, build either side, one
 editor over both — while the recorded dependency stays a pinned revision, which CI and a release
 resolve when the sibling is absent. Pro's `Justfile` adds two recipes: one running the base's
-`just verify` in `../ubiq`, one building against the pinned revision with the patch off.
+`just verify` in `../kubiq`, one building against the pinned revision with the patch off.
 
 **The rejected alternative is a nested workspace member** at a gitignored `pro/` inside the base,
 picked up by a `members` glob. Less machinery — no patch, no pinning, one `target/` — and it fails on
@@ -397,7 +397,7 @@ ignores directories it does not know, round-trips preference keys it does not kn
 an unknown rail mode to the default. What it cannot do is decrypt a store Pro encrypted, which is why
 encryption at rest needs an export before it is offered — a §16 row.
 
-**Both binaries are called `ubiq`** and differ in bundle identifier, so neither overwrites the other
+**Both binaries are called `kubiq`** and differ in bundle identifier, so neither overwrites the other
 and either can open the same root — though not simultaneously, which the catalogue already answers
 with a no: one host per process exists because two would race the store.
 
@@ -431,7 +431,7 @@ Four, and they erode a commit at a time rather than in a decision.
 
 ## 14. Phases
 
-1. **The composition root — landed 2026-09-04 (`3c51380`).** `ubiq-app` is a library with a
+1. **The composition root — landed 2026-09-04 (`3c51380`).** `kubiq-app` is a library with a
    three-line `main.rs`; `Boot` (its `stores` alone) and `Stores` exist; `Boot::default()` is present
    behaviour, nothing is registrable, the boot is testable. §6's round-trip landed with it.
 2. **The interface registries.** `ScreenSpec`, `PanelSpec`, `CommandSpec`, the three `Extension`
@@ -466,7 +466,7 @@ any second feature.
 
 Eight rows.
 
-- Pro composes the base's crates through one boot function: `crates/ubiq-app` becomes a library with
+- Pro composes the base's crates through one boot function: `crates/kubiq-app` becomes a library with
   a three-line binary, and `Boot::default()` is what ships.
 - Pro mirrors the base's crate split, so architecture rule 1 and the two `cargo tree` guards survive
   into the closed edition.

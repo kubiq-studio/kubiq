@@ -3,7 +3,7 @@ id: inbox-help
 title: Proposal — In-app help, a bundled documentation panel that is contextual and agent-readable
 kind: proposal
 status: proposal
-summary: A `?` in the titlebar opens a Help panel in the right region that draws versioned markdown from a bundle built outside the Rust build, unpacked once into the config root; links are `ubiq://` destinations so a page can send the reader to a mode, a manifest maps the current view to the page that explains it, an MCP server hands the same pages to agents, and everything downgrades to a "not built yet" page when the bundle is absent.
+summary: A `?` in the titlebar opens a Help panel in the right region that draws versioned markdown from a bundle built outside the Rust build, unpacked once into the config root; links are `kubiq://` destinations so a page can send the reader to a mode, a manifest maps the current view to the page that explains it, an MCP server hands the same pages to agents, and everything downgrades to a "not built yet" page when the bundle is absent.
 read_when: you are building the help panel, writing help content, packaging the help bundle, or wiring contextual help from a screen
 updated: 2026-09-18
 depends_on: [feat-workbench, tech-ui, tech-transport, tech-architecture, tech-operations, wip-kb, inbox-web-panel, inbox-plugin-system]
@@ -11,12 +11,12 @@ depends_on: [feat-workbench, tech-ui, tech-transport, tech-architecture, tech-op
 
 # Proposal — In-app help
 
-Ubiq has documentation for the people who build it and nothing at all for the people who run it.
+Kubiq has documentation for the people who build it and nothing at all for the people who run it.
 This proposes the smallest complete path to in-app help: a panel that draws markdown, content that
 ships as one prebuilt file, a manifest that says which page explains where you are, and an MCP
 server so the agent in the next pane can read the same manual you are reading.
 
-The argument of the document is that **almost none of this is new machinery**. Ubiq already has a
+The argument of the document is that **almost none of this is new machinery**. Kubiq already has a
 markdown renderer, a dockable panel model, an internal link scheme with anchors, a bundle format
 with a reader, a built-in MCP server family, and a rail/view value that names the current context.
 Help is the assembly of those six things plus one packaging script.
@@ -27,13 +27,13 @@ Help is the assembly of those six things plus one packaging script.
 
 | Need | Already in the tree |
 |---|---|
-| Draw markdown | `crates/ubiq/src/ui/viewer/markdown.rs::render` — GFM, tables, images, selectable, scrollable, mermaid/excalidraw fences |
+| Draw markdown | `crates/kubiq/src/ui/viewer/markdown.rs::render` — GFM, tables, images, selectable, scrollable, mermaid/excalidraw fences |
 | A movable panel | `state/dock.rs::PanelKind` + `ui/dock/mod.rs::body` + `app/panels.rs::panel` |
-| Internal links | `state/nav/text.rs` — `ubiq://<project>/<view>[/<item>][#<anchor>]`, parsed, with `Locus::Anchor` |
-| Link clicks from markdown | `ui/mod.rs::on_link(app, base)` — resolves relative, then `ubiq://`, then http |
-| A single-file archive | `UBIQBND1` — writer `ubiq-host/src/web_assets/archive.rs`, reader `ubiq/src/web_export/archive.rs` |
+| Internal links | `state/nav/text.rs` — `kubiq://<project>/<view>[/<item>][#<anchor>]`, parsed, with `Locus::Anchor` |
+| Link clicks from markdown | `ui/mod.rs::on_link(app, base)` — resolves relative, then `kubiq://`, then http |
+| A single-file archive | `KUBQBND1` — writer `kubiq-host/src/web_assets/archive.rs`, reader `kubiq/src/web_export/archive.rs` |
 | Missing-asset degradation | `state/web_panel.rs::BundleState::Unavailable { reason }` |
-| Built-in MCP servers | `crates/ubiq-host/src/mcp/` — five today, `kb.rs` is the closest sibling |
+| Built-in MCP servers | `crates/kubiq-host/src/mcp/` — five today, `kb.rs` is the closest sibling |
 | "Where am I" | `state/nav.rs::View`, `state/workbench.rs::RailMode`, `PanelKind::name()` |
 | A `?` can hang here | `ui/titlebar.rs::render` right cluster, and `ui/overflow_menu.rs::OverflowRow` |
 
@@ -92,18 +92,18 @@ id: git-changes                          # stable forever, unique in the namespa
 title: Reviewing and staging changes
 summary: What the Changes panel shows, how to stage a hunk, and what the badges mean.
 keywords: [stage, unstage, hunk, diff, revert]
-context: [panel.ubiq.git-changes]        # this page explains that place
+context: [panel.kubiq.git-changes]        # this page explains that place
 order: 20                                # position among its siblings
 status: current                          # current | draft | planned
 related: [git-overview, git-history]     # ids, not paths
 redirects: [git/staging.md]              # paths this page used to live at
-since: "2026.09"                         # the Ubiq version the page describes
+since: "2026.09"                         # the Kubiq version the page describes
 ---
 ```
 
 `id` is the field that earns the block. Help links are written `[the Changes panel](git-changes)` —
 an id, not a path — so moving a page between folders breaks nothing, and `redirects` keeps any
-`ubiq://` link a user has already pasted working. The packer resolves ids to paths at build time and
+`kubiq://` link a user has already pasted working. The packer resolves ids to paths at build time and
 ships the map, so `View::Help { page }` accepts either and the id wins.
 
 The rest each does one job, and none is decoration:
@@ -127,7 +127,7 @@ manifest keeps only what is genuinely global: the version, the nav order, and de
 ### 2.3 The bundle
 
 `just help-bundle` runs `_tools/helpbundle.py`, which walks `help/`, validates it (§6), and writes
-**one file** in the existing `UBIQBND1` format — deflated entries, a JSON index, a `u64` LE index
+**one file** in the existing `KUBQBND1` format — deflated entries, a JSON index, a `u64` LE index
 offset, the magic. Python writes it with `zlib` in thirty lines; the reader in
 `web_export/archive.rs` opens it unchanged.
 
@@ -136,9 +136,9 @@ in `build.rs` or `cargo` knows it exists — that is the point of the separate s
 
 Resolution at runtime, first hit wins:
 
-1. `UBIQ_HELP_BUNDLE` — an explicit path, for tests and for content authors iterating
+1. `KUBIQ_HELP_BUNDLE` — an explicit path, for tests and for content authors iterating
 2. beside the binary — `Contents/Resources/help.bundle` in the `.app`, `help.bundle` next to
-   `ubiq.exe`; `just bundle` and `just bundle-win` copy it in when it exists
+   `kubiq.exe`; `just bundle` and `just bundle-win` copy it in when it exists
 3. `target/help/help.bundle` — the development case, found by walking up from the executable
 4. none — the panel opens on the unavailable page (§7)
 
@@ -154,7 +154,7 @@ separately hard. Images become real paths that `img()` can load — the gpui-com
 resolves a filesystem path but not a doc-relative one and not an archive entry, which is exactly gap
 **G11** for the KB. Doc-relative links resolve with `resolve_relative` and no new resolver. And the
 MCP server reads files rather than holding an archive handle. The alternative — serving help through
-a web tenant (`inbox-web-panel`) — buys nothing here, because help is markdown and Ubiq draws
+a web tenant (`inbox-web-panel`) — buys nothing here, because help is markdown and Kubiq draws
 markdown natively.
 
 ## 3. The panel
@@ -185,22 +185,22 @@ Three ways in, all of them opening the same panel:
 - **F1**, which opens help *for the current context* (§5)
 - a **Help** row in the overflow menu, for discoverability
 
-The `?` needs an icon the registry may not have; `ubiq-icons` owns that and the draw-review loop
+The `?` needs an icon the registry may not have; `kubiq-icons` owns that and the draw-review loop
 runs before the panel lands.
 
 ## 4. Links that do something
 
-A help page's links are `ubiq://` destinations, so documentation can move the reader instead of
+A help page's links are `kubiq://` destinations, so documentation can move the reader instead of
 describing the move. "Open the git mode" becomes a link that opens the git mode.
 
 Two additions to `state/nav`:
 
 - **`View::Help { page }`** — a destination inside the manual, where `page` is an id (§2.2) or a
   path, id first. `[panes](panes)` and `[panes](../concepts/panes.md)` both land, and
-  `ubiq://./help/git-changes#staging` is a deep link anyone can paste. Prose should use the id
+  `kubiq://./help/git-changes#staging` is a deep link anyone can paste. Prose should use the id
   form; the path form exists so a page copied in from elsewhere is not broken on arrival.
 - **a project-less form** — help content ships before it knows any project ULID, so it cannot write
-  one into a link. `ubiq://./git` means *this view, in the current project*, and is rejected as
+  one into a link. `kubiq://./git` means *this view, in the current project*, and is rejected as
   today's `NotALink` if there is no current project. This is the one genuinely new piece of link
   syntax, and it is worth it: without it no shipped page can link to anything.
 
@@ -218,7 +218,7 @@ UI already computes.
 ```toml
 [help]
 version = "2026.09.1"
-namespace = "ubiq"
+namespace = "kubiq"
 
 [nav]                       # the tree, in order; a folder without a row is hidden
 order = ["index.md", "getting-started.md", "concepts/", "agents/", "workbench/", "git/"]
@@ -231,7 +231,7 @@ Resolution is most-specific-first, and stops at the first hit:
 
 1. an **explicit page** the screen named for itself
 2. `panel.<PanelKind::name()>` of the focused panel — those names are already stable strings
-   (`"ubiq.git-changes"`) chosen for saved layouts, and reusing them means a context key cannot
+   (`"kubiq.git-changes"`) chosen for saved layouts, and reusing them means a context key cannot
    drift from a renamed enum variant without the lint (§6) noticing
 3. `view.<View>` of the current destination
 4. `rail.<RailMode>`
@@ -288,7 +288,7 @@ built it and should not be stopped.
 
 ## 8. The MCP server
 
-A sixth built-in server in `crates/ubiq-host/src/mcp/help.rs`, modelled on `kb.rs`, reaching the
+A sixth built-in server in `crates/kubiq-host/src/mcp/help.rs`, modelled on `kb.rs`, reaching the
 agent through the in-process path that already exists — `McpRef::InProcess` on the `RunSpec`,
 rewritten by `provision::host_inproc_mcps` into a loopback HTTP server before the harness sees it.
 
@@ -302,20 +302,20 @@ Four tools:
 | `help_for_context` | the page bound to a context key |
 
 Every tool addresses a page by `id`, never by path — the same handle a help link uses, so a page the
-agent cites can be pasted back to the user as `ubiq://./help/<id>` and will open.
+agent cites can be pasted back to the user as `kubiq://./help/<id>` and will open.
 
 Why it earns its place: the agent sitting in the next pane is the one the user asks "how do I do X
-in Ubiq". Without this it answers from a training cutoff and invents menus. With it, it answers from
+in Kubiq". Without this it answers from a training cutoff and invents menus. With it, it answers from
 the same manual the `?` button opens, and `help_for_context` lets it answer about where the user
 actually is.
 
-## 9. Ubiq now, Studio later
+## 9. Kubiq now, Studio later
 
 The resolver takes a **list** of bundle roots, not one, and each root declares a namespace in its
-manifest. Ubiq ships `ubiq`; Studio adds `studio` and its own bundle beside the first.
+manifest. Kubiq ships `kubiq`; Studio adds `studio` and its own bundle beside the first.
 
 Merge rules, stated now so the second bundle is not a rewrite: page paths are namespaced
-(`ubiq/git/overview.md`), nav trees concatenate in root order, and a later root **may add** context
+(`kubiq/git/overview.md`), nav trees concatenate in root order, and a later root **may add** context
 keys and **may override** one it declares deliberately — but the override is in the later manifest,
 never a patch of the earlier one. One bundle, one file, no cross-references that assume the other is
 present.
@@ -328,7 +328,7 @@ Each phase is shippable and leaves the tree working.
    unavailable page. No bundle, no content. Proves the panel docks, moves and closes.
 2. **Content and packaging.** `help/` with the base pages of §2.1, `_tools/helpbundle.py`, the three
    recipes, resolution and extraction, the tree and the renderer. Help works end to end.
-3. **Navigation.** `View::Help`, `ubiq://./`, relative links, anchors, back/forward, search.
+3. **Navigation.** `View::Help`, `kubiq://./`, relative links, anchors, back/forward, search.
 4. **Context.** The manifest `[context]` table, the five-rung resolution, `help_page()` on the first
    two or three screens that want it.
 5. **MCP.** The four tools.
@@ -339,14 +339,14 @@ far better served than today.
 
 ## 11. What this owes the library when it lands
 
-- A feature document, `features/help.md` — deleting help from Ubiq would delete it, so it is a
+- A feature document, `features/help.md` — deleting help from Kubiq would delete it, so it is a
   feature by the placement rule, and it becomes the owner of every fact here.
 - A fact-ownership row in `INDEX.md` §3, which has no row for help or for the KB today.
 - Decision rows, next free number **D146** (D97–D100 are reserved unwritten by
   `inbox-plugin-system`): the bundle built outside the Rust build; unpack-on-open rather than
   read-in-archive; help kept separate from the KB while sharing the renderer; pages addressed by a
   frontmatter `id` rather than by path, with the context map inverted out of the pages themselves;
-  contextual help keyed on existing panel and view names; `ubiq://./` as the project-less link form.
+  contextual help keyed on existing panel and view names; `kubiq://./` as the project-less link form.
 - Backlog rows from **G295**: the Justfile's parse-time bash dependency, which help does not fix;
   help search scoping, which waits on the KB's; the screens that have no `help_page()` yet.
 - `tech/operations.md` gains the three recipes.
@@ -355,7 +355,7 @@ far better served than today.
 
 **An agent inside the help panel.** A composer at the foot of the panel, a conversation scoped to
 the manual — the user asks a question in prose, and an agent answers with the MCP server of §8
-pointed at the pages, citing the ones it used as `ubiq://` links the user can follow. The panel is
+pointed at the pages, citing the ones it used as `kubiq://` links the user can follow. The panel is
 already a chat surface's shape and the tools already exist by phase 5; what is missing is the policy
 question of which account and which profile answers a question about the product, and whether that
 conversation is recorded like any other. Worth doing, and worth doing after the manual is written,
@@ -366,7 +366,7 @@ it — a coach-mark overlay that highlights the rail and names its modes on firs
 link in a page that opens the panel it is about and outlines it for a moment, a guided first-agent
 walkthrough. This wants an overlay layer the window does not have and an anchor vocabulary that can
 name a live element, which is a larger piece of UI work than everything above. The groundwork it
-needs from this proposal is already here: stable panel names, `ubiq://` destinations, and a manifest
+needs from this proposal is already here: stable panel names, `kubiq://` destinations, and a manifest
 that maps context to content.
 
 ---

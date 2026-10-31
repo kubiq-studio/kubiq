@@ -8,10 +8,10 @@ status: current
 related: [remote-connect, settings-hosts, guides-remote-machine]
 ---
 
-A remote host is another machine Ubiq works on from this window. Once you are connected, its
+A remote host is another machine Kubiq works on from this window. Once you are connected, its
 folders open as projects beside your local ones, and an agent or a shell you start there runs on
 that machine, with its files, its search and its terminals in the same window as everything local.
-The **Remote hosts** manager lists the hosts Ubiq remembers and the ones you are attached to.
+The **Remote hosts** manager lists the hosts Kubiq remembers and the ones you are attached to.
 
 Open it from the **More** chevron beside the **Settings** button ![Settings](../img/ui/titlebar-settings.png)
 in the title bar, with **Remote hosts**, or from **Settings**, then **Hosts**, with **Open remote
@@ -21,7 +21,7 @@ hosts**.
 
 | Part | What it does |
 |---|---|
-| Host row | The host's name and its address, with a note of what Ubiq last learned about the machine |
+| Host row | The host's name and its address, with a note of what Kubiq last learned about the machine |
 | Status chip | **attached**, **reconnecting**, **last attempt failed** or **saved** |
 | **Test** | Tries to reach the host without attaching to it, and writes the outcome on the row |
 | **Connect** / **Disconnect** / **Reconnect now** | Attaches to a saved host, ends an attachment and closes the panes it was running, or retries a dropped link at once |
@@ -44,7 +44,7 @@ hosts**.
 
 - **The chip says last attempt failed.** Press **Test** to see why, then **Connect** again; the row
   keeps the address, so nothing needs retyping.
-- **The chip says reconnecting.** Ubiq is retrying a dropped link; **Reconnect now** retries at once.
+- **The chip says reconnecting.** Kubiq is retrying a dropped link; **Reconnect now** retries at once.
 - **Disconnect closed my panes.** Disconnecting ends every pane that host was running. A link that
   merely drops is different: a drone started with **Session** or **Managed** keeps its panes for you
   to reattach to.

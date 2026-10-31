@@ -4,7 +4,7 @@
 <dict>
 	<key>CFBundleDocumentTypes</key>
 	<array>
-		<!-- A folder Ubiq is handed becomes a project. Rank is Alternate on purpose: Ubiq should be
+		<!-- A folder Kubiq is handed becomes a project. Rank is Alternate on purpose: Kubiq should be
 		     offered in Open With, never seize the default handler for every folder on the machine. -->
 		<dict>
 			<key>CFBundleTypeName</key>
@@ -18,8 +18,8 @@
 				<string>public.folder</string>
 			</array>
 		</dict>
-		<!-- A file Ubiq is handed opens as a guest tab. Same reasoning about rank, more strongly:
-		     claiming public.data by default would put Ubiq in front of every text file there is. -->
+		<!-- A file Kubiq is handed opens as a guest tab. Same reasoning about rank, more strongly:
+		     claiming public.data by default would put Kubiq in front of every text file there is. -->
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>File</string>
@@ -37,13 +37,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>ubiq</string>
+	<string>kubiq</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.ubiq.desktop</string>
+	<string>dev.kubiq.desktop</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Ubiq</string>
+	<string>Kubiq</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

@@ -1,4 +1,4 @@
-# Every icon Ubiq draws.
+# Every icon Kubiq draws.
 #
 # A key is the file name (`assets/icons/<key>.svg`), the icon's name in the registry and the
 # variant name in Rust — one spelling, kebab-case, no synonyms. The value is the icon's *goal*:
@@ -116,7 +116,7 @@ categories:
   # `Family` (`ui/sink/style.rs`) is text-only today. Two of the six would land on variants that
   # are already carrying several meanings, so they are drawn rather than borrowed.
   family:
-    family-ubiq: a notification from the application itself
+    family-kubiq: a notification from the application itself
     family-files: {goal: a notification about files, indexing or the watch, source: "lucide:Folder"}
     family-host: {goal: a notification from the headless host, source: "lucide:Cpu"}
     family-agents:
@@ -215,9 +215,9 @@ categories:
     titlebar-panel-right: {goal: show or hide the right region, source: "adopted:PanelRight"}
     titlebar-search: {goal: search the project, source: "adopted:Search"}
     titlebar-about:
-      goal: about Ubiq — the version, updates, releases and licences, behind the Ubiq mark
+      goal: about Kubiq — the version, updates, releases and licences, behind the Kubiq mark
       source: custom
-      keywords: [about, ubiq, logo, version, licence]
+      keywords: [about, kubiq, logo, version, licence]
     titlebar-browser:
       goal: open the project in a browser
       source: "adopted:Globe"
@@ -349,6 +349,6 @@ categories:
     runner-mise:
       goal: the tool is a mise task — mise-en-place, a bowl steaming and ready
       keywords: [mise, mise-en-place, task, bowl, pot, kitchen]
-    runner-ubiq:
-      goal: the tool was defined by the user in Ubiq itself — a prompt with a spark of our own making
-      keywords: [ubiq, custom, user, prompt, terminal, spark, own]
+    runner-kubiq:
+      goal: the tool was defined by the user in Kubiq itself — a prompt with a spark of our own making
+      keywords: [kubiq, custom, user, prompt, terminal, spark, own]

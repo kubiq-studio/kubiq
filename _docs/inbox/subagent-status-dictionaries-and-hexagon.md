@@ -7,7 +7,7 @@ summary: A precise lifecycle/activity model shared by agents and subagents, with
 read_when: you are changing agent or subagent status vocabulary, status indicators, Teams blocks, or delegate completion handling
 updated: 2026-09-23
 verified: 2026-09-23
-code_anchors: [crates/ubiq/src/state/conversation.rs, crates/ubiq/src/ui/conversation/mod.rs, crates/ubiq/src/state/teams.rs, crates/ubiq/src/ui/teams/graph.rs, crates/ubiq/src/ui/agents/column.rs, crates/ubiq-host/src/conversation.rs, crates/agent-manager/src/io/jsonl.rs]
+code_anchors: [crates/kubiq/src/state/conversation.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/state/teams.rs, crates/kubiq/src/ui/teams/graph.rs, crates/kubiq/src/ui/agents/column.rs, crates/kubiq-host/src/conversation.rs, crates/agent-manager/src/io/jsonl.rs]
 depends_on: [feat-chat, tech-transport-contract, tech-ui-and-design]
 review_cycle: monthly
 ---
@@ -139,7 +139,7 @@ result is folded into the parent turn.
 The proposal does not add a transport message. Existing conversation updates carry tool-call
 creation and patch events, including `ToolStatus::Pending`, `InProgress`, `Completed` and `Failed`.
 The host maps neutral agent-manager events to those updates in
-`crates/ubiq-host/src/conversation.rs`, and the Claude native JSONL bridge derives delegate
+`crates/kubiq-host/src/conversation.rs`, and the Claude native JSONL bridge derives delegate
 completion updates in `crates/agent-manager/src/io/jsonl.rs`.
 
 The state layer owns the normalized dictionaries. The UI consumes normalized state and does not
@@ -149,30 +149,30 @@ interpret Claude event shapes, aggregate counters or harness-specific completion
 
 ### State vocabulary and derivation
 
-`crates/ubiq/src/state/conversation.rs` owns `SubagentTab`, the delegate status derivation and the
+`crates/kubiq/src/state/conversation.rs` owns `SubagentTab`, the delegate status derivation and the
 conversation lifecycle. The existing `DelegateStatus` and `delegate_status()` are the closest
 boundary for the subagent result dictionary; they should become or feed the shared lifecycle and
 activity/result types rather than remain a second vocabulary.
 
-`crates/ubiq-proto/src/conversation.rs` owns the transport-level `ToolStatus` values. It remains a
+`crates/kubiq-proto/src/conversation.rs` owns the transport-level `ToolStatus` values. It remains a
 wire status, not the UI lifecycle dictionary. `ToolStatus::Completed` is normalized to subagent
 activity/result `Done`, and its lifecycle becomes `Ended`.
 
-`crates/ubiq-proto/src/work.rs` owns the work projection's `Activity` and coarse `Bucket`. The
+`crates/kubiq-proto/src/work.rs` owns the work projection's `Activity` and coarse `Bucket`. The
 coarse bucket remains useful for filters and aggregate edges, but it must not replace the precise
 pair used by agent and subagent indicators.
 
-`crates/ubiq/src/state/teams.rs` owns `DelegateStatus`, `delegate_status()`, and the Teams filtering
+`crates/kubiq/src/state/teams.rs` owns `DelegateStatus`, `delegate_status()`, and the Teams filtering
 rules. Its `Done` filtering remains valid, but active filtering and pulse decisions must use the
 normalized lifecycle rather than treating every non-error delegate as running.
 
 ### Shared presentation dictionary
 
-`crates/ubiq/src/ui/work.rs` is the natural home for shared activity/result presentation because it
+`crates/kubiq/src/ui/work.rs` is the natural home for shared activity/result presentation because it
 already maps `Activity` and `Bucket` to colors. It should expose presentation records or functions
 for labels, colors, icons, pulse behaviour and compact buckets.
 
-`crates/ubiq/src/ui/conversation/mod.rs` owns the existing lifecycle presentation functions:
+`crates/kubiq/src/ui/conversation/mod.rs` owns the existing lifecycle presentation functions:
 `lifecycle()`, `lifecycle_colour()`, `lifecycle_pulses()`, `lifecycle_mark()` and
 `lifecycle_menu()`. The lifecycle dictionary should remain centralized there or move to a shared
 status module consumed by this file, the Teams graph and the agent column.
@@ -182,7 +182,7 @@ not accept a Claude-specific event, a `ToolStatus` directly, or a guessed `runni
 
 ### Agent chat and activity bar
 
-`crates/ubiq/src/ui/conversation/mod.rs` draws the main and subagent rows in `activity_bar()`.
+`crates/kubiq/src/ui/conversation/mod.rs` draws the main and subagent rows in `activity_bar()`.
 The main row currently uses conversation lifecycle presentation while delegate rows use
 `status_label()` and `status_colour()` over `ToolStatus`. Replace that split with the shared pair:
 the main row reads the conversation pair, and each delegate row reads the normalized delegate pair.
@@ -192,21 +192,21 @@ tooltip and accessible label expose the precise pair, such as `Working · Tools`
 
 ### Agent columns and Teams blocks
 
-`crates/ubiq/src/ui/agents/column.rs` draws the lifecycle mark beside an agent title and on its
+`crates/kubiq/src/ui/agents/column.rs` draws the lifecycle mark beside an agent title and on its
 tabs. It should continue to give the lifecycle mark priority while adding the shared activity/result
 reading to the row or tooltip without duplicating the title text.
 
-`crates/ubiq/src/ui/teams/graph.rs` draws the Teams agent blocks and is the primary home for the
+`crates/kubiq/src/ui/teams/graph.rs` draws the Teams agent blocks and is the primary home for the
 hexagonal status mark. The block receives both normalized values, draws a transparent outer
 hexagonal border for lifecycle, draws the activity/result fill inside it, and preserves the existing
 chip. The geometry should be a reusable UI primitive rather than a Teams-only interpretation so the
 same mark can reach another agent surface.
 
-`crates/ubiq/src/state/layout.rs` owns Teams block geometry and placement. If the hexagon requires
+`crates/kubiq/src/state/layout.rs` owns Teams block geometry and placement. If the hexagon requires
 an inset or a fixed status-mark size, those measurements belong with the existing card and subagent
 layout constants rather than in the renderer as untracked literals.
 
-`crates/ubiq/src/theme.rs` remains the only source of concrete colors. The presentation dictionary
+`crates/kubiq/src/theme.rs` remains the only source of concrete colors. The presentation dictionary
 uses existing theme tokens or adds paired tokens for lifecycle strokes and activity fills in both
 palettes. No hex color is placed in a Teams or conversation renderer.
 
@@ -217,14 +217,14 @@ launched asynchronous delegate calls and emits `ToolCallUpdate::finished()` when
 `subagent_stats` establishes completion or failure. The completion path must cover the case where
 the delegate's own transcript has ended but the parent result arrives later.
 
-`crates/ubiq-host/src/conversation.rs` remains the only mapping between
-`agent_manager::io::AgentEvent` and `ubiq_proto::conversation::ConvUpdate`. It maps the terminal
+`crates/kubiq-host/src/conversation.rs` remains the only mapping between
+`agent_manager::io::AgentEvent` and `kubiq_proto::conversation::ConvUpdate`. It maps the terminal
 tool update without inventing another subagent status vocabulary.
 
-Tests in `crates/agent-manager/src/io/jsonl.rs`, `crates/ubiq-host/src/conversation.rs` and
-`crates/ubiq/src/state/conversation.rs` should cover launch, delayed completion, failure,
+Tests in `crates/agent-manager/src/io/jsonl.rs`, `crates/kubiq-host/src/conversation.rs` and
+`crates/kubiq/src/state/conversation.rs` should cover launch, delayed completion, failure,
 permission waiting, duplicate completion and a delegate whose parent call never receives a
-terminal event. UI tests in `crates/ubiq/tests/agents.rs` and `crates/ubiq/tests/teams.rs` should
+terminal event. UI tests in `crates/kubiq/tests/agents.rs` and `crates/kubiq/tests/teams.rs` should
 assert that `Done` has an ended lifecycle, no active pulse and a visible chip.
 
 ## Failure

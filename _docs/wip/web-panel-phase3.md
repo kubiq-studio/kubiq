@@ -3,11 +3,11 @@ id: wip-web-panel-phase3
 title: Web panels — the shared workarea and the bundle fetch
 kind: wip
 status: current
-summary: Phase 3 of the web-panel proposal as built, Rust side only — a `shared_workarea` on `HostInfo` reserved at `<config root>/ui/`, a four-variant web asset message family, and `crates/ubiq-host/src/web_assets/` fetching a manifest's 554 files six at a time, verifying each against its SHA-256, and writing them into one compressed `.bundle` file whose rename over a `.part` sibling is the only proof of done. No interface wiring, which is a later unit.
+summary: Phase 3 of the web-panel proposal as built, Rust side only — a `shared_workarea` on `HostInfo` reserved at `<config root>/ui/`, a four-variant web asset message family, and `crates/kubiq-host/src/web_assets/` fetching a manifest's 554 files six at a time, verifying each against its SHA-256, and writing them into one compressed `.bundle` file whose rename over a `.part` sibling is the only proof of done. No interface wiring, which is a later unit.
 read_when: you are fetching or serving a vendor bundle, changing the shared workarea, or wiring the interface to `EnsureWebBundle`
 updated: 2026-09-12
 verified: 2026-09-24
-code_anchors: [crates/ubiq-host/src/web_assets/mod.rs, crates/ubiq-host/src/web_assets/archive.rs, crates/ubiq-host/src/web_assets/manifest.rs, crates/ubiq-host/src/projects.rs, crates/ubiq-host/src/coordinator.rs, crates/ubiq-proto/src/messages.rs]
+code_anchors: [crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq-host/src/web_assets/archive.rs, crates/kubiq-host/src/web_assets/manifest.rs, crates/kubiq-host/src/projects.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/messages.rs]
 depends_on: [tech-architecture, tech-transport, wip-web-panel-phase2]
 ---
 
@@ -17,7 +17,7 @@ Phase 3 of [`../inbox/web-panel-proposal.md`](../inbox/web-panel-proposal.md), a
 that is Rust: where a downloaded vendor bundle lives, and who downloads it. §5 left which side
 fetches as its one open question and then answered it — *"the interface asks; the host fetches,
 verifies, unpacks into the shared workarea and answers when it is there"* — and that is what is
-built. Nothing here draws, and nothing in `crates/ubiq` was touched: the interface wiring, the
+built. Nothing here draws, and nothing in `crates/kubiq` was touched: the interface wiring, the
 `vendor/` route and the chrome that mounts the component are a later unit.
 
 ## The shared workarea
@@ -41,7 +41,7 @@ interface asked it to fill. It still reads nothing in either workarea.
 
 ## The message family
 
-Four variants, in `crates/ubiq-proto/src/messages.rs` after the notification family;
+Four variants, in `crates/kubiq-proto/src/messages.rs` after the notification family;
 [`../tech/transport-contract.md`](../tech/transport-contract.md) owns them.
 
 | Message | Direction | Payload |
@@ -69,11 +69,11 @@ than a sweep.
 <shared workarea>/web/<app>/<version>.bundle.part   where a fetch in progress writes
 ```
 
-A vendor bundle is one compressed file, `crates/ubiq-host/src/web_assets/archive.rs`'s container,
+A vendor bundle is one compressed file, `crates/kubiq-host/src/web_assets/archive.rs`'s container,
 rather than a directory of hundreds of small files: each entry's body is raw deflate at
 `Compression::fast()` — deliberately light, since these bytes are read back over loopback once and
 never shipped anywhere — and the file ends with a JSON index of `["path", offset, compressed_len,
-uncompressed_len]` tuples, a little-endian `u64` index offset, then the 8-byte magic `UBIQBND1`.
+uncompressed_len]` tuples, a little-endian `u64` index offset, then the 8-byte magic `KUBQBND1`.
 The import map lands inside the archive under a fixed name (`web_assets::IMPORT_MAP_FILE`), not as
 a sibling file.
 
@@ -91,7 +91,7 @@ the `.complete` marker file is gone: the rename replaces it as the single proof 
 
 ## The fetch
 
-`crates/ubiq-host/src/web_assets/mod.rs`, on the clone family's shape: a `Job` that owns everything
+`crates/kubiq-host/src/web_assets/mod.rs`, on the clone family's shape: a `Job` that owns everything
 by value, a thread of its own, progress straight to the asker's `Mailbox`, and a channel back to the
 coordinator for the one thing the thread cannot do.
 

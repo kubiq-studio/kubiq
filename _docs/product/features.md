@@ -1,19 +1,19 @@
 ---
 id: prod-features
-title: Ubiq features
+title: Kubiq features
 kind: product
 status: current
-summary: What a person can do with Ubiq, grouped by area — agents and chat, panes and layout, projects, the IDE, Git, knowledge base, database, tasks and missions, teams, remote hosts, connectors, notifications and settings — each pointing at the document that owns it.
-read_when: you want the list of what Ubiq does, or you are checking whether a capability exists before proposing it
+summary: What a person can do with Kubiq, grouped by area — agents and chat, panes and layout, projects, the IDE, Git, knowledge base, database, tasks and missions, teams, remote hosts, connectors, notifications and settings — each pointing at the document that owns it.
+read_when: you want the list of what Kubiq does, or you are checking whether a capability exists before proposing it
 updated: 2026-10-09
 verified: 2026-10-09
 review_cycle: quarterly
 depends_on: [prod-overview, feat-workbench, feat-chat, feat-panes, feat-sessions, feat-workbench-agents, feat-workbench-ide, feat-workbench-git, feat-workbench-db, feat-workbench-tasks, feat-workbench-teams, feat-drone, feat-connectors, feat-notifications, feat-logs, feat-stats]
 ---
 
-# Ubiq features
+# Kubiq features
 
-Ubiq is an agentic workspace: one window that runs several AI coding agents side by side, as real
+Kubiq is an agentic workspace: one window that runs several AI coding agents side by side, as real
 terminals or as conversations, next to the project's files, history, documents, database and task
 board. This page lists what the shipped build lets a person do, area by area. Each area names the
 document that owns the detail; the reasons behind the product are in [`overview.md`](./overview.md).
@@ -114,7 +114,7 @@ Owned by [Git mode](../features/workbench-git.md).
 
 Owned by The workbench (KB mode and its settings).
 
-- **Several sources.** Gather documents from a folder, a git repository or an internal wiki Ubiq keeps for the project.
+- **Several sources.** Gather documents from a folder, a git repository or an internal wiki Kubiq keeps for the project.
 - **Explorer and tabs.** Browse sources and open their documents as tabs beside the code.
 - **Write access.** Create, rename and edit documents in a source that allows writing; read-only sources stay read-only.
 - **Agent access.** Agents read and write the knowledge base through a tool server.
@@ -162,8 +162,8 @@ Owned by [The Teams graph modes](../features/workbench-teams.md).
 
 Owned by [Drones](../features/drone.md) and The workbench (hosts and SSH settings).
 
-- **Attach a remote host.** Connect to another Ubiq host or to a machine over SSH; its projects appear in the same list.
-- **Drones.** Ubiq places a small program on the remote machine and serves its terminals, files and search; it uploads the program when the machine has none.
+- **Attach a remote host.** Connect to another Kubiq host or to a machine over SSH; its projects appear in the same list.
+- **Drones.** Kubiq places a small program on the remote machine and serves its terminals, files and search; it uploads the program when the machine has none.
 - **Three lifetimes.** Choose whether a remote session ends with the window, survives a dropped link, or keeps running until stopped.
 - **SSH profiles.** Save named targets, authenticating by agent, key, password or SSH config alias, with secrets in the OS credential store.
 - **Drone manager.** See what a drone runs, check reachability, refresh and stop it.
@@ -204,13 +204,13 @@ Owned by [The workbench](../features/workbench.md).
 - **Search and indexing.** Choose what search skips and what a project is indexed to.
 - **Assistance.** Choose the backend that writes short names and summaries, and configure API providers with a test.
 - **Tools.** Define runnable commands every project inherits.
-- **Command line.** Install the `ubiq` command on the shell's path.
+- **Command line.** Install the `kubiq` command on the shell's path.
 - **Updates.** Pick a channel, check, download and install updates.
-- **Shell integration.** Add Open in Ubiq to the Windows right-click menu.
+- **Shell integration.** Add Open in Kubiq to the Windows right-click menu.
 
 ## Related docs
 
-- [`overview.md`](./overview.md) — why Ubiq exists and what it refuses to be
+- [`overview.md`](./overview.md) — why Kubiq exists and what it refuses to be
 - [`glossary.md`](./glossary.md) — the terms used above
 - [`../features/workbench.md`](../features/workbench.md) — the window shell, settings and projects
 - [`../backlog.md`](../backlog.md) — what is unresolved

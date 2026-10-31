@@ -3,7 +3,7 @@ id: db-overview
 title: Databases
 summary: DB mode — browse a project's databases, read and edit table data, and run SQL on PostgreSQL, MySQL, SQLite and SQL Server.
 keywords: [database, db, sql, postgres, mysql, mariadb, sqlite, sql server, table, query, connection, password, read-only]
-context: [rail.db, panel.ubiq.db.explorer, panel.ubiq.db.table, panel.ubiq.db.sql]
+context: [rail.db, panel.kubiq.db.explorer, panel.kubiq.db.table, panel.kubiq.db.sql]
 targets: [ui.rail.mode.db]
 order: 10
 status: current
@@ -56,11 +56,11 @@ clipboard** puts the schema on the clipboard, and **DBML: Open in new file** ope
 
 ## When something goes wrong
 
-- **A password is missing.** Passwords are never saved with the project, only on this machine. Ubiq
+- **A password is missing.** Passwords are never saved with the project, only on this machine. Kubiq
   asks when you connect; answer with **Remember on this machine** to keep it. The form shows
   whether one is `saved`, and **Forget password** clears it.
 - **A connection says `failed`.** Use **Retry** on its row, or **Test** it in the form.
-- **A statement is refused on a read-only tab.** Ubiq checks every statement before sending it, and
+- **A statement is refused on a read-only tab.** Kubiq checks every statement before sending it, and
   underlines the one it will refuse.
 - **A statement that can change data asks first**, and **Run anyway** goes ahead.
 - **Results stop at a thousand rows** and say so; narrow the query.

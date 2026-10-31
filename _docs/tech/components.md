@@ -3,11 +3,11 @@ id: tech-components
 title: Reusable components
 kind: tech
 status: current
-summary: The reusable components Ubiq builds out of its own primitives — the floating popover, the multi-select dropdown a filter or a form narrows with, the activity bar a conversation heads with, the file picker any screen raises to choose a path, the viewer that draws one open file whole, the diff renderer two screens reach a change through, and the capabilities and tools panels each asked for by two surfaces — the state that drives them, and the discipline that keeps a compound a component rather than a one-off screen's decoration.
+summary: The reusable components Kubiq builds out of its own primitives — the floating popover, the multi-select dropdown a filter or a form narrows with, the activity bar a conversation heads with, the file picker any screen raises to choose a path, the viewer that draws one open file whole, the diff renderer two screens reach a change through, and the capabilities and tools panels each asked for by two surfaces — the state that drives them, and the discipline that keeps a compound a component rather than a one-off screen's decoration.
 read_when: you are building a control that floats above another, letting a screen choose several values at once, adding a second activity reading to a conversation's bar, wiring a screen to choose a path on the interface's or a host's filesystem, adding a file kind the viewer draws, reaching a diff or a harness's capabilities from a second screen, or reshaping something the kit's primitives are insufficient for and a one-off would have duplicated
 updated: 2026-10-04
 verified: 2026-10-02
-code_anchors: [crates/ubiq/src/ui/kit/popover.rs, crates/ubiq/src/ui/kit/menu.rs, crates/ubiq/src/ui/kit/mod.rs, crates/ubiq/src/ui/conversation/mod.rs, crates/ubiq/src/state/conversation.rs, crates/ubiq/src/ui/file_picker.rs, crates/ubiq/src/state/file_picker.rs, crates/ubiq/src/app/picker.rs, crates/ubiq/src/app/host_browse.rs, crates/ubiq/src/ui/file_dialog.rs, crates/ubiq/src/ui/teams/graph.rs, crates/ubiq/src/app/teams.rs, crates/ubiq/src/state/agents.rs, crates/ubiq/src/ui/viewer/mod.rs, crates/ubiq/src/ui/viewer/md_options.rs, crates/ubiq/src/ui/viewer/diff.rs, crates/ubiq/src/ui/editor.rs, crates/ubiq/src/ui/kb/mod.rs, crates/ubiq/src/ui/git/diff.rs, crates/ubiq/src/ui/acp_capabilities.rs, crates/ubiq/src/ui/tools.rs, crates/ubiq/src/ui/settings.rs, crates/ubiq/src/state/editor.rs]
+code_anchors: [crates/kubiq/src/ui/kit/popover.rs, crates/kubiq/src/ui/kit/menu.rs, crates/kubiq/src/ui/kit/mod.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/ui/file_picker.rs, crates/kubiq/src/state/file_picker.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/ui/file_dialog.rs, crates/kubiq/src/ui/teams/graph.rs, crates/kubiq/src/app/teams.rs, crates/kubiq/src/state/agents.rs, crates/kubiq/src/ui/viewer/mod.rs, crates/kubiq/src/ui/viewer/md_options.rs, crates/kubiq/src/ui/viewer/diff.rs, crates/kubiq/src/ui/editor.rs, crates/kubiq/src/ui/kb/mod.rs, crates/kubiq/src/ui/git/diff.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/ui/tools.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/state/editor.rs]
 depends_on: [tech-ui]
 review_cycle: monthly
 ---
@@ -50,22 +50,22 @@ top edge, so the composer never moves under the cursor.
 - The todo panel shows up to eight entries, the same mark per status the old inline strip drew,
   then `… n more`; it is read-only, a replacement list the harness re-sends whole.
 
-`activity_bar` in `crates/ubiq/src/ui/conversation/mod.rs` draws it, so every surface that embeds
+`activity_bar` in `crates/kubiq/src/ui/conversation/mod.rs` draws it, so every surface that embeds
 `conversation::render` — the agents column and the chat tab alike — gets both chips with no
 per-surface wiring. The state behind it is `panel_open: Option<ActivityPanel>` on the conversation
-(`ActivityPanel::{Subagents, Todos}` in `crates/ubiq/src/state/conversation.rs`): **collapsed by
+(`ActivityPanel::{Subagents, Todos}` in `crates/kubiq/src/state/conversation.rs`): **collapsed by
 default, and one panel at a time**, because both lists answer the same question and the bar they
 hang from is one line. Toggling a side while the other is open is a switch, never a second panel;
 picking a subagent row closes the list again.
 
 **Two surfaces host `conversation::render` today**, and what differs between them is the
 `ConversationView` they hand it and nothing else: the agents column
-(`crates/ubiq/src/ui/agents/column.rs`) and the chat tab (`crates/ubiq/src/ui/chat/mod.rs`). The
+(`crates/kubiq/src/ui/agents/column.rs`) and the chat tab (`crates/kubiq/src/ui/chat/mod.rs`). The
 Teams canvas is not a third: it has no conversation surface of its own — selecting a card points a
 `Chat` panel in the right dock at the agent (`AppState::open_teams_agent_panel`) rather than
 embedding the component itself, so what draws the transcript is still the chat tab, at that tab's
 own composer slot. A surface that wants a conversation of its own widens the composer pool by one
-slot (`crates/ubiq/src/state/agents.rs`); it does not borrow another surface's, because a slot is
+slot (`crates/kubiq/src/state/agents.rs`); it does not borrow another surface's, because a slot is
 what addresses a turn.
 
 ## The popover
@@ -76,7 +76,7 @@ trigger's top, over whatever is under it — the transcript, in a conversation. 
 rows; the panel owns the chrome: its square filled shape, the coloured left edge that says what it
 is, the window-out-of-reach clamp, and the `MENU_LAYER` it paints at. The modal, the dropdown and
 this panel shared the mechanism; `popover` in
-`crates/ubiq/src/ui/kit/popover.rs` is the same pair with the chrome pre-built, so a fourth
+`crates/kubiq/src/ui/kit/popover.rs` is the same pair with the chrome pre-built, so a fourth
 floating list does not rebuild it a fourth time.
 
 An optional debug name keeps the panel findable by its tests — the dropdowns this panel mirrors
@@ -113,31 +113,31 @@ not jump under the pointer as they are ticked.
 A row may carry a `dot` — one status colour from `.dots(...)`, the same 7px dot `kit::toggle_pill`
 wears — for a list whose values are read by colour before they are read by name.
 
-**Its first use is the Teams toolbar's states filter** (`crates/ubiq/src/ui/teams/mod.rs`,
+**Its first use is the Teams toolbar's states filter** (`crates/kubiq/src/ui/teams/mod.rs`,
 `MenuId::TeamsBuckets`), which replaced a row of four `toggle_pill`s: the buckets are the one
 filter on that row where several values are on at once. The row's other two are left as they were,
 because neither is a set — the session row is a choice of one, and `Hide done` is a toggle. The
-style reference draws a specimen (`crates/ubiq/src/ui/sink/style.rs`), preselected, as every kit
+style reference draws a specimen (`crates/kubiq/src/ui/sink/style.rs`), preselected, as every kit
 primitive must.
 
 ## The file picker
 
 **What it is.** One dialog for choosing a path, raised over whatever forest of files and folders a
-caller hands it and answered back to whoever raised it. `crates/ubiq/src/ui/file_picker.rs` draws it
+caller hands it and answered back to whoever raised it. `crates/kubiq/src/ui/file_picker.rs` draws it
 in the window's own shape — square, filled, a coloured left edge, painted over everything through
-`deferred` and `anchored` — and `crates/ubiq/src/state/file_picker.rs` holds what it needs to:
+`deferred` and `anchored` — and `crates/kubiq/src/state/file_picker.rs` holds what it needs to:
 `FilePickerState` for the dialog itself, `PickerRequest` for what a caller asked for, `PickKind`
 (`Files`/`Folders`/`Either`), `PickerCount` (`Single`/`Multiple`) and `Commit` (`OnClick`/`OnButton`)
 for the six ways one ask differs from another, and `PickerOwner` for who is owed the answer. It is
 raised through `AppState::open_file_picker(request, forest, view, window, cx)` in
-`crates/ubiq/src/app/picker.rs`.
+`crates/kubiq/src/app/picker.rs`.
 
 **It takes the forest it draws rather than fetching one.** The dialog reads no disk itself; a caller
 builds the tree and hands it in, and grows it further as more arrives. Four owners exist today: the
 kitchen sink's own fixture tree, the composer's `@`-mention (built from the open project's explorer,
 fully listed by that point), and the two host-backed ones — `PickerOwner::HostProject`, for opening a
 project on a detached host, and `PickerOwner::KbFolder`, for the folder a knowledge base source reads
-from. Both run on `crates/ubiq/src/app/host_browse.rs`, which asks `Message::BrowseHostDir` as the
+from. Both run on `crates/kubiq/src/app/host_browse.rs`, which asks `Message::BrowseHostDir` as the
 user walks into a folder and folds each answer into the forest on screen, since nothing about a
 host's filesystem can be known up front. `HostBrowseState::host` is a `HostRef` rather than a
 `HostId` for exactly that pair: one browses a named remote, the other browses whichever host serves
@@ -150,7 +150,7 @@ machine, rather than the interface's, raises this picker instead — adding a pr
 host is what it was built for, and the knowledge base's "Add source" form is the second screen to
 reach for it rather than for the platform dialog.
 
-`crates/ubiq/src/ui/file_dialog.rs` is a different thing entirely, despite the name: the name-and-
+`crates/kubiq/src/ui/file_dialog.rs` is a different thing entirely, despite the name: the name-and-
 confirm modals around a file operation — new file, rename, delete, the untitled buffer's save-as —
 answered from the window's one `file_name` field. Neither draws the other.
 
@@ -165,19 +165,19 @@ image's annotation toolbar — over a body that dispatches on what the file turn
 editor buffer, a Markdown render, a diagram, a scene, a picture, a diff. A caller hands it an
 `OpenFile` and gets the whole arrangement back, and learns nothing about which of the six it got.
 
-`render` in `crates/ubiq/src/ui/viewer/mod.rs` is the entry, `header` and `body` are its two halves,
-and `ViewerKind` on `crates/ubiq/src/state/editor.rs` is what `body` matches on — with the status
+`render` in `crates/kubiq/src/ui/viewer/mod.rs` is the entry, `header` and `body` are its two halves,
+and `ViewerKind` on `crates/kubiq/src/state/editor.rs` is what `body` matches on — with the status
 bar's file-kind chip able to override it for the life of the tab. A Markdown file's header carries
 one more control on top of the layout toggle — `ui/viewer/md_options.rs`'s reading-options popover
 (T-118), a heading navigator and an Edit chip — and its Preview and Split draw the tab's own
-`MdView` entity (`OpenFile::md`, `crates/ubiq/src/ui/mdview/view.rs`), which owns its scroll,
+`MdView` entity (`OpenFile::md`, `crates/kubiq/src/ui/mdview/view.rs`), which owns its scroll,
 minimap, navigator popover and block editor, all documented in `_docs/features/workbench-ide.md`.
 Its Annotation layout draws the same entity with its annotation layer on, inside the annotated-
-document surface (`crates/ubiq/src/ui/document.rs`) the plan dialog frames too — the surface is
+document surface (`crates/kubiq/src/ui/document.rs`) the plan dialog frames too — the surface is
 `_docs/features/workbench-tasks.md`'s. **Two hosts ask for it**:
 the IDE's
-file tabs (`crates/ubiq/src/ui/editor.rs`) and a knowledge-base document tab
-(`crates/ubiq/src/ui/kb/mod.rs`, `render_doc`). The second is what makes it a component rather than
+file tabs (`crates/kubiq/src/ui/editor.rs`) and a knowledge-base document tab
+(`crates/kubiq/src/ui/kb/mod.rs`, `render_doc`). The second is what makes it a component rather than
 the editor's own body — a KB document is reached through a different tree, loaded through a
 different message and saved against a different write, and everything past that lookup is the
 viewer's. A web panel's `Edit` position is a layout on this same axis, not a seventh body.
@@ -186,10 +186,10 @@ viewer's. A web panel's `Edit` position is a layout on this same axis, not a sev
 
 **What it is.** One `FileDiff` as a flat, virtualized list of rows — the `@@` hunk headers and the
 old and new lines under them — in either the unified or the split arrangement. `render` in
-`crates/ubiq/src/ui/viewer/diff.rs`, with `header` and `draw` under it.
+`crates/kubiq/src/ui/viewer/diff.rs`, with `header` and `draw` under it.
 
 **Two screens draw a change and neither owns the drawing.** The Git screen's diff panel
-(`crates/ubiq/src/ui/git/diff.rs`) and the viewer's own `FileBody::Diff` arm both call it, so a
+(`crates/kubiq/src/ui/git/diff.rs`) and the viewer's own `FileBody::Diff` arm both call it, so a
 change reads identically whether it was opened as a tab or picked out of the changed-paths list.
 That is the whole reason it is a component: the two paths to a diff are unrelated, and a reader
 comparing what one shows against what the other shows must not find a difference that is only the
@@ -199,11 +199,11 @@ renderer's.
 
 **What it is.** The reading of what one harness said it can do at `initialize` — its identity, its
 capability groups, the authentication methods it offers — as one panel. `panel` in
-`crates/ubiq/src/ui/acp_capabilities.rs`.
+`crates/kubiq/src/ui/acp_capabilities.rs`.
 
 **Two surfaces ask the same question and must not word it differently.** A conversation's info modal
-(`crates/ubiq/src/ui/conversation/info.rs`) asks it about the harness behind *this* conversation;
-the Harnesses settings section (`crates/ubiq/src/ui/settings.rs`) asks it about a harness in the
+(`crates/kubiq/src/ui/conversation/info.rs`) asks it about the harness behind *this* conversation;
+the Harnesses settings section (`crates/kubiq/src/ui/settings.rs`) asks it about a harness in the
 abstract. The facts are identical and the wording of a capability that is *absent* is the part worth
 sharing — a reader who sees "not offered" in one place and a missing row in the other learns a
 difference that is not there.
@@ -219,8 +219,8 @@ info modal's height when a button was pressed. What the two surfaces share is st
 ## The tools panel
 
 **What it is.** A project's or the machine's runnable tools: the rows, and the add-or-edit form
-under them. `panel` in `crates/ubiq/src/ui/tools.rs`, parameterised by `ToolEditScope` on
-`crates/ubiq/src/state/settings.rs`.
+under them. `panel` in `crates/kubiq/src/ui/tools.rs`, parameterised by `ToolEditScope` on
+`crates/kubiq/src/state/settings.rs`.
 
 **One panel twice, because only the list behind it differs.** Application settings passes
 `ToolEditScope::System` and the project settings page passes `ToolEditScope::Project(project)`; the
@@ -251,7 +251,7 @@ The gap between the two is the rule: a component earns the kit when the second s
 **Four of the eight compounds above sit on the meaning side, and none of them is in the kit.** The
 viewer knows what a Markdown file is, the diff renderer knows what a hunk is, the capabilities panel
 knows what ACP advertises and the tools panel knows what a runnable tool is — so each lives in
-`crates/ubiq/src/ui/` under its own name and is called by the two screens that want it, rather than
+`crates/kubiq/src/ui/` under its own name and is called by the two screens that want it, rather than
 being generalised into a shape the kit could hold. The test a new compound answers is which of the
 two it is: a second screen that wants the same *arrangement* is asking for a kit primitive, and a
 second screen that wants the same *answer* is asking for one of these.

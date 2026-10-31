@@ -7,7 +7,7 @@ summary: "Closed by D193 and D194. A Claude Code pane loses its OAuth login afte
 read_when: you are asked why Claude Code's login seemed to vanish, or you are tempted to seed, capture or reconcile a harness token again
 updated: 2026-09-27
 verified: 2026-09-27
-code_anchors: [crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/src/run.rs, crates/agent-manager/src/overlay.rs, crates/agent-manager/src/account.rs, crates/agent-manager/src/credentials/mod.rs, crates/ubiq-host/src/agent.rs, crates/ubiq-host/src/coordinator.rs, crates/ubiq-proto/src/log.rs]
+code_anchors: [crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/src/run.rs, crates/agent-manager/src/overlay.rs, crates/agent-manager/src/account.rs, crates/agent-manager/src/credentials/mod.rs, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/log.rs]
 depends_on: [tech-agent-manager, feat-logs]
 ---
 
@@ -41,7 +41,7 @@ conversation. Append to the watch log at the end, do not rewrite the sections ab
 
 ## 1. The symptom, as reported
 
-- A Claude Code pane launched by Ubiq works, then after some hours can no longer refresh its access
+- A Claude Code pane launched by Kubiq works, then after some hours can no longer refresh its access
   token.
 - `$CLAUDE_CONFIG_DIR/.credentials.json` is missing when it is looked for.
 - The **first theory** was that isolation seeds the file read-only, so the harness cannot rewrite it
@@ -52,11 +52,11 @@ conversation. Append to the watch log at the end, do not rewrite the sections ab
 
 ## 2. Machine evidence — 2026-09-14 13:06
 
-Read off a live ubiq-managed Claude pane (the session that opened this investigation).
+Read off a live kubiq-managed Claude pane (the session that opened this investigation).
 
-- `CLAUDE_CONFIG_DIR=/Users/mdn/.config/ubiq/runs/01M2FRXP7Q51RK322EKP5Z8V4Y` — a **per-run**
+- `CLAUDE_CONFIG_DIR=/Users/mdn/.config/kubiq/runs/01M2FRXP7Q51RK322EKP5Z8V4Y` — a **per-run**
   directory keyed by a ULID, not the user's `~/.claude`. The host owns it
-  (`Agents::run_dir_for`, `crates/ubiq-host/src/agent.rs`), and it is passed to agent-manager as
+  (`Agents::run_dir_for`, `crates/kubiq-host/src/agent.rs`), and it is passed to agent-manager as
   `ConfigStrategy::Fixed`.
 - `~/.claude/.credentials.json` does **not** exist on this machine. The user's own Claude session
   lives in the **macOS login Keychain**; the run directory holds a copy seeded out of it.
@@ -129,8 +129,8 @@ It is driven from two places:
 
 - **agent-manager's own** `run::cleanup()` (`run.rs:196-203`), at teardown only — and its own doc
   admits a token rotated mid-run is lost if the process is killed;
-- **the host**, on a timer: `Coordinator::sync_logins_due` (`crates/ubiq-host/src/coordinator.rs:3169-3181`,
-  `LOGIN_SYNC_EVERY = 30s`) → `Agents::sync_logins()` (`crates/ubiq-host/src/agent.rs:1227-1255`).
+- **the host**, on a timer: `Coordinator::sync_logins_due` (`crates/kubiq-host/src/coordinator.rs:3169-3181`,
+  `LOGIN_SYNC_EVERY = 30s`) → `Agents::sync_logins()` (`crates/kubiq-host/src/agent.rs:1227-1255`).
   There is also `Agents::refresh_login(key)` (`agent.rs:1063`), which harvests before re-seeding a
   run.
 
@@ -145,7 +145,7 @@ Every path is event-driven, none is a timer racing a live pane (verified):
 | `Agents::retire(pane)` (`agent.rs:1434`) | `Coordinator::pane_gone` |
 | `Agents::retire_agent` / `park_agent` (`agent.rs:1358`, `1482`) | `Coordinator::end_conversation`, via `client_gone` or `reap_conversations` (which filters on `conversation.ended()`) |
 | `Agents::sweep()` (`agent.rs:1453`) | **once**, at host startup, before any pane exists |
-| `run::cleanup()` (`run.rs:200`) | agent-manager's own CLI runs, ephemeral config only — not Ubiq's `Fixed` strategy |
+| `run::cleanup()` (`run.rs:200`) | agent-manager's own CLI runs, ephemeral config only — not Kubiq's `Fixed` strategy |
 | `overlay::sweep_old_runs()` (`overlay.rs:41-88`) | opportunistically at `new_run_dir()`, `AM_RUNS_TTL_DAYS` default 7 |
 
 `park_agent` is notable: it keeps the run directory but **scrubs the login files**.
@@ -230,39 +230,39 @@ somewhere and was then lost. No credential bytes or token values are ever logged
   Keychain read/write succeeded, with digests.
 - `account.rs` — the `security` subcommand outcomes, and every file `sign_out`/`delete_account`
   removes.
-- `crates/ubiq-host/src/agent.rs` — each 30s `sync_logins` pass, `refresh_login`, `compose_run`
+- `crates/kubiq-host/src/agent.rs` — each 30s `sync_logins` pass, `refresh_login`, `compose_run`
   (the digest the run *starts* with), and every `retire`/`park`/`sweep` that removes or scrubs a
   run directory, with the reason.
 
 ### 5.3 Making the log survive
 
-Logs previously died with the process (in-memory ring + stderr; `crates/ubiq-proto/src/log.rs`).
-An opt-in **file sink** was added: set **`UBIQ_LOG_FILE=/path/to/ubiq.log`** and `install()` appends
-the formatted log there as well. Append-only, unrotated, no secrets. `ubiq_host::agent` was also
+Logs previously died with the process (in-memory ring + stderr; `crates/kubiq-proto/src/log.rs`).
+An opt-in **file sink** was added: set **`KUBIQ_LOG_FILE=/path/to/kubiq.log`** and `install()` appends
+the formatted log there as well. Append-only, unrotated, no secrets. `kubiq_host::agent` was also
 reclassified from `Subsystem::Ui` to `Subsystem::Harness`, where it belongs.
 
 ### 5.4 State of the change
 
 Uncommitted in the worktree as of 2026-09-14. `cargo check` is clean for `agent-manager`,
-`ubiq-host` and `ubiq-proto`; `agent-manager`'s suite is 494 passing with two failures that predate
+`kubiq-host` and `kubiq-proto`; `agent-manager`'s suite is 494 passing with two failures that predate
 this work and are environment artifacts (`provision::tests::ephemeral_strategy_creates_a_fresh_dir_under_state`
 cannot write to the real `~/.config/agent-manager` from inside a pane, and
 `io::jsonl::tests::live_two_turn_structured_session_when_claude_available` needs a live binary).
 
 `just verify` does **not** pass whole, for reasons outside this change: someone else's git-history
-work is mid-flight in the same worktree (`crates/ubiq-host/tests/git_history.rs`, `tests/diff.rs`),
+work is mid-flight in the same worktree (`crates/kubiq-host/tests/git_history.rs`, `tests/diff.rs`),
 and `just docs-lint` has 70-odd pre-existing failures across the library. Neither is this change's
 to fix. `_docs/tech/agent-manager.md` is 494 lines against a 400-line target — it was already over
 before the paragraph added here.
 
-Also of note: `crates/ubiq-proto/src/log.rs` was reverted on disk once mid-edit by another process
-in this shared worktree, and the edits were reapplied. Check that `UBIQ_LOG_FILE` is still in
+Also of note: `crates/kubiq-proto/src/log.rs` was reverted on disk once mid-edit by another process
+in this shared worktree, and the edits were reapplied. Check that `KUBIQ_LOG_FILE` is still in
 `log.rs` before trusting a run.
 
 ## 6. How to run the watch
 
 ```sh
-UBIQ_LOG_FILE=/tmp/ubiq-auth.log RUST_LOG=agent_manager=debug,ubiq_host=debug just dev
+KUBIQ_LOG_FILE=/tmp/kubiq-auth.log RUST_LOG=agent_manager=debug,kubiq_host=debug just dev
 ```
 
 Start a Claude pane, note the `expiresAt` it launches with (the `compose_run` line prints the
@@ -281,8 +281,8 @@ What to read, in order:
 Useful one-liners:
 
 ```sh
-grep -E 'accessToken=|refreshToken=' /tmp/ubiq-auth.log   # every fingerprint, in order
-grep -E 'usable=false|removing|scrub|security' /tmp/ubiq-auth.log
+grep -E 'accessToken=|refreshToken=' /tmp/kubiq-auth.log   # every fingerprint, in order
+grep -E 'usable=false|removing|scrub|security' /tmp/kubiq-auth.log
 ```
 
 To watch the file directly alongside the log:
@@ -306,23 +306,23 @@ row because it changes what a sandboxed run may reach.
 
 ## 7a. A later session cannot look at this run's directory
 
-Each ubiq-managed Claude pane gets **its own** `runs/<ULID>` directory, and it is gone or stale by
+Each kubiq-managed Claude pane gets **its own** `runs/<ULID>` directory, and it is gone or stale by
 the time a fresh session reads this. So `01M2FRXP7Q51RK322EKP5Z8V4Y` above is evidence, not a
 place to go look. A later session:
 
 - finds **its own** directory with `echo $CLAUDE_CONFIG_DIR`, which is a *different* pane and a
   *different* token — it says nothing about the one that failed;
-- cannot list `~/.config/ubiq/runs/` from inside a pane (the sandbox answers *Operation not
-  permitted*); ask the user to run `! ls -lt ~/.config/ubiq/runs/` if the directory listing is
+- cannot list `~/.config/kubiq/runs/` from inside a pane (the sandbox answers *Operation not
+  permitted*); ask the user to run `! ls -lt ~/.config/kubiq/runs/` if the directory listing is
   needed.
 
-This is why the evidence lives in this document and in `UBIQ_LOG_FILE`, and why the watch log below
+This is why the evidence lives in this document and in `KUBIQ_LOG_FILE`, and why the watch log below
 records **fingerprints and mtimes rather than paths**. A fingerprint recorded here can be compared
 against one printed hours later in any session; a run directory cannot.
 
 ### The scratch folder
 
-`/tmp/ubiq-auth-watch/` (mode 700), set up 2026-09-14 13:22, outlives the pane:
+`/tmp/kubiq-auth-watch/` (mode 700), set up 2026-09-14 13:22, outlives the pane:
 
 | file | what it is |
 |---|---|
@@ -337,11 +337,11 @@ away), `UNREADABLE`.
 
 A detached loop snapshots every 5 minutes. It is `nohup`'d, so it survives this session, but it is
 **not** a launch agent and will not survive a reboot or a killed process tree — a fresh session
-should check `tail /tmp/ubiq-auth-watch/snapshots.tsv` and restart it if the rows stopped:
+should check `tail /tmp/kubiq-auth-watch/snapshots.tsv` and restart it if the rows stopped:
 
 ```sh
-nohup sh -c 'while :; do /tmp/ubiq-auth-watch/snapshot.sh <path-to-credentials.json>; sleep 300; done' \
-  >> /tmp/ubiq-auth-watch/watch.log 2>&1 &
+nohup sh -c 'while :; do /tmp/kubiq-auth-watch/snapshot.sh <path-to-credentials.json>; sleep 300; done' \
+  >> /tmp/kubiq-auth-watch/watch.log 2>&1 &
 ```
 
 ## 8. Watch log
@@ -366,11 +366,11 @@ print({k:hashlib.sha256(d[k].encode()).hexdigest()[:8] for k in ('accessToken','
 | 2026-09-14 12:55 | run dir `01M2FRXP…` created, credentials seeded from the Keychain, mode 644, `expiresAt` 19:53 |
 | 2026-09-14 13:06 | evidence in §2 collected; read-only-file theory ruled out |
 | 2026-09-14 13:16 | file still present, still mode 644, **mtime still 12:55** — untouched since the seed. sha256-8 `accessToken=d31af002` `refreshToken=0888341f`. Baseline for the rotation check: if these change, the harness did write; if they never change and the login fails at 19:53, H1 holds |
-| 2026-09-14 13:22 | `/tmp/ubiq-auth-watch/` created, 5-minute snapshot loop started against this pane's file; still `ok`, unchanged |
-| 2026-09-14 ~13:30 | instrumentation of §5 landed; `UBIQ_LOG_FILE` watch not yet started |
+| 2026-09-14 13:22 | `/tmp/kubiq-auth-watch/` created, 5-minute snapshot loop started against this pane's file; still `ok`, unchanged |
+| 2026-09-14 ~13:30 | instrumentation of §5 landed; `KUBIQ_LOG_FILE` watch not yet started |
 | 2026-09-14 13:42 | run dir `01M2FRXP…` gone — the old pane was retired, so the snapshot row reads `MISSING` for that reason, **not** the failure under investigation. Do not read it as evidence |
 | 2026-09-14 13:43 | new pane, new run dir `01M2FVN3…`, seeded **mode 600** — the §5 chmod is in the running build. Same token as before: sha256-8 `accessToken=d31af002` `refreshToken=0888341f`, `expiresAt` still 19:53. **Nothing rotated**; the Keychain origin handed out the identical login, so the 7 h clock is unchanged and the interesting window is still ~19:53 |
-| 2026-09-14 13:44 | `snapshot.sh` now falls back to `/tmp/ubiq-auth-watch/target` when its argument is gone, so the detached loop follows the live pane across a retirement. `UBIQ_LOG_FILE` confirmed still in `log.rs:347`; `/tmp/ubiq-auth.log` does not exist — **the §6 watch has never been started**, the app is not running under `UBIQ_LOG_FILE` |
+| 2026-09-14 13:44 | `snapshot.sh` now falls back to `/tmp/kubiq-auth-watch/target` when its argument is gone, so the detached loop follows the live pane across a retirement. `KUBIQ_LOG_FILE` confirmed still in `log.rs:347`; `/tmp/kubiq-auth.log` does not exist — **the §6 watch has never been started**, the app is not running under `KUBIQ_LOG_FILE` |
 | 2026-09-14 15:04 | file present and **untouched** — mtime still 13:43, 509 bytes, mode 600, `accessToken=d31af002` `refreshToken=0888341f`. 1 h 20 m into the run, nothing has been rewritten |
 | 2026-09-14 15:04 | **the detached snapshot loop is blind.** Every row since 13:44 says `MISSING` while the file plainly exists: the loop was `nohup`'d from the *previous* pane, so it runs under that pane's sandbox and cannot read another run's directory — the `target` fallback added at 13:44 points it somewhere it is denied. `MISSING` from that loop is now meaningless. A watch has to run **outside any pane**, from the user's own terminal |
 | 2026-09-14 21:56 | **the failure, caught live.** `.credentials.json` is **gone** from run dir `01M2FVN3…`, ~2 h after its 19:53 `expiresAt`. The pane is still alive and the run directory is **intact** — `.claude.json` is still being written (`backups/.claude.json.backup.1789415787673`, 21:56), `oauthAccount` still names the user. So this is **not** a run-dir removal and **not** a `park_agent` scrub: a scrub takes the whole login seed set, and `.claude.json` survived. H4 is out |
@@ -410,8 +410,8 @@ the user to run them with the `!` prefix, from outside any managed pane:
 
 ```sh
 ls -laR ~/.config/agent-manager            # the files secret store — is there an account, and a usable blob
-ls -lt  ~/.config/ubiq/runs/               # which run dirs exist, and which still hold a .credentials.json
-grep -rl claudeAiOauth ~/.config/ubiq/runs/ 2>/dev/null
+ls -lt  ~/.config/kubiq/runs/               # which run dirs exist, and which still hold a .credentials.json
+grep -rl claudeAiOauth ~/.config/kubiq/runs/ 2>/dev/null
 ```
 
 The question that ranks above all others: **does any usable credential still exist**, in the store,
@@ -419,10 +419,10 @@ in another live run directory, or nowhere. If nowhere, a fresh `claude login` is
 watch can be run again — and that login must be captured into the store, or the next run reproduces
 this from a blank origin.
 
-The §6 log watch has still never run (`/tmp/ubiq-auth.log` does not exist), so the `isolate::plan`
+The §6 log watch has still never run (`/tmp/kubiq-auth.log` does not exist), so the `isolate::plan`
 line that would show whether the policy can reach the Keychain — the one line that separates a
 denied write from no write at all — is still unobserved. Starting it is unchanged in priority.
-| 2026-09-14 20:26 | `_docs/log-claude.png` — a `sync_logins` pass, 33 min past expiry. **3 accounts, 5 run dirs.** Account **S** is this run's: origin `dir(/Users/mdn/.config/ubiq/accounts/S)`, `.claude/.credentials.json`, 509 bytes, `expiresAt=1789408388533` — the 19:53 stamp, so S is definitively the origin of run `01M2FVN33G…`. Three run dirs held it (`01M2FVN33G…`, `01M2FW139A…`, `01M2FVJVGB…`) and **all three carried the identical fingerprints** `accessToken=19955dd6 refreshToken=68ed7240` (DefaultHasher scheme), `usable=true`, all already expired. `picked … winner=origin`, `skipped writing back to the origin, already matches the winner` |
+| 2026-09-14 20:26 | `_docs/log-claude.png` — a `sync_logins` pass, 33 min past expiry. **3 accounts, 5 run dirs.** Account **S** is this run's: origin `dir(/Users/mdn/.config/kubiq/accounts/S)`, `.claude/.credentials.json`, 509 bytes, `expiresAt=1789408388533` — the 19:53 stamp, so S is definitively the origin of run `01M2FVN33G…`. Three run dirs held it (`01M2FVN33G…`, `01M2FW139A…`, `01M2FVJVGB…`) and **all three carried the identical fingerprints** `accessToken=19955dd6 refreshToken=68ed7240` (DefaultHasher scheme), `usable=true`, all already expired. `picked … winner=origin`, `skipped writing back to the origin, already matches the winner` |
 | 2026-09-14 22:04 | origin `accounts/S/.claude/.credentials.json` read directly: **mtime 11:53**, 509 bytes, mode 600, sha256-8 `d31af002`/`0888341f` — byte-identical to what the run was seeded with, **never written since 11:53**. |
 
 ## 11. The origin, settled — and H1 confirmed in shape
@@ -430,11 +430,11 @@ denied write from no write at all — is still unobserved. Starting it is unchan
 `_docs/log-claude.png` answers §10's first question outright, and §9's "the origin is not yet
 identified" is superseded.
 
-**The origin is a per-account directory under `~/.config/ubiq/accounts/<account>`**, not the
+**The origin is a per-account directory under `~/.config/kubiq/accounts/<account>`**, not the
 Keychain and not `~/.claude`. This run belongs to account **S**, whose
 `.claude/.credentials.json` is the durable copy. Other accounts exist on this machine and share the same
 machinery; they are **not** part of this investigation — everything below is account S. `provision::seed_zero_config_login`
-and its two tiers — §3.1 — describe the *zero-config* path, which is simply not the path Ubiq takes
+and its two tiers — §3.1 — describe the *zero-config* path, which is simply not the path Kubiq takes
 here: these runs are seeded from an explicit account. **§3.1's tier analysis is correct code and
 the wrong path; the Keychain finding of §9 is true but irrelevant, a stale `pro` item from
 2026-09-09 that nothing in this flow reads.**
@@ -449,7 +449,7 @@ are **out**. The origin's mtime is still **11:53**, ten hours untouched.
 **What this leaves is H1, confirmed in shape if not yet in mechanism.** Across the whole life of
 the token — seed at 13:43, expiry at 19:53, deletion by 21:56 — **no fingerprint anywhere ever
 changed**. Three separate live run directories all held the same expired login and not one of them
-was rewritten. A refresh was certainly attempted; it persisted nowhere Ubiq can see, and the file
+was rewritten. A refresh was certainly attempted; it persisted nowhere Kubiq can see, and the file
 was then removed rather than updated. The remaining unknown is narrow and unchanged: **whether the
 persist was denied or never attempted**, which only the `isolate::plan` line answers.
 
@@ -469,7 +469,7 @@ The investigation reduces to two questions. They are not independent.
 Established, not theorised: **no fingerprint anywhere ever changed.** The origin's mtime is 11:53,
 ten hours before the failure. The 20:26 pass read the origin and all three run directories holding
 account S's login and found one identical, already-expired login in all four. So whatever the
-harness did at expiry, **it persisted nothing Ubiq can see** — and the reconciler had nothing to
+harness did at expiry, **it persisted nothing Kubiq can see** — and the reconciler had nothing to
 carry, which is why it is not at fault.
 
 Two mechanisms remain, and only the `isolate::plan` line separates them: the persist was **denied**
@@ -479,7 +479,7 @@ first; H5 below is a reason to take the second seriously.
 ### Why was it deleted?
 
 A deletion that takes `.credentials.json` and leaves `.claude.json` and the directory intact is not
-the shape of any Ubiq teardown — those take the whole seed set or the whole directory (§3.4, H4).
+the shape of any Kubiq teardown — those take the whole seed set or the whole directory (§3.4, H4).
 It is the shape of a **harness logging itself out**: Claude Code clears its credential when the
 server tells it the credential is finished. The trigger for that is an `invalid_grant` on refresh —
 which is what the server answers for a refresh token that has already been **spent**.
@@ -542,8 +542,8 @@ succeeded.** The question is no longer where the result went — it is why the c
 The grep for the watch, now that the line is known:
 
 ```sh
-grep 'resolved sandboxed run policy' "$UBIQ_LOG_FILE"   # layers=, rw=, ro=, home=
-grep 'account login origin resolved' "$UBIQ_LOG_FILE"   # which account dir was granted
+grep 'resolved sandboxed run policy' "$KUBIQ_LOG_FILE"   # layers=, rw=, ro=, home=
+grep 'account login origin resolved' "$KUBIQ_LOG_FILE"   # which account dir was granted
 ```
 
 ## 14. H7 — the seeded refresh token was already spent
@@ -558,7 +558,7 @@ cleared its credential and logged itself out. That is the observed behaviour exa
 it does not require the three runs to race.
 
 It also fits the surrounding wreckage: the Keychain item was **blanked on 2026-09-09**, which is
-what a Claude logout looks like. A login that was rotated or revoked outside Ubiq leaves the stored
+what a Claude logout looks like. A login that was rotated or revoked outside Kubiq leaves the stored
 copy stale, and a capture taken at 11:53 preserves whatever was true then, not what is true at
 expiry.
 
@@ -575,9 +575,9 @@ endpoint by hand:
 
 It needs the user's go-ahead precisely because of the second branch.
 
-## 15. The deletion is not Ubiq's — traced exhaustively
+## 15. The deletion is not Kubiq's — traced exhaustively
 
-Every path in `ubiq-host` and `agent-manager` that can touch a run dir's credential was traced
+Every path in `kubiq-host` and `agent-manager` that can touch a run dir's credential was traced
 against the working tree. **None of them produces the observed state.**
 
 | path | what it removes | when |
@@ -588,7 +588,7 @@ against the working tree. **None of them produces the observed state.**
 | `Agents::park_agent` (`agent.rs:1461`) | via `scrub_login`, both files | conversation ended |
 | `refresh_login` / `sync_login` / `write_credential` (`agent.rs:1319`, `harness/mod.rs:414`, `625`) | **never deletes** — stages a temp file and `rename`s, and refuses any blob failing `login_is_usable` or older by expiry | the live 30 s timer |
 | `sign_out` / `delete_account` (`account.rs:375`) | files under the **account home**, never a run dir | explicit CLI |
-| `run::cleanup` (`run.rs:196`), `overlay::sweep_old_runs` | whole dir, `Ephemeral` strategy only — Ubiq uses `Fixed` | not on Ubiq's path |
+| `run::cleanup` (`run.rs:196`), `overlay::sweep_old_runs` | whole dir, `Ephemeral` strategy only — Kubiq uses `Fixed` | not on Kubiq's path |
 
 The single "delete files, keep the directory" path is `scrub_login`, and it removes the **whole seed
 set together**: it cannot leave `.claude.json` behind. Every path that can remove the credential
@@ -617,7 +617,7 @@ Claude Code-credentials-<sha256(CLAUDE_CONFIG_DIR)[:8]>
 ```
 
 Verified arithmetic: this run's `CLAUDE_CONFIG_DIR` is
-`/Users/mdn/.config/ubiq/runs/01M2FVN33G91HNRWF2EPQDG28P`, and
+`/Users/mdn/.config/kubiq/runs/01M2FVN33G91HNRWF2EPQDG28P`, and
 `sha256(path)[:8] = 2c922a00` — exactly the item the login wrote. No trailing slash, no
 normalisation; the raw value of the variable.
 
@@ -633,12 +633,12 @@ normalisation; the raw value of the variable.
 The new item holds a fresh, usable login — sha256-8 `accessToken=567647b0`
 `refreshToken=5d7b898a`, `expiresAt` 2026-09-15 **06:21** — and `.claude.json`'s
 `profileFetchedAt` is 22:21:01.900, the same second. A successful login is therefore **completely
-invisible** to every file Ubiq watches.
+invisible** to every file Kubiq watches.
 
 **The deletion is explained, and it was not a logout.** That item's `cdat` is **19:56:25Z =
 21:56:25 local** — the very minute §8 recorded the file as missing. What happened at 21:56 was a
 **migration**: Claude read the seeded `.credentials.json`, wrote it into its namespaced Keychain
-item, and removed the file. §15 was right that no Ubiq path deleted it and right that the harness
+item, and removed the file. §15 was right that no Kubiq path deleted it and right that the harness
 did, but the motive was migration, not a server-driven logout. (`.last-update-result.json` shows a
 native self-update from 2.1.270 attempted at 21:27 and *failed*, so the trigger was the running
 binary's own migration step, not a new version.)
@@ -651,7 +651,7 @@ The reconciler is not broken — **it is watching a location the harness abandon
 ### Why this looks like "credentials vanish after some hours"
 
 Nothing fails while the seeded access token is valid, because a bearer token needs no refresh. At
-its expiry the harness refreshes into the Keychain, Ubiq never sees the new token, and the next run
+its expiry the harness refreshes into the Keychain, Kubiq never sees the new token, and the next run
 seeded from the origin gets the **stale 11:53 copy** — whose refresh token may by then have been
 spent and rotated away by an earlier run. That is the reported symptom exactly.
 
@@ -675,7 +675,7 @@ refresh tokens are sitting in the login Keychain.
 
 ### The shape of the fix
 
-Ubiq must treat the **Keychain item as the credential of record** for Claude Code on macOS, keyed
+Kubiq must treat the **Keychain item as the credential of record** for Claude Code on macOS, keyed
 by `sha256(config_dir)[:8]`:
 
 1. **harvest** from `Claude Code-credentials-<hash(run_dir)>` rather than from the run dir's file,
@@ -696,14 +696,14 @@ Claude credential.
 
 ## 17. Why a standalone install survives, and whether the key is predictable
 
-### The key is predictable, and Ubiq knows it before launch
+### The key is predictable, and Kubiq knows it before launch
 
 `sha256($CLAUDE_CONFIG_DIR)[:8]`, over the raw variable value — no trailing slash, no normalisation.
 Checked against the 92 items: this run's path hashes to `2c922a00`, which is present; every other
 path tested is absent, and no item matches a path we did not expect. A 32-bit exact match on the one
 run known to have written is not coincidence.
 
-**Ubiq chooses the run directory**, so it can compute the service name *before* spawning the
+**Kubiq chooses the run directory**, so it can compute the service name *before* spawning the
 harness. Both directions are therefore open to it: write the item to seed a login, read it back to
 harvest one. That is what makes §16's fix tractable.
 
@@ -723,7 +723,7 @@ So the difference is not *where* it stores. It is that a standalone install has 
 dir for its whole life**, hence **one stable keychain key**. Refresh writes the item; the next launch
 reads the same item; the credential survives for months with no reconciliation at all.
 
-Ubiq mints a **new ULID run directory per run**, so every run has a **different keychain key**. A
+Kubiq mints a **new ULID run directory per run**, so every run has a **different keychain key**. A
 refresh lands in an item keyed to a directory that is deleted at teardown, and the next run is keyed
 somewhere new and seeded from the stale file origin. **The credential cannot survive a run boundary
 by construction.** That is the bug, stated exactly.
@@ -776,7 +776,7 @@ at 06:33 tomorrow was minted ~22:33 today, so Claude Code 2.1.270 **did rewrite
 
 §16 concluded that 2.1.270 "does not persist to `.credentials.json` at all" and that the file path
 is "actively abandoned". **That is wrong as a general claim.** The harness has *two* backends and
-chooses between them at runtime. What §16 observed was the choice a *Ubiq* run makes, not the only
+chooses between them at runtime. What §16 observed was the choice a *Kubiq* run makes, not the only
 choice available. §18's assessment of Option A inherited the error and is withdrawn; §3.5's note
 that 2.1.218+ errors rather than falling back does not hold for 2.1.270, which falls back cleanly.
 
@@ -787,12 +787,12 @@ there:
 
 - the standalone runs under a **relocated `HOME`** (`/Users/mdn/works/_dev-home`), so there is no
   `~/Library/Keychains` to use → it takes the **file** backend, and refreshes into the file;
-- a Ubiq run inherits the **real `HOME`** (`HOME=/Users/mdn`, confirmed in-pane) and `plan()` grants
+- a Kubiq run inherits the **real `HOME`** (`HOME=/Users/mdn`, confirmed in-pane) and `plan()` grants
   `~/Library/Keychains` read-write unconditionally via `DEV_LAYERS` (§13) → the keychain is
   reachable, so Claude takes the **keychain** backend, migrates the seeded file into
   `Claude Code-credentials-<hash>` and deletes it (§16).
 
-Ubiq is handing Claude the keychain and then watching the file. The harness is behaving correctly
+Kubiq is handing Claude the keychain and then watching the file. The harness is behaving correctly
 in both installs.
 
 ### The fix: Option A, restored and now evidence-backed
@@ -810,7 +810,7 @@ tree.
 
 This supersedes §16's fix (harvest the keychain item) and §18's Option C (stable per-account config
 dir). Both remain workable, but neither is needed: Option A leaves the credential in the one place
-Ubiq already manages, keeps per-run isolation, and needs no dependence on an undocumented service
+Kubiq already manages, keeps per-run isolation, and needs no dependence on an undocumented service
 name.
 
 **Still worth doing independently**: pruning the 92 orphaned keychain items (§16), which are a leak
@@ -898,7 +898,7 @@ If 2.1.270 distinguishes them, this fix fails and the log will say so.
 
 **Check these first, in order.** All of it is now in one log line and one file:
 
-1. `grep 'resolved sandboxed run policy' "$UBIQ_LOG_FILE"` — is `keychain_denied=true` on the
+1. `grep 'resolved sandboxed run policy' "$KUBIQ_LOG_FILE"` — is `keychain_denied=true` on the
    Claude run at all? If not, the harness id is not in `KEYCHAIN_DENIED` (an ACP run, or a renamed
    id) and nothing else below matters.
 2. Does the pane **start**? A harness that treats the deny as an error fails at launch, loudly.

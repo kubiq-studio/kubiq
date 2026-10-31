@@ -10,7 +10,7 @@ MCP servers, and launches the real harness against it — leaving your real
 `~/.claude` untouched.
 
 It has two modes: a **CLI** for the terminal, and a front-end-agnostic **library**
-for embedding in bigger tools (e.g. the [Ubiq](../../) multiplexer).
+for embedding in bigger tools (e.g. the [Kubiq](../../) multiplexer).
 
 > **Status: Phase 3 complete.** Wraps Claude Code, Codex, and opencode end-to-end
 > through a PTY with skill/MCP injection, account selection, initial instructions/prompt,
@@ -246,5 +246,5 @@ Roadmap in [`_docs/roadmap.md`](_docs/roadmap.md).
 
 ## License
 
-[MIT](./LICENSE). The rest of the Ubiq workspace is under the
+[MIT](./LICENSE). The rest of the Kubiq workspace is under the
 [Sustainable Use License](../../LICENSE).

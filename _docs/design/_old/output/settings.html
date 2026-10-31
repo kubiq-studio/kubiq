@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ubiq — Settings</title>
-<script>(function(){var m=localStorage.getItem('ubiq-theme-mode'),t=localStorage.getItem('ubiq-theme');var e=m==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):(m||t||'dark');document.documentElement.dataset.theme=e==='light'?'light':'dark';})();</script>
-<link rel="stylesheet" href="css/ubiq.css">
+<title>Kubiq — Settings</title>
+<script>(function(){var m=localStorage.getItem('kubiq-theme-mode'),t=localStorage.getItem('kubiq-theme');var e=m==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):(m||t||'dark');document.documentElement.dataset.theme=e==='light'?'light':'dark';})();</script>
+<link rel="stylesheet" href="css/kubiq.css">
 </head>
 <body>
 <div class="app">
   <div class="titlebar">
     <div class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></div>
-    <div class="title-c"><b>Ubiq</b> &nbsp;·&nbsp; Settings</div>
+    <div class="title-c"><b>Kubiq</b> &nbsp;·&nbsp; Settings</div>
     <div class="win-actions">
       <button class="icon-btn" id="themeBtn" title="Toggle theme">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5 5l1.7 1.7M17.3 17.3 19 19M19 5l-1.7 1.7M6.7 17.3 5 19"/></svg>
@@ -21,7 +21,7 @@
 
   <div class="body">
     <aside class="sidebar">
-      <div class="brand"><span class="mark">◇</span><b>Ubiq</b><span class="ver">v0.4.2</span>
+      <div class="brand"><span class="mark">◇</span><b>Kubiq</b><span class="ver">v0.4.2</span>
         <button class="collapse-btn" id="collapseBtn" title="Collapse sidebar" aria-label="Collapse sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M14 6l-6 6 6 6"/></svg></button>
       </div>
       <div class="side-pad"><a class="btn primary full" href="agent-manager.html" title="New session"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">New session</span></a></div>
@@ -59,8 +59,8 @@
                 <div class="card">
                   <div class="row"><div class="lbl"><div class="n">Default agent</div><div class="d">Pre-selected when creating a session.</div></div>
                     <select class="sel"><option>claude</option><option>opencode</option><option>gemini</option><option>codex</option></select></div>
-                  <div class="row"><div class="lbl"><div class="n">Worktree location</div><div class="d">Where Ubiq checks out isolated agent branches.</div></div>
-                    <input class="input mono" value="~/.ubiq/worktrees"></div>
+                  <div class="row"><div class="lbl"><div class="n">Worktree location</div><div class="d">Where Kubiq checks out isolated agent branches.</div></div>
+                    <input class="input mono" value="~/.kubiq/worktrees"></div>
                   <div class="row"><div class="lbl"><div class="n">Restore last session on launch</div><div class="d">Reopen the running session when the app starts.</div></div>
                     <button class="sw-toggle on"></button></div>
                   <div class="row"><div class="lbl"><div class="n">Auto-merge on green</div><div class="d">Merge a subagent's tree when its checks pass.</div></div>
@@ -72,7 +72,7 @@
 
               <!-- AGENTS -->
               <section class="panel show" id="p-agents">
-                <div class="panel-h"><h1>Agents</h1><p>CLIs Ubiq can launch into a workspace. Changes apply on next session.</p></div>
+                <div class="panel-h"><h1>Agents</h1><p>CLIs Kubiq can launch into a workspace. Changes apply on next session.</p></div>
                 <div class="card">
                   <div class="ch"><div><h2>Agent types</h2><p>5 configured · 4 enabled</p></div>
                     <button class="btn sm primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Add agent type</button></div>
@@ -135,7 +135,7 @@
                 <div class="card">
                   <div class="row" style="padding:18px"><div class="about">
                     <div class="logo">◇</div>
-                    <div class="meta"><b>Ubiq</b><div class="v">Version 0.4.2 · Tauri 2.0 · build a3f91c2</div></div>
+                    <div class="meta"><b>Kubiq</b><div class="v">Version 0.4.2 · Tauri 2.0 · build a3f91c2</div></div>
                   </div><div class="spacer"></div><button class="btn">Check for updates</button></div>
                   <div class="row"><div class="lbl"><div class="n">Update channel</div><div class="d">Stable releases are recommended.</div></div>
                     <div class="seg"><button class="on">Stable</button><button>Beta</button></div></div>
@@ -151,7 +151,7 @@
   </div>
 </div>
 
-<script src="js/ubiq.js"></script>
+<script src="js/kubiq.js"></script>
 <script>
 /* sub-nav routing (page-specific) */
 const nav=document.getElementById("setNav");

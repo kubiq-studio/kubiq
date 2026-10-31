@@ -11,22 +11,22 @@ related: [remote-overview, settings-hosts, guides-remote-machine]
 The **Connect to a remote host** dialog attaches this window to another machine. Open it with
 **New connection** in [Remote hosts](remote-overview), or from the **More** chevron beside the
 **Settings** button ![Settings](../img/ui/titlebar-settings.png) with **Connect to a remote host**.
-Pick how you reach the machine at the top: **Ubiq host** for a machine where Ubiq is already
+Pick how you reach the machine at the top: **Kubiq host** for a machine where Kubiq is already
 running as a host, or **Drone over ssh** for any machine you can sign in to with SSH.
 
 ## The parts
 
 | Part | What it does |
 |---|---|
-| **Ubiq host** | Reaches a machine that is running `ubiq --serve`, by address and token |
+| **Kubiq host** | Reaches a machine that is running `kubiq --serve`, by address and token |
 | **Address** | A host, or `host:port`; pasting the whole connection string that machine printed fills the token too |
 | **Token** | The token that machine printed |
 | **Protocol** | **http**, or **https** when the host was started with a certificate and key |
 | **Trust certificate** | Skips checking a self-signed certificate; only needed with https, and shown on the saved entry afterwards |
-| **Drone over ssh** | Starts Ubiq's helper on the machine over SSH, uploading it first if the machine has none |
+| **Drone over ssh** | Starts Kubiq's helper on the machine over SSH, uploading it first if the machine has none |
 | **SSH profile** | Which saved profile says where to connect and how to sign in, each with a **Check** that tries it; none is listed until you add one |
 | **Folder** | The folder on that machine the drone serves, written as that machine spells it; empty is the login directory |
-| **Lifetime** | **Attached** ends with this connection; **Session** survives a dropped link, but not Ubiq quitting; **Managed** survives both, until you stop it |
+| **Lifetime** | **Attached** ends with this connection; **Session** survives a dropped link, but not Kubiq quitting; **Managed** survives both, until you stop it |
 | **Connect** / **Cancel** | Starts the connection, or closes the dialog |
 
 ## What you can do here

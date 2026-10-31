@@ -1,6 +1,6 @@
 ---
 id: inbox-codex-app-server
-title: Problem — Codex converses, but tells Ubiq nothing about tokens, context, delegates or limits
+title: Problem — Codex converses, but tells Kubiq nothing about tokens, context, delegates or limits
 kind: proposal
 status: proposal
 summary: Codex already runs as a conversation over `codex app-server` (`io/codex.rs`), but the bridge was written from prose rather than the wire — it reads `itemType` where the protocol says `type`, ends the turn on any thread's completion, auto-approves everything and drops every usage figure. Generated against codex-cli 0.161.0's own schema, this maps the app-server's v2 vocabulary onto the existing accounting contract (`UsageUpdate`, `RateLimitUpdate`, `Origin`) so Codex reaches Claude's parity on context ring, spend, delegate split, the 5h and weekly windows and per-account quota — all inside agent-manager, with no new message on the bus — and stages it as six board-sized phases. §12 says what has landed, in the library and (T-361) in the host and the interface — fork, persistence, steering, identity, device login.
@@ -9,7 +9,7 @@ updated: 2026-10-08
 depends_on: [tech-agent-manager, tech-transport, feat-stats, feat-chat, inbox-harness-quota, inbox-message-queue-steering]
 ---
 
-# Problem — Codex converses, but tells Ubiq nothing about tokens, context, delegates or limits
+# Problem — Codex converses, but tells Kubiq nothing about tokens, context, delegates or limits
 
 The ask: bring Codex to Claude Code's level inside agent-manager — telemetry (tokens, context,
 subagents), the five-hour and weekly limits, and several accounts. The integration path is the one
@@ -36,7 +36,7 @@ is marked experimental and moves.
 Claude's reference shape, which Codex must meet without a second path anywhere above the library:
 `AgentEvent::UsageUpdate { used, size, spend, origin, model }` under the five accounting rules in
 `io/model.rs`; `AgentEvent::RateLimitUpdate { five_hour, seven_day, status, … }`, which
-`ubiq-host/src/conversation.rs` already files as a per-account `QuotaChanged`; `Origin` stamping a
+`kubiq-host/src/conversation.rs` already files as a per-account `QuotaChanged`; `Origin` stamping a
 delegate's lines; `Harness::quota` + `QuotaSource::Probe` for an account with nothing running
 (`quota::claude`). Every one of those is a slot Codex can fill — **no `ConvUpdate`, no `Message`
 and no interface change is required**; `map_event` already carries them all.
@@ -178,7 +178,7 @@ through `CODEX_HOME` (`Relocate::All`), signed in by `login_home`. Three improve
   `KEYRING_SERVICE` / `compute_store_key`). Two homes do not share one login even with
   `cli_auth_credentials_store = "keyring"`. A macOS run still confirms it.
 - **Identity.** `account/read` returns `email` and `planType` — the probe in §6 carries them, so
-  an account row can say *who* it is signed in as and on which plan, and Ubiq can warn when two
+  an account row can say *who* it is signed in as and on which plan, and Kubiq can warn when two
   accounts resolve to the same email.
 - **Login without a terminal (optional).** `account/login/start { type: "chatgptDeviceCode" }`
   returns `verificationUrl` + `userCode` and completes with `account/login/completed`; this lets
@@ -193,11 +193,11 @@ through `CODEX_HOME` (`Relocate::All`), signed in by `login_home`. Three improve
 | `crates/agent-manager/src/harness/codex.rs` | `quota: Probe`, `fn quota`, resume plumbing into the bridge, optional device-code login |
 | `crates/agent-manager/src/quota.rs` | `pub fn codex(...)` beside `claude(...)` |
 | `crates/agent-manager/_docs/harness/codex.md` | Rewritten "Output stream protocol" from the generated schema; fixtures under `test-runs/` |
-| `crates/ubiq-host` | **Nothing** expected — `map_event`, the `RateLimitUpdate → QuotaChanged` filing and the quota worker are generic. Only `accept_all` must keep working once Codex really asks |
-| `crates/ubiq-proto`, `crates/ubiq` | Nothing. The ring, the spend meter, the delegate rows and the quota panel light up from data |
+| `crates/kubiq-host` | **Nothing** expected — `map_event`, the `RateLimitUpdate → QuotaChanged` filing and the quota worker are generic. Only `accept_all` must keep working once Codex really asks |
+| `crates/kubiq-proto`, `crates/kubiq` | Nothing. The ring, the spend meter, the delegate rows and the quota panel light up from data |
 
-There is no "ubiq-host io/ module": the one `AgentEvent → ConvUpdate` translation stays in
-`ubiq-host/src/conversation.rs::map_event`, and Codex-specific parsing stays in the library
+There is no "kubiq-host io/ module": the one `AgentEvent → ConvUpdate` translation stays in
+`kubiq-host/src/conversation.rs::map_event`, and Codex-specific parsing stays in the library
 (rule 4 of the agents skill).
 
 ## 9. Gaps and risks

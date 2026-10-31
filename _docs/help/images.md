@@ -33,7 +33,7 @@ A page that names a control with no label gives its tooltip in bold and then the
 
 ### 1.1 Source and export
 
-- **Source.** `assets/icons/<name>.svg`, listed in `assets/icons/icons.yaml`. An icon is never redrawn for help. A glyph that does not exist is missing from the interface too, and adding it is `ubiq-icons` work.
+- **Source.** `assets/icons/<name>.svg`, listed in `assets/icons/icons.yaml`. An icon is never redrawn for help. A glyph that does not exist is missing from the interface too, and adding it is `kubiq-icons` work.
 - **Export.** `just help-icons` rasterises every drawn icon through resvg, the rasteriser the interface uses, into `help/img/ui/<name>.png`. `just help-icons <name> …` exports only the named icons. The PNGs are committed, so `just help-check` and `just help-bundle` see them like any image.
 - **Regenerate** after any change to an icon, and commit the PNGs with it. Never edit a PNG by hand.
 - **Name.** The icon's registry name, so `titlebar-notifications` is `help/img/ui/titlebar-notifications.png`. The registry is the list of what exists.
@@ -41,7 +41,7 @@ A page that names a control with no label gives its tooltip in bold and then the
 ### 1.2 Size and tint
 
 - **Size.** 28 by 28 pixels, which is twice the 14-pixel interface icon, on a transparent background.
-- **Tint.** One colour, `#6b6b80`, the `text.muted` token of the light palette in `crates/ubiq/src/theme.rs`. The interface tints an icon with a theme token, but a PNG has one colour and the help panel follows the theme. This mid-grey keeps at least 3:1 contrast on the dark palette's ground and about 4.7:1 on the light one. The export script reads the value from `theme.rs`; a palette change moves the tint on the next `just help-icons`.
+- **Tint.** One colour, `#6b6b80`, the `text.muted` token of the light palette in `crates/kubiq/src/theme.rs`. The interface tints an icon with a theme token, but a PNG has one colour and the help panel follows the theme. This mid-grey keeps at least 3:1 contrast on the dark palette's ground and about 4.7:1 on the light one. The export script reads the value from `theme.rs`; a palette change moves the tint on the next `just help-icons`.
 
 ### 1.3 Referencing an icon
 
@@ -93,9 +93,9 @@ On Linux the app runs headless under software rendering.
 
 - **Packages.** `mesa-vulkan-drivers` (lavapipe), `libdbus-1-dev`, `xdotool`, `imagemagick`, plus `Xvfb`.
 - **Display.** `Xvfb :99 -screen 0 2880x1800x24`, and `GPUI_X11_SCALE_FACTOR=2` in the app's environment for a true 2× capture. Set `XDG_RUNTIME_DIR` to a writable folder.
-- **Throwaway state.** Point `UBIQ_CONFIG_DIR` and `HOME` at a throwaway folder so the real configuration is untouched, and open a throwaway demo git repository as the project.
+- **Throwaway state.** Point `KUBIQ_CONFIG_DIR` and `HOME` at a throwaway folder so the real configuration is untouched, and open a throwaway demo git repository as the project.
 - **Modes.** Hide Sink under **Settings › Appearance › Modes**, so the rail shows only what a user sees.
-- **Run and drive.** Start `target/debug/ubiq` with `DISPLAY=:99`, and drive it with `xdotool`. The window lags several seconds behind under software rendering, so wait before each capture.
+- **Run and drive.** Start `target/debug/kubiq` with `DISPLAY=:99`, and drive it with `xdotool`. The window lags several seconds behind under software rendering, so wait before each capture.
 - **Capture.** `import -window root out.png`, then crop with `convert -crop`. Optimise with `convert -colors 128 -strip`.
 
 ### 2.4 Keeping them current

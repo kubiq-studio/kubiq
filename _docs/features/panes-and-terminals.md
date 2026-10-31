@@ -7,7 +7,7 @@ summary: What a pane shows, how exactly one of them holds focus, how a resize re
 read_when: you are changing where a pane sits, pane focus, resize, pane chrome, or how terminal bytes reach the screen
 updated: 2026-10-12
 verified: 2026-10-12
-code_anchors: [crates/ubiq/src/app/mod.rs, crates/ubiq/src/app/wire.rs, crates/ubiq/src/app/settings.rs, crates/ubiq/src/app/panels.rs, crates/ubiq/src/app/editor.rs, crates/ubiq/src/app/clipboard.rs, crates/ubiq-proto/src/bus.rs, crates/ubiq/src/ui/terminal.rs, crates/ubiq/src/state/dock.rs, crates/ubiq/src/state/settings.rs, crates/ubiq/src/state/workbench.rs, crates/ubiq/src/ui/dock/mod.rs, crates/ubiq/src/ui/dock/skin.rs, crates/ubiq/src/ui/new_pane_menu.rs, crates/ubiq/src/ui/menus.rs, crates/ubiq/src/ui/hidden_agents_menu.rs, crates/ubiq/src/ui/tab_menu.rs, crates/ubiq/src/ui/tools.rs, crates/ubiq/src/ui/shell.rs, crates/ubiq-host/src/coordinator.rs, crates/ubiq-host/tests/coordinator.rs, crates/ubiq-host/src/pty/mod.rs, crates/ubiq-host/src/shells.rs, vendor/gpui-terminal/src/view.rs, vendor/gpui-terminal/src/render.rs, vendor/gpui-terminal/src/input.rs, vendor/gpui-terminal/src/mouse.rs, vendor/gpui-terminal/src/clipboard.rs, vendor/gpui-terminal/src/event.rs, vendor/gpui-terminal/src/terminal.rs, crates/ubiq-host/src/runners/mod.rs]
+code_anchors: [crates/kubiq/src/app/mod.rs, crates/kubiq/src/app/wire.rs, crates/kubiq/src/app/settings.rs, crates/kubiq/src/app/panels.rs, crates/kubiq/src/app/editor.rs, crates/kubiq/src/app/clipboard.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq/src/ui/terminal.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/state/settings.rs, crates/kubiq/src/state/workbench.rs, crates/kubiq/src/ui/dock/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/ui/new_pane_menu.rs, crates/kubiq/src/ui/menus.rs, crates/kubiq/src/ui/hidden_agents_menu.rs, crates/kubiq/src/ui/tab_menu.rs, crates/kubiq/src/ui/tools.rs, crates/kubiq/src/ui/shell.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/tests/coordinator.rs, crates/kubiq-host/src/pty/mod.rs, crates/kubiq-host/src/shells.rs, vendor/gpui-terminal/src/view.rs, vendor/gpui-terminal/src/render.rs, vendor/gpui-terminal/src/input.rs, vendor/gpui-terminal/src/mouse.rs, vendor/gpui-terminal/src/clipboard.rs, vendor/gpui-terminal/src/event.rs, vendor/gpui-terminal/src/terminal.rs, crates/kubiq-host/src/runners/mod.rs]
 depends_on: [tech-transport]
 review_cycle: monthly
 ---
@@ -90,7 +90,7 @@ is not a pane. The `+` needs a project and is not drawn without one; the chevron
 then offers the console alone.
 
 **A shell pane is a login shell**, started the way the user's own terminal starts one, so `.zprofile`,
-`.zlogin` and `.profile` run and the pane's `PATH` matches the user's everywhere else (Ubiq launched from
+`.zlogin` and `.profile` run and the pane's `PATH` matches the user's everywhere else (Kubiq launched from
 Finder inherits a `PATH` nothing has set up). Only a shell started with no arguments is treated so: a
 harness, or a shell handed a command, starts as itself.
 
@@ -98,11 +98,11 @@ harness, or a shell handed a command, starts as itself.
 attaches and on every menu open, so a shell installed since the window opened is available without a
 restart; agent types and the runnable tools are asked for on the same terms.
 
-**A pane's environment is whatever started it.** A shell inherits Ubiq's own, plus the `TERM` and
+**A pane's environment is whatever started it.** A shell inherits Kubiq's own, plus the `TERM` and
 `COLORTERM` every pane is given. A composed agent adds the variables that point it at the throwaway
 configuration it was provisioned into — without them the harness reads the user's real
 configuration instead — and a confined one replaces the environment entirely, because its policy
-computed the whole of it and inheriting Ubiq's would put back what the sandbox took out.
+computed the whole of it and inheriting Kubiq's would put back what the sandbox took out.
 
 **A project's panes stay alive while another project is on screen.** A window can hold several
 projects, and switching between them swaps which project's panes are drawn; the ones behind keep
@@ -246,7 +246,7 @@ callback wherever the pane is drawn (the harness login modal is the one such cal
 **Geometry is measured in cells, not pixels.** The conversion happens once, in the UI, where the
 font metrics are known. Everything downstream speaks columns and rows.
 
-**A pane's text scales with the content family, one setting for all of Ubiq.** The terminal font
+**A pane's text scales with the content family, one setting for all of Kubiq.** The terminal font
 size is `theme::content_base()` — the same base the file editor and the explorer tree are drawn at
 — and an emulator already open is dressed to match when it changes rather than waiting for a
 restart. A zoom that only reached the next pane to open would not be a zoom, so
@@ -278,14 +278,14 @@ closes the tab, when the row does not wait).
 
 **A pane's chrome is its tab.** The title says which agent, and the dot beside it says whether the
 harness is still running. The pane itself carries that same state on the coloured left edge every
-surface in Ubiq is identified by. Everything else on screen belongs to the harness: Ubiq gives the
+surface in Kubiq is identified by. Everything else on screen belongs to the harness: Kubiq gives the
 emulator the background, foreground and cursor colours its surface is drawn in, and leaves the
 sixteen ANSI colours to the emulator's own defaults, because those are the colours the harness is
 choosing between.
 
 **A pane is a panel, and the user arranges it.** Panes sit in the window's dock like every other
 area: dragged into a tab beside another pane, into a row or a column beside one, into any region at
-all. Splitting and tabbing are that one gesture, and Ubiq fixes no arrangement of its own. Where a
+all. Splitting and tabbing are that one gesture, and Kubiq fixes no arrangement of its own. Where a
 pane may go is the placement rule in [`workbench.md`](./workbench.md) — anywhere, the same freedom a
 chat tab now has.
 
@@ -331,7 +331,7 @@ the pane does no buffering of its own beyond what backpressure requires.
 ## Implementation
 
 **A pane is one panel in the window's dock.** `PanelKind::Terminal` in
-`crates/ubiq/src/state/dock.rs` carries the pane ID, and `crates/ubiq/src/ui/dock/mod.rs` holds the
+`crates/kubiq/src/state/dock.rs` carries the pane ID, and `crates/kubiq/src/ui/dock/mod.rs` holds the
 panel itself. Three of its answers are this document's: its focus handle is the emulator's, so
 giving the panel the keyboard puts keystrokes on the harness with nothing in between — pushed into
 the panel by `AppState::settle_visibility` and never read back from `AppState`, because the dock asks
@@ -347,7 +347,7 @@ really removed it reads `UiSettings::terminal_close` or `agent_terminal_close` �
 `AppState::pane_is_agent` — and calls `close_pane()` or `detach_pane()` accordingly. Which regions a
 terminal may sit in, and the tab, its dot, its Hide and its Close, belong to the workbench document.
 
-**The panel's body is the emulator.** `crates/ubiq/src/ui/terminal.rs` draws it: `pane()` takes a
+**The panel's body is the emulator.** `crates/kubiq/src/ui/terminal.rs` draws it: `pane()` takes a
 pane ID and draws that pane's `TerminalView`, or the line a panel whose emulator has gone shows, and
 `config()` is the `TerminalConfig` every emulator is built with — taking the font size alongside the
 geometry, so a pane's text follows the content family's global base, `theme::content_base()`
@@ -370,19 +370,19 @@ pane's `Write` — the cursor report answering ConPTY's opening device-status as
 device-attribute reports anywhere. A reply dropped there leaves the harness waiting for an answer
 and the pane blank. It installs the `Terminal` key context, and
 `install_key_bindings()` nulls Tab, Shift+Tab, the window copy chord and both paste chords in that
-context so they are not stolen by the shell's focus cycle or its paste. Ubiq adds two things
+context so they are not stolen by the shell's focus cycle or its paste. Kubiq adds two things
 through `with_key_handler`, which `open_terminal()` sets: the defocus chord, where
 Shift/Ctrl/Cmd+Escape calls `window.blur` and `blur_panes()` and does not send `Focus`; and the
 image paste, where `app::clipboard::terminal_paste_bytes` turns the platform paste chord into
 `0x16` on the pane's own `Write` when the board holds an image and no text. A `PaneExited` is `close_pane()`.
 
 **The `+` that opens a pane sits at the right end of the tab strip.** Opening a terminal is chrome
-rather than a group's own action: `crates/ubiq/src/ui/dock/skin.rs` draws the control in
+rather than a group's own action: `crates/kubiq/src/ui/dock/skin.rs` draws the control in
 `render_tab_bar` on any strip whose group holds a terminal or the console — the `NewPane` closure
 `AppState::for_project` hands the skin — and a new pane's panel joins that group. It is drawn only
 with a project open, because a pane runs in a project's folder. `NewPane` carries two closures: the
 click, which is `spawn_pane(None, ..)`, and the chevron, which hands `AppState` the point the click
-landed on and nothing else. `crates/ubiq/src/ui/new_pane_menu.rs` paints the menu over the window,
+landed on and nothing else. `crates/kubiq/src/ui/new_pane_menu.rs` paints the menu over the window,
 for the reason the file tab's menu is painted there — the skin does not name `AppState`, so it
 cannot draw a menu with state in it. **The rows themselves are `ui::menus::new_pane()`**, one list
 of `MenuEntry` that carries the action behind each row — a detached pane is `reattach_pane(id)`, a
@@ -395,9 +395,9 @@ not is added to its home region first. `AppState::toggle_region()` is where open
 region starts a pane, and `pane_title()` is where a pane gets its handle and its number — a tool's name the same
 way a program does, through the same short-name rule.
 
-**`crates/ubiq-host/src/shells.rs` is the only place that knows what a shell is.** On Unix,
+**`crates/kubiq-host/src/shells.rs` is the only place that knows what a shell is.** On Unix,
 `available()` checks a fixed candidate list against `PATH`, the user's login shell's own `PATH` and the
-usual homes, and always includes `default_program()`; the extra lookups exist because the `PATH` Ubiq was
+usual homes, and always includes `default_program()`; the extra lookups exist because the `PATH` Kubiq was
 launched with cannot be trusted (a desktop launcher hands over a thin environment). The login shell is
 asked once per process with `-lic`, because the login and interactive files are where a toolchain
 installer writes its directory. `user_path()` is the same probe for the ACP registry check: on Unix
@@ -420,7 +420,7 @@ so which `PATH` a program is looked up on is answered in one place. On Windows t
 directory is handed over without `canonicalize`'s `\\?\` prefix, which the file operations keep
 but `cmd.exe` refuses as a working directory.
 
-**`crates/ubiq-proto/src/bus.rs` is the seam.** `hub()` opens the switchboard the one host answers
+**`crates/kubiq-proto/src/bus.rs` is the seam.** `hub()` opens the switchboard the one host answers
 through, and `Hub::connect()` gives a window its own `Client` on it.
 `pane_output()` makes one pane's byte stream: the sender goes to the window's router, and the
 matching `PaneOutput` is the blocking `Read` the emulator consumes on a thread of its own — dropping
@@ -439,7 +439,7 @@ Inside the window, a pane also belongs to one of its hosts, recorded by `Bus::no
 `WorkspaceSpawned` arrives, which is how keystrokes and resizes reach the connection actually running
 it. The routing is [`../tech/architecture.md`](../tech/architecture.md)'s.
 
-**`AppState` in `crates/ubiq/src/app/mod.rs` owns one `OpenProject` per project the window holds**, and
+**`AppState` in `crates/kubiq/src/app/mod.rs` owns one `OpenProject` per project the window holds**, and
 each of those owns that project's panes and which of them is focused. The emulators do not move with
 them: `terminals` stays one flat map from pane ID to emulator and output sender, because an emulator
 does not care which list draws it. The dock and one panel per pane are the window's. Two tasks it
@@ -465,8 +465,8 @@ The paths through the two halves, in call order:
 | Closes a pane | the tab's × takes the panel out of the dock; `on_removed()` defers a turn so a displaced panel is not mistaken for a closed one, then reads the pane's `TabClose` setting — `close_pane()` sends `CloseWorkspace` and drops the emulator on `Close`, `detach_pane()` leaves both alone on `Hide`; the tab menu's own Close asks first, through `ask_close_pane()`'s confirm; the coordinator kills the child, and the thread `pty::reap` left waiting on it collects the exit |
 | The harness exits | `PaneExited` reaches `close_pane()`, which queues the same panel close and sends `CloseWorkspace` so the host drops the pseudo-terminal |
 
-`crates/ubiq-host/src/coordinator.rs` holds one `Pty` per pane ID and nothing about layout or colour;
-`crates/ubiq-host/src/pty/` is the only place a descriptor or a process lives. Its reader thread and the
+`crates/kubiq-host/src/coordinator.rs` holds one `Pty` per pane ID and nothing about layout or colour;
+`crates/kubiq-host/src/pty/` is the only place a descriptor or a process lives. Its reader thread and the
 bus's channels are unbounded, because a UI that has fallen behind must never stall the reader — a
 stalled reader stalls the harness.
 

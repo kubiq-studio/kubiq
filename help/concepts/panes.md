@@ -11,7 +11,7 @@ related: [workbench-panels, how-to-hide-or-close-a-tab, how-to-split-and-move-pa
 ## What it is
 
 Everything in the window with a tab is a *panel*: a file, the explorer, the logs, this help, a chat. You
-drag a panel's tab to move it, split it beside another, or group it with one. Ubiq fixes no arrangement,
+drag a panel's tab to move it, split it beside another, or group it with one. Kubiq fixes no arrangement,
 and [Panels and the dock](workbench-panels) shows where each kind of panel may sit.
 
 A *pane* is the panel that holds one terminal. Each agent you start in a terminal, and each shell, runs

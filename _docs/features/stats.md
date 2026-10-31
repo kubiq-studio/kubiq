@@ -7,7 +7,7 @@ summary: The Control screen — five readings of the running host on one page, a
 read_when: you are changing what the Control screen reports, the usage meter's schema or its buckets, or the one thing the interface polls the host for
 updated: 2026-09-27
 verified: 2026-09-27
-code_anchors: [crates/ubiq-proto/src/stats.rs, crates/ubiq-proto/src/messages.rs, crates/ubiq-host/src/store/usage.rs, crates/ubiq-host/src/coordinator.rs, crates/ubiq-host/src/projects.rs, crates/ubiq/src/state/stats.rs, crates/ubiq/src/ui/stats.rs, crates/ubiq/src/app/stats.rs, crates/ubiq/src/app/wire.rs, crates/ubiq/src/app/shell.rs, crates/ubiq/src/ui/dock/mod.rs, crates/ubiq/tests/stats.rs, crates/ubiq-host/tests/usage.rs]
+code_anchors: [crates/kubiq-proto/src/stats.rs, crates/kubiq-proto/src/messages.rs, crates/kubiq-host/src/store/usage.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/projects.rs, crates/kubiq/src/state/stats.rs, crates/kubiq/src/ui/stats.rs, crates/kubiq/src/app/stats.rs, crates/kubiq/src/app/wire.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/ui/dock/mod.rs, crates/kubiq/tests/stats.rs, crates/kubiq-host/tests/usage.rs]
 depends_on: [tech-transport, feat-workbench, tech-structure]
 review_cycle: monthly
 ---
@@ -16,7 +16,7 @@ review_cycle: monthly
 
 ## Purpose
 
-Ubiq is one host process behind however many windows the user has open, running however many
+Kubiq is one host process behind however many windows the user has open, running however many
 harnesses they started, and nothing on screen says how much of the machine that is costing. The
 Control screen answers it: how much memory the host holds, how long it has been up, how many
 projects it is keeping open, and how many agents are alive now against how many have run since
@@ -91,7 +91,7 @@ naming it in the reader's zone is the screen's, in the one function that draws i
 own module, embedded in the executable, and a step's index is its version — `D78`. There is no
 migration crate and no schema table.
 
-**`ListStats` is the one thing the interface polls for.** Every other message in Ubiq is pushed
+**`ListStats` is the one thing the interface polls for.** Every other message in Kubiq is pushed
 because something happened; memory and uptime change when nothing happens, so there is no event to
 push. The window asks every two seconds while Control is the rail mode and stops the moment it is
 not, and one flag on the screen's state keeps a second timer from starting behind the first.
@@ -104,44 +104,44 @@ samples, which is what keeps a sample a sample rather than a broadcast of one wi
 ## Contract
 
 [`Message::ListStats`](../tech/transport-contract.md) and `Message::Stats`, carrying `HostStats`
-from `crates/ubiq-proto/src/stats.rs` with its `UsageRow` vectors. Both are documented in
+from `crates/kubiq-proto/src/stats.rs` with its `UsageRow` vectors. Both are documented in
 [`../tech/transport-contract.md`](../tech/transport-contract.md)'s project family.
 
-State: `StatsState` and `StatsTab` in `crates/ubiq/src/state/stats.rs`, on the window rather than on
+State: `StatsState` and `StatsTab` in `crates/kubiq/src/state/stats.rs`, on the window rather than on
 an open project. `RailMode::Control` is the mode that draws it; the rail and its grouping belong to
 [`workbench.md`](./workbench.md).
 
 ## Implementation
 
-`crates/ubiq/src/ui/stats.rs` draws the screen: `render()` is the tab strip over one of two pages,
+`crates/kubiq/src/ui/stats.rs` draws the screen: `render()` is the tab strip over one of two pages,
 `general()` the five readings as label-and-value rows on one surface, and `ai()` the empty state or
 the table. `humanise()`, `uptime()` and `at_hour()` are how a byte count, a duration and a bucket
 are read; `COLUMNS` fixes the table's widths rather than sizing them to content, because a column of
 figures that resizes with its longest cell stops lining up.
 
-`crates/ubiq/src/state/stats.rs` holds the chosen tab, the last reading as an `Option`, and the flag
-that says a refresh loop is already running. `crates/ubiq/src/app/stats.rs` is the loop:
+`crates/kubiq/src/state/stats.rs` holds the chosen tab, the last reading as an `Option`, and the flag
+that says a refresh loop is already running. `crates/kubiq/src/app/stats.rs` is the loop:
 `poll_stats()` spawns it, `set_stats_tab()` starts it too, and it exits when the window has gone,
-the state has gone, or the mode has changed. `crates/ubiq/src/app/wire.rs` takes `Message::Stats`
+the state has gone, or the mode has changed. `crates/kubiq/src/app/wire.rs` takes `Message::Stats`
 and replaces the reading whole.
 
-`crates/ubiq-host/src/coordinator.rs` answers: `stats()` samples memory through `memory_stats`,
+`crates/kubiq-host/src/coordinator.rs` answers: `stats()` samples memory through `memory_stats`,
 uptime from the `Instant` the coordinator started, the live conversations it already holds, the
 `agents_this_run` counter it bumps as each conversation starts, and
-`crates/ubiq-host/src/projects.rs`'s `open_count()`. The two usage vectors come back from the meter.
+`crates/kubiq-host/src/projects.rs`'s `open_count()`. The two usage vectors come back from the meter.
 
-`crates/ubiq-host/src/store/usage.rs` is the meter, and unlike everything else under `store/` it is
+`crates/kubiq-host/src/store/usage.rs` is the meter, and unlike everything else under `store/` it is
 a concrete type rather than a trait: there is one implementation and nothing substitutes it.
 `open()` creates the file, sets WAL, migrates, and empties the minute table; `record()` writes one
 delta into both tables in one transaction; `history()` and `this_run()` read them back.
-`crates/ubiq-host/src/conversation.rs`'s `UsageMeter` is what carries the meter and the launch's
+`crates/kubiq-host/src/conversation.rs`'s `UsageMeter` is what carries the meter and the launch's
 dimensions to the pump, and its `usage_row()` maps one `TokenSpend` onto the columns — `input`,
 `output` and `thinking` each to their own, cache read and cache creation together into
 `tokens_other`. `msgs_in`/`msgs_out`/`tool_calls` stay zero: the pump sees chunks and tool-call
 patches, not the counts a turn's spend belongs to, and a guessed count is worse than an absent one.
 
-`crates/ubiq/tests/stats.rs` covers the rail grouping and the two pages' copy without a frame;
-`crates/ubiq-host/tests/usage.rs` drives the meter against a real file.
+`crates/kubiq/tests/stats.rs` covers the rail grouping and the two pages' copy without a frame;
+`crates/kubiq-host/tests/usage.rs` drives the meter against a real file.
 
 ## Failure
 

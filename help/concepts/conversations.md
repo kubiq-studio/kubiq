@@ -27,7 +27,7 @@ The three-dots menu also holds the verbs for a conversation's life:
   where it left off.
 - **Fork** copies the conversation and continues the copy as a second agent, leaving the first
   untouched.
-- **Make persistent** keeps the conversation across a restart of Ubiq, for harnesses that keep their
+- **Make persistent** keeps the conversation across a restart of Kubiq, for harnesses that keep their
   own history, such as Claude Code and Codex.
 
 A harness that stops by itself, through a crash or an error, leaves its conversation unloaded, so

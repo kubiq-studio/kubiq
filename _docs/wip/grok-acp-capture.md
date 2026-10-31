@@ -62,7 +62,7 @@ There is **no `configOptions` and no `modes` block**, so `session_events` mints 
 Note what Grok calls things: **`category: "mode"` is the reasoning effort**, not a permission mode.
 Grok exposes no permission mode over ACP at all (see §4). So that group is published as the
 *thinking* option — id `thinking`, name `Thinking`, `ConfigCategory::ThoughtLevel`, the same shape
-`ubiq-host`'s `thinking_config_option` uses on the non-ACP path — because the chat row matches its
+`kubiq-host`'s `thinking_config_option` uses on the non-ACP path — because the chat row matches its
 chips by literal option id: published as `mode` it was drawn in the permission-mode chip, tooltip
 and all, and no thinking chip existed. What keeps Grok's own naming is the **setter**:
 `ConfigSource::Mode` stays on the option, so `session/set_mode {sessionId, modeId}` is what applies
@@ -82,7 +82,7 @@ known before a session exists.
 | `session/set_config_option` `{sessionId, configId, value}` | exists |
 | `session/select_model`, `x.ai/set_model`, `session/select_mode` | method not found |
 
-Ubiq only ever sends `session/set_config_option` (`acp_client.rs:881`), which Grok accepts but
+Kubiq only ever sends `session/set_config_option` (`acp_client.rs:881`), which Grok accepts but
 which names no option Grok advertises.
 
 Agent-initiated change arrives as `_x.ai/session_notification` with
@@ -144,7 +144,7 @@ keeps a `delegate_calls` set of every id ever recognised as a delegation and a k
 tool call embedded at `params.toolCall` through the same test, so a permission ask for a spawn is
 recognised as one.
 
-Two things the child's traffic still does not carry, both on Ubiq's own wire rather than Grok's:
+Two things the child's traffic still does not carry, both on Kubiq's own wire rather than Grok's:
 `ConvUpdate::ToolCallUpdate` has no `subagent` field (`G227`), and no per-subagent token accounting
 survives the mapping (`G228`).
 

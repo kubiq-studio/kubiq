@@ -24,7 +24,7 @@ am claude --mcps postgres,figma --skills web-designer --safe
 ## Two ways to use it
 
 - **CLI mode** — run an agent from your terminal with catalog-driven injection.
-- **Lib mode** — embed the crate in a bigger tool (e.g. the Ubiq multiplexer),
+- **Lib mode** — embed the crate in a bigger tool (e.g. the Kubiq multiplexer),
   construct a run spec programmatically (including in-process custom MCPs), and
   drive the agent through an abstracted I/O channel.
 

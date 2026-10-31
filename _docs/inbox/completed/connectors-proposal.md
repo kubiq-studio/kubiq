@@ -4,14 +4,14 @@ title: Proposal — connectors
 kind: proposal
 status: proposal
 summary: A Connectors section in settings that holds many named connections to GitHub, GitLab, Gitea, Azure DevOps, Atlassian and Google Workspace, cloud or self-hosted — several per provider — each authenticated by a personal access token, a device code or a PKCE authorization flow on a loopback callback, with the token material stored in the OS keychain through the library's existing `SecretStore`, never crossing the bus, and an untrusted certificate on a self-hosted instance resolved by pinning one confirmed fingerprint to that instance.
-read_when: you are deciding how Ubiq authenticates against an external service, where those tokens live, or how a browser-based login reaches a desktop application
+read_when: you are deciding how Kubiq authenticates against an external service, where those tokens live, or how a browser-based login reaches a desktop application
 updated: 2026-09-05
 depends_on: [tech-architecture, tech-transport, tech-agent-manager, feat-workbench, inbox-config]
 ---
 
 # Proposal — connectors
 
-Ubiq authenticates against exactly one class of thing today: harnesses, through the account family,
+Kubiq authenticates against exactly one class of thing today: harnesses, through the account family,
 by driving the harness's own login in a pane and capturing what it writes. It has no way to
 authenticate against a *service* — to hold a GitHub or GitLab token, a Google Workspace grant, an
 Azure DevOps scope, a Jira API token — and so every capability that would need one (private clones,
@@ -40,18 +40,18 @@ wire by a reference that carries no material.
   own doc comment: an account holds env-var *names*, a base URL, a helper command, a home path —
   "No field here can hold a secret value." A connector token is material. It belongs in
   `SecretStore`, beside a harness login, not in `Account`.
-- **No OAuth code and no HTTP client in Ubiq.** The workspace's only HTTP client is `ureq` 2, used
+- **No OAuth code and no HTTP client in Kubiq.** The workspace's only HTTP client is `ureq` 2, used
   by agent-manager's MCP transport. Every OAuth flow in the tree today is delegated to a harness's
   own browser flow. Nothing here has ever exchanged a code for a token.
-- **`ubiq://` is already taken.** It is the interface's internal navigation URI —
-  `ubiq://<ulid>/ide/...`, `/tasks/...`, `/agents/...` — parsed by `Destination::from_str`. It is
+- **`kubiq://` is already taken.** It is the interface's internal navigation URI —
+  `kubiq://<ulid>/ide/...`, `/tasks/...`, `/agents/...` — parsed by `Destination::from_str`. It is
   not an OS-registered scheme: `_tools/Info.plist` declares `CFBundleDocumentTypes` and no
   `CFBundleURLTypes`. §5 is what follows from that.
 - **The settings dialog takes a new section cheaply.** `SettingsSection` in
-  `crates/ubiq/src/state/settings.rs` is an enum plus `all()` and `label()`; a section is one
-  variant, one nav icon, one `body()` arm and one drawing function in `crates/ubiq/src/ui/settings.rs`.
+  `crates/kubiq/src/state/settings.rs` is an enum plus `all()` and `label()`; a section is one
+  variant, one nav icon, one `body()` arm and one drawing function in `crates/kubiq/src/ui/settings.rs`.
 - **Host settings are already versioned and round-tripped.** `HostSettings` in
-  `crates/ubiq-proto/src/settings.rs` carries `HOST_SETTINGS_SCHEMA`, persists to
+  `crates/kubiq-proto/src/settings.rs` carries `HOST_SETTINGS_SCHEMA`, persists to
   `<config_root>/host-settings.toml`, and moves over `GetSettings`/`SetSettings`/`Settings`.
 
 ## 2. What a connection is
@@ -142,7 +142,7 @@ next one, and dropping it is the explicit `ForgetCertificate` on that instance (
 settings section offers, and which says how many connections it affects before it acts.
 
 **GitHub uses the device flow, not a browser redirect.** GitHub's OAuth apps do not support PKCE for
-a public client, which would force Ubiq to ship a client *secret* — a secret in a binary is not a
+a public client, which would force Kubiq to ship a client *secret* — a secret in a binary is not a
 secret. The device flow needs neither secret nor callback: the host asks for a code, the interface
 shows the user code and opens the verification URL, the host polls until the user finishes. This is
 also why §5's callback question does not arise for the provider most users will connect first. An
@@ -212,21 +212,21 @@ which is a contradiction. Google is the one provider that permits a varying loop
 accepts a fixed one too. If 47821 is busy the flow fails with a message naming the port — it does
 not silently pick another, because another port is a redirect URI no provider will accept.
 
-**`ubiq://` is deferred, and not only for cost.** The scheme is already the interface's internal
+**`kubiq://` is deferred, and not only for cost.** The scheme is already the interface's internal
 navigation URI, so registering it with the OS would mean one string meaning two things: a route
 inside the window and an inbound OAuth callback. That collision has to be resolved before anything
 is registered — a distinct scheme, or a reserved path prefix — and the flows all work without it.
 When it lands it is `CFBundleURLTypes` in `_tools/Info.plist`, a Linux `.desktop` handler, a Windows
 registry key, and a handoff from a second instance to the running one. A row in `backlog.md`.
 
-<!-- ponytail: one fixed loopback port, no ubiq:// scheme, no second-instance handoff.
+<!-- ponytail: one fixed loopback port, no kubiq:// scheme, no second-instance handoff.
      Revisit if a provider appears that refuses loopback, or if a locked-down environment
      blocks the port. -->
 
 ## 6. Where the token lives
 
 **In `SecretStore`, under the engine the user already chose for harness logins.** No new storage
-layer, no second keychain, no encryption code in Ubiq.
+layer, no second keychain, no encryption code in Kubiq.
 
 The key is `CredentialId { harness: "connector:<provider>", name: <connection id> }`, which the `os`
 and `keyring` engines render as the service string `am:connector:gitlab:<ulid>`. The `harness` field
@@ -237,9 +237,9 @@ The blob is a single `token.json`: `access_token`, and where the flow produced t
 `expires_at`, `token_type`, `scope`. Storing JSON rather than a bare string is what makes
 `credential_validity` work unmodified.
 
-**Ubiq must select a secure engine for connectors.** agent-manager's default engine is `files` —
+**Kubiq must select a secure engine for connectors.** agent-manager's default engine is `files` —
 plaintext, appropriate for a captured harness login that is already a plaintext file in a home
-directory, and not appropriate for a bearer token Ubiq itself obtained. The host builds the
+directory, and not appropriate for a bearer token Kubiq itself obtained. The host builds the
 connector store with `os` (or `keyring`), and refuses to complete a flow if no secure engine is
 available rather than falling back to plaintext. That refusal is a message the user can act on:
 "connectors need a secure credential store".
@@ -248,11 +248,11 @@ available rather than falling back to plaintext. That refusal is a message the u
 
 Two different secrets have been conflated so far, and the rest of this section depends on keeping
 them apart. A **connection credential** is the token from §4: it identifies the *user* and it is
-theirs. An **application credential** — a client id, sometimes a client secret — identifies *Ubiq*
+theirs. An **application credential** — a client id, sometimes a client secret — identifies *Kubiq*
 to the provider, is the same for every user of a build, and exists only because a browser flow
 demands one. Everything above is about the first. This is about the second.
 
-**Ubiq ships no client secret. Ever.** A secret embedded in a binary that is distributed is not a
+**Kubiq ships no client secret. Ever.** A secret embedded in a binary that is distributed is not a
 secret — it is a value anyone with the file can read, and every provider's terms treat it as
 compromised the moment it ships. So the built-in applications are **public clients only**: PKCE for
 Google, GitLab, Gitea, Atlassian Cloud and Azure DevOps Services, and the device flow for GitHub,
@@ -282,7 +282,7 @@ token flow, so "no application configured" degrades to PAT rather than to nothin
 
 ### Embedding at build time
 
-`option_env!("UBIQ_OAUTH_<PROVIDER>_CLIENT_ID")` in the host's provider table, read at compile time.
+`option_env!("KUBIQ_OAUTH_<PROVIDER>_CLIENT_ID")` in the host's provider table, read at compile time.
 An exported variable is baked into that build; an unset one leaves `None` and the row falls through
 to sources 1 and 2. The bundling script in `_tools/` is where a release exports them, from whatever
 its CI holds them in; nothing is committed, and nothing is read from the environment at *run* time —
@@ -297,7 +297,7 @@ Three properties follow, and each is the reason for the choice:
 - **The official build needs no configuration for the common case.** Connecting a personal Google or
   Atlassian account is one click, because the id is already there.
 - **A fork ships its own applications by exporting its own ids**, and cannot accidentally ship
-  Ubiq's, because there is nothing in the repository to inherit.
+  Kubiq's, because there is nothing in the repository to inherit.
 
 ### Configuring one in settings
 
@@ -419,7 +419,7 @@ needs no new store, no new file, no new messages to read it. `ListConnections` e
 refresh-after-a-flow case rather than as the primary path.
 
 <!-- ponytail: connections ride the host-settings blob, so a `SetSettings` is last-writer-wins over
-     the whole thing. A dedicated ConnectorStore in ubiq-host/src/store/ if that bites. -->
+     the whole thing. A dedicated ConnectorStore in kubiq-host/src/store/ if that bites. -->
 
 Two consequences worth stating rather than discovering: the interface holds the full list in state
 like any other host setting, and a connection record must stay small — an access log or a per-repo
@@ -442,7 +442,7 @@ administrator tells them belongs in a file they can open.
 ## 10. The settings section
 
 `SettingsSection::Connectors`: one enum variant, one `all()` entry, one `label()`, one nav icon, one
-`body()` arm, one drawing function beside `search` and `harnesses` in `crates/ubiq/src/ui/settings.rs`.
+`body()` arm, one drawing function beside `search` and `harnesses` in `crates/kubiq/src/ui/settings.rs`.
 
 It draws a list, not a form. One row per connection — provider glyph, label, account name, instance
 if any, and the status as a badge — with rename and disconnect on the row. Below it, one "Connect…"
@@ -518,7 +518,7 @@ with its own family. That boundary is the reason this can land and be verified o
 question with a real answer, and it is not this document's — a binding names a connection id, so it
 can be added without touching anything here.
 
-**It is not a secrets manager.** Ubiq stores what its own flows obtained, under keys it minted.
+**It is not a secrets manager.** Kubiq stores what its own flows obtained, under keys it minted.
 Importing a token from elsewhere, sharing one between machines, or handing one to a harness is out
 of scope, and the last of those is the account family's job.
 
@@ -526,7 +526,7 @@ of scope, and the last of those is the account family's job.
 
 ## 13. Phases
 
-1. **The record and the section.** `Connection` in `ubiq-proto`, `HostSettings` schema 3, the
+1. **The record and the section.** `Connection` in `kubiq-proto`, `HostSettings` schema 3, the
    `Connectors` settings section drawing an empty list. Nothing authenticates yet.
 2. **The token flow, with `instance`.** `SubmitConnectSecret`, the secure-engine selection,
    `SecretStore` under the `connector:` namespace, the per-provider validation call under a base
@@ -536,7 +536,7 @@ of scope, and the last of those is the account family's job.
 4. **PKCE and the loopback listener.** Google first — the only provider with no token flow — then
    GitLab and Gitea against a user-supplied client id, then Azure DevOps Services and Atlassian
    Cloud. Refresh lands with it, since these are the flows that produce refresh tokens.
-5. **`ubiq://`**, if anything still needs it.
+5. **`kubiq://`**, if anything still needs it.
 
 §7's application credentials land with phase 4, the first phase that needs one: the resolution
 order, the `option_env!` reads and the Applications list are what make that phase's flows reach a
@@ -565,7 +565,7 @@ self-hosted work, and a self-hosted instance behind a private CA is the case tha
 5. **`connector:` as a `CredentialId.harness` namespace** (§6), versus a second trait in
    agent-manager. This one is a change to that crate's vocabulary, so it is theirs to accept.
 6. **Connections in the host-settings blob** (§9), versus their own store.
-7. **Ubiq ships no client secret** (§7) — built-in applications are public clients, which is what
+7. **Kubiq ships no client secret** (§7) — built-in applications are public clients, which is what
    makes a build-embedded client id harmless. This is worth a decision-register row rather than a
    paragraph, because relaxing it later would look like a small convenience and would not be one.
 

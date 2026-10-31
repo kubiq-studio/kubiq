@@ -20,11 +20,11 @@ every source, with **Add source** under them.
 | Row | What it does |
 |---|---|
 | **Name** | What the **Documents** panel calls the source; filled in from the folder or repository until you type your own |
-| **Kind** | **Folder** is read where it lies, **Git repository** is cloned and refreshed by Ubiq, **Wiki** is Ubiq's own and starts empty |
+| **Kind** | **Folder** is read where it lies, **Git repository** is cloned and refreshed by Kubiq, **Wiki** is Kubiq's own and starts empty |
 | **Folder** | Browse for the folder; it is chosen on the machine the project runs on, not necessarily this one |
 | **Repository URL** and **Check** | Check reaches the repository and reports **Reached** with its branch count |
 | **Branch** | Which branch the checkout follows; **The repository's default** unless the check offers others |
-| **Store** | Where a repository is kept: **Cache**, **Ubiq's project folder** (the default) or **Inside the project** |
+| **Store** | Where a repository is kept: **Cache**, **Kubiq's project folder** (the default) or **Inside the project** |
 | **Access** | **Read only** or **Read and write**; a wiki is always writable |
 | **Password protected** | Wiki only: encrypts every document under a password, fixed once saved |
 | **Cancel**, **Add source** | Discard the form, or add the source |
@@ -47,5 +47,5 @@ only matching files are shown, and it applies when you press **Enter** or leave 
 - **Check does not report Reached.** Correct the repository URL, which must be an `https://`
   address, and check again.
 - **A source shows `failed`.** Its folder is gone or its fetch failed; fix the source, then click it.
-- **A forgotten wiki password cannot be recovered.** Ubiq says so before you set it.
+- **A forgotten wiki password cannot be recovered.** Kubiq says so before you set it.
 - **A wiki's password setting cannot be changed back** once the source is saved.

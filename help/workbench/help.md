@@ -3,7 +3,7 @@ id: workbench-help
 title: The help panel
 summary: How to open the manual inside the window, find the page for the screen you are on, and point at a control for its one-line help.
 keywords: [help, manual, F1, point at, contents, follow mode, documentation, balloon]
-context: [panel.ubiq.help]
+context: [panel.kubiq.help]
 order: 130
 status: current
 related: [workbench-titlebar, getting-started, workbench-panels, troubleshooting]
@@ -30,7 +30,7 @@ page listed greyed in **Contents** has not been written, and opens a notice sayi
 
 **Point at something** draws a box around whatever the pointer is over and a balloon beside it with the control's name and one or two sentences. Move the pointer to read another.
 Clicks do nothing in this mode, so you can point at a button without pressing it. Press **Esc** or
-**Done** to leave. A control Ubiq has named but not yet described says `This place has a name but no
+**Done** to leave. A control Kubiq has named but not yet described says `This place has a name but no
 description yet.`; an unnamed area shows nothing.
 
 The title bar's **More** menu, beside **Settings**, has **Help** and **Point at something…** too.

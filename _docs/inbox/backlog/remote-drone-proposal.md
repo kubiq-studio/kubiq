@@ -3,22 +3,22 @@ id: inbox-drone
 title: Proposal — the drone, shell and file access to a remote host
 kind: proposal
 status: proposal
-summary: A small process Ubiq injects into a remote host over SSH, so a project's shell and file access can come from another machine through the same pane and file messages a local project already speaks — the version-and-identity handshake that fences it, how the binary gets there, and what stays out of scope.
-read_when: you are deciding how a project's files or shell reach a machine Ubiq is not running on, what "drone" means in this tree, or which host messages a remote transport answers
+summary: A small process Kubiq injects into a remote host over SSH, so a project's shell and file access can come from another machine through the same pane and file messages a local project already speaks — the version-and-identity handshake that fences it, how the binary gets there, and what stays out of scope.
+read_when: you are deciding how a project's files or shell reach a machine Kubiq is not running on, what "drone" means in this tree, or which host messages a remote transport answers
 updated: 2026-09-03
 depends_on: [tech-architecture, tech-transport, tech-agent-manager, tech-structure]
 ---
 
 # Proposal — the drone, shell and file access to a remote host
 
-Ubiq hosts every harness on the machine it runs on. A project's folder, its shell, its git
-repository — all of it is read by `crates/ubiq-host` reaching directly into the local filesystem and
+Kubiq hosts every harness on the machine it runs on. A project's folder, its shell, its git
+repository — all of it is read by `crates/kubiq-host` reaching directly into the local filesystem and
 spawning local pseudo-terminals. There is no notion anywhere in the tree of a project whose files and
 shell live somewhere else.
 
-This proposes the **drone**: a small binary Ubiq deploys onto a remote host over SSH, which then does
+This proposes the **drone**: a small binary Kubiq deploys onto a remote host over SSH, which then does
 for that host what the coordinator's `pty/` and `files/` modules already do for this one — spawns
-PTYs, reads and writes files, walks a tree — and answers for it over a connection back to the Ubiq
+PTYs, reads and writes files, walks a tree — and answers for it over a connection back to the Kubiq
 that put it there.
 
 ## 1. This is not a new idea in this tree — it is a deferred one
@@ -45,7 +45,7 @@ seam a remote drone slots into: a project id and a relative path do not say whic
 answered."* The word "drone" is already in the tree, naming the same thing this document designs.
 
 **What is missing is everything underneath those sentences.** No SSH client dependency exists in any
-manifest. No message in `crates/ubiq-proto/src/messages.rs` carries a protocol version — the bus has
+manifest. No message in `crates/kubiq-proto/src/messages.rs` carries a protocol version — the bus has
 never needed one, because both ends are always compiled from the same commit in the same process,
 which stops being true the moment a drone can be built from a different one. `just bundle`
 (`Justfile:26`) assembles one `.app` for the machine running it and nothing cross-compiles or
@@ -62,7 +62,7 @@ by name is a shell starting a shell, the same rule `agent-manager.md` states for
 harness, and that is permanent rather than a v1 gap:** a composed run — skills, MCP servers, an
 account — is `agent-manager`'s to build, and `agent-manager` has no story for a machine it is not
 running on, and gains none here. What a future version adds is not a harness on the far end of a drone
-connection, but the opposite direction — a harness Ubiq already runs locally, handed a `remote-file`
+connection, but the opposite direction — a harness Kubiq already runs locally, handed a `remote-file`
 and a `remote-shell` tool that call back into a project's drone. That is the MCP-connector future in
 §12, and it is the only way this design ever lets a harness touch a remote host.
 
@@ -81,20 +81,20 @@ relative path; none of them needs to change. What changes is entirely inside the
 project carrying a `RemoteOrigin` (host, user, remote root) routes the same request over that
 project's drone connection instead. The interface draws a remote project exactly as it draws a local
 one — the same explorer, the same tabs, the same terminal panes — because nothing about `AppState` or
-`crates/ubiq/src/ui/` needed to learn that a machine boundary exists. That is rule 2 of
+`crates/kubiq/src/ui/` needed to learn that a machine boundary exists. That is rule 2 of
 [`../tech/architecture.md`](../../tech/architecture.md) cashed in rather than bent: *"No path, no process
 handle, no file descriptor crosses into UI code."* A drone is the thing on the other end of a stream
 the UI already only ever holds by ID.
 
 **The one thing the contract does not carry, and now must: a version.** Every message today assumes
 both ends were built from the same tree, which the in-memory bus makes true by construction. A drone
-is compiled once, at some Ubiq version, and kept running for as long as its SSH session lives — it
-can easily be older or newer than the Ubiq that reconnects to it after an update. So the very first
+is compiled once, at some Kubiq version, and kept running for as long as its SSH session lives — it
+can easily be older or newer than the Kubiq that reconnects to it after an update. So the very first
 thing on a drone connection, before any pane or file message, is a handshake:
 
 ```
-DroneHello   drone → Ubiq   { drone_version, os, arch, message_schema, capabilities[], auth_proof }
-DroneReady   Ubiq → drone   { ubiq_version, message_schema, accepted: bool }
+DroneHello   drone → Kubiq   { drone_version, os, arch, message_schema, capabilities[], auth_proof }
+DroneReady   Kubiq → drone   { kubiq_version, message_schema, accepted: bool }
 ```
 
 `message_schema` is a single integer bumped whenever a variant in `messages.rs` that a drone must
@@ -111,13 +111,13 @@ connection, is answered by the coordinator alone, and never reaches the UI.
 ## 4. Identity: an ephemeral key at launch, not a key baked into the binary
 
 The prompt that seeded this proposal asked for a key or certificate patched into the executable's own
-payload before upload, so a drone could only ever speak to the Ubiq that deployed it. That is real
+payload before upload, so a drone could only ever speak to the Kubiq that deployed it. That is real
 security work worth having, but it is not what v1 needs, for a reason worth stating plainly: **the
 SSH session that puts the drone on the host is already an authenticated, encrypted channel**, and
 handing the drone a fresh secret over that channel costs a great deal less than patching a
 per-deployment certificate into a cross-compiled binary before every upload.
 
-**What v1 does instead.** Ubiq mints an ephemeral asymmetric keypair per deployment, holds the private
+**What v1 does instead.** Kubiq mints an ephemeral asymmetric keypair per deployment, holds the private
 half, and passes the public half to the drone over the SSH `exec` channel's **standard input** — never
 as a command-line argument, because `argv` is visible to every other local user on the remote host
 through `ps`, and a secret in `argv` is a secret in a place this document would otherwise have to
@@ -131,7 +131,7 @@ secures the *tunnel*, not who may use the socket at either end of it. §6 below 
 connection over an SSH port forward, and a forwarded local port is a socket anything else running on
 that machine can dial. Without the handshake, any local process on the remote host that connects to
 the forwarded port before the real drone does would be answered as if it were the drone; with it, a
-connection that cannot prove it holds the key Ubiq handed this deployment is refused before it can
+connection that cannot prove it holds the key Kubiq handed this deployment is refused before it can
 send a `TerminalInput` or a `WriteProjectFile`.
 
 **The binary-embedded certificate becomes worth its cost for exactly one case v1 does not need to
@@ -143,14 +143,14 @@ an exec-time one cannot. Filed as `G111` in §14, deliberately deferred rather t
 
 ## 5. Getting the binary onto the host
 
-**Ubiq shells out to the system's own `ssh` and `scp`, rather than embedding an SSH client.**
+**Kubiq shells out to the system's own `ssh` and `scp`, rather than embedding an SSH client.**
 `D49` already sets this precedent for the local coordinator — a shell pane execs the real `zsh` or
-`bash` on the machine rather than Ubiq reimplementing shell startup — and the same trade holds here
+`bash` on the machine rather than Kubiq reimplementing shell startup — and the same trade holds here
 with a wider margin: `ssh` and `scp` on the user's machine already carry host-key verification,
 every authentication method the user has configured (keys, an agent, a certificate, a hardware
 token), `~/.ssh/config` aliases and jump hosts, for free and already trusted by the user. A Rust SSH
 crate would have to re-earn every one of those, and get them wrong in ways a user cannot fix from
-Ubiq's settings screen.
+Kubiq's settings screen.
 
 **This is the opposite call from `D43`, and the difference is worth naming rather than leaving as a
 tension.** `D43` rejected shelling to `git diff` because the host would then own a text format's every
@@ -164,21 +164,21 @@ back needs to be understood.
 
 1. **Probe.** `ssh <target> uname -sm` — one round trip — tells the coordinator which artifact to
    fetch: `linux-x86_64` covers the common case, `linux-arm64` the next most common.
-2. **Resolve the binary.** A drone build for that OS/arch, checked in this order: a copy Ubiq's own
+2. **Resolve the binary.** A drone build for that OS/arch, checked in this order: a copy Kubiq's own
    bundle already carries for the platforms it ships (once §12's packaging work exists); else a cache
-   under Ubiq's config root, keyed by version and target; else a fetch from this Ubiq build's own
-   GitHub release, named `ubiq-drone-<os>-<arch>` and pinned to the running Ubiq's own version tag —
+   under Kubiq's config root, keyed by version and target; else a fetch from this Kubiq build's own
+   GitHub release, named `kubiq-drone-<os>-<arch>` and pinned to the running Kubiq's own version tag —
    pinned because `DroneHello`'s `message_schema` is only useful if the two ends were never going to
    agree by accident.
 3. **Upload.** `scp` the binary to a throwaway path under the remote user's own cache directory —
    the remote-host analogue of the throwaway configuration directory `agent-manager` already mints
    locally per run.
-4. **Launch.** `ssh -R <remote_port>:localhost:<local_port> <target> '<path>/ubiq-drone'`, writing
+4. **Launch.** `ssh -R <remote_port>:localhost:<local_port> <target> '<path>/kubiq-drone'`, writing
    the public half of §4's keypair to that command's stdin once the process starts. `-R` is what
    makes the drone the one that dials — see §6 — and is why the exec line needs no address or port
    baked into it beyond what SSH itself is already forwarding.
 5. **Handshake.** The drone connects to its own `localhost:<remote_port>`, which `sshd` tunnels back
-   to the `<local_port>` Ubiq is listening on; `DroneHello`/`DroneReady` run; the project attaches.
+   to the `<local_port>` Kubiq is listening on; `DroneHello`/`DroneReady` run; the project attaches.
 
 Steps 1–3 are skipped on every deployment after the first to the same host and version — the drone's
 own throwaway path is checked before a fresh upload, the way a cached run directory already is
@@ -190,9 +190,9 @@ locally.
 which one their `sshd` allows.** `-R` (remote forward — §5's default) makes the *drone* the one that
 opens the socket, which means it takes no address to reach and works from behind whatever NAT put the
 remote host there in the first place; some `sshd` configurations disable `AllowTcpForwarding` for
-just this direction. `-L` (local forward) is the fallback: Ubiq forwards a local port to a port the
+just this direction. `-L` (local forward) is the fallback: Kubiq forwards a local port to a port the
 drone itself binds on the remote host's loopback interface, which needs no `GatewayPorts` setting and
-is the more commonly allowed direction. Ubiq tries `-R` first and falls back to `-L` on a refused
+is the more commonly allowed direction. Kubiq tries `-R` first and falls back to `-L` on a refused
 forward, which is one flag on the same `ssh` invocation and no second code path — both still ride one
 SSH session, and both still terminate when that session closes, which is the honest v1 boundary: a
 drone's connection is exactly as durable as the tunnel that carries it, the mirror of `D22`'s "closing
@@ -200,7 +200,7 @@ a pane kills its harness" applied to a machine rather than a process.
 
 **What this defers rather than builds.** A drone that must go on answering after the launching SSH
 session ends needs a transport that does not depend on that session at all — a direct outbound
-connection to an address Ubiq (or a relay) holds open, authenticated by §4's future embedded
+connection to an address Kubiq (or a relay) holds open, authenticated by §4's future embedded
 identity rather than an exec-time key. That is real infrastructure — a listener with a stable address,
 or a relay service, neither of which exists today — and is exactly the class of thing the "future
 features" list this proposal was handed already named: HTTPS, a custom relay, a mesh network over
@@ -280,10 +280,10 @@ every drone target is real work that should not gate shell and file access on la
 
 | | Question | Recommendation |
 |---|---|---|
-| a | SSH client: shell to the system `ssh`/`scp`, or a Rust SSH crate embedded in `ubiq-host`? | **Shell out**, `D49`'s precedent — every auth method, host-key check and `~/.ssh/config` alias for free. |
+| a | SSH client: shell to the system `ssh`/`scp`, or a Rust SSH crate embedded in `kubiq-host`? | **Shell out**, `D49`'s precedent — every auth method, host-key check and `~/.ssh/config` alias for free. |
 | b | Does a remote project get a new record type, or a field on `ProjectRecord`? | **A field.** `remote: Option<RemoteOrigin>` on the existing record; every message that resolves a project by id keeps working unchanged. |
 | c | Does a remote project persist in the catalogue the same as a local one? | **Yes** — same `projects.toml`, `D29`'s discipline, nothing project-shaped needs a second store. |
-| d | Where does the drone binary come from before Ubiq itself has a release pipeline? | **Genuinely blocked** — `just bundle` produces one unsigned local `.app` and nothing cross-compiles yet. Filed as `G108`, and this proposal's P1 cannot ship ahead of it. |
+| d | Where does the drone binary come from before Kubiq itself has a release pipeline? | **Genuinely blocked** — `just bundle` produces one unsigned local `.app` and nothing cross-compiles yet. Filed as `G108`, and this proposal's P1 cannot ship ahead of it. |
 | e | Auto-reconnect when the tunnel drops? | **Not in v1.** A dropped drone behaves like a dropped local process; reconnecting is a gesture, not a background retry loop. |
 | f | Does `-R` or `-L` try first? | **`-R` first**, falling back to `-L` on a refused forward — one flag, one code path, covers both common `sshd` policies. |
 
@@ -310,11 +310,11 @@ Named by the request that seeded this proposal, and kept out on purpose rather t
 
 - **An MCP/tool connector giving a local, `agent-manager`-composed harness a `remote-file` and a
   `remote-shell` tool.** This is a *consumer* of what P1–P3 build, not a drone feature — it is the
-  in-process MCP surface `crates/ubiq-host/src/mcp_server.rs` already carries the shape for
+  in-process MCP surface `crates/kubiq-host/src/mcp_server.rs` already carries the shape for
   (`agent-manager.md`'s `inproc-mcp`), pointed at a project's drone instead of its local files. The
   harness itself never leaves the local pane; only the two tools reach across. Worth its own proposal
   once P2 has shipped.
-- **Windows remote hosts.** `D3` in `_docs/backlog.md`'s Deferred table already says the same of Ubiq
+- **Windows remote hosts.** `D3` in `_docs/backlog.md`'s Deferred table already says the same of Kubiq
   itself: "the pseudo-terminal layer is cross-platform; nothing has been run there." A drone target
   is a cross-compilation problem before it is a design one.
 - **Transports beyond SSH** — HTTPS, a custom relay, a mesh network over WireGuard or Tailscale. §6
@@ -342,10 +342,10 @@ Named by the request that seeded this proposal, and kept out on purpose rather t
 
 | Id | Row |
 |---|---|
-| G107 | No SSH/remote transport exists; a project's shell and file access assume the same machine as `crates/ubiq-host` — `pty/` and `files/` reach the local filesystem directly |
+| G107 | No SSH/remote transport exists; a project's shell and file access assume the same machine as `crates/kubiq-host` — `pty/` and `files/` reach the local filesystem directly |
 | G108 | No cross-compiled drone artifact and no release pipeline producing per-arch binaries; `just bundle` builds one unsigned `.app` for the machine running it and nothing distributes a headless binary |
 | G109 | The message set carries no protocol or schema version — every message assumes both ends were compiled from the same commit, true today only because the bus is in-process |
-| G110 | `ubiq-host` has no SSH client and no path that shells to the system `ssh`/`scp`, so nothing in the tree can reach a second machine at all |
+| G110 | `kubiq-host` has no SSH client and no path that shells to the system `ssh`/`scp`, so nothing in the tree can reach a second machine at all |
 | G111 | A drone's identity is exec-time only, and its transport dies with the SSH session that launched it — no binary-embedded identity and no connection-independent transport exist for a drone meant to outlive its deployment |
 
 ## Related docs

@@ -1,0 +1,202 @@
+//! The window's element tree.
+//!
+//! `kit/` holds the reusable primitives; every other module here draws one area of the workbench.
+//! Nothing under `ui/` names the coordinator, a process, a path on disk or a file descriptor.
+//!
+//! Screen areas are free functions over the root view rather than views of their own, which keeps
+//! one place — `AppState` — responsible for state and redraws.
+
+pub mod a2ui;
+pub mod about;
+pub mod acp_capabilities;
+pub mod agents;
+pub mod all_projects;
+pub mod archify;
+pub mod ask;
+pub mod board;
+pub mod browser;
+pub mod browser_settings;
+pub mod catalog;
+pub mod chat;
+pub mod clone;
+pub mod conversation;
+pub mod db;
+pub mod devtools;
+pub mod dock;
+pub mod document;
+pub mod editor;
+pub mod empty;
+pub mod explorer;
+pub mod feedback;
+pub mod file_dialog;
+pub mod file_picker;
+pub mod git;
+pub mod help;
+pub mod help_target;
+pub mod hidden_agents_menu;
+pub mod ident;
+pub mod kb;
+pub mod kit;
+pub mod logs;
+pub mod mark;
+pub mod mdview;
+pub mod menus;
+pub mod mission;
+pub mod navigator;
+pub mod new_agent;
+pub mod new_mission;
+pub mod new_pane_menu;
+pub mod new_project_menu;
+pub mod notifications;
+pub mod onboarding;
+pub mod outline;
+pub mod overflow_menu;
+pub mod plan;
+pub mod project_face;
+pub mod project_menu;
+pub mod rail;
+pub mod remote_connect;
+pub mod remote_hosts;
+pub mod ribbon;
+pub mod run_tool_menu;
+pub mod search;
+pub mod settings;
+pub mod shell;
+pub mod sink;
+pub mod size;
+pub mod stats;
+pub mod status_bar;
+pub mod tab_menu;
+pub mod tasksrc;
+pub mod teams;
+pub mod terminal;
+pub mod themes;
+pub mod titlebar;
+pub mod tools;
+pub mod tunnels;
+pub mod viewer;
+pub mod web_view;
+pub mod work;
+
+use gpui::{App, ClickEvent, Context, ElementId, Entity, SharedString, Window};
+
+use crate::app::AppState;
+
+/// Adapt a method on the root view into the plain handler the kit expects.
+///
+/// The kit is view-agnostic on purpose, so it takes `Fn(&mut Window, &mut App)`; `cx.listener`
+/// produces a click handler instead. This bridges the two by capturing the view.
+pub fn handler(
+    view: &Entity<AppState>,
+    f: impl Fn(&mut AppState, &mut Window, &mut Context<AppState>) + 'static,
+) -> impl Fn(&mut Window, &mut App) + 'static {
+    let view = view.clone();
+    move |window, cx| {
+        view.update(cx, |this, cx| f(this, window, cx));
+    }
+}
+
+/// [`handler`], for the dismissal of an overlay something else can be painted over.
+///
+/// A modal's `on_mouse_down_out` fires on its own bounds, capture-phase, so a click inside a
+/// layer *above* it reads here as a click outside — see `crate::state::overlay`. This yields:
+/// while anything sits above `layer`, the click belongs to that layer and this one stays up. The
+/// same closure is the modal's × and its outside click both, and a covered modal's × is under
+/// another scrim anyway, so one guard serves both.
+///
+/// An overlay that nothing is ever painted over takes plain [`handler`].
+pub fn dismiss(
+    view: &Entity<AppState>,
+    layer: crate::state::Layer,
+    f: impl Fn(&mut AppState, &mut Window, &mut Context<AppState>) + 'static,
+) -> impl Fn(&mut Window, &mut App) + 'static {
+    let view = view.clone();
+    move |window, cx| {
+        view.update(cx, |this, cx| {
+            if this.covered(layer) {
+                return;
+            }
+            f(this, window, cx);
+        });
+    }
+}
+
+/// The same, for the kit's index-carrying callbacks: tab strips and menu rows.
+pub fn indexed(
+    view: &Entity<AppState>,
+    f: impl Fn(&mut AppState, usize, &mut Window, &mut Context<AppState>) + 'static,
+) -> impl Fn(usize, &mut Window, &mut App) + 'static {
+    let view = view.clone();
+    move |index, window, cx| {
+        view.update(cx, |this, cx| f(this, index, window, cx));
+    }
+}
+
+/// The same, for `kit::colour_picker`'s pick: a hue, a saturation and a value.
+pub fn hsv(
+    view: &Entity<AppState>,
+    f: impl Fn(&mut AppState, f32, f32, f32, &mut Window, &mut Context<AppState>) + 'static,
+) -> kit::HsvAction {
+    let view = view.clone();
+    std::rc::Rc::new(move |hue, sat, val, window, cx| {
+        view.update(cx, |this, cx| f(this, hue, sat, val, window, cx));
+    })
+}
+
+/// An element id for a row keyed by a ULID. A ULID is not a `u64`, so the tuple form the rest of
+/// the window uses cannot carry one.
+pub fn eid(prefix: &str, id: impl std::fmt::Display) -> ElementId {
+    ElementId::Name(format!("{prefix}-{id}").into())
+}
+
+/// The same for a row two ids deep — a step, which is one id inside another.
+pub fn eid2(prefix: &str, a: impl std::fmt::Display, b: impl std::fmt::Display) -> ElementId {
+    ElementId::Name(format!("{prefix}-{a}-{b}").into())
+}
+
+/// One line for the last answer to [`AppState::check_ssh_host`], plus the status colour to draw
+/// it in — shared by the Drones settings section and the connect modal's profile picker, which
+/// draw the same fact in two places rather than two facts.
+///
+/// A host with no drone reachable there is not a failure — it is `theme::warning`, on
+/// [`crate::theme`]'s rule that status rides colour, never wording alone; only `Err` earns
+/// `theme::danger`, and its sentence is the [`crate::app::remote_connect::ConnectFailure`] this
+/// crate already shows for every other failed reach, unchanged.
+pub fn host_check_line(
+    result: &Result<crate::app::ssh_connect::HostCheck, String>,
+) -> (String, gpui::Rgba) {
+    match result {
+        Ok(check) => match &check.drone {
+            Some(drone) => (
+                format!(
+                    "Reachable \u{2014} kubiq-drone {} ({}), {}ms",
+                    drone.version, drone.triple, check.elapsed_ms
+                ),
+                crate::theme::success(),
+            ),
+            None => (
+                "Reachable \u{2014} no drone installed".to_string(),
+                crate::theme::warning(),
+            ),
+        },
+        Err(reason) => (reason.clone(), crate::theme::danger()),
+    }
+}
+
+/// Follow a link written inside a rendered document.
+///
+/// `base` is the document's own path, which a relative target is resolved against; `None` is the
+/// project root, which is where a chat message and a task description are written from. A target
+/// that names a place is navigated to, the web and mail are handed to the operating system, and
+/// anything else is nothing at all — without this, a clicked `../src/app.rs` is handed to the
+/// operating system as a URL. The policy itself is [`AppState::follow_link`], which a markdown
+/// view's `LinkClicked` reaches directly.
+pub fn on_link(
+    app: Entity<AppState>,
+    base: Option<SharedString>,
+) -> impl Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static {
+    move |target, _, _, cx| {
+        let base = base.clone().unwrap_or_default();
+        app.update(cx, |this, cx| this.follow_link(&base, target, cx));
+    }
+}

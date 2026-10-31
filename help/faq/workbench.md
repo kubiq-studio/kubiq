@@ -31,6 +31,6 @@ The tab is pinned, and a pinned tab cannot be closed or hidden. Right-click it a
 
 Click the project's name in the title bar, or click its badge on the rail when the window holds several; **⌘1** to **⌘9** jump to the nth badge. Switching project keeps the mode you are on. See [The rail](workbench-rail).
 
-## Why did the bell's list empty after I restarted Ubiq?
+## Why did the bell's list empty after I restarted Kubiq?
 
-The notification list and any silences you set are kept only while Ubiq runs, so a restart clears both. The list also holds only the 200 most recent. See [Notifications](workbench-notifications).
+The notification list and any silences you set are kept only while Kubiq runs, so a restart clears both. The list also holds only the 200 most recent. See [Notifications](workbench-notifications).

@@ -1,0 +1,3602 @@
+//! One live agent's conversation, as the window holds it.
+//!
+//! The host is the only writer. What arrives is a stream of deltas — a chunk
+//! appends to the block it belongs to, a tool-call patch changes only the
+//! fields it names — and this is where they are folded into something a
+//! transcript can draw. Nothing here invents a line: the composer appends
+//! nothing when it sends, and the user's own turn appears when the harness
+//! echoes it back.
+//!
+//! What *is* derived here is presentation: the run pill, the activity badge,
+//! the context ring. Those are read off the stream rather than asked for,
+//! because a second round trip per token would be a round trip per token.
+
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+
+use std::sync::Arc;
+
+use gpui::{App, AppContext as _, Context, Entity, Pixels, SharedString, Subscription, px};
+use gpui_component::VirtualListScrollHandle;
+use gpui_component::text::TextViewState;
+use kubiq_proto::conversation::{
+    ConfigOption, ConfigValue, ConvContent, ConvUpdate, PermissionOption, PlanEntry,
+    RateLimitRecord, StopReason, Subagent, TokenSpend, ToolCallPatch, ToolCallRecord, ToolStatus,
+    UsageRecord,
+};
+use kubiq_proto::ids::AskId;
+use kubiq_proto::work::{Activity, AgentId};
+
+use super::status::Doing;
+
+/// One thing in a transcript, in the order it was said.
+///
+/// **Three of the four carry who said it.** A spawned subagent's prose, reasoning and tool calls
+/// all arrive on the same stream as the conversation's own, and a block that lost the attribution
+/// would be drawn as the main agent's own voice — which is exactly the transcript telling a lie
+/// about who spoke.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConvBlock {
+    /// What the user said, as the harness received it, and the files that went with it.
+    ///
+    /// **The attachments are remembered locally, because the harness does not echo them back as
+    /// attachments.** They leave as `@path` mentions inside `text` (`G171`), so a turn drawn from
+    /// the echo alone would have lost the chips the user put on it the moment Send was pressed.
+    /// They are carried across the send much as [`Conversation::prompt_preamble`] is — pushed onto
+    /// a queue when the turn goes out, popped by that turn's own real-text
+    /// [`ConvUpdate::UserChunk`] — and a sent attachment is not removable, so nothing here is ever
+    /// edited afterwards.
+    ///
+    /// `at` is when it was said, unix milliseconds — the host's, off the update, and `None` where
+    /// the source keeps no time (an ACP replay).
+    User {
+        text: String,
+        attached: Vec<Attachment>,
+        at: Option<i64>,
+    },
+    /// Assistant prose, markdown. `subagent` is `None` for the conversation itself. `at` is when
+    /// its first chunk was said, on the same terms as a user turn's.
+    Agent {
+        body: String,
+        subagent: Option<Subagent>,
+        at: Option<i64>,
+    },
+    /// Reasoning. `open` is whether the disclosure is drawn expanded — the same shape a tool
+    /// call's own `open` is, so a thinking block is toggled and drawn through the one pattern the
+    /// transcript already has for a collapsible block rather than a second one.
+    Thought {
+        body: String,
+        subagent: Option<Subagent>,
+        open: bool,
+    },
+    /// A tool call and whether its detail is open.
+    Tool { call: ToolCallRecord, open: bool },
+    /// Where the harness compacted: everything above is still what was said, but the agent no
+    /// longer holds it. Nobody said it, so it carries no attribution.
+    Compacted,
+}
+
+impl ConvBlock {
+    /// Which subagent produced this block, where one did.
+    pub fn subagent(&self) -> Option<&Subagent> {
+        match self {
+            ConvBlock::User { .. } | ConvBlock::Compacted => None,
+            ConvBlock::Agent { subagent, .. } | ConvBlock::Thought { subagent, .. } => {
+                subagent.as_ref()
+            }
+            ConvBlock::Tool { call, .. } => call.subagent.as_ref(),
+        }
+    }
+
+    /// Which *instance* produced it — the only identity a transcript can be filtered by, since
+    /// several subagents of one type are one type and several agents.
+    pub fn subagent_id(&self) -> Option<&str> {
+        self.subagent().map(|who| who.id.as_str())
+    }
+}
+
+/// One spawned subagent, as the switcher above the composer draws it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubagentTab {
+    /// The spawning tool call's id, which is what [`Conversation::viewing`] holds.
+    pub id: String,
+    pub name: String,
+    /// What it is doing, read off the spawning call rather than invented here. `None` where that
+    /// call is not in the transcript at all: nothing here knows what such an agent is up to, and
+    /// saying "running" would be a guess drawn as a fact.
+    pub status: Option<ToolStatus>,
+    /// The type the harness named — `"general-purpose"` — where it named one.
+    pub kind: Option<String>,
+    /// What this delegate is answering with, as the harness stamped its lines. Its own model, not
+    /// the parent's: a delegate launched on a smaller model is exactly what a reader is looking
+    /// for here.
+    pub model: Option<String>,
+    /// What effort it runs at, where the harness says. `None` on every harness today — nothing in
+    /// a stream states a per-delegate level — and drawn as nothing rather than borrowed from the
+    /// parent conversation, which would be a guess wearing a fact's clothes.
+    pub thinking: Option<String>,
+    /// How many permission requests this delegate is blocked on. Non-zero is what puts `need you`
+    /// on its row, in place of what it would otherwise say it was doing: a delegate waiting on a
+    /// human is not doing anything, and the question is the more useful of the two readings.
+    pub waiting: usize,
+    /// What this delegate's own last line says it is doing — the running tool's title, or the
+    /// last line of its prose or thinking (`Writing` / `Thinking` where that line is empty).
+    /// `None` where the transcript holds nothing of
+    /// its own yet: a delegate with no lines is not doing anything this window can name.
+    pub activity: Option<String>,
+    /// The same reading as [`Self::activity`], in the shared vocabulary rather than in the
+    /// harness's own words — which is what a mark can be drawn from and a prose title cannot.
+    /// [`Doing::Unknown`] where the delegate has no lines of its own yet, on the same rule:
+    /// nothing here guesses what an agent that has said nothing is busy with.
+    ///
+    /// It is the *activity* half only. Whether the delegate is still running is its spawning
+    /// call's word, and [`crate::state::status::delegate_status`] is where the two are put
+    /// together.
+    pub doing: Doing,
+}
+
+impl SubagentTab {
+    /// Who this delegate is, on the agent label's second line: its type, then its model as the
+    /// composer's chip cuts it (`Explore · haiku`), either skipped where the harness named none.
+    /// Its title is [`Self::name`]; this is what still tells two delegates of one title apart.
+    pub fn identity(&self, harness: &str) -> String {
+        [
+            self.kind.clone(),
+            self.model
+                .as_deref()
+                .map(|model| short_model_label(harness, model)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" \u{00b7} ")
+    }
+
+    /// Its handle: the parent's title, `↳`, and its type — what the tooltip ends on.
+    pub fn handle(&self, parent: &str) -> String {
+        match &self.kind {
+            Some(kind) => format!("{parent} \u{21b3} {kind}"),
+            None => format!("{parent} \u{21b3}"),
+        }
+    }
+}
+
+/// Which of the activity panels above the composer is open: the spawned-subagent
+/// list or the agent's own todo list. One at a time — both answer the same
+/// question, "what is the agent doing next", and the bar they hang from is a
+/// single line — so it is one switch, not two.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ActivityPanel {
+    #[default]
+    Subagents,
+    Todos,
+}
+
+/// The last thing a prose block says, as one plain line: its last line that says anything, with
+/// the markdown that leads it (a heading's `#`s, a quote's `>`, a list marker — each only before a
+/// space) and wraps it whole (`**…**`, `` `…` ``) taken off. Lines with nothing but markup — a
+/// closing fence, a rule — are passed over. `None` where no line says anything. The row it is read
+/// for truncates it, so no length is cut here.
+fn last_line(body: &str) -> Option<String> {
+    body.lines().rev().find_map(|line| {
+        let mut line = line.trim();
+        loop {
+            let before = line;
+            for marker in ["#", ">", "-", "*", "+"] {
+                if let Some(rest) = line.strip_prefix(marker) {
+                    let rest = rest.trim_start_matches(marker);
+                    if rest.starts_with(' ') {
+                        line = rest.trim_start();
+                    }
+                }
+            }
+            for wrap in ["**", "__", "`", "*", "_"] {
+                if line.len() > 2 * wrap.len() && line.starts_with(wrap) && line.ends_with(wrap) {
+                    line = line[wrap.len()..line.len() - wrap.len()].trim();
+                }
+            }
+            if line == before {
+                break;
+            }
+        }
+        line.chars()
+            .any(char::is_alphanumeric)
+            .then(|| line.to_string())
+    })
+}
+
+/// Fold one report's spend into a running total. Field by field, because a flow is summed and
+/// there is no other way to sum one; saturating, because a counter that wrapped would read as a
+/// conversation that spent nothing.
+fn accumulate(into: &mut TokenSpend, add: &TokenSpend) {
+    into.input = into.input.saturating_add(add.input);
+    into.output = into.output.saturating_add(add.output);
+    into.thinking = into.thinking.saturating_add(add.thinking);
+    into.cache_read = into.cache_read.saturating_add(add.cache_read);
+    into.cache_creation = into.cache_creation.saturating_add(add.cache_creation);
+}
+
+/// A permission the agent is waiting on.
+///
+/// `tool_call` is a *patch*, and upstream guarantees only its id: everything else may be absent.
+/// So what a prompt says about the operation is read off the call already in the transcript —
+/// [`Conversation::tool_block_index`] does that join — and this carries only what the request itself
+/// added.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pending {
+    pub request_id: String,
+    pub tool_call: ToolCallPatch,
+    pub options: Vec<PermissionOption>,
+}
+
+impl Pending {
+    /// The first option that reads as going ahead, or as refusing — what the keyboard answers
+    /// with. `kind` is a hint, so this picks by hint and echoes the `option_id` it found: nothing
+    /// here interprets an id.
+    pub fn option_for(&self, allow: bool) -> Option<&PermissionOption> {
+        self.options
+            .iter()
+            .find(|option| option.kind.allows() == allow)
+    }
+
+    /// The option that goes ahead *and* is remembered — the "all" of yes / no / all.
+    ///
+    /// `None` where the harness offered no such reading, and then nothing is drawn: a third
+    /// button that answered with the plain allow would be a control that lies about lasting.
+    /// **The harness remembers it, not Kubiq** — this is one more opaque `option_id` echoed back.
+    pub fn always_option(&self) -> Option<&PermissionOption> {
+        self.options
+            .iter()
+            .find(|option| option.kind.allows() && option.kind.remembers())
+    }
+}
+
+/// A prompt typed while a turn was already running, held until it ends.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueuedMessage {
+    pub id: u64,
+    pub text: String,
+}
+
+/// One file the composer will hand this conversation with the next prompt.
+///
+/// **Held here rather than in the composer's own field**, beside [`Conversation::draft`] and for
+/// its reason: unsent composer content belongs to the conversation, so it follows it from one
+/// surface to another rather than being lost when a tab is switched or a slot is handed on.
+///
+/// Nothing is read from a disk to build one: the size is whatever the picker already reported for
+/// that node, which is what the host said when it listed the folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Attachment {
+    /// Stable per conversation, on the same reasoning as [`QueuedMessage::id`]: an element id and
+    /// a removal name the same entry even as others are added or removed around it.
+    pub id: u64,
+    /// Project-relative — the one path shape the interface holds.
+    pub path: String,
+    /// How big it is, where anything said so. `None` is not guessed at: a tag with no size reads
+    /// as an ordinary file rather than as a small one.
+    pub size: Option<u64>,
+}
+
+/// Whether the agent is working or waiting for a turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Run {
+    Idle,
+    Working,
+    Ended,
+}
+
+impl Run {
+    pub fn label(self) -> &'static str {
+        match self {
+            Run::Idle => "Idle",
+            Run::Working => "Working",
+            Run::Ended => "Ended",
+        }
+    }
+}
+
+/// A live agent's conversation.
+#[derive(Clone, Debug)]
+pub struct Conversation {
+    pub id: AgentId,
+    /// The harness's display name, from the record the host minted.
+    pub harness: String,
+    /// The identity it runs as, empty when it resolved none and fell back to the user's own
+    /// home. Fixed for the conversation's life: a turn already taken was taken as somebody.
+    pub account: String,
+    pub blocks: Vec<ConvBlock>,
+    /// What the harness says it is answering with. Empty until it says.
+    pub model: Option<String>,
+    pub mode: Option<String>,
+    /// Context and cost, as of the last thing the harness reported **for the conversation itself**.
+    /// Occupancy is a level: it is replaced, never summed, and a subagent's report never reaches
+    /// it — a subagent repeats the parent's `used`/`size` unchanged, so applying one would move the
+    /// ring for a turn that did not touch the window.
+    pub usage: Option<UsageRecord>,
+    /// Every token this conversation has billed, folded as reports arrive. A flow, so it is summed
+    /// — the opposite of [`Self::usage`]. `None` until the harness counts anything, which is what
+    /// lets the footer draw nothing rather than a zero it made up.
+    pub spend: Option<TokenSpend>,
+    /// The same total, split by who spent it: the key is the subagent type, and the empty string is
+    /// the conversation's own turns. What answers "who burned the tokens" without leaving the chat.
+    pub spend_by_subagent: BTreeMap<String, TokenSpend>,
+    /// The same total again, split by **which** delegate spent it: the key is
+    /// [`Subagent::id`], the spawning call's id, so two delegates of one type are two entries.
+    /// What a single delegate's card and its transcript footer read — the type bucket above is an
+    /// aggregate, and drawing it on one instance's card showed every delegate of a type the same
+    /// number (`T-259`). Empty for a harness that names a type but no instance.
+    pub spend_by_delegate: BTreeMap<String, TokenSpend>,
+    /// How full the user's rate-limit windows are, as of the last thing the harness reported.
+    pub rate_limit: Option<RateLimitRecord>,
+    pub run: Run,
+    pub stop_reason: Option<StopReason>,
+    /// What the harness advertised: the model, the mode, the thinking level.
+    /// One list, because upstream has one mechanism for all of them.
+    pub config: Vec<ConfigOption>,
+    pub plan: Vec<PlanEntry>,
+    /// Every permission the agent is waiting on, in the order the requests arrived.
+    ///
+    /// **A list, not a slot.** Upstream may have several requests outstanding at once and expects
+    /// every one of them answered; there are no timeouts, so a request this dropped on the floor
+    /// would deadlock the turn with nothing on screen to say so. Keyed by `request_id`: a second
+    /// request under an id already here replaces it rather than queueing a duplicate.
+    pub pending: Vec<Pending>,
+    /// Every structured question this agent has asked the user, oldest first — see
+    /// [`crate::state::ask`].
+    ///
+    /// **Beside `pending` rather than in `blocks`**, and for its reason: an ask is a side channel
+    /// joined to the transcript by id, not something the harness said. It outlives its answer, so
+    /// an entry stays after it is confirmed and reads as what was chosen. Keyed by `ask_id`: a
+    /// second `AskUser` under an id already here replaces it rather than queueing a duplicate.
+    pub asks: Vec<crate::state::ask::AskRecord>,
+    /// The last thing that went wrong, until the next thing happens.
+    pub error: Option<String>,
+    /// Whether this harness takes a second turn at all.
+    pub accepts_input: bool,
+    /// What the composer holds, unsent.
+    pub draft: String,
+    /// Everything the user has sent from the composer, oldest first — kept here and not read back
+    /// out of the transcript, because a turn the harness errors on is never echoed and would
+    /// otherwise be lost to Arrow Up. In memory only.
+    pub sent: Vec<String>,
+    /// While Arrow Up is walking `sent`: the entry on screen, and the draft that was in the field
+    /// before browsing began, which walking forward past the newest entry restores.
+    pub recall: Option<(usize, String)>,
+    /// Whether the harness behind this conversation has actually launched. `false` from
+    /// registration until its own `Started` event arrives — the window between them is P3's
+    /// pending stage, where the composer offers a model picker instead of a running conversation.
+    pub launched: bool,
+    /// What's been picked before launch, optimistically, keyed by `config_id` — the host does not
+    /// echo a `SetAgentConfig` sent while a conversation is still pending, so this is what each
+    /// picker highlights until `launched` flips [`Self::launched`] true. An id with no entry means
+    /// "the harness's own default", which is also that `ConfigOption`'s own `current` field until
+    /// the user picks something else. A map rather than one field per knob: the host can grow a
+    /// fourth config id without a change here.
+    pub chosen: BTreeMap<String, String>,
+    /// Which of the pre-launch pickers (by `config_id`) is open, if any. Kept on the conversation
+    /// rather than the window's single `open_menu` — several conversations can be on screen
+    /// pending at once, each with its own pickers — but still one at a time per conversation, the
+    /// same rule the window's menus follow.
+    pub open_config: Option<String>,
+    /// Which spawned subagent's transcript is being read — its instance id — `None` being the
+    /// conversation's own turns. Beside [`Self::open_config`] and for its reason: several
+    /// conversations are on screen at once and each is read independently, so this cannot live on
+    /// the window. Read through [`Self::viewing_subagent`], which discounts an id the transcript
+    /// no longer has.
+    pub viewing: Option<String>,
+    /// Which collapsed runs of same-kind tool calls the reader has opened, keyed by the id of the
+    /// run's first call. A run of `READ`s is drawn as its last card plus one row standing for the
+    /// rest, and this says which of those rows have been asked to show what they stand for. Keyed
+    /// by call id rather than by block index because a run's position is a property of the
+    /// transcript's current shape and its first call's id is not.
+    pub open_groups: HashSet<String>,
+    /// Which thinking blocks the reader has toggled by hand, keyed by block index. A block in
+    /// here keeps whatever `open` it was last set to: auto-collapse (see [`Self::end_open_block`])
+    /// checks this before touching a thought's disclosure, so a reader who reopened a finished one
+    /// does not have it closed under them by the next chunk.
+    pub touched_thoughts: HashSet<usize>,
+    /// Which activity panel is open: the spawned-subagent list or the todo
+    /// list, one at a time. Collapsed by default and per conversation, beside
+    /// [`Self::viewing`] and for its reason: several conversations are on screen
+    /// at once, and each reader opens the ones they are following. `None` —
+    /// neither — is the resting state.
+    pub panel_open: Option<ActivityPanel>,
+    /// Prompts typed while a turn was already running, held until it ends. A stable
+    /// per-conversation id per entry, so an edit or a delete names the right one even if others
+    /// are added or removed around it.
+    pub queued: Vec<QueuedMessage>,
+    next_queued_id: u64,
+    /// Files picked for the next prompt, in the order they were picked. Unsent composer content,
+    /// so it sits beside [`Self::draft`] and [`Self::queued`] rather than being indexed by the
+    /// composer slot that happens to be drawing it.
+    pub attached: Vec<Attachment>,
+    next_attached_id: u64,
+    /// A preamble folded into the turn now in flight, to be taken back off the harness's echo of
+    /// it.
+    ///
+    /// The form's opening prompt and its subagent ceiling are sent to the harness in front of the
+    /// user's first message — instructions the agent must read, not something the user wrote — and
+    /// a transcript that opened with them would be putting words in the reader's mouth. The
+    /// harness echoes the turn it received, verbatim, so the only place to take them off again is
+    /// the echo. Set when the turn goes out and consumed by the next [`ConvUpdate::UserChunk`],
+    /// which is that turn's own echo; a harness that echoes nothing simply never spends it.
+    prompt_preamble: Option<String>,
+    /// The files folded into each turn now in flight, oldest first, to be hung on the harness's
+    /// echoes of them.
+    ///
+    /// [`Self::prompt_preamble`]'s mirror image, and here for its reason: what goes out is one
+    /// string of `@path` mentions (`G171`), so the echo that comes back says nothing about which
+    /// of those were tags the user placed. The transcript keeps them itself — pushed when a turn
+    /// leaves, popped by that turn's own [`ConvUpdate::UserChunk`] — because a turn that lost its
+    /// chips on Send would be the interface forgetting what the user just did.
+    ///
+    /// **A queue rather than one slot, and one entry per send even when it is empty.** Two Sends
+    /// can be in flight before either echoes; a single slot would let the second overwrite the
+    /// first, and the first turn would draw bare. An empty entry still goes on, because the queue
+    /// is only in step with the echoes if every send is on it — skipping a plain turn would hand
+    /// its position, and the next turn's files, to the wrong echo.
+    ///
+    /// Nothing in here outlives the turn that armed it: a run that can no longer echo discharges
+    /// the whole queue — see [`Self::discharge_attachments`].
+    prompt_attachments: VecDeque<Vec<Attachment>>,
+
+    /// Prompts this window sent whose echo has not arrived — bumped by [`Self::expect_turn`],
+    /// spent by each real echo. What makes an echo *owed*: only a send can owe one, so a turn end
+    /// nobody prompted (Codex's extra `TurnEnded` per steered prompt) owes nothing.
+    sent_unechoed: u32,
+    /// Whether the turn now running has echoed its prompt yet. Read by `TurnEnded` to decide
+    /// [`Self::echo_owed`].
+    turn_echoed: bool,
+    /// A turn ended cleanly before the echo of a prompt this window sent, so the next echo is that
+    /// prompt's, late — drawn, but not a turn opening. Every bridge synthesises the echo on the
+    /// thread that writes the prompt while the turn's end comes off the reader, so an instant turn
+    /// can end first.
+    echo_owed: bool,
+    /// History arrived before this launch's `Started` — agent output, or a user chunk no send of
+    /// this window accounts for: an ACP `session/load` replaying, which closes with no
+    /// `TurnEnded`. `Started` sets the run back to idle when it did.
+    replayed: bool,
+
+    /// The highest sequence number applied. An update that does not follow it
+    /// is a gap, and a gap is worth saying rather than silently drawing.
+    seq: u64,
+    /// Which block each tool call is, so a patch reaches it in one lookup
+    /// rather than a scan of the whole transcript.
+    tools: HashMap<String, usize>,
+    /// The message currently being appended to, and which block it is. A
+    /// change of id starts a new block — that is what a message id is for.
+    open: Option<(String, usize)>,
+    /// The two readings of `blocks` the transcript asks for every frame, kept rather than scanned:
+    /// which blocks are on screen, and which subagents exist at all. See [`BlockIndex`].
+    index: RefCell<BlockIndex>,
+    /// The last block's markdown, as a `SharedString` the renderer clones for free. One slot,
+    /// because only the block being streamed into grows: a finished block is cloned once when the
+    /// tail moves past it and never again.
+    ///
+    /// ponytail: one slot. A per-block map if a static transcript ever measures slow.
+    markdown: RefCell<Option<(usize, SharedString)>>,
+    /// Whether a draw is already scheduled for this conversation — see [`Self::notify_due`].
+    notify_pending: Cell<bool>,
+}
+
+/// What a frame reads off `blocks`, cached so it is scanned when the transcript grows rather than
+/// once per frame per block.
+///
+/// **Keyed by length and by who is being read**, which is sound because `blocks` is append-only and
+/// a block's body growing cannot change either answer: a chunk that lengthens the tail leaves both
+/// the visible set and the subagent set exactly as they were.
+#[derive(Clone, Debug, Default)]
+struct BlockIndex {
+    /// The `blocks.len()` this was built from.
+    len: usize,
+    /// The `viewing` it was built for — the raw field, stale id included.
+    viewing: Option<String>,
+    /// Which blocks whoever is being read sees, by index into `blocks`. An `Arc` so a frame takes
+    /// a reference count rather than a copy.
+    visible: Arc<Vec<usize>>,
+    /// Every subagent that has said anything.
+    subagents: HashSet<String>,
+}
+
+impl Conversation {
+    pub fn new(id: AgentId, harness: String, account: String) -> Self {
+        Self {
+            id,
+            harness,
+            account,
+            blocks: Vec::new(),
+            model: None,
+            mode: None,
+            usage: None,
+            spend: None,
+            spend_by_subagent: BTreeMap::new(),
+            spend_by_delegate: BTreeMap::new(),
+            rate_limit: None,
+            run: Run::Idle,
+            stop_reason: None,
+            config: Vec::new(),
+            plan: Vec::new(),
+            pending: Vec::new(),
+            asks: Vec::new(),
+            error: None,
+            accepts_input: true,
+            draft: String::new(),
+            sent: Vec::new(),
+            recall: None,
+            launched: false,
+            chosen: BTreeMap::new(),
+            open_config: None,
+            viewing: None,
+            open_groups: HashSet::new(),
+            touched_thoughts: HashSet::new(),
+            panel_open: None,
+            queued: Vec::new(),
+            next_queued_id: 0,
+            attached: Vec::new(),
+            next_attached_id: 0,
+            prompt_preamble: None,
+            prompt_attachments: VecDeque::new(),
+            sent_unechoed: 0,
+            turn_echoed: false,
+            echo_owed: false,
+            replayed: false,
+            seq: 0,
+            tools: HashMap::new(),
+            open: None,
+            index: RefCell::default(),
+            markdown: RefCell::default(),
+            notify_pending: Cell::new(false),
+        }
+    }
+
+    /// The block index, rebuilt only if the transcript grew or the reader switched transcripts.
+    fn index(&self) -> std::cell::Ref<'_, BlockIndex> {
+        {
+            let mut index = self.index.borrow_mut();
+            if index.len != self.blocks.len() || index.viewing != self.viewing {
+                index.len = self.blocks.len();
+                index.viewing = self.viewing.clone();
+                index.subagents.clear();
+                index.subagents.extend(
+                    self.blocks
+                        .iter()
+                        .filter_map(|block| block.subagent_id().map(str::to_string)),
+                );
+                // The same discounting [`Self::viewing_subagent`] does, resolved here because the
+                // set it needs is the one being built.
+                let viewing = self
+                    .viewing
+                    .as_deref()
+                    .filter(|id| index.subagents.contains(*id));
+                index.visible = Arc::new(
+                    self.blocks
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, block)| block.subagent_id() == viewing)
+                        .map(|(ix, _)| ix)
+                        .collect(),
+                );
+            }
+        }
+        self.index.borrow()
+    }
+
+    /// The markdown of block `ix`, as a `SharedString`, without copying a streaming tail once per
+    /// frame. Rebuilt only when the body actually changed — a body only ever grows, so an equal
+    /// length is an unchanged block.
+    pub fn markdown(&self, ix: usize, body: &str) -> SharedString {
+        let mut slot = self.markdown.borrow_mut();
+        if let Some((at, text)) = slot.as_ref()
+            && *at == ix
+            && text.len() == body.len()
+        {
+            return text.clone();
+        }
+        let text = SharedString::from(body.to_string());
+        *slot = Some((ix, text.clone()));
+        text
+    }
+
+    /// Whether this conversation's next draw is due, or a frame is already coming that will do it.
+    ///
+    /// A streamed turn arrives as one delta per token, and each one marking the whole window dirty
+    /// is the clock the whole interface runs at. So the first delta of a burst answers `true` and
+    /// is drawn; the rest answer `false`.
+    ///
+    /// **Nothing is dropped, including the last delta.** Answering `false` means a frame is
+    /// already on its way, and every delta since has already been folded into this record — so
+    /// that frame draws them whether they asked for it or not. The flag is cleared by
+    /// [`Self::drawn`], which the frame calls, so the delta after it starts the cycle again.
+    pub fn notify_due(&self) -> bool {
+        !self.notify_pending.replace(true)
+    }
+
+    /// A frame has drawn this transcript: the next delta asks for one of its own.
+    pub fn drawn(&self) {
+        self.notify_pending.set(false);
+    }
+
+    /// What a subagent is called: the title of the `Task` call that spawned it — the bridge
+    /// titles that with the task's own description, "Formal greeting agent" — falling back to its
+    /// type when no such call is in the transcript, and to the raw id when the harness named
+    /// neither.
+    ///
+    /// The one place the join is done. Two callers resolving it apart would eventually disagree
+    /// about what the same agent is called.
+    pub fn subagent_name(&self, id: &str) -> String {
+        if let Some(ConvBlock::Tool { call, .. }) = self
+            .blocks
+            .iter()
+            .find(|block| matches!(block, ConvBlock::Tool { call, .. } if call.id == id))
+        {
+            return call.title.clone();
+        }
+        self.subagent_stamps(id)
+            .find_map(|who| who.kind.clone())
+            .unwrap_or_else(|| id.to_string())
+    }
+
+    /// Every subagent this conversation has spawned, in the order it first spoke — one tag each in
+    /// the switcher. Distinct by instance, so three `general-purpose` agents are three tags.
+    ///
+    /// Status comes from the spawning call, which is the same `ToolStatus` the transcript already
+    /// draws for it; a subagent whose spawning call is not in the transcript has no status at all,
+    /// and the row says so rather than claiming one.
+    pub fn subagents(&self) -> Vec<SubagentTab> {
+        let mut tabs: Vec<SubagentTab> = Vec::new();
+        for id in self.blocks.iter().filter_map(ConvBlock::subagent_id) {
+            if tabs.iter().any(|tab| tab.id == id) {
+                continue;
+            }
+            tabs.push(SubagentTab {
+                id: id.to_string(),
+                name: self.subagent_name(id),
+                status: self.subagent_status(id),
+                kind: self.subagent_stamps(id).find_map(|who| who.kind.clone()),
+                model: self.subagent_stamps(id).find_map(|who| who.model.clone()),
+                thinking: self
+                    .subagent_stamps(id)
+                    .find_map(|who| who.thinking.clone()),
+                waiting: self.pending_count(Some(id)),
+                activity: self.subagent_activity(id),
+                doing: self.subagent_doing(id),
+            });
+        }
+        tabs
+    }
+
+    /// What this delegate's own last line says it is doing — the running tool's title, or the
+    /// last line of its prose or thinking, which says more than the words `Writing` / `Thinking`
+    /// the status chip already draws (those stand in only for an empty line). `None` where the transcript holds nothing of
+    /// its own yet: a delegate with no lines is not doing anything this window can name.
+    ///
+    /// Read off `ConvBlock::subagent_id`, so the spawning `Task` call itself — whose id equals
+    /// this delegate's id but whose own attribution is the parent's — is never mistaken for one of
+    /// the delegate's own lines.
+    pub fn subagent_activity(&self, id: &str) -> Option<String> {
+        self.blocks
+            .iter()
+            .rev()
+            .find(|block| block.subagent_id() == Some(id))
+            .and_then(|block| match block {
+                ConvBlock::Tool { call, .. } => Some(call.title.clone()),
+                ConvBlock::Thought { body, .. } => {
+                    Some(last_line(body).unwrap_or_else(|| "Thinking".to_string()))
+                }
+                ConvBlock::Agent { body, .. } => {
+                    Some(last_line(body).unwrap_or_else(|| "Writing".to_string()))
+                }
+                ConvBlock::User { .. } | ConvBlock::Compacted => None,
+            })
+    }
+
+    /// The same last line [`Self::subagent_activity`] reads, in the shared [`Doing`] vocabulary:
+    /// a tool line is [`Doing::Tools`], a thought is [`Doing::Thinking`], prose is
+    /// [`Doing::Writing`], and a delegate with no lines of its own is [`Doing::Unknown`].
+    ///
+    /// Two readings of one scan rather than one reading used two ways: the mark needs the kind and
+    /// the row needs the words, and deriving one from the other would mean matching on a title the
+    /// harness wrote.
+    pub fn subagent_doing(&self, id: &str) -> Doing {
+        self.blocks
+            .iter()
+            .rev()
+            .find(|block| block.subagent_id() == Some(id))
+            .map_or(Doing::Unknown, |block| match block {
+                ConvBlock::Tool { .. } => Doing::Tools,
+                ConvBlock::Thought { .. } => Doing::Thinking,
+                ConvBlock::Agent { .. } => Doing::Writing,
+                ConvBlock::User { .. } | ConvBlock::Compacted => Doing::Unknown,
+            })
+    }
+
+    /// Every stamp this delegate's own lines carry, in order — its kind, and what it was launched
+    /// to answer with.
+    ///
+    /// Each field is read from the first line that *names* it rather than from the first line
+    /// outright: the harness resolves a delegate's model once, at launch, and repeats it on every
+    /// line of that delegate, so a line that names none is simply not the one to read it from.
+    fn subagent_stamps(&self, id: &str) -> impl Iterator<Item = &Subagent> {
+        self.blocks
+            .iter()
+            .filter_map(ConvBlock::subagent)
+            .filter(move |who| who.id == id)
+    }
+
+    fn subagent_status(&self, id: &str) -> Option<ToolStatus> {
+        self.blocks.iter().find_map(|block| match block {
+            ConvBlock::Tool { call, .. } if call.id == id => Some(call.status),
+            _ => None,
+        })
+    }
+
+    /// Whether anything in the transcript was said by this subagent — which is the only
+    /// evidence the window has that the agent exists at all. What makes a delegation block a way
+    /// in to a second transcript rather than a dead label.
+    /// A set lookup rather than a scan: this is asked once per `Delegate` block per frame, and a
+    /// scan there is the transcript read once per delegation.
+    pub fn has_subagent(&self, id: &str) -> bool {
+        self.index().subagents.contains(id)
+    }
+
+    /// Whose transcript an ask arriving *now* belongs in: the spawned subagent that is speaking,
+    /// or `None` for the conversation's own turns.
+    ///
+    /// **Because an ask names no subagent and cannot.** A conversation and everything it spawns
+    /// share one `AgentId`, and the host's `kubiq-ask` listener is keyed by that id alone — so the
+    /// only evidence of who called the tool is who was talking when the call landed. That is the
+    /// last block, and it counts only while that subagent is still running: a delegate whose
+    /// spawning `Task` call has finished is not the one asking, and attributing the ask to it
+    /// would file the question in a transcript nobody is reading.
+    pub fn asking_subagent(&self) -> Option<String> {
+        let id = self.blocks.last()?.subagent_id()?;
+        match self.subagent_status(id) {
+            Some(ToolStatus::Pending | ToolStatus::InProgress) | None => Some(id.to_string()),
+            Some(ToolStatus::Completed | ToolStatus::Failed) => None,
+        }
+    }
+
+    /// Whose transcript is on screen, once a stale id is discounted: a subagent that has gone from
+    /// the transcript — a resume, a cleared history — falls back to the main agent rather than
+    /// leaving the reader looking at nothing.
+    pub fn viewing_subagent(&self) -> Option<&str> {
+        let id = self.viewing.as_deref()?;
+        self.has_subagent(id).then_some(id)
+    }
+
+    /// The blocks to draw, for whoever is being read — as indices, because an element id and the
+    /// tool-toggle listener both key off a block's position in `blocks`.
+    ///
+    /// One transcript at a time: the main agent's own turns exclude every subagent's, and a
+    /// subagent's include only its own. The rule lives here so the switcher and the transcript
+    /// cannot disagree about it.
+    ///
+    /// Cached in [`BlockIndex`] and handed out as an `Arc`, so a frame costs a reference count
+    /// rather than a filtered copy of the whole transcript.
+    pub fn visible_blocks(&self) -> Arc<Vec<usize>> {
+        Arc::clone(&self.index().visible)
+    }
+
+    /// The badge the sidebar and the column header draw.
+    ///
+    /// Derived rather than carried: an activity is a reading of the last
+    /// thing that happened, and the stream already says what that was.
+    pub fn activity(&self) -> Activity {
+        if !self.pending.is_empty() {
+            return Activity::NeedsYou;
+        }
+        match (self.run, self.stop_reason) {
+            (Run::Ended, Some(StopReason::Failed)) => Activity::Failed,
+            (Run::Ended, _) => Activity::Ended,
+            // Never run a turn: either a pending conversation whose harness has not launched yet,
+            // or one that just has — read as still getting itself going, matching the
+            // `Activity::Thinking` the host reports at registration, rather than as ended before
+            // it began.
+            (Run::Idle, None) => Activity::Thinking,
+            (Run::Idle, Some(_)) => Activity::Ended,
+            (Run::Working, _) => match self.blocks.last() {
+                Some(ConvBlock::Thought { .. }) => Activity::Thinking,
+                Some(ConvBlock::Tool { .. }) => Activity::Tools,
+                _ => Activity::Writing,
+            },
+        }
+    }
+
+    /// The percentage the ring draws, when a window is known.
+    pub fn context_pct(&self) -> Option<u8> {
+        self.usage.as_ref().and_then(UsageRecord::context_pct)
+    }
+
+    /// Tokens in the context, as a count rather than a ratio.
+    pub fn tokens(&self) -> u64 {
+        self.usage.as_ref().map_or(0, |usage| usage.used)
+    }
+
+    /// What the turn cost so far, where the harness reports money.
+    pub fn cost_usd(&self) -> Option<f64> {
+        self.usage.as_ref().and_then(|usage| usage.cost_usd)
+    }
+
+    /// Every token this conversation has spent, its subagents included, accumulated over every
+    /// report rather than read off the last one. Not the ring: [`Self::tokens`] is what still
+    /// occupies the context window, and this is what has gone through it. `None` means the harness
+    /// counted nothing, which the footer draws as nothing rather than as a zero it made up.
+    pub fn total_tokens(&self) -> Option<u64> {
+        self.spend.map(|spend| spend.total())
+    }
+
+    /// The context-re-use part of that total, where it is reported. Cache *creation* is not in it:
+    /// that is context paid for once, not context saved.
+    pub fn cached_tokens(&self) -> Option<u64> {
+        self.spend.map(|spend| spend.cached())
+    }
+
+    /// What each spawned subagent type spent, biggest first, and never the conversation's own
+    /// entry — this is the breakdown beside the total, not a second copy of it.
+    pub fn subagent_spend(&self) -> Vec<(&str, u64)> {
+        let mut rows: Vec<(&str, u64)> = self
+            .spend_by_subagent
+            .iter()
+            .filter(|(name, spend)| !name.is_empty() && spend.total() > 0)
+            .map(|(name, spend)| (name.as_str(), spend.total()))
+            .collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+        rows
+    }
+
+    /// How full the rolling five-hour rate-limit window is, where the harness reports one.
+    pub fn rate_limit_five_hour_pct(&self) -> Option<u8> {
+        self.rate_limit.as_ref().and_then(|r| r.five_hour_pct)
+    }
+
+    /// Say that the turn now going out carries `preamble` in front of what the user typed, so the
+    /// echo of it can be read back as the user's own words. Empty is nothing to take off.
+    pub fn expect_preamble(&mut self, preamble: &str) {
+        if !preamble.is_empty() {
+            self.prompt_preamble = Some(preamble.to_string());
+        }
+    }
+
+    /// Take the preamble back off the harness's echo, if this is the echo it was folded into.
+    ///
+    /// Spent whether or not it matched: it belongs to exactly one turn, and a harness that
+    /// reformats what it echoes must not leave it armed for the next one, where it would cut the
+    /// front off a message the user really did write.
+    ///
+    /// Failing that, a subagent directive is taken off whatever turn it opens: a `session/load`
+    /// replay hands back a first turn with the preamble still on it and no send here armed one,
+    /// and the directive is this interface's own words, never the user's.
+    fn strip_preamble(&mut self, text: String) -> String {
+        if let Some(preamble) = self.prompt_preamble.take()
+            && let Some(rest) = text.strip_prefix(&preamble)
+        {
+            return rest.trim_start().to_string();
+        }
+        match super::new_agent::strip_subagent_directive(&text) {
+            Some(rest) => rest.to_string(),
+            None => text,
+        }
+    }
+
+    /// Whether a `seq` follows the last one applied.
+    ///
+    /// The bus promises order per agent, so a gap means a message was lost
+    /// rather than reordered — worth reporting, and worth applying anyway,
+    /// since half a transcript beats none.
+    pub fn is_next(&self, seq: u64) -> bool {
+        seq == self.seq + 1
+    }
+
+    /// Fold one delta in.
+    pub fn apply(&mut self, seq: u64, update: ConvUpdate) {
+        self.seq = self.seq.max(seq);
+        // Model discovery can land after a fast launch failure; it says nothing about the failure.
+        if !matches!(update, ConvUpdate::ConfigOptions(_)) {
+            self.error = None;
+        }
+
+        match update {
+            ConvUpdate::Started { model, mode, .. } => {
+                self.model = model;
+                self.mode = mode;
+                // An ACP `session/load` replays the whole history ahead of its handshake and
+                // closes it with this, not a `TurnEnded`: nothing it opened is running. Claude
+                // Code's first echo precedes its `Started` too, but a send of this window accounts
+                // for it, so that live turn does not mark a replay.
+                if !self.launched && self.replayed {
+                    self.run = Run::Idle;
+                    self.turn_echoed = false;
+                    self.echo_owed = false;
+                }
+                self.replayed = false;
+                self.launched = true;
+                // Whatever was replayed is closed: a live reply starts a new, dated block rather
+                // than appending to the last undated one.
+                self.end_open_thought();
+                self.open = None;
+            }
+
+            ConvUpdate::UserChunk { content, at, .. } => {
+                // A user turn always starts a block: the harness echoes one
+                // per prompt, and merging two would merge two questions.
+                self.end_open_thought();
+                self.open = None;
+                let mut opens = true;
+                if let Some(text) = text_of(&content) {
+                    let said = self.strip_preamble(text);
+                    // Claude Code echoes a synthetic user-role message when a turn is cancelled —
+                    // `[Request interrupted by user]`, or the tool-use variant. Nobody typed it, so
+                    // it is dropped rather than pushed: not drawn as a message, and not there for
+                    // the sent history to hand back as if it were the last thing the user said.
+                    // It is the cancelled turn's trailer, often behind its end, so it opens nothing.
+                    opens = !is_cancelled_turn_marker(&said);
+                    if opens {
+                        // Spent only by the *real* turn. A chunk with no text in it and a
+                        // synthetic interrupt echo are both this turn's harness talking, not this
+                        // turn — taking the front of the queue for either would draw the real
+                        // message bare a frame later. A turn that never echoes at all is
+                        // discharged instead, so nothing here is left for a later one.
+                        let attached = self.prompt_attachments.pop_front().unwrap_or_default();
+                        self.blocks.push(ConvBlock::User {
+                            text: said,
+                            attached,
+                            at,
+                        });
+                    }
+                }
+                if opens {
+                    let sent = self.sent_unechoed > 0;
+                    self.sent_unechoed = self.sent_unechoed.saturating_sub(1);
+                    if std::mem::take(&mut self.echo_owed) {
+                        // The late echo of a turn that already ended is drawn above but reopens
+                        // nothing: no `TurnEnded` is coming to close it again.
+                        opens = false;
+                    } else if !self.launched && !sent {
+                        self.replayed = true;
+                    }
+                }
+                if opens {
+                    self.turn_echoed = true;
+                    self.run = Run::Working;
+                }
+            }
+            ConvUpdate::AgentChunk {
+                content,
+                message_id,
+                subagent,
+                at,
+            } => {
+                self.agent_working();
+                self.append(message_id, content, false, subagent, at);
+            }
+            ConvUpdate::ThoughtChunk {
+                content,
+                message_id,
+                subagent,
+            } => {
+                self.agent_working();
+                self.append(message_id, content, true, subagent, None);
+            }
+
+            ConvUpdate::ToolCall(call) => {
+                self.agent_working();
+                self.end_open_thought();
+                self.open = None;
+                self.tools.insert(call.id.clone(), self.blocks.len());
+                self.blocks.push(ConvBlock::Tool { call, open: false });
+            }
+            ConvUpdate::ToolCallUpdate(patch) => self.patch_tool(patch),
+
+            ConvUpdate::Plan(entries) => self.plan = entries,
+            ConvUpdate::ConfigOptions(options) => {
+                self.config = options;
+                // A model pick makes the host re-send `ConfigOptions` with e.g. the thinking
+                // levels recomputed for the newly chosen model — a level the old model accepted
+                // may not exist under the new one. Drop any held pick the fresh options no longer
+                // back, and drop picks for ids that vanished entirely, so a stale choice never
+                // survives into launch.
+                let config = &self.config;
+                self.chosen.retain(|config_id, value| {
+                    config
+                        .iter()
+                        .find(|opt| &opt.id == config_id)
+                        .is_some_and(|opt| match &opt.value {
+                            ConfigValue::Select { choices, .. } => {
+                                choices.iter().any(|choice| &choice.value == value)
+                            }
+                            ConfigValue::Flag { .. } => true,
+                        })
+                });
+            }
+            ConvUpdate::ModeChanged { mode_id } => self.mode = Some(mode_id),
+            // The host puts a harness's own title on `WorkAgent::title` and says so with an
+            // `AgentChanged` (T-283), under the rename-first precedence only it can apply; the
+            // transcript has nothing to keep of it.
+            ConvUpdate::Title(_) => {}
+            ConvUpdate::Compacted => {
+                // A divider ends whatever was open above it: the next chunk is the agent talking
+                // about a context it no longer shares with the one before.
+                self.end_open_thought();
+                self.open = None;
+                self.blocks.push(ConvBlock::Compacted);
+            }
+
+            ConvUpdate::Usage(usage) => {
+                // Spend is a flow, and every report's flow counts — the conversation's own and
+                // each subagent's, kept apart as well as together.
+                if let Some(spend) = usage.spend {
+                    accumulate(self.spend.get_or_insert_default(), &spend);
+                    accumulate(
+                        self.spend_by_subagent
+                            .entry(usage.subagent.clone().unwrap_or_default())
+                            .or_default(),
+                        &spend,
+                    );
+                    // And once more by instance, where the harness said which delegate it was:
+                    // the type bucket above answers "what do general-purpose agents cost me",
+                    // this one answers "what did *this* one cost".
+                    if let Some(id) = usage.subagent_id.clone() {
+                        accumulate(self.spend_by_delegate.entry(id).or_default(), &spend);
+                    }
+                }
+                // A subagent's report repeats the parent's occupancy and names the subagent's own
+                // model. Neither is news about this conversation: it is a spend row, and it stops
+                // here rather than moving the ring or renaming the column. Either stamp says so — a
+                // Codex delegate names its instance and often no type.
+                if usage.subagent.is_some() || usage.subagent_id.is_some() {
+                    return;
+                }
+                // A model is only named where the harness named it: a usage
+                // report for a fallback model must not rename the column.
+                if usage.model.is_some() {
+                    self.model = usage.model.clone();
+                }
+                self.usage = Some(usage);
+            }
+
+            ConvUpdate::RateLimit(record) => self.rate_limit = Some(record),
+
+            ConvUpdate::PermissionRequest {
+                request_id,
+                tool_call,
+                options,
+            } => {
+                let request = Pending {
+                    request_id,
+                    tool_call,
+                    options,
+                };
+                // Keyed by id, appended otherwise: arrival order is what the transcript and the
+                // keyboard both read as "the oldest one still waiting".
+                match self
+                    .pending
+                    .iter_mut()
+                    .find(|held| held.request_id == request.request_id)
+                {
+                    Some(held) => *held = request,
+                    None => self.pending.push(request),
+                }
+            }
+
+            ConvUpdate::TurnEnded { stop_reason, error } => {
+                self.end_open_thought();
+                self.open = None;
+                self.run = Run::Idle;
+                // A turn that broke never echoed and never will, so whatever it armed is
+                // discharged with it. A turn that ended cleanly is left alone: its own echo may
+                // still be a frame behind the end, and a send made while it ran is still in
+                // flight behind it.
+                let broke = matches!(stop_reason, StopReason::Failed) || error.is_some();
+                if broke {
+                    self.discharge_attachments();
+                }
+                // The same bargain for the run: a clean end that has not echoed a send of this
+                // window yet still owes that echo, and it must not reopen the turn. One at most,
+                // and every other unechoed send is forgotten here, so a lost echo cannot carry an
+                // off-by-one into later turns. A broken end owes nothing.
+                self.echo_owed = !broke && !self.turn_echoed && self.sent_unechoed > 0;
+                self.sent_unechoed = u32::from(self.echo_owed);
+                self.turn_echoed = false;
+                self.stop_reason = Some(stop_reason);
+                self.error = error;
+            }
+        }
+    }
+
+    /// Whether the harness behind this conversation is actually up — a live process, not a
+    /// transcript left after an unload or an end, and not a pending form that has never launched.
+    ///
+    /// Closing a project asks about these the way it asks about terminals still running, because
+    /// dropping the project stops them.
+    pub fn running(&self) -> bool {
+        self.launched && self.run != Run::Ended && self.accepts_input
+    }
+
+    /// Say that a prompt is leaving this window, so its echo is owed — see
+    /// [`Self::sent_unechoed`]. Called by the one place `PromptAgent` is built.
+    pub fn expect_turn(&mut self) {
+        self.sent_unechoed += 1;
+    }
+
+    /// The agent itself is talking, so a turn is running. Before this launch's `Started` it can
+    /// only be history an ACP `session/load` is replaying — see [`Self::replayed`].
+    fn agent_working(&mut self) {
+        self.run = Run::Working;
+        if !self.launched {
+            self.replayed = true;
+        }
+    }
+
+    /// Forget the turn bookkeeping, because no turn of this run can still end or echo.
+    fn forget_turn(&mut self) {
+        self.sent_unechoed = 0;
+        self.turn_echoed = false;
+        self.echo_owed = false;
+        self.replayed = false;
+    }
+
+    /// The harness has gone.
+    pub fn ended(&mut self, stop_reason: StopReason) {
+        self.end_open_thought();
+        self.open = None;
+        self.pending.clear();
+        self.discharge_attachments();
+        self.forget_turn();
+        self.run = Run::Ended;
+        self.stop_reason = Some(stop_reason);
+    }
+
+    /// The harness is gone but the conversation is not: back to the state it had before its first
+    /// turn, so the pickers return and the next prompt — or a resume — starts a new process.
+    /// `blocks` stays exactly as it is; only a resumed harness's own transcript will grow it
+    /// further.
+    pub fn unloaded(&mut self) {
+        self.run = Run::Idle;
+        self.launched = false;
+        self.open_config = None;
+        self.pending.clear();
+        self.discharge_attachments();
+        self.forget_turn();
+    }
+
+    /// Forget one request, because it has been answered. Idempotent: an answer that raced the
+    /// harness's own withdrawal of the request finds nothing and does nothing.
+    pub fn answered(&mut self, request_id: &str) {
+        self.pending.retain(|held| held.request_id != request_id);
+    }
+
+    /// The oldest request still waiting — what the keyboard answers, and what the strip above the
+    /// footer names when several are up.
+    pub fn oldest_pending(&self) -> Option<&Pending> {
+        self.pending.first()
+    }
+
+    /// File a structured question the agent just asked, replacing any under the same id — a
+    /// re-sent ask is the same question, not a second one.
+    pub fn file_ask(&mut self, ask: crate::state::ask::AskRecord) {
+        match self.asks.iter_mut().find(|held| held.ask_id == ask.ask_id) {
+            Some(held) => *held = ask,
+            None => self.asks.push(ask),
+        }
+    }
+
+    pub fn ask(&self, ask_id: AskId) -> Option<&crate::state::ask::AskRecord> {
+        self.asks.iter().find(|held| held.ask_id == ask_id)
+    }
+
+    pub fn ask_mut(&mut self, ask_id: AskId) -> Option<&mut crate::state::ask::AskRecord> {
+        self.asks.iter_mut().find(|held| held.ask_id == ask_id)
+    }
+
+    /// Which block a tool call is drawn as, if the transcript holds it at all. The join a
+    /// permission prompt needs: a request carries a call id and nothing else it can rely on.
+    pub fn tool_block_index(&self, id: &str) -> Option<usize> {
+        self.tools.get(id).copied()
+    }
+
+    /// Whose transcript a request is asking about — the subagent that raised it, or `None` for
+    /// the conversation's own turn.
+    ///
+    /// Read off the block the call is drawn as, which is the same join
+    /// [`Self::tool_block_index`] answers: a request names a call id, and the call's block is the
+    /// only thing that knows who was speaking. A request naming a call this transcript has never
+    /// seen belongs to nobody, and reads as the main agent's rather than being filed under a
+    /// guess.
+    pub fn pending_subagent(&self, pending: &Pending) -> Option<&str> {
+        let ix = self.tool_block_index(&pending.tool_call.id)?;
+        self.blocks.get(ix)?.subagent_id()
+    }
+
+    /// Where a request is drawn: whose transcript, and which block of it. `None` for the block
+    /// where the transcript does not hold the call — the prompt degrades to the self-contained
+    /// one at the end, which is where a reader is sent instead.
+    ///
+    /// The one place the routing behind the "needs you" strip is resolved. Clicking the strip
+    /// switches to this subagent and scrolls to this block, and both answers have to be the same
+    /// reading or the strip sends the reader somewhere the prompt is not.
+    pub fn pending_route(&self, pending: &Pending) -> (Option<String>, Option<usize>) {
+        let ix = self.tool_block_index(&pending.tool_call.id);
+        let who = ix
+            .and_then(|ix| self.blocks.get(ix))
+            .and_then(ConvBlock::subagent_id)
+            .map(str::to_string);
+        (who, ix)
+    }
+
+    /// How many requests whoever is being read is waiting on — `None` being the main agent's own
+    /// turn. What a delegate's row in the switcher marks itself with.
+    pub fn pending_count(&self, subagent: Option<&str>) -> usize {
+        self.pending
+            .iter()
+            .filter(|held| self.pending_subagent(held) == subagent)
+            .count()
+    }
+
+    /// What one subagent **type** has spent — its total and the cached part of it — for the
+    /// footer of a delegate's transcript.
+    ///
+    /// Keyed by type and not by instance because that is the only grain the wire carries:
+    /// `UsageRecord::subagent` is deliberately a type, so two `general-purpose` delegates share
+    /// one bucket. The footer says so on hover rather than drawing a type's total as one
+    /// instance's.
+    pub fn subagent_tokens(&self, kind: &str) -> Option<(u64, u64)> {
+        let spend = self.spend_by_subagent.get(kind)?;
+        (spend.total() > 0).then(|| (spend.total(), spend.cached()))
+    }
+
+    /// What **one delegate's subtree** has spent — its own reports plus every delegate it spawned,
+    /// down — as a total and the cached part of it, keyed by the spawning call's id, which is the
+    /// instance and not the type. Never a sibling's or the parent's: the conversation's own card
+    /// reads [`Self::total_tokens`], which is everything.
+    ///
+    /// A delegate's children are the `Delegate`-shaped calls its own lines made: a call stamped
+    /// with this delegate whose id is itself a delegate's id.
+    ///
+    /// This is what a card and a delegate's own footer read. `None` where the harness never
+    /// identified the instance behind a report: nothing is drawn rather than the type's total,
+    /// which is the same figure on every card of that type (`T-259`).
+    pub fn delegate_tokens(&self, id: &str) -> Option<(u64, u64)> {
+        // One pass for every parent → child edge, and only between delegates: an ordinary tool
+        // call a delegate made is not a subtree to walk. Asked every frame, per card.
+        let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
+        for block in &self.blocks {
+            if let ConvBlock::Tool { call, .. } = block {
+                let child = call.id.as_str();
+                let Some(parent) = call.subagent.as_ref().map(|who| who.id.as_str()) else {
+                    continue;
+                };
+                if parent != child
+                    && (self.spend_by_delegate.contains_key(child) || self.has_subagent(child))
+                {
+                    children.entry(parent).or_default().push(child);
+                }
+            }
+        }
+        let mut subtree = vec![id];
+        let mut ix = 0;
+        while let Some(&parent) = subtree.get(ix) {
+            ix += 1;
+            for &child in children.get(parent).into_iter().flatten() {
+                if !subtree.contains(&child) {
+                    subtree.push(child);
+                }
+            }
+        }
+        let mut spend = TokenSpend::default();
+        for &member in &subtree {
+            if let Some(own) = self.spend_by_delegate.get(member) {
+                accumulate(&mut spend, own);
+            }
+        }
+        (spend.total() > 0).then(|| (spend.total(), spend.cached()))
+    }
+
+    /// Remember what the user just sent, so Arrow Up can bring it back. A repeat of the newest
+    /// entry is not stored twice, and sending ends any browsing in progress.
+    pub fn remember_sent(&mut self, typed: &str) {
+        self.recall = None;
+        if typed.trim().is_empty() || self.sent.last().is_some_and(|last| last == typed) {
+            return;
+        }
+        self.sent.push(typed.to_string());
+    }
+
+    /// Hold a prompt for later, typed while a turn was already running. Returns the id it was
+    /// given, so a caller can find this entry again to edit or delete it.
+    pub fn enqueue(&mut self, text: String) -> u64 {
+        let id = self.next_queued_id;
+        self.next_queued_id += 1;
+        self.queued.push(QueuedMessage { id, text });
+        id
+    }
+
+    /// Pop the oldest queued prompt — what a turn ending sends automatically.
+    pub fn dequeue_front(&mut self) -> Option<QueuedMessage> {
+        (!self.queued.is_empty()).then(|| self.queued.remove(0))
+    }
+
+    /// Take a queued prompt's text back out, by id. A plain delete, or the first half of an edit
+    /// — the caller loads what comes back into the live composer.
+    pub fn remove_queued(&mut self, id: u64) -> Option<String> {
+        let ix = self.queued.iter().position(|m| m.id == id)?;
+        Some(self.queued.remove(ix).text)
+    }
+
+    /// Attach a file to the next prompt, and say which entry it became.
+    ///
+    /// **A path already attached is not attached twice**, and answers `None`: two tags for one
+    /// file would be two mentions of it in the prompt, and a remove that only half worked. The
+    /// size is refreshed on the entry that is already there, since the picker that just reported
+    /// it has read the folder more recently than whatever attached it first.
+    pub fn attach(&mut self, path: String, size: Option<u64>) -> Option<u64> {
+        if let Some(existing) = self.attached.iter_mut().find(|file| file.path == path) {
+            existing.size = size;
+            return None;
+        }
+        let id = self.next_attached_id;
+        self.next_attached_id += 1;
+        self.attached.push(Attachment { id, path, size });
+        Some(id)
+    }
+
+    /// Take one attachment back off, by id — a tag's own dismiss control.
+    pub fn detach(&mut self, id: u64) -> Option<Attachment> {
+        let ix = self.attached.iter().position(|file| file.id == id)?;
+        Some(self.attached.remove(ix))
+    }
+
+    /// Drop every attachment — what an enqueue consumes, alongside the draft. A queued prompt is
+    /// one string and its paths are already inside it, so there is nothing left to carry.
+    pub fn clear_attached(&mut self) {
+        self.attached.clear();
+    }
+
+    /// Hand every attachment to the turn now going out, so the echo of it can be drawn with them.
+    ///
+    /// [`Self::expect_preamble`]'s counterpart, and the composer's clear at the same time: the
+    /// field has finished with these files and the transcript has not started, so the one move
+    /// does both.
+    ///
+    /// **One entry per send, empty or not.** The queue is read in step with the echoes, so a
+    /// plain turn has to take its place in it: skipping it would hand its echo the *next* turn's
+    /// files. Two Sends before either echoes therefore keep their own sets, in order.
+    pub fn expect_attachments(&mut self) {
+        let sent = std::mem::take(&mut self.attached);
+        self.prompt_attachments.push_back(sent);
+    }
+
+    /// Forget every armed set, because no turn still in flight can echo.
+    ///
+    /// The queue is spent by echoes and nothing else, so a run that broke, was unloaded or ended
+    /// would leave its sets armed forever — and the next turn that *did* echo, in a later session
+    /// of the same conversation, would draw chips for files the user never attached to it. A turn
+    /// that cannot arrive is a turn whose attachments are not owed to anybody.
+    pub fn discharge_attachments(&mut self) {
+        self.prompt_attachments.clear();
+    }
+
+    /// What actually goes on the wire: what was typed, with every attachment named after it as
+    /// `@path`.
+    ///
+    /// The mentions come *after* the prose because the sentence around the paths is usually
+    /// written first, which is also the order the picker used to append them in. `@path`,
+    /// project-relative, is the one path shape the interface holds and the shape every harness
+    /// reads a file reference in — nothing new crosses the bus for this, so a prompt with
+    /// attachments is a `PromptAgent` like any other.
+    pub fn compose_prompt(&self, typed: &str) -> String {
+        let mut out = typed.trim().to_string();
+        for file in &self.attached {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push('@');
+            out.push_str(&file.path);
+        }
+        out
+    }
+
+    /// Toggle a tool block's detail.
+    pub fn toggle_tool(&mut self, id: &str) {
+        if let Some(ConvBlock::Tool { open, .. }) =
+            self.tools.get(id).map(|ix| &mut self.blocks[*ix])
+        {
+            *open = !*open;
+        }
+    }
+
+    /// Open or shut one collapsed run of tool calls, named by its first call's id.
+    pub fn toggle_group(&mut self, id: &str) {
+        if !self.open_groups.remove(id) {
+            self.open_groups.insert(id.to_string());
+        }
+    }
+
+    /// Toggle one run of consecutive thinking blocks, by their positions in `blocks` — the
+    /// transcript draws a run as a single box, so the disclosure on it has to move the whole run
+    /// or the box would be half open. The **last** block's state is the one the run is read by,
+    /// since that is the one still streaming while the run is being written, and every block is
+    /// then set to the opposite of it rather than flipped on its own.
+    ///
+    /// Marks every block touched, so [`Self::end_open_thought`] leaves whatever the reader picked
+    /// alone from here on.
+    pub fn toggle_thought_group(&mut self, blocks: &[usize]) {
+        let last_open = blocks
+            .last()
+            .and_then(|ix| self.blocks.get(*ix))
+            .is_some_and(|block| matches!(block, ConvBlock::Thought { open: true, .. }));
+        for &ix in blocks {
+            if let Some(ConvBlock::Thought { open, .. }) = self.blocks.get_mut(ix) {
+                *open = !last_open;
+                self.touched_thoughts.insert(ix);
+            }
+        }
+    }
+
+    /// Close the thinking block currently streaming, if there is one and the reader has not
+    /// touched it — called whenever the open block ends, one way or another: a new block starts,
+    /// the harness compacts, or the turn ends. A thought is drawn expanded while it is the one
+    /// thing still being written; once something else starts, there is nothing left to follow, so
+    /// it collapses the same way a finished run of tool calls folds away.
+    fn end_open_thought(&mut self) {
+        if let Some((_, ix)) = self.open
+            && !self.touched_thoughts.contains(&ix)
+            && let Some(ConvBlock::Thought { open, .. }) = self.blocks.get_mut(ix)
+        {
+            *open = false;
+        }
+    }
+
+    /// Append a chunk to the message it belongs to, starting a new block when
+    /// the message id changes — which is what a message id is for.
+    ///
+    /// A chunk with no id at all can only extend the block immediately before
+    /// it, and only if that block is the same kind: a harness that numbers
+    /// nothing still streams in order.
+    ///
+    /// **Who said it is part of what makes two chunks one block.** A subagent's message id is
+    /// minted by its own turn and can collide with the parent's, so matching on id and kind alone
+    /// lands a spawned agent's greeting inside the sentence the main agent was in the middle of.
+    fn append(
+        &mut self,
+        message_id: Option<String>,
+        content: ConvContent,
+        thought: bool,
+        subagent: Option<Subagent>,
+        at: Option<i64>,
+    ) {
+        let Some(text) = text_of(&content) else {
+            return;
+        };
+
+        let same_block = |block: &ConvBlock| {
+            matches!(
+                (block, thought),
+                (ConvBlock::Agent { .. }, false) | (ConvBlock::Thought { .. }, true)
+            ) && block.subagent_id() == subagent.as_ref().map(|who| who.id.as_str())
+        };
+
+        if let Some((open_id, ix)) = &self.open
+            && message_id.as_ref().is_none_or(|id| id == open_id)
+            && self.blocks.get(*ix).is_some_and(same_block)
+        {
+            match &mut self.blocks[*ix] {
+                ConvBlock::Agent { body, .. } | ConvBlock::Thought { body, .. } => {
+                    body.push_str(&text)
+                }
+                _ => unreachable!("same_block just matched one of these two"),
+            }
+            return;
+        }
+
+        // Whatever was open before this chunk is a different block now: the previous thought, if
+        // there was one, has nothing left to follow and folds — unless the reader already said
+        // otherwise.
+        self.end_open_thought();
+
+        let ix = self.blocks.len();
+        self.blocks.push(if thought {
+            ConvBlock::Thought {
+                body: text,
+                subagent,
+                // Expanded while it is the one thing being written; [`Self::end_open_thought`]
+                // collapses it the moment something else starts.
+                open: true,
+            }
+        } else {
+            ConvBlock::Agent {
+                body: text,
+                subagent,
+                at,
+            }
+        });
+        self.open = Some((message_id.unwrap_or_default(), ix));
+    }
+
+    /// Apply a tool-call patch: **absent means unchanged**, and content and
+    /// locations replace rather than append.
+    fn patch_tool(&mut self, patch: ToolCallPatch) {
+        let Some(ix) = self.tools.get(&patch.id).copied() else {
+            // A result for a call nobody announced. Dropping it is right:
+            // drawing a completed call with no beginning would invent one.
+            return;
+        };
+        let Some(ConvBlock::Tool { call, .. }) = self.blocks.get_mut(ix) else {
+            return;
+        };
+
+        if let Some(title) = patch.title {
+            call.title = title;
+        }
+        if let Some(kind) = patch.kind {
+            call.kind = kind;
+        }
+        if let Some(status) = patch.status {
+            call.status = status;
+        }
+        if let Some(content) = patch.content {
+            call.content = content;
+        }
+        if let Some(locations) = patch.locations {
+            call.locations = locations;
+        }
+    }
+}
+
+/// The short name the composer's model chip wears, given the harness that answered.
+///
+/// Only Claude's ids are shortened. They read `vendor-family-version-date`, and the family is the
+/// only part anyone picks a model by — `claude-haiku-4-5-20251001` is `haiku`. Every other harness
+/// names its models however it likes, so its id is left exactly as it came: a cut guessed across
+/// vendors would take the meaning out of half of them. The full id is never lost — the chip's
+/// tooltip carries it.
+pub fn short_model_label(harness: &str, model: &str) -> String {
+    if !harness.to_lowercase().contains("claude") {
+        return model.to_string();
+    }
+    model.split('-').nth(1).unwrap_or(model).to_string()
+}
+
+// ── where a reader was left, per transcript ────────────────────────────
+
+/// Which transcript a scroll position belongs to: the conversation, and which of its delegates.
+///
+/// The delegate is part of the key because switching to a subagent is arriving at a *different*
+/// transcript, not moving within one — a reader sent to a delegate's tail and back must find the
+/// main agent where they left it.
+pub type TranscriptKey = (AgentId, Option<String>);
+
+/// How close to the tail still counts as reading the tail. A few pixels of slack, because a
+/// wheel notch that lands one pixel short is not a reader who has scrolled away.
+const TAIL_SLACK: Pixels = px(20.);
+
+/// How far a re-measurement has to move before the row is worth drawing again. Below this the
+/// difference is layout rounding, and answering it would be a frame per frame for ever.
+const MEASURE_SLACK: Pixels = px(0.5);
+
+/// Whether the handle is far enough off the bottom to count as somewhere else. A slot that has
+/// never painted has no maximum and is not away from anything.
+fn off_bottom(offset: Pixels, max: Pixels) -> bool {
+    max > px(0.) && offset + max > TAIL_SLACK
+}
+
+/// The whole of the follow rule, with the handle taken out of it — so the one thing worth testing
+/// can be, `max_offset` being written by the list at paint and readable nowhere else.
+///
+/// **Being at the bottom is sticky until the reader scrolls up.** The offset is `0` at the top and
+/// `-max_offset` at the bottom, and content growing raises the maximum while leaving the offset
+/// alone: a row that lays out taller than it was last measured at therefore *looks* like a reader
+/// who has moved, which is what used to end the follow partway through a turn. What only a reader
+/// can do is make the offset **rise** between two frames — so that, and not the distance to the
+/// bottom, is what says they left.
+///
+/// Both halves are needed. Without the rise nothing ends the follow; without [`off_bottom`] a
+/// bottom that moved *up* to meet the reader — a fold closing, the list re-clamping — would read as
+/// a reader moving away from it, and coming back to the tail would never be noticed.
+///
+/// `own_move` discounts the frame after this type moved the offset itself: [`TranscriptScroll::
+/// to_bottom`] asks for `-1e9` and the list clamps it at paint, so the reading that follows a pin
+/// is far above the value that was set and is not a scroll.
+fn away_reading(
+    offset: Pixels,
+    previous: Pixels,
+    max: Pixels,
+    was_away: bool,
+    own_move: bool,
+) -> bool {
+    let scrolled_up = !own_move && offset - previous > TAIL_SLACK;
+    off_bottom(offset, max) && (was_away || scrolled_up)
+}
+
+/// What one composer slot's transcript remembers between frames.
+///
+/// A slot, not a conversation: the handle belongs to the element the pool built, and a slot shows
+/// one transcript at a time. What is per *transcript* is the position, and that is what
+/// [`Self::saved`] holds — so a slot moved from an agent to its delegate and back restores both.
+///
+/// Every field is interior-mutable because `render` holds `&AppState`: there is no mutable path
+/// to this from inside an element, and these are readings of the last frame rather than state the
+/// application owns.
+pub struct TranscriptScroll {
+    pub handle: VirtualListScrollHandle,
+    /// The tail signature the handle was last followed to the bottom for. What keeps the follow
+    /// from fighting the reader: the transcript follows only when the tail actually moved.
+    followed: Cell<u64>,
+    /// Which transcript the handle currently holds a position for.
+    showing: RefCell<Option<TranscriptKey>>,
+    /// Where the reader was in each transcript this slot has shown.
+    saved: RefCell<HashMap<TranscriptKey, Pixels>>,
+    /// A block this slot has been asked to bring into view. Taken once and cleared: a request to
+    /// go somewhere is answered, not re-answered every frame afterwards.
+    target: Cell<Option<usize>>,
+    /// Whether the last frame was painted away from the tail. Read from the handle before
+    /// anything moves it, and what both the follow and the jump button ask.
+    ///
+    /// **Sticky, not re-derived.** The reader leaves the tail by scrolling and comes back by
+    /// scrolling; a row that lays out taller than it was measured at is not either of those, and
+    /// deriving this from the handle alone made the growing tail itself end the follow.
+    away: Cell<bool>,
+    /// The offset [`Self::sync`] read last frame, which is what "the reader scrolled up" is
+    /// measured against. Growing content moves `max_offset` and leaves the offset alone, so a
+    /// *rise* here is the one thing that only a reader can cause.
+    last_offset: Cell<Pixels>,
+    /// Whether this type moved the offset itself since the last [`Self::sync`], in which case the
+    /// change the next frame reads is its own doing rather than the reader's. Necessary because
+    /// [`Self::to_bottom`] asks for `-1e9` and the list clamps it at paint, so the frame after a
+    /// pin reads an offset far *above* the one that was set.
+    own_move: Cell<bool>,
+    /// Whether this frame is drawing the same transcript the last one did.
+    ///
+    /// A frame that has just switched transcripts is measuring the *previous* one: the scroll
+    /// handle's record of where each child was painted still describes the transcript that has
+    /// gone. So a request to be taken to a block waits for the frame after the switch, which is
+    /// the first frame whose measurements are of the transcript the block is in.
+    settled: Cell<bool>,
+    /// What each row of the transcript actually laid out to, keyed by the row's identity: the
+    /// content signature it was measured at, and the height it measured.
+    ///
+    /// The virtual list is told every row's height before it lays one out, so a variable-height
+    /// transcript has to remember them. Keyed by identity rather than by position, because a fold
+    /// opening shifts every row below it and a height cache that moved with them would guess wrong
+    /// about the whole transcript below the fold.
+    heights: RefCell<HashMap<u64, (u64, Pixels)>>,
+    /// A forced re-measure asked of the next frame's visible rows, whatever their signature says
+    /// (T-194). `needs_measure` only catches a row whose *content* moved; nothing here claims that
+    /// covers every way a virtualized transcript's block positions can drift over a long, busy
+    /// conversation, so a window periodically asks for one anyway and watches whether it changes
+    /// anything.
+    force: Cell<bool>,
+    /// What the last forced pass found, for the periodic timer that asked for it: `Some(true)` a
+    /// height actually moved, `Some(false)` nothing did (the signal to stop asking), `None` no
+    /// forced pass has reported back yet — the transcript was not on screen to run one.
+    force_result: Cell<Option<bool>>,
+    /// Fingerprint of the rows the last frame planned — every row's identity and signature.
+    rows_seen: Cell<u64>,
+    /// Whether the rows changed since the last forced relayout was asked for. What makes the
+    /// periodic timer change-driven: a quiet transcript is re-measured once after its last
+    /// change, then left alone.
+    dirty: Cell<bool>,
+    /// The markdown state behind every agent body drawn in the last frame, keyed by row identity.
+    ///
+    /// **Owned here so the height cache can see when a body's parse lands.** A `TextView` parses
+    /// streamed appends (and any body over 4 KiB) on a background thread and commits the result a
+    /// frame or more later, so the frame that measured the row measured the *previous* parse. The
+    /// signature cannot tell — the text it hashes has not moved since — and the row kept a height
+    /// one paragraph short, which the next row then drew over until a resize re-measured it.
+    /// [`Self::body_settling`] is that missing signal.
+    bodies: RefCell<HashMap<u64, Body>>,
+    /// The frame counter [`Self::bodies`] is evicted against: a body not drawn in the previous
+    /// frame is dropped, the life a `TextView`'s own keyed state has.
+    frame: Cell<u64>,
+    /// The completion mark [`Self::note_completion`] last saw, per transcript — which of its
+    /// messages are finished. A move is a message completing, and re-measures that transcript's
+    /// rows once. Per transcript, so a slot switching between two chats is not a completion.
+    completed: RefCell<HashMap<TranscriptKey, u64>>,
+}
+
+/// One agent body's markdown state, and the text last handed to it.
+struct Body {
+    state: Entity<TextViewState>,
+    text: SharedString,
+    /// The frame that last drew it — see [`TranscriptScroll::begin_frame`].
+    used: u64,
+    /// Redraws the window when a parse commits, so the frame that re-measures the row comes.
+    _redraw: Subscription,
+}
+
+/// What a provisional measurement's signature is stored under: a row measured while its body's
+/// parse was still in flight is measured again, whatever its content signature says.
+const UNSETTLED: u64 = 0x9e37_79b9_7f4a_7c15;
+
+/// The signature every cached height is moved to when a message completes: no row carries it, so
+/// each row is measured again the next time it is drawn, its old height kept as the hint.
+const STALE: u64 = u64::MAX;
+
+impl Default for TranscriptScroll {
+    fn default() -> Self {
+        Self {
+            handle: VirtualListScrollHandle::new(),
+            followed: Cell::default(),
+            showing: RefCell::default(),
+            saved: RefCell::default(),
+            target: Cell::default(),
+            away: Cell::default(),
+            last_offset: Cell::default(),
+            own_move: Cell::default(),
+            settled: Cell::default(),
+            heights: RefCell::default(),
+            force: Cell::default(),
+            force_result: Cell::default(),
+            rows_seen: Cell::default(),
+            dirty: Cell::default(),
+            bodies: RefCell::default(),
+            frame: Cell::default(),
+            completed: RefCell::default(),
+        }
+    }
+}
+
+impl TranscriptScroll {
+    /// Read the last frame's position, then put the handle where this frame's transcript wants
+    /// it. Called once per frame, before the children are built.
+    ///
+    /// Three cases, in this order. A **different transcript** than the last frame's saves where
+    /// the outgoing one was and restores where this one was, and follows the tail only for one
+    /// never seen before. The **same transcript with a moved tail** follows it, but only for a
+    /// reader already at the tail — which is the whole of "preserve the scroll": a delegate three
+    /// screens up stays three screens up while the agent below it keeps writing. Anything else
+    /// leaves the handle alone.
+    pub fn sync(&self, key: TranscriptKey, signature: u64) {
+        let offset = self.handle.offset().y;
+        self.away.set(away_reading(
+            offset,
+            self.last_offset.replace(offset),
+            self.handle.max_offset().y,
+            self.away.get(),
+            self.own_move.replace(false),
+        ));
+        let mut showing = self.showing.borrow_mut();
+        if showing.as_ref() != Some(&key) {
+            if let Some(previous) = showing.take() {
+                self.saved
+                    .borrow_mut()
+                    .insert(previous, self.handle.offset().y);
+            }
+            *showing = Some(key.clone());
+            self.settled.set(false);
+            // The incoming transcript's tail is not news, whoever put it there.
+            self.followed.set(signature);
+            let saved = self.saved.borrow().get(&key).copied();
+            match saved {
+                Some(y) => {
+                    self.handle
+                        .set_offset(gpui::point(self.handle.offset().x, y));
+                    self.own_move.set(true);
+                    self.away.set(true);
+                }
+                // Somewhere to be taken to outranks the tail: the list answers a scroll-to-row
+                // *after* an offset, so asking for both in one frame is asking for the bottom.
+                None if self.target.get().is_none() => {
+                    self.to_bottom();
+                    self.away.set(false);
+                }
+                None => {}
+            }
+            return;
+        }
+        self.settled.set(true);
+        if self.followed.get() != signature {
+            self.followed.set(signature);
+            if !self.away.get() && self.target.get().is_none() {
+                self.to_bottom();
+            }
+        }
+    }
+
+    /// Whether the handle is geometrically off the bottom right now. One half of the answer
+    /// [`Self::away`] carries: enough to say the reader has come *back* to the tail, and not
+    /// enough on its own to say they left it, because a row measured taller than it was drawn
+    /// moves the bottom without the reader moving at all.
+    ///
+    /// Measured from the last frame the handle painted: the offset is zero or negative and sits
+    /// at `-max_offset` at the bottom, so the two summed are the distance still to go. A slot
+    /// that has never painted has no maximum and is not away from anything.
+    pub fn away_from_tail(&self) -> bool {
+        off_bottom(self.handle.offset().y, self.handle.max_offset().y)
+    }
+
+    /// What the last frame decided, for whoever is drawing this frame's overlay. The sticky
+    /// answer — [`away_reading`] is the rule it carries.
+    pub fn away(&self) -> bool {
+        self.away.get()
+    }
+
+    /// Ask for a block to be brought into view on the next frame — how the "needs you" strip
+    /// arrives at the prompt it named.
+    pub fn request(&self, block: usize) {
+        self.target.set(Some(block));
+    }
+
+    /// Take the block asked for, if one was and this frame can answer it. Answered once.
+    ///
+    /// Held back on the frame that switched transcripts — see [`Self::settled`] — so a jump to a
+    /// delegate's prompt lands on the delegate's block rather than wherever that child index
+    /// happened to be in the transcript the reader just left.
+    pub fn take_request(&self) -> Option<usize> {
+        self.settled.get().then(|| self.target.take()).flatten()
+    }
+
+    /// Whether a block is still waiting to be scrolled to. The frame that switched transcripts
+    /// cannot answer one, so it has to ask for the frame that can.
+    pub fn request_held(&self) -> bool {
+        self.target.get().is_some()
+    }
+
+    /// Put the reader back on the tail, and follow it again from here.
+    pub fn to_tail(&self) {
+        self.to_bottom();
+        self.away.set(false);
+    }
+
+    /// Put the handle past the end of the content. The list clamps an offset it cannot honour to
+    /// the exact bottom, on the frame it is given rather than the one after — which is what keeps
+    /// a streaming tail in view while the block it is growing gets taller.
+    fn to_bottom(&self) {
+        self.handle
+            .set_offset(gpui::point(self.handle.offset().x, px(-1.0e9)));
+        // The clamped offset the next frame reads is this pin, not a reader — see
+        // [`Self::own_move`].
+        self.own_move.set(true);
+    }
+
+    /// How tall to tell the virtual list a row is, before it has laid it out.
+    ///
+    /// Three cases. A row **unchanged** since it was measured is its measurement, which is the
+    /// common one. A row whose content **has changed** — the streaming tail, a fold opening — is
+    /// its last measurement, because a block that grew by a line is a line taller than it was and
+    /// nothing closer is available until it is laid out again. A row **never measured** is the
+    /// caller's estimate; the frame that draws it measures it, and the frame after that is exact.
+    ///
+    /// So the last measurement whatever it was measured at — which content it was measured at
+    /// decides only whether it is measured *again*, and that is [`Self::needs_measure`].
+    pub fn row_height(&self, key: u64, estimate: Pixels) -> Pixels {
+        self.heights
+            .borrow()
+            .get(&key)
+            .map_or(estimate, |(_, height)| *height)
+    }
+
+    /// Whether a row has to be laid out to be known: one never measured, or one whose content
+    /// has moved since it was. What keeps the measurement off the frames that do not need it.
+    pub fn needs_measure(&self, key: u64, sig: u64) -> bool {
+        !matches!(self.heights.borrow().get(&key), Some((measured, _)) if *measured == sig)
+    }
+
+    /// What a row was last measured at — its signature and its height — if it ever was. Read by
+    /// the transcript's stale-height diagnostic, which compares it with a fresh measurement.
+    pub fn cached(&self, key: u64) -> Option<(u64, Pixels)> {
+        self.heights.borrow().get(&key).copied()
+    }
+
+    /// Record what a row laid out to. `true` where that is not the height the row was drawn at,
+    /// so the frame that measured it knows it has to be drawn again.
+    pub fn measured(&self, key: u64, sig: u64, height: Pixels) -> bool {
+        let previous = self.heights.borrow_mut().insert(key, (sig, height));
+        match previous {
+            Some((_, was)) => (height - was).abs() > MEASURE_SLACK,
+            None => true,
+        }
+    }
+
+    /// [`Self::measured`] for a row whose body was still being parsed: the height is kept — it is
+    /// the best one there is — but under a signature no row carries, so the next frame drawing
+    /// the row measures it again. The frame after the parse lands is the one that settles it.
+    pub fn measured_unsettled(&self, key: u64, sig: u64, height: Pixels) -> bool {
+        self.measured(key, sig ^ UNSETTLED, height)
+    }
+
+    /// Record which messages of `transcript` are complete; a mark that moved since that
+    /// transcript was last drawn is a message whose stream has ended — a block following it, or
+    /// the turn ending — and the cached height of each of its `rows` is made stale, so the row is
+    /// laid out again the next time it is drawn. The one full reflow per completed message, never
+    /// one per delta; a transcript seen for the first time has nothing to reflow. `true` when it
+    /// fired.
+    pub fn note_completion(
+        &self,
+        transcript: TranscriptKey,
+        mark: u64,
+        rows: impl IntoIterator<Item = u64>,
+    ) -> bool {
+        match self.completed.borrow_mut().insert(transcript, mark) {
+            Some(last) if last != mark => {}
+            _ => return false,
+        }
+        let mut heights = self.heights.borrow_mut();
+        for key in rows {
+            if let Some((sig, _)) = heights.get_mut(&key) {
+                *sig = STALE;
+            }
+        }
+        true
+    }
+
+    /// Start a frame's use of [`Self::bodies`]: drop every body the previous frame did not draw.
+    /// Called once per frame, before the rows are built.
+    pub fn begin_frame(&self) {
+        let frame = self.frame.get().wrapping_add(1);
+        self.frame.set(frame);
+        self.bodies
+            .borrow_mut()
+            .retain(|_, body| body.used.wrapping_add(1) >= frame);
+    }
+
+    /// The markdown state for the agent body a row draws, created on first sight and handed the
+    /// body's current text. A text that extends the last one is an append to the state, which
+    /// is what keeps a streaming body's parse incremental.
+    pub fn body<T: 'static>(
+        &self,
+        key: u64,
+        text: &SharedString,
+        cx: &mut Context<T>,
+    ) -> Entity<TextViewState> {
+        let frame = self.frame.get();
+        let mut bodies = self.bodies.borrow_mut();
+        if let Some(body) = bodies.get_mut(&key) {
+            body.used = frame;
+            let same = (body.text.as_ptr() == text.as_ptr() && body.text.len() == text.len())
+                || body.text.as_str() == text.as_str();
+            if !same {
+                body.text = text.clone();
+                body.state.update(cx, |state, cx| state.set_text(text, cx));
+            }
+            return body.state.clone();
+        }
+        let state = cx.new(|cx| TextViewState::markdown(text, cx));
+        let redraw = cx.observe(&state, |_, _, cx| cx.notify());
+        bodies.insert(
+            key,
+            Body {
+                state: state.clone(),
+                text: text.clone(),
+                used: frame,
+                _redraw: redraw,
+            },
+        );
+        state
+    }
+
+    /// Whether the row's body has text its markdown has not finished parsing — so a height
+    /// measured now is a height of the previous parse, not of what the row will draw.
+    pub fn body_settling(&self, key: u64, cx: &App) -> bool {
+        self.bodies.borrow().get(&key).is_some_and(|body| {
+            body.state.read(cx).rendered_text().source().len() != body.text.len()
+        })
+    }
+
+    /// Put the reader where the last frame's measurements say a row is. Answers a jump asked for
+    /// by block, once the caller has resolved it to a row.
+    pub fn scroll_to_row(&self, row: usize) {
+        self.handle.scroll_to_item(row, gpui::ScrollStrategy::Top);
+    }
+
+    /// Ask the next frame to re-measure every row it draws, whether or not its signature moved
+    /// (T-194's periodic maintenance). Idempotent — asking twice before a frame answers is asking
+    /// once.
+    pub fn force_relayout(&self) {
+        self.force.set(true);
+    }
+
+    /// Record the fingerprint of the rows a frame planned; a different one than the last frame's
+    /// marks the transcript changed since its last forced relayout. Called once per frame, where
+    /// the rows are planned.
+    pub fn note_rows(&self, fingerprint: u64) {
+        if self.rows_seen.replace(fingerprint) != fingerprint {
+            self.dirty.set(true);
+        }
+    }
+
+    /// The periodic timer's tick: ask for a forced relayout only if the rows changed since the
+    /// last one asked for, and clear the mark. `true` when one was asked for.
+    pub fn relayout_if_changed(&self) -> bool {
+        let changed = self.dirty.replace(false);
+        if changed {
+            self.force_relayout();
+        }
+        changed
+    }
+
+    /// Take the forced-relayout request, if this is the frame answering one. Consumed once, the
+    /// way [`Self::take_request`] is: the frame that measures under it is the frame that clears it.
+    pub fn take_force(&self) -> bool {
+        self.force.replace(false)
+    }
+
+    /// Record whether a forced pass actually moved a height, for the timer that asked for it to
+    /// read back.
+    pub fn report_force_result(&self, changed: bool) {
+        self.force_result.set(Some(changed));
+    }
+
+    /// The last forced pass's answer, taken once: `Some(true)` to keep asking, `Some(false)` to
+    /// stop, `None` while none has landed yet (the transcript was not drawn to run one).
+    pub fn take_force_result(&self) -> Option<bool> {
+        self.force_result.take()
+    }
+}
+
+fn text_of(content: &ConvContent) -> Option<String> {
+    match content {
+        ConvContent::Text(text) => Some(text.clone()),
+        // Something the transcript cannot draw. Saying it arrived beats
+        // dropping it silently, and beats pretending it was prose.
+        ConvContent::Other { kind, description } => Some(format!("_[{kind}: {description}]_")),
+    }
+}
+
+/// Whether a user-role echo is Claude Code's own cancelled-turn marker rather than something the
+/// user wrote — `[Request interrupted by user]`, or a variant like `[Request interrupted by user
+/// for tool use]`. Matched by shape, not by one literal, because the CLI does not promise the
+/// bracket's contents stay exactly this sentence.
+fn is_cancelled_turn_marker(text: &str) -> bool {
+    let text = text.trim();
+    text.starts_with("[Request interrupted by user") && text.ends_with(']')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kubiq_proto::conversation::{TokenSpend, ToolKind, ToolStatus};
+
+    fn task_call(id: &str, title: &str, status: ToolStatus) -> ConvUpdate {
+        ConvUpdate::ToolCall(ToolCallRecord {
+            id: id.to_string(),
+            title: title.to_string(),
+            kind: ToolKind::Other,
+            status,
+            content: Vec::new(),
+            locations: Vec::new(),
+            subagent: None,
+        })
+    }
+
+    fn said_by(text: &str, id: &str, kind: Option<&str>) -> ConvUpdate {
+        ConvUpdate::AgentChunk {
+            content: ConvContent::Text(text.to_string()),
+            message_id: Some("m1".to_string()),
+            subagent: Some(Subagent {
+                id: id.to_string(),
+                kind: kind.map(str::to_string),
+                ..Default::default()
+            }),
+            at: None,
+        }
+    }
+
+    /// Turn 2 of `_data/kubiq-tape-1788688032.jsonl`: three `general-purpose` subagents, spawned by
+    /// three `Task` calls. The type they share is not their identity — keying on it would collapse
+    /// them into one tag with their turns interleaved, which is the bug the instance id fixes.
+    fn three_greeters() -> Conversation {
+        let mut c = conversation();
+        c.apply(1, chunk("I'll delegate.", Some("m0")));
+        c.apply(
+            2,
+            task_call("t751", "Formal greeting agent", ToolStatus::Completed),
+        );
+        c.apply(
+            3,
+            task_call("t754", "Pirate-style greeting agent", ToolStatus::Failed),
+        );
+        c.apply(
+            4,
+            task_call("t759", "Poetic greeting agent", ToolStatus::InProgress),
+        );
+        c.apply(5, said_by("Good day.", "t751", Some("general-purpose")));
+        c.apply(6, said_by("Ahoy!", "t754", Some("general-purpose")));
+        c.apply(
+            7,
+            said_by("A greeting, in verse.", "t759", Some("general-purpose")),
+        );
+        c
+    }
+
+    #[test]
+    fn three_subagents_of_one_kind_stay_three_agents() {
+        let c = three_greeters();
+        let tabs = c.subagents();
+        assert_eq!(
+            tabs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            vec!["t751", "t754", "t759"],
+            "one tag per instance, in the order each first spoke"
+        );
+        assert_eq!(
+            tabs.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            vec![
+                "Formal greeting agent",
+                "Pirate-style greeting agent",
+                "Poetic greeting agent"
+            ],
+        );
+        assert_eq!(
+            tabs.iter().map(|t| t.status).collect::<Vec<_>>(),
+            vec![
+                Some(ToolStatus::Completed),
+                Some(ToolStatus::Failed),
+                Some(ToolStatus::InProgress)
+            ],
+            "what it is doing is the spawning call's own status"
+        );
+    }
+
+    /// One transcript at a time: the main agent's excludes its delegates' turns, and each
+    /// delegate's includes only its own.
+    #[test]
+    fn the_transcript_shows_exactly_one_agent() {
+        let mut c = three_greeters();
+
+        let main: Vec<usize> = c.visible_blocks().to_vec();
+        assert_eq!(
+            main,
+            vec![0, 1, 2, 3],
+            "the prose and the three Task calls, and none of what they said"
+        );
+
+        c.viewing = Some("t754".to_string());
+        assert_eq!(
+            c.visible_blocks()
+                .iter()
+                .map(|ix| c.blocks[*ix].clone())
+                .collect::<Vec<_>>(),
+            vec![ConvBlock::Agent {
+                body: "Ahoy!".to_string(),
+                subagent: Some(Subagent {
+                    id: "t754".to_string(),
+                    kind: Some("general-purpose".to_string()),
+                    ..Default::default()
+                }),
+                at: None,
+            }],
+        );
+    }
+
+    /// The name is the spawning call's title, which the bridge writes from the task description.
+    /// With no such call in the transcript there is nothing to title it with, so the kind stands
+    /// in — and the raw id only where the harness named neither.
+    #[test]
+    fn a_subagents_name_falls_back_to_its_kind() {
+        let c = three_greeters();
+        assert_eq!(c.subagent_name("t751"), "Formal greeting agent");
+
+        let mut orphan = conversation();
+        orphan.apply(1, said_by("no Task call here", "t900", Some("Explore")));
+        assert_eq!(orphan.subagent_name("t900"), "Explore");
+        assert_eq!(
+            orphan.subagents()[0].status,
+            None,
+            "no spawning call, no status — not a guess at one"
+        );
+
+        let mut nameless = conversation();
+        nameless.apply(1, said_by("anonymous", "t901", None));
+        assert_eq!(nameless.subagent_name("t901"), "t901");
+    }
+
+    /// A delegation block is the entry point to another transcript — but only once there is one.
+    /// A `Task` call whose agent has not said anything yet has nothing to switch to, and the block
+    /// stays inert rather than opening an empty view.
+    #[test]
+    fn a_delegation_is_a_way_in_only_once_its_agent_has_spoken() {
+        let mut c = conversation();
+        c.apply(
+            1,
+            task_call("t751", "Formal greeting agent", ToolStatus::InProgress),
+        );
+        assert!(!c.has_subagent("t751"), "spawned, and nothing said yet");
+
+        c.apply(2, said_by("Good day.", "t751", Some("general-purpose")));
+        assert!(c.has_subagent("t751"));
+    }
+
+    /// What a delegate answers with is its own, and it reaches the tab that both the reading strip
+    /// and the panel's row tooltip read. A delegate the harness stamped no model on carries `None`
+    /// and is drawn as nothing — never as the parent's model, which is the one case worth hovering
+    /// for. `thinking` is `None` on every harness today, and the same rule applies to it.
+    #[test]
+    fn a_delegates_model_reaches_its_tab() {
+        let mut c = conversation();
+        c.apply(
+            1,
+            task_call("t751", "Formal greeting agent", ToolStatus::InProgress),
+        );
+        c.apply(
+            2,
+            ConvUpdate::AgentChunk {
+                content: ConvContent::Text("Good day.".to_string()),
+                message_id: Some("m1".to_string()),
+                subagent: Some(Subagent {
+                    id: "t751".to_string(),
+                    kind: Some("general-purpose".to_string()),
+                    model: Some("claude-haiku-4-5-20251001".to_string()),
+                    thinking: None,
+                }),
+                at: None,
+            },
+        );
+        c.apply(3, said_by("Ahoy!", "t754", Some("general-purpose")));
+
+        let tabs = c.subagents();
+        assert_eq!(tabs[0].kind.as_deref(), Some("general-purpose"));
+        assert_eq!(
+            tabs[0].model.as_deref(),
+            Some("claude-haiku-4-5-20251001"),
+            "the delegate's own model, as its lines were stamped"
+        );
+        assert_eq!(
+            short_model_label(&c.harness, tabs[0].model.as_deref().unwrap()),
+            "haiku",
+            "shortened the way the composer's chip shortens the parent's"
+        );
+        assert_eq!(tabs[0].thinking, None, "no harness states one per delegate");
+        assert_eq!(
+            tabs[1].model, None,
+            "a delegate the harness named no model for carries none — not the parent's"
+        );
+    }
+
+    /// What a delegate is doing right now is read off its own last line — the running tool's
+    /// title where that line is a call, the prose's own last line where it is prose, and nothing at
+    /// all where it has not said anything of its own yet. The spawning `Task` call, whose id
+    /// equals the delegate's own, is never mistaken for one of those lines.
+    #[test]
+    fn a_delegates_activity_is_its_own_last_line() {
+        let mut c = conversation();
+        c.apply(
+            1,
+            task_call("t751", "Formal greeting agent", ToolStatus::InProgress),
+        );
+        assert_eq!(
+            c.subagent_activity("t751"),
+            None,
+            "spawned, and nothing said yet"
+        );
+
+        c.apply(
+            2,
+            ConvUpdate::ThoughtChunk {
+                content: ConvContent::Text("How to greet formally?".to_string()),
+                message_id: Some("m1".to_string()),
+                subagent: Some(Subagent {
+                    id: "t751".to_string(),
+                    kind: Some("general-purpose".to_string()),
+                    ..Default::default()
+                }),
+            },
+        );
+        assert_eq!(
+            c.subagent_activity("t751"),
+            Some("How to greet formally?".to_string())
+        );
+
+        c.apply(
+            3,
+            ConvUpdate::ToolCall(ToolCallRecord {
+                id: "inner-1".to_string(),
+                title: "Reading etiquette.md".to_string(),
+                kind: ToolKind::Other,
+                status: ToolStatus::InProgress,
+                content: Vec::new(),
+                locations: Vec::new(),
+                subagent: Some(Subagent {
+                    id: "t751".to_string(),
+                    kind: Some("general-purpose".to_string()),
+                    ..Default::default()
+                }),
+            }),
+        );
+        assert_eq!(
+            c.subagents()
+                .iter()
+                .find(|t| t.id == "t751")
+                .unwrap()
+                .activity,
+            Some("Reading etiquette.md".to_string()),
+            "the running tool's own title, carried through to the tab"
+        );
+
+        c.apply(4, said_by("Good day.", "t751", Some("general-purpose")));
+        assert_eq!(c.subagent_activity("t751"), Some("Good day.".to_string()));
+        assert_eq!(
+            c.subagent_doing("t751"),
+            Doing::Writing,
+            "the chip still says the kind"
+        );
+    }
+
+    /// Markdown off the line a card reads, and the kind's word only where nothing is left.
+    #[test]
+    fn last_line_is_the_prose_tail_in_plain_words() {
+        assert_eq!(
+            last_line("Plan:\n\n## **Chef: pizza ready!**\n"),
+            Some("Chef: pizza ready!".to_string())
+        );
+        assert_eq!(last_line("- `sleep 4`"), Some("sleep 4".to_string()));
+        assert_eq!(last_line("  \n**\n"), None);
+        // Markup-only lines are passed over, not drawn.
+        assert_eq!(
+            last_line("Plating:\n```\nserve()\n```\n---\n"),
+            Some("serve()".to_string())
+        );
+        // Text that only looks like markup is left as written.
+        assert_eq!(last_line("-5 degrees"), Some("-5 degrees".to_string()));
+        assert_eq!(
+            last_line("**Note** this"),
+            Some("**Note** this".to_string())
+        );
+        assert_eq!(last_line("_private"), Some("_private".to_string()));
+        assert_eq!(last_line("> ## Done"), Some("Done".to_string()));
+    }
+
+    /// The panels are closed until they are asked for: a conversation's delegates or plans are a
+    /// fact worth a line, not a list that unfolds itself.
+    #[test]
+    fn the_activity_panels_start_collapsed() {
+        assert_eq!(conversation().panel_open, None);
+    }
+
+    /// A pending form is not a running harness, and neither is a transcript whose process has
+    /// already gone. Only a launched conversation that still takes turns counts — that is what
+    /// closing a project asks about.
+    #[test]
+    fn a_conversation_is_running_only_while_its_harness_is_up() {
+        let mut c = conversation();
+        assert!(!c.running(), "pending, never launched");
+
+        c.launched = true;
+        assert!(c.running(), "launched and idle is still a live process");
+
+        c.run = Run::Working;
+        assert!(c.running());
+
+        c.unloaded();
+        assert!(!c.running(), "unloaded: the harness is gone");
+
+        c.launched = true;
+        c.ended(StopReason::Failed);
+        assert!(!c.running(), "ended: the harness is gone");
+
+        c.launched = true;
+        c.run = Run::Idle;
+        c.accepts_input = false;
+        assert!(!c.running(), "a harness that takes no more turns is not up");
+    }
+
+    /// A resume, or any transcript the id has gone from, must not leave the reader looking at an
+    /// empty view.
+    #[test]
+    fn a_stale_viewing_id_falls_back_to_the_main_agent() {
+        let mut c = three_greeters();
+        c.viewing = Some("t999".to_string());
+
+        assert_eq!(c.viewing_subagent(), None);
+        assert_eq!(c.visible_blocks().len(), 4, "the main agent's own turns");
+    }
+
+    /// The bug this rule exists for: the tail's row measures taller than it was drawn, so the
+    /// bottom moves out from under a reader who has not touched the wheel. The follow has to
+    /// survive that, and has to stop the moment they actually scroll up.
+    ///
+    /// Driven through [`away_reading`] rather than through a `TranscriptScroll`, because
+    /// `max_offset` is written by the virtual list at paint and there is no way to put a value
+    /// there from a test — a test over the type would only ever see a slot that never painted.
+    #[test]
+    fn growing_content_does_not_end_the_follow_but_scrolling_up_does() {
+        // Pinned to the bottom of a 500px-tall transcript, then the tail's block grows by 80px:
+        // the offset is untouched and only the maximum moved.
+        assert!(
+            !away_reading(px(-500.), px(-500.), px(580.), false, false),
+            "the bottom moved, not the reader"
+        );
+
+        // The frame after `to_bottom`: `-1e9` was asked for and the list clamped it, so the
+        // reading is a rise of most of a billion pixels and is this type's own doing.
+        assert!(
+            !away_reading(px(-580.), px(-1.0e9), px(580.), false, true),
+            "a clamped pin is not a scroll"
+        );
+
+        // The reader scrolls up. Past the slack, and past the bottom.
+        assert!(
+            away_reading(px(-380.), px(-580.), px(580.), false, false),
+            "the offset rose: only a reader does that"
+        );
+
+        // A wheel notch that lands a few pixels short of the bottom is still reading the tail.
+        assert!(
+            !away_reading(px(-570.), px(-580.), px(580.), false, false),
+            "within the slack of the bottom"
+        );
+
+        // Away stays away while the turn keeps writing under them, however far the bottom moves.
+        assert!(
+            away_reading(px(-380.), px(-380.), px(900.), true, false),
+            "still reading the same place"
+        );
+
+        // And ends the moment they are back on the tail, which is the geometry alone.
+        assert!(
+            !away_reading(px(-900.), px(-380.), px(900.), true, false),
+            "back on the tail"
+        );
+    }
+
+    fn conversation() -> Conversation {
+        Conversation::new(
+            AgentId::generate(),
+            "Claude Code".to_string(),
+            "work".to_string(),
+        )
+    }
+
+    fn chunk(text: &str, id: Option<&str>) -> ConvUpdate {
+        ConvUpdate::AgentChunk {
+            content: ConvContent::Text(text.to_string()),
+            message_id: id.map(str::to_string),
+            subagent: None,
+            at: None,
+        }
+    }
+
+    /// A request carrying nothing but its own id and an empty patch — the shape upstream
+    /// guarantees, and the one a prompt has to survive.
+    fn permission(request_id: &str) -> ConvUpdate {
+        ConvUpdate::PermissionRequest {
+            request_id: request_id.to_string(),
+            tool_call: ToolCallPatch::default(),
+            options: Vec::new(),
+        }
+    }
+
+    /// Chunks sharing a message id are one message. This is the whole reason
+    /// a token stream does not produce a block per token.
+    #[test]
+    fn chunks_of_one_message_become_one_block() {
+        let mut c = conversation();
+        c.apply(1, chunk("Hel", Some("m1")));
+        c.apply(2, chunk("lo", Some("m1")));
+
+        assert_eq!(
+            c.blocks,
+            vec![ConvBlock::Agent {
+                body: "Hello".to_string(),
+                subagent: None,
+                at: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_new_message_id_starts_a_new_block() {
+        let mut c = conversation();
+        c.apply(1, chunk("first", Some("m1")));
+        c.apply(2, chunk("second", Some("m2")));
+
+        assert_eq!(
+            c.blocks,
+            vec![
+                ConvBlock::Agent {
+                    body: "first".to_string(),
+                    subagent: None,
+                    at: None,
+                },
+                ConvBlock::Agent {
+                    body: "second".to_string(),
+                    subagent: None,
+                    at: None,
+                },
+            ]
+        );
+    }
+
+    /// Prose and reasoning are different blocks even inside one message.
+    #[test]
+    fn a_thought_does_not_join_the_prose_before_it() {
+        let mut c = conversation();
+        c.apply(1, chunk("answering", Some("m1")));
+        c.apply(
+            2,
+            ConvUpdate::ThoughtChunk {
+                content: ConvContent::Text("pondering".to_string()),
+                message_id: Some("m1".to_string()),
+                subagent: None,
+            },
+        );
+
+        assert_eq!(c.blocks.len(), 2);
+        assert_eq!(
+            c.blocks[1],
+            ConvBlock::Thought {
+                body: "pondering".to_string(),
+                subagent: None,
+                open: true,
+            }
+        );
+    }
+
+    /// A run of thoughts is one box, so its disclosure is one decision: the reader clicked a box
+    /// closed, not the last message in it. And the run is read by its last block, which is the one
+    /// still streaming — so a run whose tail is open shuts, rather than every block flipping on
+    /// its own and leaving the box half open.
+    #[test]
+    fn toggling_a_run_of_thoughts_moves_every_block_in_it() {
+        let mut c = conversation();
+        for (seq, id) in [(1, "t1"), (2, "t2"), (3, "t3")] {
+            c.apply(
+                seq,
+                ConvUpdate::ThoughtChunk {
+                    content: ConvContent::Text("pondering".to_string()),
+                    message_id: Some(id.to_string()),
+                    subagent: None,
+                },
+            );
+        }
+        let open = |c: &Conversation| {
+            c.blocks
+                .iter()
+                .map(|block| matches!(block, ConvBlock::Thought { open: true, .. }))
+                .collect::<Vec<_>>()
+        };
+        // Only the last is still being written; the two before it folded as it started.
+        assert_eq!(open(&c), vec![false, false, true]);
+
+        c.toggle_thought_group(&[0, 1, 2]);
+        assert_eq!(
+            open(&c),
+            vec![false; 3],
+            "the tail was open, so the box shut"
+        );
+
+        c.toggle_thought_group(&[0, 1, 2]);
+        assert_eq!(open(&c), vec![true; 3], "and opens as one");
+
+        // Every block is the reader's choice now, so nothing collapses under them.
+        c.apply(
+            4,
+            ConvUpdate::AgentChunk {
+                content: ConvContent::Text("done".to_string()),
+                message_id: Some("m1".to_string()),
+                subagent: None,
+                at: None,
+            },
+        );
+        assert_eq!(open(&c)[..3], [true; 3], "a reader's own choice stands");
+    }
+
+    #[test]
+    fn a_patch_changes_only_what_it_names() {
+        let mut c = conversation();
+        c.apply(
+            1,
+            ConvUpdate::ToolCall(ToolCallRecord {
+                id: "t1".to_string(),
+                title: "Bash ls".to_string(),
+                kind: ToolKind::Execute,
+                status: ToolStatus::InProgress,
+                content: Vec::new(),
+                locations: Vec::new(),
+                subagent: None,
+            }),
+        );
+        c.apply(
+            2,
+            ConvUpdate::ToolCallUpdate(ToolCallPatch {
+                id: "t1".to_string(),
+                status: Some(ToolStatus::Completed),
+                ..ToolCallPatch::default()
+            }),
+        );
+
+        let ConvBlock::Tool { call, .. } = &c.blocks[0] else {
+            panic!("expected a tool block");
+        };
+        assert_eq!(call.status, ToolStatus::Completed);
+        assert_eq!(call.title, "Bash ls", "a patch that named no title kept it");
+        assert_eq!(call.kind, ToolKind::Execute);
+    }
+
+    /// Drawing a completed call with no beginning would invent one.
+    #[test]
+    fn a_patch_for_a_call_nobody_announced_is_dropped() {
+        let mut c = conversation();
+        c.apply(
+            1,
+            ConvUpdate::ToolCallUpdate(ToolCallPatch {
+                id: "ghost".to_string(),
+                status: Some(ToolStatus::Completed),
+                ..ToolCallPatch::default()
+            }),
+        );
+        assert!(c.blocks.is_empty());
+    }
+
+    #[test]
+    fn the_ring_comes_from_the_harness_rather_than_a_constant() {
+        let mut c = conversation();
+        assert_eq!(c.context_pct(), None, "nothing reported yet");
+
+        c.apply(
+            1,
+            ConvUpdate::Usage(UsageRecord {
+                used: 100_000,
+                size: 1_000_000,
+                cost_usd: Some(0.25),
+                model: Some("claude-opus-5".to_string()),
+                spend: Some(TokenSpend {
+                    input: 40_000,
+                    output: 10_000,
+                    thinking: 10_000,
+                    cache_read: 180_000,
+                    // The expected numbers changed with the spend split: `cached_tokens` is now
+                    // cache *read* alone, and cache creation is counted separately.
+                    cache_creation: 0,
+                }),
+                subagent: None,
+                subagent_id: None,
+            }),
+        );
+
+        assert_eq!(c.context_pct(), Some(10));
+        assert_eq!(c.tokens(), 100_000);
+        assert_eq!(c.model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(c.total_tokens(), Some(240_000));
+        assert_eq!(c.cached_tokens(), Some(180_000));
+    }
+
+    fn usage(used: u64, size: u64, spend: TokenSpend, subagent: Option<&str>) -> ConvUpdate {
+        delegate_usage(used, size, spend, subagent, None)
+    }
+
+    /// The same report, with the instance the harness named behind it — what a card actually
+    /// reads, and the grain `usage` above leaves absent.
+    fn delegate_usage(
+        used: u64,
+        size: u64,
+        spend: TokenSpend,
+        subagent: Option<&str>,
+        id: Option<&str>,
+    ) -> ConvUpdate {
+        ConvUpdate::Usage(UsageRecord {
+            used,
+            size,
+            cost_usd: None,
+            model: None,
+            spend: Some(spend),
+            subagent: subagent.map(str::to_string),
+            subagent_id: id.map(str::to_string),
+        })
+    }
+
+    fn spend(input: u64, output: u64) -> TokenSpend {
+        TokenSpend {
+            input,
+            output,
+            ..TokenSpend::default()
+        }
+    }
+
+    /// The two rules that decide everything the footer draws: occupancy is a level and is
+    /// replaced, spend is a flow and is summed. Reading the last record's spend as the total —
+    /// which is what this used to do — under-reports every report before it.
+    #[test]
+    fn spend_accumulates_while_occupancy_is_replaced() {
+        let mut c = conversation();
+        c.apply(1, usage(10_000, 200_000, spend(1_000, 100), None));
+        c.apply(2, usage(30_000, 200_000, spend(2_000, 200), None));
+
+        assert_eq!(c.tokens(), 30_000, "occupancy is the last reading");
+        assert_eq!(c.context_pct(), Some(15));
+        assert_eq!(c.total_tokens(), Some(3_300), "spend is every reading");
+    }
+
+    /// A subagent repeats the parent's `used`/`size` unchanged, so applying one as a fresh reading
+    /// would move the ring for a turn that never touched the parent's window.
+    #[test]
+    fn a_subagents_report_spends_without_moving_the_ring() {
+        let mut c = conversation();
+        c.apply(1, usage(50_000, 200_000, spend(4_000, 400), None));
+        c.apply(
+            2,
+            usage(50_000, 200_000, spend(9_000, 900), Some("Explore")),
+        );
+        c.apply(
+            3,
+            usage(50_000, 200_000, spend(1_000, 100), Some("Explore")),
+        );
+        c.apply(4, usage(50_000, 200_000, spend(2_000, 200), Some("Plan")));
+
+        assert_eq!(
+            c.tokens(),
+            50_000,
+            "the parent still says where the ring is"
+        );
+        assert_eq!(c.context_pct(), Some(25));
+        assert_eq!(c.total_tokens(), Some(17_600));
+        assert_eq!(
+            c.subagent_spend(),
+            vec![("Explore", 11_000), ("Plan", 2_200)],
+            "biggest spender first, and the conversation's own entry is not among them"
+        );
+        assert_eq!(
+            c.spend_by_subagent[""].total(),
+            4_400,
+            "the conversation's own spend is kept apart under its own key"
+        );
+    }
+
+    /// The **type** bucket, which is the aggregate the `tot` breakdown and the usage meter read:
+    /// two `general-purpose` instances sum into one entry, on purpose. What a single delegate's
+    /// card reads is [`Conversation::delegate_tokens`] instead — drawing a type's total as one
+    /// instance's over-reports it by however many siblings it had (`T-259`).
+    #[test]
+    fn subagent_tokens_are_a_types_bucket_rather_than_an_instances() {
+        let mut c = conversation();
+        c.apply(1, usage(50_000, 200_000, spend(4_000, 400), None));
+        // Two instances of one type, reporting separately.
+        c.apply(
+            2,
+            usage(50_000, 200_000, spend(9_000, 900), Some("general-purpose")),
+        );
+        c.apply(
+            3,
+            usage(50_000, 200_000, spend(1_000, 100), Some("general-purpose")),
+        );
+
+        assert_eq!(
+            c.subagent_tokens("general-purpose"),
+            Some((11_000, 0)),
+            "both instances summed into the one bucket their type has"
+        );
+        assert_eq!(
+            c.subagent_tokens("Explore"),
+            None,
+            "a type that never reported has nothing to draw — not a zero it made up"
+        );
+    }
+
+    /// **The rollup.** The parent's card is everything — its own reports and every descendant's;
+    /// a delegate's card is its own subtree, never a sibling's or the parent's. Three Codex
+    /// delegates as `_data/codex-subagents.jsonl` reports them (instance id, no type, the
+    /// parent's ring repeated), plus a grandchild the chef spawned: its `Delegate` call is
+    /// stamped with the chef, which is how the chef's card knows it is the chef's.
+    #[test]
+    fn a_parent_counts_everything_and_a_delegate_its_subtree() {
+        let mut c = conversation();
+        for (ix, id) in ["chef", "pastry", "kitchen"].into_iter().enumerate() {
+            c.apply(
+                ix as u64 + 1,
+                task_call(id, "Subagent", ToolStatus::InProgress),
+            );
+        }
+        c.apply(
+            4,
+            ConvUpdate::ToolCall(ToolCallRecord {
+                id: "sous".to_string(),
+                title: "sous".to_string(),
+                kind: ToolKind::Other,
+                status: ToolStatus::InProgress,
+                content: Vec::new(),
+                locations: Vec::new(),
+                subagent: Some(Subagent {
+                    id: "chef".to_string(),
+                    ..Default::default()
+                }),
+            }),
+        );
+        c.apply(5, usage(29_880, 258_400, spend(30_000, 100), None));
+        let reports = [
+            ("chef", 18_000),
+            ("pastry", 2_000),
+            ("kitchen", 3_000),
+            ("sous", 500),
+        ];
+        for (ix, (id, input)) in reports.into_iter().enumerate() {
+            c.apply(
+                ix as u64 + 6,
+                // A level unlike the parent's, so a report that leaked into the ring would show.
+                delegate_usage(99, 258_400, spend(input, 0), None, Some(id)),
+            );
+        }
+
+        assert_eq!(
+            c.total_tokens(),
+            Some(30_100 + 18_000 + 2_000 + 3_000 + 500)
+        );
+        assert_eq!(c.delegate_tokens("chef"), Some((18_500, 0)), "own + sous");
+        assert_eq!(c.delegate_tokens("pastry"), Some((2_000, 0)));
+        assert_eq!(c.delegate_tokens("kitchen"), Some((3_000, 0)));
+        assert_eq!(c.delegate_tokens("sous"), Some((500, 0)));
+        assert_eq!(
+            c.usage.as_ref().map(|u| u.used),
+            Some(29_880),
+            "a report stamped only with an instance id never stands in for the parent's"
+        );
+    }
+
+    /// **What a card reads is the instance, and the instances differ.** The defect this closes
+    /// (`T-259`) was two `general-purpose` delegates drawing a byte-identical figure, because both
+    /// cards read their type's bucket. Two reports, two ids, two numbers — and neither is the
+    /// type's total.
+    #[test]
+    fn a_delegates_tokens_are_its_own_and_not_its_types() {
+        let mut c = conversation();
+        c.apply(1, usage(50_000, 200_000, spend(4_000, 400), None));
+        c.apply(
+            2,
+            delegate_usage(
+                50_000,
+                200_000,
+                spend(9_000, 900),
+                Some("general-purpose"),
+                Some("toolu_a"),
+            ),
+        );
+        c.apply(
+            3,
+            delegate_usage(
+                50_000,
+                200_000,
+                spend(1_000, 100),
+                Some("general-purpose"),
+                Some("toolu_b"),
+            ),
+        );
+
+        assert_eq!(c.delegate_tokens("toolu_a"), Some((9_900, 0)));
+        assert_eq!(c.delegate_tokens("toolu_b"), Some((1_100, 0)));
+        assert_eq!(
+            c.subagent_tokens("general-purpose"),
+            Some((11_000, 0)),
+            "the type's bucket is still the aggregate — the two live side by side"
+        );
+        assert_eq!(
+            c.delegate_tokens("toolu_never_reported"),
+            None,
+            "a delegate whose reports named no instance draws nothing, not its type's total"
+        );
+    }
+
+    /// The cached half of the reading is cache *read* alone: context re-used is saved, context
+    /// newly written is paid for once. And a bucket that exists but counted nothing reads `None`,
+    /// so the footer draws nothing rather than a row of zeroes.
+    #[test]
+    fn subagent_tokens_count_cache_read_as_the_cached_part() {
+        let mut c = conversation();
+        c.apply(
+            1,
+            usage(
+                50_000,
+                200_000,
+                TokenSpend {
+                    input: 1_000,
+                    output: 100,
+                    cache_read: 9_000,
+                    cache_creation: 500,
+                    ..TokenSpend::default()
+                },
+                Some("Explore"),
+            ),
+        );
+        c.apply(
+            2,
+            usage(50_000, 200_000, TokenSpend::default(), Some("Plan")),
+        );
+
+        assert_eq!(
+            c.subagent_tokens("Explore"),
+            Some((10_600, 9_000)),
+            "every token billed, and the cache-read part of it"
+        );
+        assert_eq!(
+            c.subagent_tokens("Plan"),
+            None,
+            "a bucket that was opened and counted nothing draws nothing"
+        );
+    }
+
+    /// The worst of the bugs a real capture showed: a subagent's greeting drawn inside the
+    /// sentence the main agent was in the middle of. Message ids are minted per turn and collide.
+    #[test]
+    fn a_subagents_chunk_does_not_join_the_parents_block() {
+        let mut c = conversation();
+        c.apply(1, chunk("I'll delegate. ", Some("m1")));
+        c.apply(
+            2,
+            ConvUpdate::AgentChunk {
+                content: ConvContent::Text("Hello from the subagent".to_string()),
+                message_id: Some("m1".to_string()),
+                subagent: Some(Subagent {
+                    id: "toolu_1".to_string(),
+                    kind: Some("Explore".to_string()),
+                    ..Default::default()
+                }),
+                at: None,
+            },
+        );
+
+        assert_eq!(c.blocks.len(), 2, "two voices are two blocks");
+        assert_eq!(c.blocks[0].subagent_id(), None);
+        assert_eq!(c.blocks[1].subagent_id(), Some("toolu_1"));
+    }
+
+    /// The chip is short enough to read at a glance without inventing a rule for vendors whose
+    /// ids do not share Claude's shape.
+    #[test]
+    fn only_claude_ids_are_shortened_to_their_family() {
+        assert_eq!(
+            short_model_label("Claude Code", "claude-haiku-4-5-20251001"),
+            "haiku"
+        );
+        assert_eq!(
+            short_model_label("Claude Code", "opus"),
+            "opus",
+            "nothing to cut on"
+        );
+        assert_eq!(
+            short_model_label("Codex", "gpt-5-codex"),
+            "gpt-5-codex",
+            "another harness's id is its own"
+        );
+    }
+
+    #[test]
+    fn a_rate_limit_update_is_held_and_read_back() {
+        let mut c = conversation();
+        assert_eq!(c.rate_limit_five_hour_pct(), None, "nothing reported yet");
+
+        c.apply(
+            1,
+            ConvUpdate::RateLimit(RateLimitRecord {
+                five_hour_pct: Some(7),
+                five_hour_resets_at: Some(1_788_474_600),
+                seven_day_pct: Some(21),
+                seven_day_resets_at: Some(1_788_796_800),
+                status: "allowed".to_string(),
+                overage_status: None,
+                overage_reason: None,
+            }),
+        );
+
+        assert_eq!(c.rate_limit_five_hour_pct(), Some(7));
+    }
+
+    #[test]
+    fn a_waiting_permission_outranks_whatever_it_was_doing() {
+        let mut c = conversation();
+        c.apply(1, chunk("working", Some("m1")));
+        assert_eq!(c.activity(), Activity::Writing);
+
+        c.apply(2, permission("r1"));
+        assert_eq!(c.activity(), Activity::NeedsYou);
+    }
+
+    /// Upstream may have several requests open at once and expects every one answered, so a
+    /// second must not push the first off the screen — and answering one must not clear the other.
+    #[test]
+    fn two_permissions_are_both_held_and_answered_one_at_a_time() {
+        let mut c = conversation();
+        c.apply(1, permission("r1"));
+        c.apply(2, permission("r2"));
+
+        let ids: Vec<&str> = c.pending.iter().map(|p| p.request_id.as_str()).collect();
+        assert_eq!(ids, vec!["r1", "r2"]);
+        assert_eq!(
+            c.oldest_pending().map(|p| p.request_id.as_str()),
+            Some("r1")
+        );
+
+        c.answered("r1");
+        let ids: Vec<&str> = c.pending.iter().map(|p| p.request_id.as_str()).collect();
+        assert_eq!(ids, vec!["r2"]);
+        assert_eq!(c.activity(), Activity::NeedsYou);
+
+        c.answered("r2");
+        assert!(c.pending.is_empty());
+        assert_ne!(c.activity(), Activity::NeedsYou);
+    }
+
+    /// The same id twice is the harness restating one request, not a second one.
+    #[test]
+    fn a_repeated_request_id_replaces_rather_than_queues() {
+        let mut c = conversation();
+        c.apply(1, permission("r1"));
+        c.apply(2, permission("r1"));
+        assert_eq!(c.pending.len(), 1);
+    }
+
+    #[test]
+    fn a_failed_end_shows_as_failed_rather_than_ended() {
+        let mut c = conversation();
+        c.ended(StopReason::Failed);
+        assert_eq!(c.activity(), Activity::Failed);
+        assert_eq!(c.run, Run::Ended);
+    }
+
+    /// The bus promises order per agent, so a gap is a lost message.
+    #[test]
+    fn a_gap_in_the_sequence_is_visible() {
+        let mut c = conversation();
+        assert!(c.is_next(1));
+        c.apply(1, chunk("a", Some("m1")));
+        assert!(c.is_next(2));
+        assert!(!c.is_next(4));
+    }
+
+    /// Ids are stable and increase, so an edit or a delete elsewhere in the queue never renames
+    /// what a caller already holds a reference to.
+    #[test]
+    fn enqueue_hands_out_stable_increasing_ids() {
+        let mut c = conversation();
+        let first = c.enqueue("one".to_string());
+        let second = c.enqueue("two".to_string());
+        assert_ne!(first, second);
+        assert_eq!(
+            c.queued,
+            vec![
+                QueuedMessage {
+                    id: first,
+                    text: "one".to_string()
+                },
+                QueuedMessage {
+                    id: second,
+                    text: "two".to_string()
+                },
+            ]
+        );
+    }
+
+    /// What a turn ending sends automatically: the oldest one, first in first out.
+    #[test]
+    fn dequeue_front_pops_the_oldest() {
+        let mut c = conversation();
+        c.enqueue("first".to_string());
+        c.enqueue("second".to_string());
+
+        let popped = c.dequeue_front().expect("a queued message");
+        assert_eq!(popped.text, "first");
+        assert_eq!(c.queued.len(), 1);
+        assert_eq!(c.dequeue_front().unwrap().text, "second");
+        assert_eq!(c.dequeue_front(), None, "nothing left to pop");
+    }
+
+    /// Delete, and the other half of an edit: the caller re-populates the composer with what
+    /// comes back.
+    #[test]
+    fn remove_queued_takes_the_named_entry_back_out() {
+        let mut c = conversation();
+        let keep = c.enqueue("keep".to_string());
+        let drop = c.enqueue("drop this".to_string());
+
+        let text = c.remove_queued(drop).expect("the entry existed");
+        assert_eq!(text, "drop this");
+        assert_eq!(
+            c.queued,
+            vec![QueuedMessage {
+                id: keep,
+                text: "keep".to_string()
+            }]
+        );
+        assert_eq!(c.remove_queued(drop), None, "already removed");
+    }
+
+    /// One tag per file, however many times it is picked — and the second pick is what refreshes
+    /// the size, since it read the folder more recently.
+    #[test]
+    fn attaching_the_same_path_twice_keeps_one_tag() {
+        let mut c = conversation();
+        let first = c.attach("src/main.rs".to_string(), Some(10));
+        let again = c.attach("src/main.rs".to_string(), Some(20));
+
+        assert_eq!(first, Some(0));
+        assert_eq!(again, None, "already attached");
+        assert_eq!(c.attached.len(), 1);
+        assert_eq!(c.attached[0].size, Some(20));
+    }
+
+    /// Ids are stable, so a remove names the entry the tag was drawn for and nothing else moves
+    /// under it.
+    #[test]
+    fn detach_takes_the_named_attachment_back_out() {
+        let mut c = conversation();
+        let keep = c.attach("a.rs".to_string(), None).expect("attached");
+        let drop = c.attach("b.rs".to_string(), Some(1)).expect("attached");
+
+        let gone = c.detach(drop).expect("the entry existed");
+        assert_eq!(gone.path, "b.rs");
+        assert_eq!(c.attached.len(), 1);
+        assert_eq!(c.attached[0].id, keep);
+        assert_eq!(c.detach(drop), None, "already removed");
+    }
+
+    /// What sending does: the mentions are composed into the one `PromptAgent` text, and the
+    /// attachments are consumed with the draft rather than carried into the next turn.
+    #[test]
+    fn attachments_compose_into_the_prompt_and_are_cleared_on_send() {
+        let mut c = conversation();
+        c.attach("src/lib.rs".to_string(), Some(400 * 1024));
+        c.attach("README.md".to_string(), None);
+
+        assert_eq!(
+            c.compose_prompt("  review these  "),
+            "review these @src/lib.rs @README.md"
+        );
+        assert_eq!(
+            c.compose_prompt(""),
+            "@src/lib.rs @README.md",
+            "attachments alone are still something to send"
+        );
+
+        c.clear_attached();
+        assert!(c.attached.is_empty());
+        assert_eq!(c.compose_prompt("plain"), "plain");
+    }
+
+    /// A message keeps the time the host gave it — an agent's, its first chunk's, however many
+    /// follow.
+    #[test]
+    fn a_message_keeps_the_time_it_was_said() {
+        let mut c = conversation();
+        c.apply(
+            1,
+            ConvUpdate::UserChunk {
+                content: ConvContent::Text("hello".to_string()),
+                message_id: None,
+                at: Some(1_000),
+            },
+        );
+        for (seq, at) in [(2, 2_000), (3, 3_000)] {
+            c.apply(
+                seq,
+                ConvUpdate::AgentChunk {
+                    content: ConvContent::Text("hi".to_string()),
+                    message_id: Some("m1".to_string()),
+                    subagent: None,
+                    at: Some(at),
+                },
+            );
+        }
+        match &c.blocks[..] {
+            [
+                ConvBlock::User { at: said, .. },
+                ConvBlock::Agent {
+                    at: answered, body, ..
+                },
+            ] => {
+                assert_eq!(*said, Some(1_000));
+                assert_eq!(
+                    *answered,
+                    Some(2_000),
+                    "the first chunk's time, not the last's"
+                );
+                assert_eq!(body, "hihi");
+            }
+            other => panic!("expected a user and an agent block, got {other:?}"),
+        }
+    }
+
+    /// A live reply after a replayed history is a new, dated block, not a tail on the last
+    /// undated one.
+    #[test]
+    fn a_live_reply_after_a_replay_starts_a_dated_block() {
+        let mut c = conversation();
+        let agent = |at| ConvUpdate::AgentChunk {
+            content: ConvContent::Text("hi".to_string()),
+            message_id: None,
+            subagent: None,
+            at,
+        };
+        c.apply(1, agent(None));
+        c.apply(
+            2,
+            ConvUpdate::Started {
+                session_id: None,
+                model: None,
+                mode: None,
+                tools: Vec::new(),
+                agents: Vec::new(),
+            },
+        );
+        c.apply(3, agent(Some(5_000)));
+        match &c.blocks[..] {
+            [
+                ConvBlock::Agent { at: None, .. },
+                ConvBlock::Agent {
+                    at: Some(5_000), ..
+                },
+            ] => {}
+            other => panic!("expected two agent blocks, got {other:?}"),
+        }
+    }
+
+    /// The chips survive Send. The harness echoes back one string of `@path` mentions and says
+    /// nothing about which of them were tags, so the turn carries its own list across — and the
+    /// composer is empty afterwards, exactly as a plain clear leaves it.
+    #[test]
+    fn a_sent_turn_keeps_the_files_it_was_sent_with() {
+        let mut c = conversation();
+        c.attach("src/lib.rs".to_string(), Some(12));
+        c.expect_attachments();
+        assert!(c.attached.is_empty(), "the composer is clear on send");
+
+        c.apply(
+            1,
+            ConvUpdate::UserChunk {
+                content: ConvContent::Text("review this @src/lib.rs".to_string()),
+                message_id: Some("u1".to_string()),
+                at: None,
+            },
+        );
+
+        match &c.blocks[..] {
+            [ConvBlock::User { text, attached, .. }] => {
+                assert_eq!(text, "review this @src/lib.rs");
+                assert_eq!(attached.len(), 1);
+                assert_eq!(attached[0].path, "src/lib.rs");
+                assert_eq!(attached[0].size, Some(12));
+            }
+            other => panic!("expected one user block, got {other:?}"),
+        }
+    }
+
+    /// They belong to one turn. A second echo with nothing armed is a plain message, rather than
+    /// the previous turn's files hung on a sentence they were never sent with.
+    #[test]
+    fn attachments_are_spent_by_the_turn_that_carried_them() {
+        let mut c = conversation();
+        c.attach("a.rs".to_string(), None);
+        c.expect_attachments();
+
+        let echo = |text: &str| ConvUpdate::UserChunk {
+            content: ConvContent::Text(text.to_string()),
+            message_id: None,
+            at: None,
+        };
+        c.apply(1, echo("first @a.rs"));
+        c.apply(2, echo("second"));
+
+        match &c.blocks[..] {
+            [
+                ConvBlock::User {
+                    attached: first, ..
+                },
+                ConvBlock::User { attached: next, .. },
+            ] => {
+                assert_eq!(first.len(), 1);
+                assert!(next.is_empty(), "the second turn attached nothing");
+            }
+            other => panic!("expected two user blocks, got {other:?}"),
+        }
+    }
+
+    /// Two Sends can be in flight before either echoes, and each keeps its own files, in order.
+    /// One armed slot would let the second send overwrite the first and the first turn would draw
+    /// bare — which is what the queue exists to stop.
+    #[test]
+    fn two_sends_in_flight_keep_their_own_files_in_order() {
+        let mut c = conversation();
+        c.attach("first.rs".to_string(), None);
+        c.expect_attachments();
+        c.attach("second.rs".to_string(), None);
+        c.expect_attachments();
+
+        let echo = |text: &str| ConvUpdate::UserChunk {
+            content: ConvContent::Text(text.to_string()),
+            message_id: None,
+            at: None,
+        };
+        c.apply(1, echo("one @first.rs"));
+        c.apply(2, echo("two @second.rs"));
+
+        match &c.blocks[..] {
+            [
+                ConvBlock::User { attached: one, .. },
+                ConvBlock::User { attached: two, .. },
+            ] => {
+                assert_eq!(one.len(), 1);
+                assert_eq!(one[0].path, "first.rs");
+                assert_eq!(two.len(), 1);
+                assert_eq!(two[0].path, "second.rs");
+            }
+            other => panic!("expected two user blocks, got {other:?}"),
+        }
+    }
+
+    /// A plain send takes its place in the queue too. Skipping it would hand its echo the *next*
+    /// turn's files, which is the same defect one position along.
+    #[test]
+    fn a_plain_send_between_two_attached_ones_keeps_the_queue_in_step() {
+        let mut c = conversation();
+        c.expect_attachments();
+        c.attach("later.rs".to_string(), None);
+        c.expect_attachments();
+
+        let echo = |text: &str| ConvUpdate::UserChunk {
+            content: ConvContent::Text(text.to_string()),
+            message_id: None,
+            at: None,
+        };
+        c.apply(1, echo("plain"));
+        c.apply(2, echo("with a file @later.rs"));
+
+        match &c.blocks[..] {
+            [
+                ConvBlock::User {
+                    attached: plain, ..
+                },
+                ConvBlock::User {
+                    attached: files, ..
+                },
+            ] => {
+                assert!(plain.is_empty(), "the plain turn stayed plain");
+                assert_eq!(files.len(), 1);
+                assert_eq!(files[0].path, "later.rs");
+            }
+            other => panic!("expected two user blocks, got {other:?}"),
+        }
+    }
+
+    /// A turn that broke never echoed and never will, so its files are discharged rather than
+    /// left armed to be hung on some unrelated later turn.
+    #[test]
+    fn a_turn_that_never_echoes_does_not_hang_its_files_on_a_later_one() {
+        let mut c = conversation();
+        c.attach("lost.rs".to_string(), None);
+        c.expect_attachments();
+
+        c.apply(
+            1,
+            ConvUpdate::TurnEnded {
+                stop_reason: StopReason::Failed,
+                error: Some("the harness died".to_string()),
+            },
+        );
+        c.apply(
+            2,
+            ConvUpdate::UserChunk {
+                content: ConvContent::Text("a later, unrelated question".to_string()),
+                message_id: None,
+                at: None,
+            },
+        );
+
+        match &c.blocks[..] {
+            [ConvBlock::User { attached, .. }] => assert!(
+                attached.is_empty(),
+                "the broken turn's files did not survive it"
+            ),
+            other => panic!("expected one user block, got {other:?}"),
+        }
+    }
+
+    /// An end and an unload both discharge, for the same reason: nothing in flight can echo once
+    /// the harness is gone.
+    #[test]
+    fn ending_and_unloading_both_discharge_the_armed_files() {
+        for gone in [
+            (|c: &mut Conversation| c.ended(StopReason::Cancelled)) as fn(&mut Conversation),
+            |c: &mut Conversation| c.unloaded(),
+        ] {
+            let mut c = conversation();
+            c.attach("lost.rs".to_string(), None);
+            c.expect_attachments();
+            gone(&mut c);
+            c.apply(
+                1,
+                ConvUpdate::UserChunk {
+                    content: ConvContent::Text("a resumed conversation's first turn".to_string()),
+                    message_id: None,
+                    at: None,
+                },
+            );
+            match &c.blocks[..] {
+                [ConvBlock::User { attached, .. }] => assert!(attached.is_empty()),
+                other => panic!("expected one user block, got {other:?}"),
+            }
+        }
+    }
+
+    /// Claude Code's synthetic interrupt echo is not the turn. It is dropped rather than drawn,
+    /// and it must not eat the files either — the real turn's own echo is still to come.
+    #[test]
+    fn an_interrupt_marker_echo_does_not_eat_the_files() {
+        let mut c = conversation();
+        c.attach("kept.rs".to_string(), None);
+        c.expect_attachments();
+
+        let echo = |text: &str| ConvUpdate::UserChunk {
+            content: ConvContent::Text(text.to_string()),
+            message_id: None,
+            at: None,
+        };
+        c.apply(1, echo("[Request interrupted by user]"));
+        c.apply(2, echo("the real turn @kept.rs"));
+
+        match &c.blocks[..] {
+            [ConvBlock::User { text, attached, .. }] => {
+                assert_eq!(text, "the real turn @kept.rs");
+                assert_eq!(attached.len(), 1, "the marker left them alone");
+                assert_eq!(attached[0].path, "kept.rs");
+            }
+            other => panic!("expected one user block, got {other:?}"),
+        }
+    }
+
+    /// An enqueue is not a send. Its paths are already inside the queued string, so they are
+    /// dropped rather than armed — otherwise they would land on whatever turn echoed next.
+    #[test]
+    fn enqueuing_drops_the_attachments_rather_than_carrying_them() {
+        let mut c = conversation();
+        c.attach("a.rs".to_string(), None);
+        c.enqueue(c.compose_prompt("later"));
+        c.clear_attached();
+
+        c.apply(
+            1,
+            ConvUpdate::UserChunk {
+                content: ConvContent::Text("something else".to_string()),
+                message_id: None,
+                at: None,
+            },
+        );
+
+        match &c.blocks[..] {
+            [ConvBlock::User { attached, .. }] => assert!(attached.is_empty()),
+            other => panic!("expected one user block, got {other:?}"),
+        }
+    }
+
+    /// The mechanics `app.rs`'s auto-send glue relies on: a turn ending flips `run` to `Idle`,
+    /// and the front of the queue is then a plain pop away — the state layer's half of "send the
+    /// next queued prompt when a turn ends", which is as far as this layer's own test can reach.
+    #[test]
+    fn a_turn_ending_leaves_the_queue_ready_to_drain() {
+        let mut c = conversation();
+        c.enqueue("next up".to_string());
+        c.apply(
+            1,
+            ConvUpdate::TurnEnded {
+                stop_reason: StopReason::EndTurn,
+                error: None,
+            },
+        );
+
+        assert_eq!(c.run, Run::Idle);
+        assert_eq!(c.dequeue_front().unwrap().text, "next up");
+    }
+
+    fn user(text: &str) -> ConvUpdate {
+        ConvUpdate::UserChunk {
+            content: ConvContent::Text(text.to_string()),
+            message_id: None,
+            at: None,
+        }
+    }
+
+    fn turn_ended() -> ConvUpdate {
+        ConvUpdate::TurnEnded {
+            stop_reason: StopReason::EndTurn,
+            error: None,
+        }
+    }
+
+    fn started() -> ConvUpdate {
+        ConvUpdate::Started {
+            session_id: None,
+            model: None,
+            mode: None,
+            tools: Vec::new(),
+            agents: Vec::new(),
+        }
+    }
+
+    /// The echo is synthesised on the thread that wrote the prompt and the end comes off the
+    /// reader, so an instant turn can end first. Its echo is still drawn, but it reopens nothing —
+    /// and the next turn's own echo opens that turn as before.
+    #[test]
+    fn a_late_echo_does_not_reopen_an_ended_turn() {
+        let mut c = conversation();
+        c.launched = true;
+        c.expect_turn();
+        c.apply(1, chunk("done already", Some("m1")));
+        c.apply(2, turn_ended());
+        c.apply(3, user("the question"));
+
+        assert_eq!(c.run, Run::Idle, "the late echo left the turn ended");
+        assert!(
+            matches!(&c.blocks[..], [_, ConvBlock::User { text, .. }] if text == "the question")
+        );
+
+        c.expect_turn();
+        c.apply(4, user("the next question"));
+        assert_eq!(c.run, Run::Working, "a real next turn still opens");
+    }
+
+    /// Codex ends a turn once more for each prompt steered into it. A turn end nobody's send is
+    /// waiting on owes no echo, so the next turn's echo still opens it — every turn after, too.
+    #[test]
+    fn a_steered_double_turn_end_owes_no_echo() {
+        let mut c = conversation();
+        c.launched = true;
+        c.expect_turn();
+        c.apply(1, user("first"));
+        c.expect_turn();
+        c.apply(2, user("steered in"));
+        c.apply(3, turn_ended());
+        c.apply(4, turn_ended());
+        assert_eq!(c.run, Run::Idle);
+
+        for (n, seq) in [(0, 5), (1, 7)] {
+            c.expect_turn();
+            c.apply(seq, user(&format!("next {n}")));
+            assert_eq!(c.run, Run::Working, "turn {n} opens on its echo");
+            c.apply(seq + 1, turn_ended());
+        }
+    }
+
+    /// A turn that broke owes no echo, so the next turn's echo is that turn opening.
+    #[test]
+    fn a_failed_turn_owes_no_echo() {
+        let mut c = conversation();
+        c.apply(
+            1,
+            ConvUpdate::TurnEnded {
+                stop_reason: StopReason::Failed,
+                error: Some("refused".to_string()),
+            },
+        );
+        c.apply(2, user("again"));
+        assert_eq!(c.run, Run::Working);
+    }
+
+    /// Claude Code's interrupt marker trails the cancelled turn, often behind its end.
+    #[test]
+    fn an_interrupt_marker_after_the_end_opens_nothing() {
+        let mut c = conversation();
+        c.apply(1, user("go"));
+        c.apply(2, turn_ended());
+        c.apply(3, user("[Request interrupted by user]"));
+        assert_eq!(c.run, Run::Idle);
+    }
+
+    /// An ACP `session/load` replays history ahead of its handshake with no `TurnEnded`; the
+    /// handshake's `Started` is what closes it.
+    #[test]
+    fn a_session_load_replay_does_not_leave_the_run_working() {
+        let mut c = conversation();
+        c.apply(1, user("old question"));
+        c.apply(2, chunk("old answer", Some("m1")));
+        c.apply(3, started());
+        assert_eq!(c.run, Run::Idle);
+        assert!(c.launched);
+
+        c.expect_turn();
+        c.apply(4, user("new question"));
+        assert_eq!(c.run, Run::Working, "the live turn after the replay opens");
+    }
+
+    /// A replayed history of user turns alone is still history: no send accounts for it.
+    #[test]
+    fn a_user_only_replay_does_not_leave_the_run_working() {
+        let mut c = conversation();
+        c.apply(1, user("asked, never answered"));
+        c.apply(2, started());
+        assert_eq!(c.run, Run::Idle);
+    }
+
+    /// Claude Code's first echo also precedes its `Started`, and that turn is live.
+    #[test]
+    fn a_first_echo_before_started_keeps_the_turn_working() {
+        let mut c = conversation();
+        c.expect_turn();
+        c.apply(1, user("hello"));
+        c.apply(2, started());
+        assert_eq!(c.run, Run::Working);
+    }
+}

@@ -11,8 +11,8 @@ depends_on: [inbox-editions]
 
 # Pre-editions refactoring plan
 
-Source: a four-way audit (read-only subagents) of the largest files in `ubiq`, `ubiq-host`,
-`ubiq-proto` and `agent-manager`, cross-checked against `inbox/editions-proposal.md`. Deleted when
+Source: a four-way audit (read-only subagents) of the largest files in `kubiq`, `kubiq-host`,
+`kubiq-proto` and `agent-manager`, cross-checked against `inbox/editions-proposal.md`. Deleted when
 phase 4 closes — promote anything durable to `tech/` or `backlog.md` before that.
 
 **Phases 0-3 landed on 2026-09-04, and so did phase 4's first item.** What is left of phase 4 is
@@ -22,13 +22,13 @@ three items, each with a recorded reason it is left.
 
 | Was | Is | Largest file now |
 |---|---|---|
-| the old `app.rs`, 8120 lines, one 7060-line `impl AppState` | `crates/ubiq/src/app/`, 16 files | `app/wire.rs`, 1241 |
+| the old `app.rs`, 8120 lines, one 7060-line `impl AppState` | `crates/kubiq/src/app/`, 16 files | `app/wire.rs`, 1241 |
 | `receive()`, a 775-line match over the whole bus protocol | 31 lines chaining nine `receive_<family>` helpers | `receive_file`, 172 |
-| the old `state/explorer.rs`, 1405 lines | `crates/ubiq/src/state/explorer/`, 6 files | `tree.rs`, 454 |
+| the old `state/explorer.rs`, 1405 lines | `crates/kubiq/src/state/explorer/`, 6 files | `tree.rs`, 454 |
 | the old `cli/account.rs`, 1754 lines | `crates/agent-manager/src/cli/account/`, 6 files | `import.rs`, 439 |
 | five harness files carrying five copies of three things | `harness/shared.rs` | −419 lines, test count unchanged |
 
-`crates/ubiq/src/app/sink.rs` and `app/board.rs` are the two screen-private files
+`crates/kubiq/src/app/sink.rs` and `app/board.rs` are the two screen-private files
 editions-proposal §4.2 needs as its base-side user. `app/wire.rs`'s chain ends at the same
 unhandled-message warning the `Extension` arm slots in before.
 
@@ -43,7 +43,7 @@ Recorded because the same mistakes are easy to make again from the same reading.
 | Child modules cannot see parent-private **fields**, so the split needs a visibility bump | They can — a private item is visible in its module *and all descendants*. No field changed. What did need bumping was 41 private **methods** now called from a *sibling* module, which is not a descendant relationship |
 | `explorer.rs` splits along a grid of doc-comment banners | There were two banners, both inside one impl. The split was made along responsibilities the file left implicit |
 | The five tree walkers consolidate into one generic visitor | `node_of`/`node_mut` is a const/mut pair Rust cannot unify without a macro, and `paint_nodes`/`collect_cache` share only the recursion skeleton. Left alone |
-| `turn_ended` is a dead method on a `ubiq`-side io bridge | It was a **field** in `crates/agent-manager/src/io/`, and only the struct's copy was dead — the reader thread's clone was live. It is now a plain thread-local `bool` |
+| `turn_ended` is a dead method on a `kubiq`-side io bridge | It was a **field** in `crates/agent-manager/src/io/`, and only the struct's copy was dead — the reader thread's clone was live. It is now a plain thread-local `bool` |
 | `state/sink.rs` has a dead `rgb` the app duplicates | Two separate findings: `ProjectDemo::rgb` had no callers, and the duplicate was `sink_project_swatch_rgb` against the free `project_swatch_rgb`. Both gone |
 | The colour-picker duplication is six helpers, ~90 lines | It was `set_rgb`'s body inlined against a second state in four places, plus a **third** copy of the shape in `ui/sink/project.rs`. One `ColourField` in `state/sink.rs` now owns the maths |
 | The env-injection block is identical five times, ~50 lines each | Only the `std::env::var(…).map_err(…)` expression was identical (9 times). The surrounding branch shapes genuinely differ — claude sets key and token independently, grok collapses with `.or()`, opencode pushes two vars per arm. Only the resolver was extracted |
@@ -72,10 +72,10 @@ In the proposal's own order (`inbox-editions` §14).
 
 ### Landed on 2026-09-04
 
-1. **Composition root** (§3), `3c51380` — `ubiq-app` is a library: `Stores` (the four boxed store
+1. **Composition root** (§3), `3c51380` — `kubiq-app` is a library: `Stores` (the four boxed store
    traits, with `Stores::files`), `Boot` (one field, `stores: Box<dyn FnOnce(&Path) -> Stores>`,
    because the config root is resolved inside `run`) and `run(boot)`, the former 246-line `main()`
-   verbatim. `main.rs` is three lines. `Cargo.toml` gained `[lib] name = "ubiq_app"`. Zero behaviour
+   verbatim. `main.rs` is three lines. `Cargo.toml` gained `[lib] name = "kubiq_app"`. Zero behaviour
    change, and the boot gained a test that hands in the memory stores.
    The proposal's `Boot::features` and `Boot::contributions` are absent by design — `Feature` and
    `Contribution` do not exist, and the proposal's own rule is that an extension point with no
@@ -115,7 +115,7 @@ regression.
 
 **`cargo test --workspace` is green as of `1c322c2`, and the `codex_bridge` "flake" was never a
 flake.** Cargo unifies features across workspace members; Zed's `gpui`/`http_client` crates, which
-`crates/ubiq` needs, enable `serde_json/preserve_order`, which serialises map keys in insertion
+`crates/kubiq` needs, enable `serde_json/preserve_order`, which serialises map keys in insertion
 order instead of alphabetically. So the same JSON-RPC request is `{"id":1,"jsonrpc":…}` under
 `cargo test -p agent-manager` and `{"jsonrpc":"2.0","id":1,…}` under `--workspace`, and
 `tests/fake-codex-appserver.sh` extracted `id` with a `sed` anchored to `^{"id":`. Deterministic per

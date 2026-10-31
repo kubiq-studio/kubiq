@@ -7,7 +7,7 @@ summary: Editor-like chat tabs — many, movable to any dockable region, each a 
 read_when: you are changing a chat tab, the control that starts or attaches a conversation, or which conversation a tab shows
 updated: 2026-10-26
 verified: 2026-10-26
-code_anchors: [crates/ubiq/src/ui/chat/mod.rs, crates/ubiq/src/ui/chat/sidebar.rs, crates/ubiq/src/state/chat.rs, crates/ubiq/src/state/dock.rs, crates/ubiq/src/app/chat.rs, crates/ubiq/src/app/clipboard.rs, crates/ubiq/src/app/picker.rs, crates/ubiq/src/app/panels.rs, crates/ubiq/src/app/wire.rs, crates/ubiq/src/app/shell.rs, crates/ubiq/src/app/boot.rs, crates/ubiq/src/ui/conversation/mod.rs, crates/ubiq/src/ui/conversation/info.rs, crates/ubiq/src/ui/acp_capabilities.rs, crates/ubiq/src/state/conversation.rs, crates/ubiq/src/state/work.rs, crates/ubiq/src/app/agents.rs, crates/ubiq/src/ui/agents/mod.rs, crates/ubiq/src/ui/dock/skin.rs, crates/ubiq/src/state/prefs.rs, crates/ubiq/src/app/projects.rs, crates/ubiq/src/state/ask.rs, crates/ubiq/src/app/ask.rs, crates/ubiq/src/ui/ask.rs, crates/ubiq-proto/src/ask.rs]
+code_anchors: [crates/kubiq/src/ui/chat/mod.rs, crates/kubiq/src/ui/chat/sidebar.rs, crates/kubiq/src/state/chat.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/app/chat.rs, crates/kubiq/src/app/clipboard.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/app/panels.rs, crates/kubiq/src/app/wire.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/boot.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/ui/conversation/info.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/state/work.rs, crates/kubiq/src/app/agents.rs, crates/kubiq/src/ui/agents/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/state/ask.rs, crates/kubiq/src/app/ask.rs, crates/kubiq/src/ui/ask.rs, crates/kubiq-proto/src/ask.rs]
 depends_on: [feat-workbench]
 review_cycle: monthly
 ---
@@ -93,19 +93,19 @@ model`), the assigned task's title and the handle, led by the full title when cu
 prompt the host names the conversation onto its record and the tab follows with the next `AgentChanged`. An
 unattached tab reads `New chat` and hovers to nothing. The naming rule, its other surfaces and the switch
 that disables it are the workbench's; the record is the work family's `AgentChanged`
-([`../tech/transport-contract.md`](../tech/transport-contract.md)); `D90` is why a name Ubiq invented may be
+([`../tech/transport-contract.md`](../tech/transport-contract.md)); `D90` is why a name Kubiq invented may be
 replaced by one it read.
 
 **An unattached tab is one large play button**, centred, on `start a new agent`, drawn at `EMPTY_START_SIZE`
 rather than through `kit::icon_button` (a fixed small chrome square). No title, no note: an empty tab is the
 ordinary state of a fresh one.
 
-**Every chat tab draws from the shared conversation view**, `crates/ubiq/src/ui/conversation`: the
+**Every chat tab draws from the shared conversation view**, `crates/kubiq/src/ui/conversation`: the
 transcript, tool blocks, footer and composer every live-agent surface shares (run pill, context ring, quota
 ring, token cost, launch-time model and thinking pickers). **A link in a rendered reply or sent message
-goes where it points**: a relative path (resolved from the agent's project root) or a `ubiq://` link opens
+goes where it points**: a relative path (resolved from the agent's project root) or a `kubiq://` link opens
 in the window, `http`, `https` and `mailto` reach the OS, anything else does nothing
-([`workbench.md`](./workbench.md)). The agent's project also supplies `ubiq://./` links, including when
+([`workbench.md`](./workbench.md)). The agent's project also supplies `kubiq://./` links, including when
 the window displays another project. A deleted conversation supplies no project for relative links;
 web, mail and explicitly named project links still work. A path merely mentioned in prose is text.
 
@@ -173,7 +173,7 @@ the tool-content size above were the causes found.
 (`app/boot.rs`) ticks one per composer slot every four seconds for the window's life, but asks only when the transcript's
 rows (identity and signature, noted per frame by `note_rows`) changed since the last forced pass — a quiet
 chat gets one pass after its last change, then none. A row found at a
-different height under an unchanged signature is logged as a warning on `ubiq::ui::conversation` (kind,
+different height under an unchanged signature is logged as a warning on `kubiq::ui::conversation` (kind,
 length, cached height, measured height). A mitigation, not a fix: `backlog.md`'s `G372`.
 
 **Where a reader was left is remembered per transcript**, keyed by the conversation *and* the delegate
@@ -268,10 +268,10 @@ YOU` mark, and a delegate's request carries the delegate's name. The rest are an
 column's active tab), with the first allow- or reject-kind option offered, and do nothing where none is.
 Bound in both the `Workbench` and `Input` contexts, so a focused composer does not swallow them.
 
-### Structured questions (`ubiq-ask`)
+### Structured questions (`kubiq-ask`)
 
-**An `ubiq-ask` question is not a permission ask, and is drawn as a dialog.** `AskUser` arrives from a tool
-call the host parked and is filed on the conversation as an `AskRecord` (`crates/ubiq/src/state/ask.rs`), a
+**An `kubiq-ask` question is not a permission ask, and is drawn as a dialog.** `AskUser` arrives from a tool
+call the host parked and is filed on the conversation as an `AskRecord` (`crates/kubiq/src/state/ask.rs`), a
 side channel joined by id. With the conversation on screen and no other dialog up, the modal opens directly;
 otherwise a notification is raised and the transcript carries an "Ask for feedback" row
 (`ui::ask::transcript_entry`) whose button reopens the dialog with its draft intact — closing never touches
@@ -300,7 +300,7 @@ without an answer (the harness's own tool timeout is shorter); the dialog stays 
 submitted as the next turn, as for a registered dialog (`D191`).
 
 **One ask is drawn in one transcript: the asking agent's.** A conversation and its subagents share one
-`AgentId` and `ubiq-ask` endpoint, so `AskRecord::subagent` (from `Conversation::asking_subagent`) says who
+`AgentId` and `kubiq-ask` endpoint, so `AskRecord::subagent` (from `Conversation::asking_subagent`) says who
 was speaking, and the row is drawn in that transcript alone.
 
 **The row reads `warning` while it blocks the harness, `accent` once it does not.** It uses
@@ -391,13 +391,13 @@ for the workbench and for `Workbench > Input`, as the library's own field binds 
 made relative only to **the agent's own project**: another project may hold the same `src/lib.rs`, and the
 relative form would name a different existing file the harness reads silently.
 
-**A pasted picture is written into the project first**, under `.ubiq/pasted/` through `WriteProjectFile` —
+**A pasted picture is written into the project first**, under `.kubiq/pasted/` through `WriteProjectFile` —
 an attachment is an `@path` mention, so it needs a path. This is a file in the user's project, deliberately
-(`.ubiq/` is Ubiq's own folder there, beside `.ubiq/local/kb`). The name is the paste's millisecond, so a
+(`.kubiq/` is Kubiq's own folder there, beside `.kubiq/local/kb`). The name is the paste's millisecond, so a
 later session never repoints an older tag. What results is an ordinary attachment: same tag, dedupe, size
 warning and `@path` on send.
 
-- **The folder ignores itself**: the first picture writes `.ubiq/pasted/.gitignore` holding `*`. A paste is
+- **The folder ignores itself**: the first picture writes `.kubiq/pasted/.gitignore` holding `*`. A paste is
   the side effect of a keystroke, and untracked binaries nobody chose do not belong in `git status`. The
   user's own `.gitignore` is never touched.
 - **Bytes are re-encoded as PNG where this build can.** Harness image support is png/jpeg/gif/webp, while a
@@ -536,17 +536,17 @@ remembers travels in the interface's opaque view blob. Once attached, a tab spea
 of [`../tech/transport-contract.md`](../tech/transport-contract.md): a permission ask arrives as
 `ConvUpdate::PermissionRequest` and leaves as one `AnswerPermission` (`request_id`, `option_id`),
 `CancelTurn` answering the rest; which surface drew the buttons is not on the wire, so an ask is answered
-for them all. A question through `ubiq-ask` speaks that family's `AskUser`/`AnswerAsk`/`AskEnded` instead
+for them all. A question through `kubiq-ask` speaks that family's `AskUser`/`AnswerAsk`/`AskEnded` instead
 and is filed as an `AskRecord` beside the conversation.
 
 ## Implementation
 
-**Transcript links** (`crates/ubiq/src/ui/conversation/mod.rs`, `on_agent_link`). Both user and agent
-`TextView` bodies call `AppState::follow_agent_link` in `crates/ubiq/src/app/editor.rs`. It resolves the
+**Transcript links** (`crates/kubiq/src/ui/conversation/mod.rs`, `on_agent_link`). Both user and agent
+`TextView` bodies call `AppState::follow_agent_link` in `crates/kubiq/src/app/editor.rs`. It resolves the
 conversation's owning project at click time, then uses the same destination routing and external-scheme
-policy as `follow_link`. `crates/ubiq/tests/chat.rs` covers cross-project, expired and project-less clicks.
+policy as `follow_link`. `crates/kubiq/tests/chat.rs` covers cross-project, expired and project-less clicks.
 
-**Dock** (`crates/ubiq/src/state/dock.rs`). `ChatId` is a locally minted counter, `Display` and `FromStr` so
+**Dock** (`crates/kubiq/src/state/dock.rs`). `ChatId` is a locally minted counter, `Display` and `FromStr` so
 it round-trips through the dock's payload like a pane id. `PanelKind::Chat(ChatId)`'s `class` is `Free`,
 `home` the right region, `home_in` the same in every mode (right dock, Teams included, where the graph and
 its inspector take the centre inline), plus `closable` and `is_drawn`. `PanelKind::chat_home(mode)` is
@@ -554,7 +554,7 @@ its inspector take the centre inline), plus `closable` and `is_drawn`. `PanelKin
 trip; a saved leaf naming an id this window did not hold is dropped (a chat id is not the host's to
 confirm).
 
-**State** (`crates/ubiq/src/state/chat.rs`). `ChatTab`; `free_chat_slot` (lowest unused slot in the chat
+**State** (`crates/kubiq/src/state/chat.rs`). `ChatTab`; `free_chat_slot` (lowest unused slot in the chat
 range); `attach_choices`, the one pure function behind every attach list (chevron, `+` menu second stage,
 agents screen): which conversations pass the filter, which an open panel of the asking surface already shows
 (disabled), and the asking panel's own pick. `hidden_agents` is the per-mode rule (live minus what the
@@ -564,7 +564,7 @@ current mode shows) that the `+` menu, the tab's chevron and the titlebar chevro
 the start form and notes this tab as the target; the tab attaches when `Message::ConversationStarted` lands.
 `Attach` is immediate and `pick_chat_row` follows it with `restore_composer_draft`.
 
-**Slots** (`crates/ubiq/src/state/agents.rs`). `COLUMNS_MAX`, `CHATS_MAX` and `COMPOSER_SLOTS = COLUMNS_MAX
+**Slots** (`crates/kubiq/src/state/agents.rs`). `COLUMNS_MAX`, `CHATS_MAX` and `COMPOSER_SLOTS = COLUMNS_MAX
 + CHATS_MAX + 1`; the extra is `SINK_SLOT`, the kitchen sink's bench. Selecting a Teams card has no slot of
 its own: it opens an ordinary chat tab (`AppState::open_teams_agent_panel`). **The tab is the active
 project's; the attachment need not be**: under `TeamsSpan::Window` a card may belong to any project, but the
@@ -577,7 +577,7 @@ showing the agent Teams set, so a deliberate attach made meanwhile wins. `rememb
 attachment for a borrowed tab, so the borrow is never persisted. The tab is still the project's own; a
 Teams-owned panel is the cleaner design and is not built.
 
-**Lifecycle** (`crates/ubiq/src/app/chat.rs`). `open_chat_tab` mints a tab and slot; `open_chat_tab_now`
+**Lifecycle** (`crates/kubiq/src/app/chat.rs`). `open_chat_tab` mints a tab and slot; `open_chat_tab_now`
 also docks it, only when there is a conversation to put in it, via `PanelEdit::Reveal` (not `Open`), since
 the titlebar shortcut or a just-started conversation may fire with the right region put away. `attach_chat`
 sets or clears the attachment; `toggle_chat_picker` and `dismiss_chat_picker` own the open flag;
@@ -589,20 +589,20 @@ region's group without reopening it; `Reveal` is for user gestures). The region 
 `OpenProject::persistent_settled` guards it to once per project, so a later `WorkList` cannot reopen a tab
 the user closed; it runs from `enter_project` and from the `WorkList` answer.
 
-**Focus mode** (`crates/ubiq/src/app/chat.rs`). `toggle_chat_focus` and `toggle_chat_focus_key` (the
+**Focus mode** (`crates/kubiq/src/app/chat.rs`). `toggle_chat_focus` and `toggle_chat_focus_key` (the
 `ToggleChatFocus` action, bound in `app/mod.rs`) set `workbench.chat_focus` and focus the pooled
 composer; `close_chat_focus` clears it, and `closed_chat_tab` and the detach path clear it for their own
 tab; `drop_stale_column_focus` in `app/agents.rs` clears a column's, from `bench_agent` and `fill_columns`.
 `ui/chat/mod.rs`'s `focus_modal` paints the modal at the window root from `ui/shell.rs`, and its
 `body` draws the `Focused` placeholder in the panel; `ui/chat/sidebar.rs` draws the header button.
 
-**Delete** (`crates/ubiq/src/app/wire.rs`). `Message::ConversationDeleted` (the answer to `EndConversation`)
+**Delete** (`crates/kubiq/src/app/wire.rs`). `Message::ConversationDeleted` (the answer to `EndConversation`)
 drops the conversation and its `WorkAgent`, prunes it from columns, and **closes** every attached chat tab
 through `AppState::close_chat_tab_in`, which takes the project id (the delete can arrive while the window
 looks elsewhere). Going through that method rather than dropping the `ChatTab` removes the dock leaf and
 clears the slot. A detached tab would be an empty panel where a conversation used to be (`D100`).
 
-**Population** (`crates/ubiq/src/app/panels.rs`). `sync_chat_panels` squares the dock tree with
+**Population** (`crates/kubiq/src/app/panels.rs`). `sync_chat_panels` squares the dock tree with
 `OpenProject::chats` on entering a project (after `OpenProject::new` seeds the first tab) and at the end of
 `settle_layout`, so a restore that dropped an unfamiliar id is squared at once. `settle_panels` skips
 the seeded tab's `Open` edit through `AppState::is_idle_chat` — an unattached chat bound for the
@@ -617,7 +617,7 @@ rebuild cannot recreate it); the tab returns from its own mode's blob or the use
 panel as it reports a clicked ×, so the sweep marks it with `WorkbenchPanel::displace` (taken, not
 read: one removal) to keep `closed_chat_tab` from firing on it.
 
-**Rendering** (`crates/ubiq/src/ui/chat/`). `mod.rs` resolves the attachment once (`attached`) and hands it
+**Rendering** (`crates/kubiq/src/ui/chat/`). `mod.rs` resolves the attachment once (`attached`) and hands it
 to the shared renderer (`header: false`) or draws the empty play button; `sidebar.rs` calls
 `ui::conversation::lifecycle_header` (or draws the chevron alone, at the same height).
 `ConversationView::header` is `true` on the agents column (no `switch`) and here too, with the chevron as
@@ -670,7 +670,7 @@ The control is `ui/kit/menu.rs`'s `Picker`: `disabled`, `separators` and `search
 |---|---|
 | A chat tab has nothing attached | Its page is the play button, and its dock tab reads `New chat` |
 | No provider is configured, or the naming fails | The tab keeps its mechanical name and hovers to nothing; nothing is reported |
-| A naming answers Markdown, an emoji or a label it was asked not to add | Taken off before the title is written (`ubiq_proto::assist::plain_text`); a line of pure decoration is dropped, not made an empty name |
+| A naming answers Markdown, an emoji or a label it was asked not to add | Taken off before the title is written (`kubiq_proto::assist::plain_text`); a line of pure decoration is dropped, not made an empty name |
 | The chat range's composer slots are all taken | The strip's `+` and a re-opened empty right region do nothing, the ceiling a ninth column meets |
 | A harness is uninstalled between the draw and the click | The start form refuses rather than send a `StartConversation` that fails as a spawn; the tab keeps what it had |
 | The remembered harness or agent definition is gone | The form answers nothing rather than open on a start that would fail |

@@ -45,7 +45,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 REPO = Path(__file__).resolve().parents[1]
-MANIFEST = REPO / "crates/ubiq-host/src/web_assets/manifest.rs"
+MANIFEST = REPO / "crates/kubiq-host/src/web_assets/manifest.rs"
 
 APP = "excalidraw"
 PACKAGE = "@excalidraw/excalidraw"
@@ -56,7 +56,7 @@ DEFAULT_VERSION = "0.18.1"
 DRAWIO_APP = "drawio"
 DRAWIO_REPO = "jgraph/drawio"
 DRAWIO_DEFAULT_VERSION = "32.2.0"
-DRAWIO_MANIFEST = REPO / "crates/ubiq-host/src/web_assets/manifest_drawio.rs"
+DRAWIO_MANIFEST = REPO / "crates/kubiq-host/src/web_assets/manifest_drawio.rs"
 DRAWIO_WEBAPP_PREFIX = "src/main/webapp/"
 
 DATA_API = "https://data.jsdelivr.com/v1/packages/npm"
@@ -77,7 +77,7 @@ SCRIPT_SUFFIXES = {".js", ".mjs", ".cjs"}
 FONT_SUFFIXES = (".woff2", ".woff", ".ttf", ".otf")
 
 CONCURRENCY = 12
-USER_AGENT = "ubiq-webassets/1 (+https://github.com/ubiq)"
+USER_AGENT = "kubiq-webassets/1 (+https://github.com/kubiq)"
 
 console = Console()
 
@@ -91,15 +91,15 @@ def scratch_root() -> Path:
     The cache directory if it is writable, the temp directory if it is not: a confined run still
     works, it just loses the cache between machines rebooting.
     """
-    env = os.environ.get("UBIQ_WEBASSETS_CACHE")
+    env = os.environ.get("KUBIQ_WEBASSETS_CACHE")
     if env:
         return Path(env).expanduser()
     base = os.environ.get("XDG_CACHE_HOME")
-    cache = (Path(base) if base else Path.home() / ".cache") / "ubiq-webassets"
+    cache = (Path(base) if base else Path.home() / ".cache") / "kubiq-webassets"
     try:
         cache.mkdir(parents=True, exist_ok=True)
     except OSError:
-        return Path(tempfile.gettempdir()) / "ubiq-webassets"
+        return Path(tempfile.gettempdir()) / "kubiq-webassets"
     return cache
 
 

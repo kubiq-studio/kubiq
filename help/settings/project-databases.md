@@ -38,7 +38,7 @@ where you add, test, change and remove them. It appears once the folder is kept 
 
 ## When something goes wrong
 
-- **A warning says this install cannot keep passwords.** A password you type is held until Ubiq
+- **A warning says this install cannot keep passwords.** A password you type is held until Kubiq
   closes, then asked for again.
 - **A row says needs password.** Press **Edit**, enter it, and **Save**.
 - **Read-write is dimmed.** A read-only connection cannot give an agent write access; turn off

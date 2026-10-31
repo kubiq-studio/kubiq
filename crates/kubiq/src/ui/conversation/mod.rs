@@ -1,0 +1,4576 @@
+//! One live agent's conversation, drawn once for every surface that shows one.
+//!
+//! There is a single interface for talking to an agent, and this is it. Three surfaces host it —
+//! the chat panel the Teams and IDE screens dock, an agents-screen column, and the kitchen sink —
+//! and none of them has a renderer of its own. What differs between hosts is [`ConversationView`],
+//! which says whether the footer, the composer and the lifecycle strip come with it and which of
+//! the window's pooled composers to type into. A surface that wants one of those differently
+//! flips a flag; a surface that grows a second transcript is the mistake this module exists to
+//! prevent, and T-143 removed the last one.
+//!
+//! **Nothing here knows which screen it is inside.** It is handed a [`Conversation`] and draws it:
+//! no column, no tab, no slot of the agents screen's own arrangement reaches in. That is the whole
+//! constraint, and it is what lets a second host adopt this by passing a different view.
+//!
+//! Nothing here appends to a transcript either. The composer sends and the line appears when the
+//! harness echoes it back — an interface that draws its own half of a conversation is inventing
+//! the other half too.
+
+pub mod info;
+
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::time::Duration;
+
+use std::rc::Rc;
+
+use gpui::prelude::FluentBuilder;
+use gpui::{
+    AnimationExt, AnyElement, App, ClickEvent, ClipboardItem, Context, Div, ElementId, Focusable,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement,
+    Pixels, Rgba, SharedString, StatefulInteractiveElement, Styled, Window, div, point,
+    pulsating_between, px,
+};
+use gpui_component::input::Textarea;
+use gpui_component::text::TextView;
+use gpui_component::v_virtual_list;
+use gpui_component::{Icon, IconName, Sizable as _, Size};
+
+use kubiq_proto::conversation::{
+    ConfigChoice, ConfigValue, PlanStatus, ToolContent, ToolKind, ToolStatus,
+};
+use kubiq_proto::quota::QuotaSnapshot;
+use kubiq_proto::work::{Activity, AgentId};
+
+use crate::app::AppState;
+use crate::state::conversation::{
+    ActivityPanel, Attachment, ConvBlock, Conversation, Pending, QueuedMessage, Run, SubagentTab,
+    TranscriptScroll, short_model_label,
+};
+use crate::state::file_picker::{SizeReading, size_label, size_reading};
+use crate::state::settings::snapshot_from_rate_limit;
+use crate::state::work::format_tokens;
+use crate::state::{AttachmentPreview, MenuId};
+use crate::theme;
+use crate::ui::kit::menu::MENU_ANCHOR_UP;
+use crate::ui::kit::{
+    self, ContextItem, Picker, PickerStyle, KubiqIcon, context_menu, ghost_button, harness_icon,
+    icon_button, icon_button_tip, mono, pill, popover, primary_button, progress_ring,
+    progress_ring_in, pulse_animation, removable_tag, status_dot, tag as kit_tag,
+};
+use crate::ui::{handler, indexed};
+
+/// What differs between the surfaces that host a conversation.
+#[derive(Clone)]
+pub struct ConversationView {
+    /// What every element id inside is built from, so two conversations on screen at once do not
+    /// collide. A prefix rather than an [`ElementId`], because the ids under it are composed.
+    pub id: SharedString,
+    /// Which of the window's pooled composer fields this surface types into. An index, and
+    /// nothing else: which surface owns which slot is the host's question.
+    pub slot: usize,
+    pub footer: bool,
+    pub composer: bool,
+    /// Whether this surface draws the lifecycle strip — the three-dots menu — itself. The agents
+    /// column keeps it; the chat panel draws the same menu (via [`lifecycle_menu`]) inline in its
+    /// own toolbar row instead, so it sets this to `false` rather than showing the strip twice.
+    pub header: bool,
+}
+
+impl ConversationView {
+    fn eid(&self, part: &str) -> ElementId {
+        ElementId::Name(format!("{}-{part}", self.id).into())
+    }
+}
+
+pub fn render(
+    app: &AppState,
+    conversation: &Conversation,
+    view: ConversationView,
+    window: &Window,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let id = conversation.id;
+
+    let subagents = conversation.subagents();
+
+    // The composer's resize is tracked on the whole view rather than on the grip: dragging the
+    // field's top edge upward means the pointer spends the drag over the transcript, so a handler
+    // that only listened on the handle would lose the pointer on the first row. A move arriving
+    // with no button down is a release that happened somewhere else, and ends the drag rather than
+    // leaving one live for the next pointer that crosses the view.
+    let mut root = div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h(px(0.))
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+            if this.composer_drag.is_none() {
+                return;
+            }
+            if event.dragging() {
+                this.drag_composer_resize(f32::from(event.position.y), cx);
+            } else {
+                this.end_composer_resize(cx);
+            }
+        }))
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this, _, _, cx| this.end_composer_resize(cx)),
+        );
+    if view.header {
+        // No switch control: see `lifecycle_header`'s own doc for why the agents column, the one
+        // caller that sets `view.header`, has no equivalent of the chat panel's chevron to pass.
+        root = root.child(lifecycle_header(app, conversation, &view, None, cx));
+    }
+    if let Some(subagent) = conversation.viewing_subagent() {
+        let tab = subagents.iter().find(|tab| tab.id == subagent);
+        root = root.child(reading_strip(
+            &conversation.subagent_name(subagent),
+            tab.and_then(|tab| tab.model.as_deref())
+                .map(|model| short_model_label(&conversation.harness, model)),
+        ));
+    }
+    root = root.child(transcript(app, conversation, &view, cx));
+
+    if let Some(oldest) = conversation.oldest_pending() {
+        root = root.child(needs_you_strip(
+            conversation,
+            oldest,
+            conversation.pending.len(),
+            &view,
+            cx,
+        ));
+    }
+    if let Some(error) = &conversation.error {
+        // The sentence wraps rather than running off the edge (`T-326`): a launch failure is an
+        // `anyhow` chain naming a program, its arguments and a folder, far wider than a column.
+        // `min_w(0)` on the text is what lets a flex child shrink below its own longest line; the
+        // icon and the button keep their size and sit at the top beside however many lines it
+        // takes. The scroll cap keeps a very long chain from pushing the composer off the panel.
+        let mut strip = div()
+            .id(view.eid("error"))
+            .px_3()
+            .py_1p5()
+            .flex()
+            .flex_none()
+            .items_start()
+            .gap_2()
+            .max_h(px(160.))
+            .overflow_y_scroll()
+            .bg(theme::danger_soft())
+            .border_l(px(theme::accent_edge()))
+            .border_color(theme::danger())
+            .child(
+                div().flex_none().pt_0p5().child(
+                    Icon::new(IconName::TriangleAlert)
+                        .with_size(Size::XSmall)
+                        .text_color(theme::danger()),
+                ),
+            )
+            .child(
+                mono(error.clone(), theme::text())
+                    .flex_1()
+                    .min_w(px(0.))
+                    .whitespace_normal()
+                    .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+            );
+        // Nothing running is what made the launch fail or the harness exit; Retry is the menu's
+        // Resume, offered where the reason is (`T-327`). A harness with a session id resumes into
+        // it — the host keeps that on the pending row.
+        if !conversation.launched {
+            strip = strip.child(div().flex_none().child(ghost_button(
+                view.eid("error-retry"),
+                Some(IconName::RotateCw),
+                "Retry",
+                cx.listener(move |this, _, _, cx| this.resume_agent(id, cx)),
+            )));
+        }
+        root = root.child(strip);
+    }
+    // One rule, above both. The footer and the composer are one block at the bottom of the view
+    // — not two boxes — so the separator belongs to the block rather than to either half.
+    if view.footer || view.composer {
+        let mut bottom = div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .relative()
+            .border_t_1()
+            .border_color(theme::border());
+        // The block's own top border is the edge a reader would reach for to make the field
+        // bigger, so that is what the grip sits on — over the border rather than beside it, so
+        // nothing is added to the layout and the row below does not move to make room for a
+        // handle. Only where there is a field to resize: a footer on its own has no height to
+        // give.
+        if view.composer && conversation.accepts_input {
+            bottom = bottom.child(composer_grip(&view, cx));
+        }
+        // Above the activity bar, the footer and the composer: what is queued is not part of the
+        // turn being written, so it sits at the top of the block rather than against the field it
+        // used to hang off. Only where there is something waiting.
+        if !conversation.queued.is_empty() {
+            bottom = bottom.child(queue_list(id, view.slot, &view, &conversation.queued, cx));
+        }
+        // Above the footer as well as the composer: it opens upward over the transcript, so
+        // nothing under it moves when it does. Only where there is a subagent or a plan — a
+        // conversation that has neither looks exactly as it did before, the same discipline every
+        // element here follows.
+        if !subagents.is_empty() || !conversation.plan.is_empty() {
+            bottom = bottom.child(activity_bar(conversation, &subagents, &view, cx));
+        }
+        if view.footer {
+            bottom = bottom.child(footer(
+                conversation,
+                &subagents,
+                app.workbench.settings.ui.show_cache_ring,
+                app.workbench
+                    .settings
+                    .quota(&conversation.harness, &conversation.account),
+                &view,
+            ));
+        }
+        if view.composer {
+            bottom = bottom.child(composer(app, conversation, &view, window, cx));
+        }
+        root = root.child(bottom);
+    }
+
+    // **The Close confirm is not drawn here.** It hung off this panel once, which works while the
+    // panel is up but not for the tab's own ×, whose whole job is to take the panel down first —
+    // the question was drawn by nothing and the conversation quietly survived. It needs only the
+    // agent's id, so it is painted at the window root instead (`ui::shell`).
+    //
+    // The Info panel does stay, because it is the opposite case: it reads the live `Conversation`
+    // — the transcript's spend, the usage, the model — which only a surface holding one has. It
+    // is raised from the three-dots menu, which every such surface draws, and
+    // `app.conversation_info` keys it to one agent, so the surfaces not showing that agent add
+    // nothing.
+    root = root.child(info::render(app, conversation, window, cx));
+
+    root.into_any_element()
+}
+
+/// The conversation's state, as one glyph reads it.
+///
+/// **It is not this module's enum any more.** A main agent, an agent card and a delegate all
+/// report the same two things now — a lifecycle and an activity — and the dictionaries live in
+/// [`crate::state::status`], one layer below every surface that draws them. This module keeps the
+/// *presentation*: which glyph, which colour, which of them pulses, and the menu behind the mark.
+///
+/// The pair, rather than one enum, is what lets `Ended \u{b7} Done` be drawn as a delegate that stopped
+/// *well* — the reading a single enum could only get by adding a state that meant two things.
+pub use crate::state::status::{Doing, Lifecycle, Status, conversation_status, delegate_status};
+
+/// The conversation's lifecycle alone, for the surfaces that draw a dot rather than a pair.
+/// [`conversation_status`] is the whole answer; this is its first half.
+pub fn lifecycle(conversation: &Conversation) -> Lifecycle {
+    conversation_status(conversation).lifecycle
+}
+
+/// Which row of [`lifecycle_menu_rows`] the dump toggle is. Named because [`lifecycle_menu`] has
+/// to reach back into the built list to hang the file's path on that one row, and a bare `9` there
+/// is the position-matching skew the list itself exists to prevent. It moves whenever a row or a
+/// separator is added above it, which is the other half of why it is not a literal.
+pub const LIFECYCLE_DUMP_ROW: usize = 9;
+
+/// The rows the lifecycle menu draws, in order, each with whether it applies — a pure reading of
+/// the conversation's own state, pulled out of [`lifecycle_header`] so the enable/disable rule is
+/// testable on its own: Stop only while a turn is running, Abort and Unload only while launched,
+/// Resume only while not, Close always (ending applies whatever the state).
+///
+/// **Three sections, and the two hairlines between them are rows.** What the harness is *doing*
+/// (Stop, Abort, Unload, Resume), what the reader can *reach for* (Info, Fork, and the three
+/// toggles), and what puts the conversation *away* (Hide, Close):
+///
+/// ```text
+/// 0 Stop   1 Abort   2 Unload   3 Resume
+/// 4 ─────
+/// 5 Info   6 Fork   7 persistence   8 accept-all   9 dump
+/// 10 ─────
+/// 11 Hide   12 Close
+/// ```
+///
+/// A separator is `("", false)` here and becomes [`ContextItem::separator`] in [`lifecycle_menu`],
+/// because it **occupies an index**: dispatch is positional, so a hairline that did not take a
+/// place in this list would slide every row below it one off its action.
+///
+/// **Stop and Abort are different verbs.** Stop interrupts the *turn* and leaves the harness to
+/// take the next one; Abort kills the *process*, which is what is left when a harness has stopped
+/// answering and Stop has nothing to interrupt it with. Abort keeps the conversation, so Resume
+/// brings it back — it is Close that is irreversible, and only Close is confirmed.
+///
+/// **Hide and Close are the two ends of the last section, and only one of them ends anything.**
+/// Hide puts the reader's view away — the chat tab goes, the conversation is the host's and keeps
+/// running — while Close takes the transcript and the run directory with it. They sit together
+/// because they are what a reader reaches for when they are finished looking, and the destructive
+/// one stays last: a menu whose irreversible verb is somewhere in the middle is a menu clicked by
+/// muscle memory into the wrong row. A row added later goes above Close, never below it.
+///
+/// **A `Vec`, not a fixed array.** The length is now a property of the sectioning rather than a
+/// number worth naming — every separator added moves it — and an array would have to be resized
+/// at the signature, at the one call site's type, and in the doc, for a count nothing reads.
+///
+/// **Accept-all and the dump are always enabled, unlike persistence.** Both are Kubiq's own
+/// overrides — the host answers every permission request itself, and the host writes the traffic to
+/// a file — so neither asks anything of the harness and neither has a harness that cannot do it.
+/// Persistence is the row that reads the harness (`keeps_sessions`), and it is the only one.
+///
+/// **One list of pairs, not two arrays.** There were two — labels and enablement — and they were a
+/// row apart from disagreeing, because [`AppState::pick_conversation_menu`] dispatches by position:
+/// a row added to one copy and not the other is a menu whose rows do the wrong thing. The toggles'
+/// labels are the reason the labels can no longer be a `const`, and a dynamic label is exactly what
+/// would have made that skew easy, so the two are built together here.
+///
+/// **Plain `bool` parameters rather than one options struct.** They are read once, at the one
+/// call site, and each is a single flip of a single row's wording or enablement; a struct would
+/// name the same facts twice and give a caller somewhere to leave one of them at its default
+/// without noticing.
+pub fn lifecycle_menu_rows(
+    conversation: &Conversation,
+    persistent: bool,
+    accept_all: bool,
+    dumping: bool,
+    keeps_sessions: bool,
+    attached: bool,
+) -> Vec<(String, bool)> {
+    vec![
+        ("Stop".to_string(), conversation.run != Run::Idle),
+        ("Abort".to_string(), conversation.launched),
+        ("Unload".to_string(), conversation.launched),
+        ("Resume".to_string(), !conversation.launched),
+        (String::new(), false),
+        // Always enabled: what it draws is the record the host already sent, so there is nothing
+        // to be waiting for and nothing a conversation can be in the wrong state to answer.
+        ("Info".to_string(), true),
+        // Two conditions, and they refuse for different reasons. `keeps_sessions` is about the
+        // harness: one that writes its sessions outside the run directory would be copied into a
+        // fork that shares its store rather than diverging. The turn state is about the moment:
+        // copying a store while the harness appends to it tears the last record.
+        (
+            "Fork".to_string(),
+            keeps_sessions && conversation.run == Run::Idle,
+        ),
+        (
+            if persistent {
+                "Stop persisting".to_string()
+            } else {
+                "Make persistent".to_string()
+            },
+            // Keeping the run directory of a harness that keeps its sessions elsewhere would
+            // preserve nothing, so the row is drawn dead rather than refused after the click.
+            keeps_sessions,
+        ),
+        // Always enabled: Kubiq answers the requests itself, so there is no harness support to
+        // check and nothing to draw dead.
+        (
+            if accept_all {
+                "Stop accepting all".to_string()
+            } else {
+                "Accept all".to_string()
+            },
+            true,
+        ),
+        // Always enabled for the same reason: the file is Kubiq's, written from traffic it already
+        // has in hand.
+        (
+            if dumping {
+                "Stop dumping".to_string()
+            } else {
+                "Dump messages".to_string()
+            },
+            true,
+        ),
+        (String::new(), false),
+        // Only where there is a view to put away. Nothing else on this menu reads the window's own
+        // arrangement, and this row is the exception because it is the one verb that acts on the
+        // arrangement rather than on the conversation.
+        ("Hide".to_string(), attached),
+        ("Close".to_string(), true),
+    ]
+}
+
+/// The one first line every surface that hosts a conversation draws — `T-102`: the three-dots
+/// menu, the agent-switch chevron where the surface has one, and the current-action chip, flush
+/// against the strip's own right edge with no margin (chrome does not pad, `kubiq-ui`).
+///
+/// **`switch` is `None` for a surface with no equivalent control**, rather than this function
+/// inventing one. The chat panel passes its own [`crate::ui::chat::sidebar::start_control`] — a
+/// chevron over `chat_picks`, attaching *this tab* to any conversation the project holds. The
+/// agents column has no matching gesture: a column's tabs are the agents already grouped into it,
+/// added from its own bench picker (`crate::ui::agents::column::add_tab`) rather than attached
+/// from a free list keyed the way a chat tab is, and folding the two into one control is a data
+/// model change, not a rendering one — left for its own card rather than half-merged here. The
+/// row's shape and the chip are identical either way, which is the whole of what one first line
+/// can promise while that gap stands.
+///
+/// **Neither the state mark nor the persistence mark are here any more.** The mark moved to the
+/// hexagon every tab now wears (T-99/T-102); persistence has no seat on this row until a card asks
+/// for one — the row draws only what T-102 named.
+pub fn lifecycle_header(
+    app: &AppState,
+    conversation: &Conversation,
+    view: &ConversationView,
+    switch: Option<AnyElement>,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let status = conversation_status(conversation);
+    div()
+        .h(px(28.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_between()
+        .border_b_1()
+        .border_color(theme::border())
+        .debug_selector(|| "lifecycle-strip".into())
+        .child(
+            div()
+                .pl_1p5()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_1p5()
+                .child(lifecycle_menu(app, conversation, view, cx))
+                .children(switch),
+        )
+        .child(crate::ui::teams::status::status_chip(status, 1.0))
+        .into_any_element()
+}
+
+/// The state mark on its own, for a surface that puts it somewhere other than beside the menu.
+///
+/// The chat tab's head reads left to right — what the conversation *is*, then what it is *on*,
+/// then what can be *done to it* — so it wants the mark and [`lifecycle_menu`] at opposite ends
+/// of one row rather than as a pair. Same glyph, same tooltip, same colours as the dot the agents
+/// column draws on its title: this is the shared fragment, not a second one.
+pub fn lifecycle_mark(conversation: &Conversation, view: &ConversationView) -> AnyElement {
+    lifecycle_glyph(conversation, view)
+}
+
+/// The three-dots menu on its own, the other half of [`lifecycle_mark`]. The whole of the
+/// lifecycle strip the agents column draws, and the far end of the chat panel's toolbar row.
+pub fn lifecycle_menu(
+    app: &AppState,
+    conversation: &Conversation,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let id = conversation.id;
+    let entity = cx.entity();
+
+    // Each toggle's label says which way it goes, and all three of those facts live on the work
+    // record rather than on the conversation — see [`persistence_mark`], [`accepts_all`] and
+    // [`dump_path`].
+    let dump = dump_path(app, id, cx);
+    let mut items: Vec<ContextItem> = lifecycle_menu_rows(
+        conversation,
+        is_persistent(app, id, cx),
+        accepts_all(app, id, cx),
+        dump.is_some(),
+        keeps_sessions(app, conversation, cx),
+        has_chat_tab(app, id, cx),
+    )
+    .into_iter()
+    .map(|(label, enabled)| {
+        // The empty label is the sectioning, spelled the one way a `(String, bool)` can spell it
+        // — see [`lifecycle_menu_rows`], where the hairline is a row so that it keeps an index.
+        if label.is_empty() {
+            return ContextItem::separator();
+        }
+        let item = ContextItem::new(label);
+        if enabled { item } else { item.disabled() }
+    })
+    .collect();
+
+    // The dump row's tooltip is the only place the file's path is ever said. The host picks the
+    // file and reports it back on the record, so `Stop dumping` on its own would tell the user
+    // that something is being written and nothing about where to read it; a path is far too long
+    // to be a menu row's label, and this is what a tooltip on a row is for.
+    if let Some(path) = dump {
+        let path = SharedString::from(path);
+        if let Some(row) = items.get_mut(LIFECYCLE_DUMP_ROW) {
+            *row = row.clone().tooltip(path);
+        }
+    }
+
+    let mut row = div().flex().flex_none().items_center().child(
+        div()
+            .id(view.eid("lifecycle"))
+            .h(px(20.))
+            .w(px(20.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(|this| this.bg(theme::hover()))
+            .child(
+                Icon::new(IconName::EllipsisVertical)
+                    .with_size(Size::XSmall)
+                    .text_color(theme::text_muted()),
+            )
+            .on_click(cx.listener(move |this, event: &gpui::ClickEvent, _, cx| {
+                let at = event.position();
+                this.open_conversation_menu(id, (at.x.into(), at.y.into()), cx);
+            }))
+            .tooltip(|window, cx| {
+                gpui_component::tooltip::Tooltip::new("Conversation actions").build(window, cx)
+            }),
+    );
+
+    if app.workbench.open_menu == Some(MenuId::ConversationLifecycle(id)) {
+        let at = app.workbench.conversation_menu.unwrap_or_default();
+        row = row.child(context_menu(
+            view.eid("lifecycle-menu"),
+            point(px(at.0), px(at.1)),
+            items,
+            indexed(&entity, move |this, index, _window, cx| {
+                this.pick_conversation_menu(id, index, cx);
+            }),
+            handler(&entity, |this, _, cx| this.dismiss_conversation_menu(cx)),
+        ));
+    }
+
+    row.into_any_element()
+}
+
+/// The one glyph that says what P7's muted sentence used to say in prose — beside the three-dots
+/// menu rather than above the composer, and the word itself moved into the tooltip.
+///
+/// No new kit primitive: a `status_dot` is what every other state mark in the window already is —
+/// a tab's dot, the sidebar's dot — so this is that same mark, coloured and captioned by
+/// [`Lifecycle`].
+fn lifecycle_glyph(conversation: &Conversation, view: &ConversationView) -> AnyElement {
+    let status = conversation_status(conversation);
+    let state = status.lifecycle;
+    let colour = lifecycle_colour(state);
+    // The precise pair, which is what the tooltip is for: `Working \u{b7} Tools` rather than the one
+    // word the glyph itself can carry.
+    let label = status.label();
+    // The three quiet states keep the plain dot — colour alone answers them. The four a reader
+    // acts on get the shape the registry drew for exactly this: `pane-awaiting` and
+    // `pane-thinking` are canon, `pane-unloaded` and Lucide's own `CircleX` round out the set.
+    let mark = match crate::ui::work::lifecycle_icon(state) {
+        Some(icon) if state != Lifecycle::Idle && state != Lifecycle::Ready => icon
+            .with_size(Size::XSmall)
+            .text_color(colour)
+            .into_any_element(),
+        _ => status_dot(colour, theme::pane_bg()).into_any_element(),
+    };
+    div()
+        .id(view.eid("lifecycle-glyph"))
+        .child(mark)
+        .tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+        })
+        .into_any_element()
+}
+
+/// Whether this conversation is one the user marked to keep.
+///
+/// **It is not on [`Conversation`].** `persistent` is a property of the *record* — `WorkAgent`
+/// carries it, because every surface that draws an agent draws this glyph and the sidebar and the
+/// card have no live conversation to read it off. So this is the one lookup, and the surfaces that
+/// already hold the record ([`crate::ui::agents::column`]) read it there directly instead.
+fn is_persistent(app: &AppState, id: AgentId, cx: &App) -> bool {
+    // Through [`AppState::teams_agent`], like the two readers below it and the three toggles they
+    // pair with: the record is read from the project that owns the agent, because the Teams
+    // inspector draws this menu for any open project's card under the window span, and a row that
+    // read `None` there would report *off* for a flag that is on.
+    app.teams_agent(id, cx)
+        .is_some_and(|agent| agent.persistent)
+}
+
+/// Whether every permission request on this conversation is being answered with allow, unasked.
+///
+/// **On the record, not on [`Conversation`]**, for [`is_persistent`]'s reason: the host owns the
+/// override — it is the host that answers the requests, and it keeps answering them for an agent no
+/// surface is currently drawing — so the work snapshot is where the truth is and the window only
+/// reads it.
+fn accepts_all(app: &AppState, id: AgentId, cx: &App) -> bool {
+    app.teams_agent(id, cx)
+        .is_some_and(|agent| agent.accept_all)
+}
+
+/// Where this conversation's traffic is being written, or `None` for one nobody asked to capture.
+///
+/// **The path, not a flag.** It is the host that chooses the file — the window asks for a dump and
+/// is told afterwards where it went — so a bool here would answer *whether* and leave the one thing
+/// the user needs, *where*, with nowhere to be read from. [`lifecycle_menu`] puts it on the row's
+/// tooltip; being on the record rather than on [`Conversation`] is [`is_persistent`]'s reason
+/// again.
+fn dump_path(app: &AppState, id: AgentId, cx: &App) -> Option<String> {
+    app.teams_agent(id, cx)
+        .and_then(|agent| agent.debug_dump.clone())
+}
+
+/// Whether a chat tab in the project on screen is attached to this conversation — that is, whether
+/// there is a view of it to put away.
+///
+/// **The one thing on this menu read off the window rather than off the host.** Hide acts on the
+/// arrangement, so the arrangement is what says whether it applies; every other row asks the work
+/// snapshot, because every other row acts on the conversation itself.
+fn has_chat_tab(app: &AppState, id: AgentId, cx: &App) -> bool {
+    app.open_project(cx)
+        .is_some_and(|open| open.chats.iter().any(|tab| tab.attached == Some(id)))
+}
+
+/// Whether this conversation's harness keeps its own session store where Kubiq can keep or copy it.
+///
+/// Matched on the display label, because that is what a `WorkAgent` carries — the host puts
+/// `AgentTypeInfo::label` there rather than the harness id, so the id is not in the window's hands
+/// at this point.
+///
+/// **True when the harness is not found.** A lookup that misses is not evidence the harness keeps
+/// its sessions elsewhere, and drawing a control dead on a failed match would refuse something that
+/// works. The host refuses the ones that genuinely cannot; this only saves the user the click.
+fn keeps_sessions(app: &AppState, conversation: &Conversation, _cx: &App) -> bool {
+    app.workbench
+        .agent_type_by_label(&conversation.harness)
+        .is_none_or(|info| info.keeps_sessions)
+}
+
+/// The mark that says this conversation outlives the window, drawn **beside** the lifecycle glyph
+/// and never into it.
+///
+/// Two marks because they answer two questions: the dot says *what is this doing*, and this says
+/// *will this still be here tomorrow*. Folding the second into the first — a fifth dot colour, or a
+/// tinted state glyph — would cost the dot the one reading it is scanned for.
+///
+/// **Drawn only when it is true.** There is no "not kept" mark: absence is the answer for every
+/// conversation, which is most of them, and a glyph on every row says nothing.
+pub fn persistence_mark(id: impl Into<ElementId>) -> AnyElement {
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .child(
+            Icon::new(KubiqIcon::PanePersistent)
+                .with_size(Size::XSmall)
+                .text_color(theme::text_muted()),
+        )
+        .tooltip(|window, cx| {
+            gpui_component::tooltip::Tooltip::new("Kept \u{b7} comes back after a restart")
+                .build(window, cx)
+        })
+        .into_any_element()
+}
+
+/// The colour a lifecycle dot draws — [`crate::ui::work::lifecycle_colour`]'s, re-exported here
+/// because this module is where every surface that draws a conversation already looks. One
+/// function, so a chat tab's dot, a column's dot and a Teams hexagon's border cannot disagree.
+pub use crate::ui::work::lifecycle_colour;
+
+/// Whether the dot for a reading moves, which is the other half of what it says.
+///
+/// **Only the two readings that are going somewhere.** A turn in flight and a question waiting on
+/// the reader are the states worth catching an eye that is not on this surface; idle and stopped
+/// are resting, and a resting dot that moved would put every tab in the row in motion and leave
+/// the movement meaning nothing. The system's reduced-motion setting is honoured here rather than
+/// at each call site, so a reader who asked for stillness gets the same still dot on every surface
+/// that draws one.
+pub fn lifecycle_pulses(state: Lifecycle, cx: &App) -> bool {
+    state.active() && !cx.reduce_motion()
+}
+
+/// The state dot itself — the one element every surface that reports a conversation draws.
+///
+/// A [`kit::status_dot`], plus the slow shallow fade [`lifecycle_pulses`] asks for. Slow and
+/// shallow on purpose: this is a hint at the edge of vision on a row of tabs a reader is not
+/// looking at, not an alarm, and the [`writing_mark`] at the tail is where a turn is watched.
+/// `ring` is the surface the dot sits on, so the ring reads as the dot's own edge rather than as a
+/// halo.
+pub fn lifecycle_dot(
+    colour: Rgba,
+    pulse: bool,
+    ring: Rgba,
+    id: impl Into<ElementId>,
+) -> AnyElement {
+    let dot = status_dot(colour, ring);
+    if !pulse {
+        return dot.into_any_element();
+    }
+    dot.with_animation(
+        id,
+        pulse_animation(Duration::from_millis(2_000)).with_easing(pulsating_between(0.45, 1.0)),
+        |this, delta| this.opacity(delta),
+    )
+    .into_any_element()
+}
+
+/// A cheap reading of the transcript's tail: how many blocks there are, how long the last one is,
+/// and how many prompts are waiting on an answer.
+///
+/// A streaming chunk lengthens the last block, so this moves on every token without hashing the
+/// whole transcript once a frame — and it does *not* move when nothing was said, which is what
+/// lets [`transcript`] follow the tail without dragging a reader who scrolled up back down.
+/// Read over the blocks *on screen* rather than over all of them, because that is the tail being
+/// followed: while a delegate's transcript is up, the main agent writing below it is not the tail
+/// of anything the reader can see, and following it would scroll a transcript nothing was added
+/// to.
+///
+/// **A pending permission request is part of it, and it has to be — it is not a block.** A prompt
+/// the transcript cannot attach to a call is drawn as its own row at the very end (`RowKind::
+/// Adrift`, built straight from `conversation.pending`), and an attached one still grows the row it
+/// is drawn against. Neither touches `conversation.blocks`, so without the count here a prompt
+/// arriving while the last block on screen is unchanged — an agent's tool call still `InProgress`,
+/// waiting on the harness to ask permission for it — would move nothing this function reads, and
+/// the row the reader most needs to see would land under the fold with no follow to bring it up.
+fn tail_signature(conversation: &Conversation, visible: &[usize]) -> u64 {
+    let tail = match visible.last().and_then(|ix| conversation.blocks.get(*ix)) {
+        // The chips count: a turn drawn with three files under it is a taller row than the same
+        // prose with none, and the attachments arrive on the same update the text does.
+        Some(ConvBlock::User { text, attached, .. }) => text.len() + attached.len(),
+        Some(ConvBlock::Agent { body: text, .. } | ConvBlock::Thought { body: text, .. }) => {
+            text.len()
+        }
+        Some(ConvBlock::Tool { call, open }) => {
+            call.title.len() + call.content.len() + usize::from(*open)
+        }
+        // A divider never changes once drawn.
+        Some(ConvBlock::Compacted) => 0,
+        None => 0,
+    };
+    // The run is part of it: the writing indicator appears and disappears without a block being
+    // added, and a tail that did not notice would leave it under the fold.
+    let run = conversation.run as u64;
+    let pending = conversation.pending.len() as u64;
+    // And the asks, for `pending`'s reason exactly: a fresh one arrives with no block moving
+    // under it — it is filed on the conversation, not drawn from one — and it is the row the
+    // reader most needs brought into view.
+    let asks = conversation
+        .asks
+        .iter()
+        .fold(conversation.asks.len() as u64, |sum, ask| {
+            sum.wrapping_mul(3) ^ u64::from(ask.live())
+        });
+    (visible.len() as u64).wrapping_mul(1_000_003)
+        ^ tail as u64
+        ^ run.wrapping_mul(31)
+        ^ pending.wrapping_mul(97)
+        ^ asks.wrapping_mul(193)
+}
+
+/// What one row of the transcript draws. The plan the virtual list is fed: built once a frame
+/// from the blocks on screen, cheap enough to build whole because nothing in it is an element.
+enum RowKind {
+    /// A block, drawn as itself.
+    Block(usize),
+    /// The row standing for a folded run of same-kind calls.
+    Group {
+        key: String,
+        kind: ToolKind,
+        hidden: usize,
+        running: bool,
+        open: bool,
+    },
+    /// One run of consecutive thinking blocks, drawn as a single box — the blocks it stands for,
+    /// in the order they were said, and whether the box is expanded.
+    Thinking { blocks: Vec<usize>, open: bool },
+    /// A prompt whose call the transcript does not hold, by its place in `pending`.
+    Adrift(usize),
+    /// One structured question the agent asked the user, by its place in `asks`. Never attached to
+    /// a block: an ask is the agent talking to the user through the host, not something it said.
+    /// Placed by `AskRecord::at_block` rather than always last — see `plan_rows`.
+    Ask(usize),
+    /// The note a transcript with nothing in it draws.
+    Empty,
+    /// The mark under a turn still being written.
+    Writing,
+}
+
+/// One row of the plan: what it draws, which block it stands for, and what the height cache needs
+/// to know about it.
+struct Row {
+    kind: RowKind,
+    /// Which block this row stands for, where it stands for one — what a jump asked for by block
+    /// is resolved against.
+    anchor: Option<usize>,
+    /// The row *across* frames. Identity, not position, so a row keeps its measured height when
+    /// a fold opening above it moves every row below.
+    key: u64,
+    /// What the row is drawing *now*. Moves when the block's text does, which is what has a
+    /// streaming tail measured again; and it carries the width and the conversation family's body
+    /// size, because every height in the transcript is a height at one width and one type size.
+    sig: u64,
+    /// How tall to draw the row before it has been measured once.
+    estimate: Pixels,
+}
+
+/// The horizontal breathing room around a row. On the rows rather than on the list, because the
+/// list lays its items out in `prepaint`, where a parent's padding and text style are no longer
+/// on the stack — so the row that wants them has to carry them itself.
+const GUTTER: Pixels = px(12.);
+
+fn hashed(value: impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher as _;
+    let mut hasher = std::hash::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// What a block is drawing, in one number, and how tall to guess it is before it has been laid
+/// out once.
+///
+/// The estimate is crude on purpose — a line of prose per eighty characters — because it is used
+/// only for the first frame a row appears on: the frame that draws a row measures it, and every
+/// frame after that is the measurement.
+fn block_shape(block: &ConvBlock) -> (u64, Pixels) {
+    let (len, sig) = match block {
+        // A sent turn's chips are a wrapping row under its prose, so they are part of both halves
+        // of the answer: the signature moves when a chip does, and the estimate allows a row for
+        // every three of them, which is about what fits across a column.
+        ConvBlock::User { text, attached, .. } => (
+            text.len() + attached.len().div_ceil(3) * 80,
+            hashed((text.len(), attached.len())),
+        ),
+        ConvBlock::Agent { body: text, .. } | ConvBlock::Thought { body: text, .. } => {
+            (text.len(), hashed(text.len()))
+        }
+        ConvBlock::Tool { call, open } => {
+            let len = call.title.len() + call.content.len();
+            // What an open card draws under its header, in bytes: a call's output can grow inside
+            // an entry it already had — a terminal's text, an edit's new side — without the count
+            // of entries moving, and a signature that read only the count kept the shorter card.
+            let body: usize = call
+                .content
+                .iter()
+                .map(|item| match item {
+                    ToolContent::Text(text) => text.len(),
+                    ToolContent::Diff {
+                        path,
+                        old_text,
+                        new_text,
+                    } => path.len() + old_text.as_ref().map_or(0, String::len) + new_text.len(),
+                })
+                .sum();
+            (
+                len,
+                hashed((
+                    len,
+                    call.content.len(),
+                    body,
+                    *open,
+                    std::mem::discriminant(&call.status),
+                )),
+            )
+        }
+        ConvBlock::Compacted => (0, hashed("compacted")),
+    };
+    (sig, px(28. + 17. * (len / 80) as f32))
+}
+
+/// A row's content signature: what it is drawing, at the width and the type size it is drawing at.
+///
+/// Both of those are in it because a measured height is only a height at one width and one size —
+/// change either and every height in the cache is stale.
+fn row_signature(width: Pixels, size: Pixels, shape: u64) -> u64 {
+    hashed((f32::from(width).to_bits(), f32::from(size).to_bits(), shape))
+}
+
+/// Which row to scroll to, to bring a block into view. The block's own row where it has one;
+/// otherwise the last row before it, which is where a folded-away block is drawn.
+fn row_for(rows: &[Row], block: usize) -> Option<usize> {
+    if let Some(exact) = rows.iter().position(|row| row.anchor == Some(block)) {
+        return Some(exact);
+    }
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| row.anchor.is_some_and(|anchor| anchor <= block))
+        .map(|(ix, _)| ix)
+        .next_back()
+}
+
+/// The rows one frame draws, planned from the blocks on screen — what each row stands for, and
+/// what the height cache needs to know about it. Nothing here is an element, which is what makes
+/// planning the whole transcript cheap enough to do every frame.
+///
+/// **A run of same-kind tool calls is one row standing for the whole of it**: twelve `READ`s in a
+/// row are twelve rows of furniture between two sentences. While the run's last call is still
+/// going that one card stays out of the fold, because a call in flight is the part a reader is
+/// following; once it finishes the row is the entire run. Either way the row says how many it
+/// stands for and opens to show them.
+///
+/// **A run of consecutive thinking blocks is one row too**, and unconditionally — the fold saves
+/// a bordered box per message rather than a card, so there is no floor to pay for.
+///
+/// Contiguity is judged over `visible`, not over `conversation.blocks`: what the reader sees is
+/// what groups, so a block belonging to another subagent — drawn nowhere — does not break a run.
+fn plan_rows(
+    conversation: &Conversation,
+    visible: &[usize],
+    attached: &HashMap<usize, Vec<&Pending>>,
+    adrift: &[usize],
+    tag: u64,
+    width: Pixels,
+    size: Pixels,
+) -> Vec<Row> {
+    let row = |kind: RowKind, anchor: Option<usize>, slot: (u8, usize), shape: (u64, Pixels)| Row {
+        kind,
+        anchor,
+        key: hashed((tag, slot.0, slot.1)),
+        sig: row_signature(width, size, shape.0),
+        estimate: shape.1,
+    };
+
+    let mut rows: Vec<Row> = Vec::new();
+    let mut at = 0usize;
+    while at < visible.len() {
+        let ix = visible[at];
+        let block = &conversation.blocks[ix];
+        // Reasoning first, because a harness that flushes it as several messages is saying nothing
+        // by the boundaries between them: the whole run is one box, however many blocks it took.
+        if matches!(block, ConvBlock::Thought { .. }) {
+            let mut end = at + 1;
+            while end < visible.len()
+                && matches!(conversation.blocks[visible[end]], ConvBlock::Thought { .. })
+            {
+                end += 1;
+            }
+            let blocks = visible[at..end].to_vec();
+            // The run is read by its **last** block: that is the one still streaming while the
+            // thinking is the one thing being written, and `Conversation::end_open_thought` is
+            // what closes it once anything else starts.
+            let open = matches!(
+                conversation.blocks[visible[end - 1]],
+                ConvBlock::Thought { open: true, .. }
+            );
+            // The bodies are in the signature the way `block_shape` puts a block's own length
+            // there: a streaming thought grows without a block being added, and a row whose
+            // signature did not move would be drawn at the height it had one chunk ago.
+            let len: usize = blocks
+                .iter()
+                .map(|ix| match &conversation.blocks[*ix] {
+                    ConvBlock::Thought { body, .. } => body.len(),
+                    _ => 0,
+                })
+                .sum();
+            let estimate = px(28. + if open { 17. * (len / 80) as f32 } else { 0. });
+            rows.push(row(
+                RowKind::Thinking { blocks, open },
+                Some(ix),
+                (5, ix),
+                (hashed((len, end - at, open)), estimate),
+            ));
+            at = end;
+            continue;
+        }
+        // A delegation is never folded away: a spawned agent is a second transcript, not a step.
+        // Nor is a call somebody is being asked to authorise — a prompt hidden behind a counter is
+        // a turn that deadlocks.
+        if let ConvBlock::Tool { call, .. } = block
+            && call.kind != ToolKind::Delegate
+            && !attached.contains_key(&ix)
+        {
+            let kind = call.kind;
+            let mut end = at + 1;
+            while end < visible.len() {
+                match &conversation.blocks[visible[end]] {
+                    ConvBlock::Tool { call: next, .. }
+                        if next.kind == kind && !attached.contains_key(&visible[end]) =>
+                    {
+                        end += 1;
+                    }
+                    _ => break,
+                }
+            }
+            // Two cards become a row plus a card, which is no shorter and one more thing to learn.
+            // Three is where folding starts paying.
+            if end - at >= GROUP_MIN {
+                let key = call.id.clone();
+                let open = conversation.open_groups.contains(&key);
+                // The last card is held out of the fold only while it is still going: a call in
+                // flight is the one thing in the run a reader is actually following, and folding
+                // it away would hide the only part still changing. The moment it finishes there
+                // is nothing left to follow, so it joins the ones before it and the whole run
+                // becomes the one row — which is what a finished run of twelve READs should cost.
+                let last_ix = visible[end - 1];
+                let last = &conversation.blocks[last_ix];
+                let running = matches!(
+                    last,
+                    ConvBlock::Tool { call, .. }
+                        if matches!(call.status, ToolStatus::Pending | ToolStatus::InProgress)
+                );
+                let hidden = if running { end - at - 1 } else { end - at };
+                rows.push(row(
+                    RowKind::Group {
+                        key,
+                        kind,
+                        hidden,
+                        running,
+                        open,
+                    },
+                    Some(ix),
+                    (1, ix),
+                    (hashed((hidden, running, open)), px(24.)),
+                ));
+                if open {
+                    for &hidden_ix in &visible[at..at + hidden] {
+                        rows.push(row(
+                            RowKind::Block(hidden_ix),
+                            Some(hidden_ix),
+                            (0, hidden_ix),
+                            block_shape(&conversation.blocks[hidden_ix]),
+                        ));
+                    }
+                }
+                if running {
+                    rows.push(row(
+                        RowKind::Block(last_ix),
+                        Some(last_ix),
+                        (0, last_ix),
+                        block_shape(last),
+                    ));
+                }
+                at = end;
+                continue;
+            }
+        }
+        // A prompt drawn under the call is part of the row: it arrives, is answered and changes
+        // without the block moving, so it is in the signature, and in the estimate.
+        let (shape, estimate) = block_shape(block);
+        let shape = match attached.get(&ix) {
+            Some(requests) => (
+                hashed((
+                    shape,
+                    requests.iter().map(|r| prompt_shape(r)).collect::<Vec<_>>(),
+                )),
+                estimate + px(120.) * requests.len() as f32,
+            ),
+            None => (shape, estimate),
+        };
+        rows.push(row(RowKind::Block(ix), Some(ix), (0, ix), shape));
+        at += 1;
+    }
+
+    // A request whose call the transcript does not hold — the patch carried nothing but an id, or
+    // the request outran the call announcing it. Self-contained, and still answerable.
+    for &request in adrift {
+        rows.push(row(
+            RowKind::Adrift(request),
+            None,
+            (2, request),
+            (
+                hashed((request, conversation.pending.get(request).map(prompt_shape))),
+                px(120.),
+            ),
+        ));
+    }
+
+    // Then the asks, oldest first, each placed where it actually arrived rather than pinned to
+    // the tail: `AskRecord::at_block` is how many blocks the conversation held the instant it was
+    // filed, and the row goes in right before the first block-anchored row at or past that count —
+    // the point in the transcript the ask interrupted. A block appended later has a higher index,
+    // so nothing already inserted has to move as the conversation goes on; a permission row
+    // (`RowKind::Adrift`, `anchor: None`) is transparent to the search, on the same reasoning that
+    // keeps it out of `block_shape`'s reach.
+    //
+    // **And only the asks this transcript's agent asked.** A conversation and every subagent it
+    // spawned share one `AgentId`, so an ask is filed against the conversation with the delegate
+    // that raised it named on the record; drawing one in every transcript would show the same
+    // question once per tab. `AskRecord::subagent` is `None` for the conversation's own turns,
+    // which is exactly what `viewing_subagent` reads as the main transcript.
+    let reading = conversation.viewing_subagent();
+    for at in 0..conversation.asks.len() {
+        let record = &conversation.asks[at];
+        if record.subagent.as_deref() != reading {
+            continue;
+        }
+        // The entry's own arithmetic: how tall it is depends on the stage it is in, and only the
+        // module that draws it knows what it draws there.
+        let lines = crate::ui::ask::entry_lines(record);
+        let insert_at = rows
+            .iter()
+            .position(|row| row.anchor.is_some_and(|anchor| anchor >= record.at_block))
+            .unwrap_or(rows.len());
+        rows.insert(
+            insert_at,
+            row(
+                RowKind::Ask(at),
+                None,
+                (6, at),
+                (
+                    hashed((at, record.live(), lines)),
+                    crate::ui::ask::entry_height(record),
+                ),
+            ),
+        );
+    }
+
+    // Last, so a transcript holding only an unattached prompt reads as the question it is.
+    if rows.is_empty() {
+        rows.push(row(RowKind::Empty, None, (3, 0), (0, px(20.))));
+    }
+
+    // And after everything, while the turn is still running: the tail of a transcript is where a
+    // reader waits, so that is where the waiting is drawn. Not while a prompt is up — the question
+    // on screen is what is happening, and two marks would compete to say so.
+    if conversation.run == Run::Working && conversation.pending.is_empty() {
+        rows.push(row(RowKind::Writing, None, (4, 0), (0, px(24.))));
+    }
+
+    rows
+}
+
+/// What the stale-height diagnostic says about a row: what it draws, and how much of it — a body's
+/// length in bytes (the size markdown parsing is gated on), or a call's content entries plus the
+/// prompts drawn under it.
+fn row_reading(
+    conversation: &Conversation,
+    row: &Row,
+    attached: &HashMap<usize, Vec<&Pending>>,
+) -> (&'static str, usize) {
+    match &row.kind {
+        RowKind::Block(ix) => match conversation.blocks.get(*ix) {
+            Some(ConvBlock::User { text, .. }) => ("user", text.len()),
+            Some(ConvBlock::Agent { body, .. }) => ("agent", body.len()),
+            Some(ConvBlock::Thought { body, .. }) => ("thought", body.len()),
+            Some(ConvBlock::Tool { call, .. }) => (
+                "tool",
+                call.content.len() + attached.get(ix).map_or(0, Vec::len),
+            ),
+            Some(ConvBlock::Compacted) => ("compacted", 0),
+            None => ("missing", 0),
+        },
+        RowKind::Group { hidden, .. } => ("group", *hidden),
+        RowKind::Thinking { blocks, .. } => ("thinking", blocks.len()),
+        RowKind::Adrift(at) => ("adrift", *at),
+        RowKind::Ask(at) => ("ask", *at),
+        RowKind::Empty => ("empty", 0),
+        RowKind::Writing => ("writing", 0),
+    }
+}
+
+/// One row, drawn — and wrapped in the padding and the text style the transcript reads in.
+#[allow(clippy::too_many_arguments)]
+fn build_row(
+    conversation: &Conversation,
+    id: AgentId,
+    row: &Row,
+    attached: &HashMap<usize, Vec<&Pending>>,
+    preview: Option<&AttachmentPreview>,
+    view: &ConversationView,
+    root: &gpui::Entity<AppState>,
+    scroll: Option<&TranscriptScroll>,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let inner = match &row.kind {
+        RowKind::Block(ix) => match conversation.blocks.get(*ix) {
+            Some(block) => one_block(
+                conversation,
+                id,
+                *ix,
+                block,
+                attached,
+                preview,
+                view,
+                root,
+                scroll.map(|scroll| (scroll, row.key)),
+                cx,
+            ),
+            None => div().into_any_element(),
+        },
+        RowKind::Group {
+            key,
+            kind,
+            hidden,
+            running,
+            open,
+        } => tool_group(id, key, *kind, *hidden, *running, *open, view, cx),
+        RowKind::Thinking { blocks, open } => {
+            thought_group(conversation, id, blocks, *open, view, cx)
+        }
+        RowKind::Adrift(at) => match conversation.pending.get(*at) {
+            Some(request) => permission(id, request, None, view, cx),
+            None => div().into_any_element(),
+        },
+        RowKind::Ask(at) => match conversation.asks.get(*at) {
+            Some(record) => crate::ui::ask::transcript_entry(id, record, cx),
+            None => div().into_any_element(),
+        },
+        RowKind::Empty => mono("nothing said yet", theme::text_faint())
+            .text_size(theme::font(theme::Family::Conversation, theme::Role::Label))
+            .into_any_element(),
+        RowKind::Writing => writing_mark(conversation.activity(), mark_variant(conversation), view),
+    };
+    // A column of one, so the row fills the width the way it did as a child of the transcript's
+    // own column: in a flex row it would be sized by its content instead.
+    //
+    // **`w_full` is what holds the row to the column.** The list lays each row out as a root of
+    // its own, and a root with no width of its own is as wide as its content's min-content —
+    // which for a `TextView` is its longest line *unwrapped*, since GPUI text answers an
+    // unconstrained probe without wrapping. Sized that way, a message is wider than the panel:
+    // its lines run past the right edge, and the text is wrapped at one width while its box is
+    // sized at another, which leaves a blank band under it. A definite width gives every probe
+    // below the same column to wrap against.
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .px(GUTTER)
+        .text_size(theme::font(theme::Family::Conversation, theme::Role::Body))
+        .text_color(theme::text())
+        .child(inner)
+        .into_any_element()
+}
+
+/// How many same-kind tool cards in a row it takes before the run is folded. Below this the fold
+/// would replace a card with a row of the same height, which is not a saving.
+const GROUP_MIN: usize = 3;
+
+/// One transcript block, drawn as itself — the arm the grouping loop reuses for the cards it does
+/// not fold away, and for the ones it unfolds.
+#[allow(clippy::too_many_arguments)]
+fn one_block(
+    conversation: &Conversation,
+    id: AgentId,
+    ix: usize,
+    block: &ConvBlock,
+    attached: &HashMap<usize, Vec<&Pending>>,
+    preview: Option<&AttachmentPreview>,
+    view: &ConversationView,
+    root: &gpui::Entity<AppState>,
+    body_cache: Option<(&TranscriptScroll, u64)>,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    match block {
+        ConvBlock::User {
+            text,
+            attached: files,
+            at,
+        } => {
+            let turn = user_turn(id, ix, text, files, preview, view, root, body_cache, cx);
+            copyable(view, ix, text, *at, turn)
+        }
+        ConvBlock::Agent { body, at, .. } => {
+            // The body as a `SharedString` the conversation keeps: a streaming tail is copied when
+            // it grows rather than every time this frame builds it.
+            let text = conversation.markdown(ix, body);
+            // The markdown state lives on the slot's height cache where there is one, so the
+            // cache can tell a measurement taken before the body's parse landed (see
+            // `TranscriptScroll::body_settling`).
+            let markdown = match body_cache {
+                Some((scroll, key)) => TextView::new(&scroll.body(key, &text, cx)),
+                None => TextView::markdown(view.eid(&format!("md-{ix}")), text),
+            };
+            copyable(
+                view,
+                ix,
+                body,
+                *at,
+                markdown
+                    .on_link_click(on_agent_link(root.clone(), id))
+                    .into_any_element(),
+            )
+        }
+        // A run of one. The plan draws every thinking block through `RowKind::Thinking`, so this
+        // is the arm for a thought reached some other way — the same box, standing for itself.
+        ConvBlock::Thought { open, .. } => thought_group(conversation, id, &[ix], *open, view, cx),
+        ConvBlock::Tool { call, open } => {
+            // A delegation is a way in to the agent it spawned, and the way in exists only
+            // once that agent has said something: the instance id *is* this call's id.
+            let delegate = (call.kind == ToolKind::Delegate && conversation.has_subagent(&call.id))
+                .then(|| call.id.clone());
+            let waiting = attached.get(&ix);
+            let card = tool_block(id, ix, call, *open, delegate, waiting.is_some(), view, cx);
+            // The prompt belongs to the call, so it is drawn under it rather than somewhere
+            // the reader has to go and find. Several are possible on one call.
+            match waiting {
+                None => card,
+                Some(requests) => div()
+                    .flex()
+                    .flex_none()
+                    .flex_col()
+                    .child(card)
+                    .children(
+                        requests
+                            .iter()
+                            .copied()
+                            .map(|request| permission(id, request, Some(call), view, cx))
+                            .collect::<Vec<_>>(),
+                    )
+                    .into_any_element(),
+            }
+        }
+        ConvBlock::Compacted => compacted(),
+    }
+}
+
+/// Where the harness compacted its context. A hairline and a word, no card: what is above it was
+/// still said, and only the agent's memory of it stopped — a heavier mark would read as the
+/// transcript itself being cut.
+fn compacted() -> AnyElement {
+    let rule = || div().h(px(1.)).flex_1().bg(theme::border());
+    div()
+        .py_2()
+        .px_2()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_2()
+        .child(rule())
+        .child(
+            mono("Context compacted", theme::text_faint())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+        )
+        .child(rule())
+        .into_any_element()
+}
+
+/// The row that stands for the folded part of a run: what kind they were, how many, and a chevron
+/// that shows them. It borrows the kind's own colour and the tool card's own shape, so a reader
+/// sees a stack of the same thing rather than a new kind of object.
+///
+/// `trailing` is whether a card is still drawn under the row. It decides one word: calls the row
+/// stands for are `earlier` ones only while there is a later one to be earlier *than*. Once the
+/// run has finished the row is the whole of it, and it says so.
+#[allow(clippy::too_many_arguments)]
+fn tool_group(
+    agent: AgentId,
+    key: &str,
+    kind: ToolKind,
+    hidden: usize,
+    trailing: bool,
+    open: bool,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let colour = tool_colour(kind);
+    let key = key.to_string();
+    let word = if hidden == 1 { "call" } else { "calls" };
+    let count = if trailing {
+        format!("{hidden} earlier {word}")
+    } else {
+        format!("{hidden} {word}")
+    };
+    // Which run the row stands for and what it says about it, in one name — the fold's whole
+    // decision is how much of the run the row swallowed, so a selector naming only the run could
+    // not tell a finished fold from one still holding its last card out.
+    let selector = format!("tool-group-{key}-{}", count.replace(' ', "-"));
+    div()
+        .id(view.eid(&format!("group-{key}")))
+        .debug_selector(move || selector)
+        .min_h(px(24.))
+        .px_2()
+        .py_1()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_2()
+        .border_l_2()
+        .border_color(theme::fade(colour, 0.5))
+        .bg(theme::surface())
+        .cursor_pointer()
+        .hover(|this| this.bg(theme::hover()))
+        .child(
+            Icon::new(if open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .with_size(Size::XSmall)
+            .text_color(theme::text_faint()),
+        )
+        .child(
+            mono(kind.label(), colour)
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+        )
+        .child(
+            mono(count, theme::text_faint())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.toggle_conversation_tool_group(agent, key.clone(), cx)
+        }))
+        .into_any_element()
+}
+
+/// What has been said, oldest first — and, when anything new has landed, scrolled to.
+///
+/// **The transcript is virtualized.** What this builds is a *plan* — one [`Row`] per thing on
+/// screen, which is arithmetic rather than elements — and hands it to `v_virtual_list` with a
+/// height for every row. Only the rows the list can see are built, whether the transcript holds
+/// three blocks or three thousand.
+fn transcript(
+    app: &AppState,
+    conversation: &Conversation,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let id = conversation.id;
+    let root = cx.entity();
+
+    // This frame is the one a streamed delta asked for, so the next delta may ask for its own.
+    // See `Conversation::notify_due`: without this the gate in `app::wire` would let one draw
+    // stand in for the whole turn.
+    conversation.drawn();
+
+    // Every prompt still up, joined onto the call it authorises by that call's id — which is the
+    // only field of a request's patch upstream guarantees. What matches nothing in the transcript
+    // is drawn on its own at the end rather than dropped: a request nobody can answer deadlocks
+    // the turn, so losing one is worse than drawing it out of place.
+    let mut attached: HashMap<usize, Vec<&Pending>> = HashMap::new();
+    let mut adrift: Vec<usize> = Vec::new();
+    for (at, request) in conversation.pending.iter().enumerate() {
+        match conversation.tool_block_index(&request.tool_call.id) {
+            Some(block) => attached.entry(block).or_default().push(request),
+            None => adrift.push(at),
+        }
+    }
+
+    // One agent's turns, never two interleaved — and the indices are the real ones, because the
+    // element ids and every toggle listener key off a block's position in `blocks`.
+    let visible = conversation.visible_blocks();
+    let scroll = app.transcript_scrolls.get(view.slot);
+    // Where the reader is put before anything is drawn: a transcript switched to is restored to
+    // where it was left, and one whose tail moved is followed only for a reader already on it.
+    if let Some(scroll) = scroll {
+        scroll.sync(
+            (id, conversation.viewing_subagent().map(str::to_string)),
+            tail_signature(conversation, &visible),
+        );
+        scroll.begin_frame();
+    }
+
+    // Which transcript these rows belong to, and at what width and type size. The first keeps a
+    // delegate's heights out of the main agent's; the other two are why a resize — or a change to
+    // the conversation family's base size — re-measures everything, because a height is only a
+    // height at one width and one size.
+    let tag = hashed(conversation.viewing_subagent());
+    let width = scroll.map_or(px(0.), |scroll| scroll.handle.bounds().size.width);
+    let size = theme::font(theme::Family::Conversation, theme::Role::Body);
+
+    let rows = plan_rows(conversation, &visible, &attached, &adrift, tag, width, size);
+
+    if let Some(scroll) = scroll {
+        // Any change to the rows marks the transcript for the next periodic forced relayout.
+        scroll.note_rows(hashed(
+            rows.iter()
+                .map(|row| (row.key, row.sig))
+                .collect::<Vec<_>>(),
+        ));
+        // A message whose stream has ended — a block following it, or the turn ending — gets one
+        // full reflow: every row of this transcript is laid out again when next drawn. Neither
+        // moves per delta, and switching transcripts is not a completion (the mark is per one).
+        scroll.note_completion(
+            (id, conversation.viewing_subagent().map(str::to_string)),
+            hashed((visible.len(), conversation.run as u64)),
+            rows.iter().map(|row| row.key),
+        );
+        // Somewhere to be taken to, asked for by the strip that named the prompt. Resolved here
+        // rather than where it was asked for, because only the frame that planned the rows knows
+        // which row a block ended up as.
+        match scroll
+            .take_request()
+            .and_then(|block| row_for(&rows, block))
+        {
+            Some(at) => scroll.scroll_to_row(at),
+            // The frame that switched transcripts is measuring the one it left, so it cannot
+            // answer a jump — it asks for the frame that can. Self-terminating: the next frame
+            // is settled, answers, and clears the request.
+            None if scroll.request_held() => cx.notify(),
+            None => {}
+        }
+    }
+
+    // Every row's height, which is what the list lays out against: the measurement where there is
+    // one, the estimate where the row has never been drawn.
+    let sizes: Rc<Vec<gpui::Size<Pixels>>> = Rc::new(
+        rows.iter()
+            .map(|row| {
+                let height = scroll.map_or(row.estimate, |scroll| {
+                    scroll.row_height(row.key, row.estimate)
+                });
+                gpui::size(px(0.), height)
+            })
+            .collect(),
+    );
+
+    let plan = Rc::new(rows);
+    let slot = view.slot;
+    let building = view.clone();
+    let entity = root.clone();
+    let mut list = v_virtual_list(
+        root,
+        view.eid("transcript"),
+        sizes,
+        move |app, range, window, cx| {
+            let scroll = app.transcript_scrolls.get(slot);
+            let width = scroll.map_or(px(0.), |scroll| scroll.handle.bounds().size.width);
+            // Taken once for the whole pass, not per row: a forced relayout asks every visible
+            // row to be measured again regardless of `needs_measure`'s own answer (T-194).
+            let forced = scroll.is_some_and(TranscriptScroll::take_force);
+            // The agent's own project, matching the guard the Teams inspector draws this panel
+            // behind: a foreign card under the window span has a conversation the project on
+            // screen has never held, and reading it there would draw a panel with no rows in it.
+            let Some(conversation) = app.teams_conversation(id, cx) else {
+                return Vec::new();
+            };
+            let mut attached: HashMap<usize, Vec<&Pending>> = HashMap::new();
+            for request in &conversation.pending {
+                if let Some(block) = conversation.tool_block_index(&request.tool_call.id) {
+                    attached.entry(block).or_default().push(request);
+                }
+            }
+            let mut built = Vec::with_capacity(range.len());
+            // Whether a row turned out to be a different height than it was drawn at. The list
+            // was told the heights before it laid anything out, so a row measured for the first
+            // time was drawn at a guess and the frame has to be drawn again to be right.
+            let mut again = false;
+            for at in range {
+                let Some(row) = plan.get(at) else { continue };
+                // Read off the window rather than captured: the panel opens and closes between
+                // frames, and the one place that knows which chip it hangs from is this state.
+                let preview = app.workbench.attachment_preview.as_ref();
+                let mut element = build_row(
+                    conversation,
+                    id,
+                    row,
+                    &attached,
+                    preview,
+                    &building,
+                    &entity,
+                    scroll,
+                    cx,
+                );
+                // A body whose markdown parse has not landed lays out at the previous parse's
+                // height, under a signature that already names the new text — so it is measured
+                // provisionally, and again on the frame the parse commits. A body settled at
+                // this signature, mid-reparse after scrolling back into view, keeps its height
+                // rather than collapsing to the empty parse, forced pass or not.
+                let settling = scroll.is_some_and(|scroll| scroll.body_settling(row.key, cx));
+                if let Some(scroll) = scroll
+                    && width > px(0.)
+                    && (scroll.needs_measure(row.key, row.sig) || (forced && !settling))
+                {
+                    let before = scroll.cached(row.key);
+                    let measured = element.layout_as_root(
+                        gpui::size(
+                            gpui::AvailableSpace::Definite(width),
+                            gpui::AvailableSpace::MinContent,
+                        ),
+                        window,
+                        cx,
+                    );
+                    again |= if settling {
+                        scroll.measured_unsettled(row.key, row.sig, measured.height)
+                    } else {
+                        scroll.measured(row.key, row.sig, measured.height)
+                    };
+                    // The diagnostic for a transcript that cannot reach its own end: a row whose
+                    // signature never moved but whose height did is a height the cache had no way
+                    // to invalidate. Only a forced pass re-measures such a row, so only a forced
+                    // pass can see one.
+                    if let Some((sig, was)) = before
+                        && sig == row.sig
+                        && (measured.height - was).abs() > px(0.5)
+                    {
+                        let (kind, len) = row_reading(conversation, row, &attached);
+                        tracing::warn!(
+                            target: "kubiq::ui::conversation",
+                            row = at,
+                            kind,
+                            len,
+                            was = f32::from(was),
+                            now = f32::from(measured.height),
+                            "a transcript row's cached height was stale under an unchanged signature"
+                        );
+                    }
+                }
+                built.push(element);
+            }
+            // The periodic timer that asked for a forced pass reads this back to decide whether
+            // to keep asking — a pass that moved nothing is the transcript settled.
+            if forced && let Some(scroll) = scroll {
+                scroll.report_force_result(again);
+            }
+            // Asked *after* the frame: a notify made while this frame is still drawing is dropped,
+            // and the row would keep its first height until something unrelated redrew.
+            if again {
+                let entity = cx.entity();
+                window.on_next_frame(move |_, cx| entity.update(cx, |_, cx| cx.notify()));
+            }
+            built
+        },
+    )
+    .py_2()
+    .gap_2();
+    if let Some(scroll) = scroll {
+        list = list.track_scroll(&scroll.handle);
+    }
+
+    // The jump sits over the transcript rather than in the column, so nothing moves when it
+    // appears and the last line stays readable under it.
+    let mut framed = div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h(px(0.))
+        .relative()
+        .child(div().flex().flex_col().flex_1().min_h(px(0.)).child(list));
+    if scroll.is_some_and(TranscriptScroll::away) {
+        framed = framed.child(to_tail_button(view, cx));
+    }
+    framed.into_any_element()
+}
+
+/// The overlay that puts a reader who has scrolled up back on the tail.
+///
+/// Drawn only while there is something below the viewport, because a button that is always there
+/// is a button that says nothing. It scrolls; it does not mark anything read and does not resume
+/// following on its own — the next thing said does that, which is what the reader asked for by
+/// coming back down.
+fn to_tail_button(view: &ConversationView, cx: &mut Context<AppState>) -> AnyElement {
+    let slot = view.slot;
+    div()
+        .id(view.eid("to-tail"))
+        .absolute()
+        .bottom_2()
+        .right_3()
+        .h(px(26.))
+        .px_2()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_1p5()
+        .rounded_md()
+        .bg(theme::surface())
+        .border_1()
+        .border_color(theme::border())
+        .shadow_sm()
+        .cursor_pointer()
+        .hover(|this| this.bg(theme::hover()))
+        .child(
+            Icon::new(IconName::ArrowDown)
+                .with_size(Size::XSmall)
+                .text_color(theme::text_muted()),
+        )
+        .child(
+            mono("Go to last message", theme::text_muted())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+        )
+        .on_click(cx.listener(move |this, _, _, cx| this.scroll_transcript_to_tail(slot, cx)))
+        .into_any_element()
+}
+
+/// The hit area of the strip that resizes the composer. Wide enough to grab, and drawn as nothing
+/// at all: the block's own top border is already the line, so a bar of its own would be a second
+/// edge one pixel from the first.
+const COMPOSER_GRIP: f32 = 5.0;
+
+/// The strip on the composer block's top edge that makes the field taller.
+///
+/// Dragging up is more writing space, which is the whole of it. Double-clicking hands the field
+/// back to growing with what is typed, because a size dragged by hand needs a way back that is not
+/// dragging it to exactly where it was.
+fn composer_grip(view: &ConversationView, cx: &mut Context<AppState>) -> AnyElement {
+    let slot = view.slot;
+    div()
+        .id(view.eid("composer-grip"))
+        .absolute()
+        .top(px(-COMPOSER_GRIP / 2.0))
+        .left_0()
+        .w_full()
+        .h(px(COMPOSER_GRIP))
+        .cursor_row_resize()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                this.start_composer_resize(slot, f32::from(event.position.y), cx);
+            }),
+        )
+        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+            if event.click_count() >= 2 {
+                this.end_composer_resize(cx);
+                this.set_composer_rows(slot, None, cx);
+            }
+        }))
+        .into_any_element()
+}
+
+/// How many squares the scanner sweeps across. Five is enough for the sweep to read as travel
+/// rather than as a blink, and short enough to sit on one line beside a word.
+const SCAN_CELLS: u32 = 5;
+
+/// One square of the waiting mark. Square rather than round, and the accent rather than a colour
+/// of its own: this is the same blue and the same corner every chip, ring and pill in the window
+/// is drawn with, so the mark reads as part of the application rather than as a widget visiting
+/// from somewhere else.
+fn mark_cell(colour: Rgba) -> Div {
+    div().size(px(5.)).rounded(px(1.)).flex_none().bg(colour)
+}
+
+/// Which of the two waiting marks a turn draws.
+///
+/// Not a random number: the answer has to be the same on every frame of one turn, because a mark
+/// that re-rolled per frame would strobe between two animations instead of playing either. So it
+/// is a hash of the conversation and of which turn this is — fixed for exactly as long as the turn
+/// lasts, and different from one turn to the next, which is all "pick one of two" needs.
+fn mark_variant(conversation: &Conversation) -> u64 {
+    // Which turn this is, counted from the end: the last thing the user said cannot move while
+    // that turn is still running, so this is stable for precisely the mark's lifetime.
+    let turn = conversation
+        .blocks
+        .iter()
+        .rposition(|block| matches!(block, ConvBlock::User { .. }))
+        .map_or(0, |at| at + 1);
+    let mut hasher = DefaultHasher::new();
+    conversation.id.hash(&mut hasher);
+    turn.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The mark that says the agent is mid-turn: small accent squares in motion, and the word for what
+/// it is doing right now.
+///
+/// A turn can be a minute of silence between two sentences, and silence in a chat reads as
+/// nothing happening. Movement is the only honest thing to draw there — a spinner would claim
+/// progress it cannot measure, and a percentage would be a lie with a decimal point.
+///
+/// **Two animations, one per turn, chosen by [`mark_variant`].** A wave of squares breathing out
+/// of phase, or a single light sweeping the row and coming back. Both say the same thing and
+/// neither says more than the other; a mark a reader waits minutes in front of is worth not being
+/// identical every time. Which one is drawn is never a status — the word beside them is what
+/// carries the activity.
+fn writing_mark(activity: Activity, variant: u64, view: &ConversationView) -> AnyElement {
+    let colour = theme::accent();
+    let scanning = variant % 2 == 1;
+    let cells: Vec<AnyElement> = if scanning {
+        (0..SCAN_CELLS)
+            .map(|n| {
+                let at = n as f32;
+                mark_cell(colour)
+                    .with_animation(
+                        view.eid(&format!("writing-scan-{n}")),
+                        pulse_animation(Duration::from_millis(1_400)).with_easing(move |delta| {
+                            // A triangle wave, so the light runs to the end of the row and
+                            // comes back rather than jumping home: one pass out and one pass
+                            // back per cycle.
+                            let head = if delta < 0.5 {
+                                delta * 2.0
+                            } else {
+                                (1.0 - delta) * 2.0
+                            } * (SCAN_CELLS - 1) as f32;
+                            // How near the head is to this square, softened so the squares
+                            // beside it glow too and the row reads as one moving light rather
+                            // than five taking turns to blink.
+                            let near = 1.0 - ((head - at).abs() / 1.8).min(1.0);
+                            0.15 + near * 0.85
+                        }),
+                        |this, delta| this.opacity(delta),
+                    )
+                    .into_any_element()
+            })
+            .collect()
+    } else {
+        (0..3u32)
+            .map(|n| {
+                // Each square a third of a cycle behind the one before it, which is what makes
+                // the row read as a wave rather than as a blink.
+                let phase = n as f32 / 3.0;
+                mark_cell(colour)
+                    .with_animation(
+                        view.eid(&format!("writing-pulse-{n}")),
+                        pulse_animation(Duration::from_millis(1_100)).with_easing(move |delta| {
+                            pulsating_between(0.2, 1.0)((delta + phase) % 1.0)
+                        }),
+                        |this, delta| this.opacity(delta),
+                    )
+                    .into_any_element()
+            })
+            .collect()
+    };
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        // The scanner's squares sit closer together: a light travelling a row has to look like
+        // one row, and a wave of three has to look like three things.
+        .gap(if scanning { px(3.) } else { px(6.) })
+        .px_1()
+        .py_0p5()
+        .children(cells)
+        .child(
+            mono(activity.label(), theme::text_faint())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta)),
+        )
+        .into_any_element()
+}
+
+/// One message, with its own copy control in the lower right — hidden until the pointer is over
+/// the message, because a control on every line of a transcript reads as a toolbar rather than a
+/// conversation. The clipboard gets the block's own text, which is what the harness said or
+/// received rather than anything rendered over it.
+///
+/// Beside the button, in the same hover, the local time the message was said — `HH:MM`, and the
+/// full date and offset on its own tooltip. Nothing where `at` is `None`: a message whose source
+/// kept no time is not given one.
+fn copyable(
+    view: &ConversationView,
+    ix: usize,
+    text: impl Into<String>,
+    at: Option<i64>,
+    body: AnyElement,
+) -> AnyElement {
+    let group = SharedString::from(format!("{}-msg-{ix}", view.id));
+    let text = text.into();
+    let stamp = at
+        .and_then(|at| message_time(at, &chrono::Local))
+        .map(|(short, full)| {
+            let full = SharedString::from(full);
+            div()
+                .id(view.eid(&format!("at-{ix}")))
+                .px_1()
+                .rounded_sm()
+                .bg(theme::surface())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta))
+                .text_color(theme::text_muted())
+                .child(short)
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
+                })
+        });
+    div()
+        .debug_selector(move || format!("transcript-block-{ix}"))
+        .relative()
+        .flex()
+        .flex_none()
+        .flex_col()
+        .group(group.clone())
+        .child(body)
+        .child(
+            div()
+                .absolute()
+                .bottom_0()
+                .right_0()
+                .flex()
+                .items_center()
+                .gap_1()
+                .invisible()
+                .group_hover(group, |this| this.visible())
+                .children(stamp)
+                .child(
+                    icon_button(
+                        view.eid(&format!("copy-{ix}")),
+                        IconName::Copy,
+                        false,
+                        move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                        },
+                    )
+                    .size(px(22.))
+                    .bg(theme::surface()),
+                ),
+        )
+        .into_any_element()
+}
+
+/// A message's time in `zone`, as the hover draws it: `HH:MM`, and the full
+/// `YYYY-MM-DD HH:MM:SS ±HH:MM` its tooltip says. `None` for a time no calendar holds.
+pub fn message_time<Tz: chrono::TimeZone>(at_ms: i64, zone: &Tz) -> Option<(String, String)>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let when = chrono::DateTime::from_timestamp_millis(at_ms)?.with_timezone(zone);
+    Some((
+        when.format("%H:%M").to_string(),
+        when.format("%Y-%m-%d %H:%M:%S %:z").to_string(),
+    ))
+}
+
+/// What the user said sits in the accent, the way every other surface in the window draws a turn
+/// of theirs — and under it, the files that went with it.
+///
+/// **The chips are inside the turn's own surface, under the prose.** They were part of the
+/// message, not a footnote to it, and a row drawn outside the accent block would read as
+/// something the interface added afterwards. They carry no `×`: a sent attachment is not
+/// removable, because the harness already has it.
+///
+/// Clicking one opens [`attachment_preview`] rather than the editor. A chip on the composer opens
+/// the file, because the reader is still deciding whether to send it; a chip on a sent turn
+/// answers a narrower question — *which file was that* — and taking the reader off the transcript
+/// to answer it is the wrong trade. The panel's own `Open` is the other click.
+#[allow(clippy::too_many_arguments)]
+fn user_turn(
+    agent: AgentId,
+    ix: usize,
+    text: &str,
+    files: &[Attachment],
+    preview: Option<&AttachmentPreview>,
+    view: &ConversationView,
+    root: &gpui::Entity<AppState>,
+    body_cache: Option<(&TranscriptScroll, u64)>,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    // The same markdown path an agent's body takes; only the text differs, in that a typed line
+    // break stays a line break (see [`user_markdown`]).
+    let source = SharedString::from(user_markdown(text));
+    let markdown = match body_cache {
+        Some((scroll, key)) => TextView::new(&scroll.body(key, &source, cx)),
+        None => TextView::markdown(view.eid(&format!("md-{ix}")), source),
+    };
+    let mut said = div()
+        .p_2()
+        .bg(theme::accent_soft())
+        .border_l(px(theme::accent_edge()))
+        .border_color(theme::accent())
+        .text_size(theme::font(theme::Family::Conversation, theme::Role::Body))
+        .text_color(theme::text())
+        .child(markdown.on_link_click(on_agent_link(root.clone(), agent)));
+
+    if !files.is_empty() {
+        said = said.child(sent_attachment_tags(agent, ix, files, preview, view, cx));
+    }
+
+    div().pl_6().flex_none().child(said).into_any_element()
+}
+
+/// Resolve the conversation's owner when clicked, rather than the window's active project.
+fn on_agent_link(
+    root: gpui::Entity<AppState>,
+    agent: AgentId,
+) -> impl Fn(&SharedString, &gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + Send + Sync + 'static
+{
+    move |target, _, _, cx| {
+        root.update(cx, |app, cx| app.follow_agent_link(agent, target, cx));
+    }
+}
+
+/// A sent turn's text as markdown that keeps the author's line breaks: every single newline outside
+/// a code fence becomes a hard break (two trailing spaces), where markdown would fold it into a
+/// space. Fences are left byte for byte, so pasted code gets the agent's code-block treatment.
+fn user_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut fence: Option<(char, usize)> = None;
+    let lines: Vec<&str> = text.split('\n').collect();
+    for (at, line) in lines.iter().enumerate() {
+        let line = line.trim_end_matches('\r');
+        let trimmed = line.trim_start();
+        let run = trimmed
+            .chars()
+            .take_while(|c| matches!(c, '`' | '~'))
+            .count();
+        // A backtick fence's info string cannot hold a backtick: ```` ```code``` ```` is inline code.
+        let mark = trimmed.chars().next().filter(|c| {
+            run >= 3 && !(fence.is_none() && *c == '`' && trimmed[run..].contains('`'))
+        });
+        match (fence, mark) {
+            (None, Some(c)) => fence = Some((c, run)),
+            (Some((open, len)), Some(c))
+                if c == open && run >= len && trimmed[run..].trim().is_empty() =>
+            {
+                fence = None
+            }
+            _ => {}
+        }
+        out.push_str(line);
+        if at + 1 < lines.len() {
+            let next_blank = lines[at + 1].trim().is_empty();
+            if fence.is_none()
+                && mark.is_none()
+                && !line.trim().is_empty()
+                && !next_blank
+                && !line.ends_with("  ")
+            {
+                out.push_str("  ");
+            }
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// The files one sent turn carried, one tag each, wrapping onto as many lines as they need.
+///
+/// [`attachment_tags`]'s twin with the dismiss gone, and the same three size readings, because it
+/// is the same list at a later moment in its life: what was above the field before Send is what
+/// sits under the prose after it. The colour still says the size, and the tooltip still says the
+/// whole path and the figure, for the reasons stated there.
+///
+/// The panel hangs off the chip it was opened from — a child of the trigger, the way every
+/// anchored surface in this interface is.
+fn sent_attachment_tags(
+    agent: AgentId,
+    ix: usize,
+    files: &[Attachment],
+    preview: Option<&AttachmentPreview>,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let tags: Vec<AnyElement> = files
+        .iter()
+        .map(|file| {
+            let (name, tip, fill, edge, colour) = attachment_face(file);
+            let open = file.path.clone();
+            let size = file.size;
+            let attachment = file.id;
+            let showing = preview
+                .filter(|preview| preview.agent == agent && preview.attachment == attachment);
+
+            let mut chip = kit_tag(
+                view.eid(&format!("sent-{ix}-{attachment}")),
+                name,
+                tip,
+                fill,
+                edge,
+                colour,
+                false,
+                cx.listener(move |this, _, _, cx| {
+                    this.open_attachment_preview(agent, attachment, open.clone(), size, cx)
+                }),
+            );
+            if let Some(showing) = showing {
+                chip = chip.child(attachment_preview(showing, view, cx));
+            }
+            chip.into_any_element()
+        })
+        .collect();
+
+    div()
+        .pt_1()
+        .flex()
+        .flex_wrap()
+        .flex_none()
+        .items_center()
+        .gap_1()
+        .children(tags)
+        .into_any_element()
+}
+
+/// How wide the preview panel draws, and how tall a picture inside it is allowed to be. Fixed,
+/// because a panel that sized itself to its picture would be a different shape for every
+/// screenshot and would cover a different amount of the transcript each time.
+const PREVIEW_WIDTH: Pixels = px(360.);
+const PREVIEW_HEIGHT: Pixels = px(240.);
+
+/// What is behind a chip on a sent turn: the picture where there is one, a note where there is
+/// not, and the file's own name, size and path under either.
+///
+/// **A popover, not a modal.** It asks nothing and blocks nothing, so it wants the shape that
+/// costs nothing to dismiss: a `MenuId` the window's single open-menu slot already holds, which
+/// means Escape peels it through `cancel_dialog` with no rung of its own and an outside click
+/// closes it.
+///
+/// **A read in flight is drawn as one.** An empty panel and a file that never arrived look
+/// identical, and they want different things done, so the waiting says so and nothing blocks
+/// while it waits. A file the image viewer declines says that too rather than drawing nothing —
+/// the viewer decides by extension and compiles in one decoder (`G178`, `G179`), so a picture
+/// under an unexpected name lands here, and `Open` is what it offers instead.
+fn attachment_preview(
+    preview: &AttachmentPreview,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let body = match (&preview.bytes, &preview.failed) {
+        (_, Some(reason)) => crate::ui::viewer::note(
+            SharedString::from(format!("Cannot preview \u{2014} {reason}")),
+            theme::text_faint(),
+        ),
+        (Some(bytes), None) => div()
+            .h(PREVIEW_HEIGHT)
+            .flex()
+            .child(crate::ui::viewer::image::render(bytes, &preview.path))
+            .into_any_element(),
+        (None, None) => crate::ui::viewer::note("Reading\u{2026}", theme::text_faint()),
+    };
+
+    let mut note = preview.path.clone();
+    let size = size_label(preview.size);
+    if !size.is_empty() {
+        note.push_str(" \u{00b7} ");
+        note.push_str(&size);
+    }
+    let open = preview.path.clone();
+
+    popover(
+        view.eid("attachment-preview"),
+        PREVIEW_WIDTH,
+        Some("attachment-preview"),
+        Some(Rc::new(handler(&cx.entity(), |this, _, cx| {
+            this.close_attachment_preview(cx)
+        }))),
+        vec![
+            body,
+            div()
+                .px_2()
+                .pb_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(kit::elided(
+                    view.eid("attachment-preview-path"),
+                    note,
+                    theme::text_faint(),
+                    theme::font(theme::Family::Conversation, theme::Role::Micro),
+                ))
+                .child(div().flex_1().min_w(px(0.)))
+                .child(ghost_button(
+                    view.eid("attachment-preview-open"),
+                    None,
+                    "Open",
+                    cx.listener(move |this, _, _, cx| this.open_attachment(open.clone(), cx)),
+                ))
+                .into_any_element(),
+        ],
+    )
+}
+
+/// Reasoning, quieter than prose: it is what the agent thought on the way to what it said, and it
+/// must not read as the answer. Whose thought it was is not marked here any more \u{2014} the
+/// transcript shows one agent at a time, and [`reading_strip`] names it once above the whole of it.
+///
+/// **One box for the whole run.** `blocks` is every consecutive thinking block the plan folded
+/// together, and each one is a child of the same box rather than a box of its own: where a
+/// harness broke its reasoning into messages is not something the reader asked about, and a stack
+/// of identical `THINKING` frames says only that the harness flushed several times. Each block
+/// stays its own child, so a streaming run appends to the last one instead of rebuilding a joined
+/// string every frame.
+///
+/// **The caption is the disclosure.** Expanded while the thinking is the one thing still being
+/// written, collapsed to the caption alone once something else starts
+/// ([`Conversation::end_open_thought`]), and clicking it moves the whole run
+/// ([`Conversation::toggle_thought_group`]) \u{2014} half a box open would be the reader's click
+/// drawn wrong.
+fn thought_group(
+    conversation: &Conversation,
+    agent: AgentId,
+    blocks: &[usize],
+    open: bool,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let first = blocks.first().copied().unwrap_or_default();
+    let bodies = || {
+        blocks
+            .iter()
+            .filter_map(|ix| match conversation.blocks.get(*ix) {
+                Some(ConvBlock::Thought { body, .. }) => Some(body.as_str()),
+                _ => None,
+            })
+    };
+    let owned = blocks.to_vec();
+
+    let header = div()
+        .id(view.eid(&format!("thought-{first}")))
+        // Named by the run's first block and how much of the run it stands for, so a fold is
+        // legible from outside: how many messages one box swallowed is the question.
+        .debug_selector({
+            let count = blocks.len();
+            move || format!("thought-group-{first}-{count}")
+        })
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_1p5()
+        .cursor_pointer()
+        .hover(|this| this.bg(theme::hover()))
+        .child(
+            Icon::new(if open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .with_size(Size::XSmall)
+            .text_color(theme::text_faint()),
+        )
+        .child(
+            mono("THINKING", theme::text_faint())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.toggle_conversation_thought_group(agent, owned.clone(), cx);
+        }));
+
+    let mut box_ = div()
+        .p_2()
+        .flex()
+        .flex_none()
+        .flex_col()
+        .gap_1()
+        .bg(theme::surface())
+        .border_l(px(theme::accent_edge()))
+        .border_color(theme::text_faint())
+        .child(header);
+
+    // Collapsed is the caption alone: the reasoning is still there to be reopened, and a box
+    // keeping a first line of it would be a preview nobody asked for.
+    if open {
+        box_ = box_.children(
+            bodies()
+                .map(|body| {
+                    div()
+                        .text_size(theme::font(theme::Family::Conversation, theme::Role::Body))
+                        .text_color(theme::text_muted())
+                        .child(SharedString::from(body.to_string()))
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    // The clipboard gets the whole run, collapsed or not: what the reader points at is one
+    // thought, so copying it has to be all of it rather than whichever part is on screen.
+    copyable(
+        view,
+        first,
+        bodies().collect::<Vec<_>>().join("\n\n"),
+        // Reasoning carries no time of its own; only what was said does.
+        None,
+        box_.into_any_element(),
+    )
+}
+
+/// The one line above a subagent's transcript that says whose turns are on screen, and what they
+/// are being answered with. Drawn only while a subagent is being read: the main agent's own
+/// transcript is the default and needs no caption to say so.
+///
+/// The model is the delegate's own, shortened by [`short_model_label`] — the composer's chip
+/// shortens the parent's the same way, so one conversation never spells a model two ways — and a
+/// delegate the harness named no model for draws nothing rather than a placeholder, exactly as the
+/// footer's pills do.
+fn reading_strip(name: &str, model: Option<String>) -> AnyElement {
+    div()
+        .px_3()
+        .py_1()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_1p5()
+        .bg(theme::surface())
+        .border_b_1()
+        .border_color(theme::border())
+        .debug_selector(|| "reading-strip".into())
+        .child(
+            mono("\u{21b3}", theme::info())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+        )
+        .child(
+            mono(name.to_string(), theme::info())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+        )
+        .children(model.map(|model| {
+            mono(model, theme::text_faint())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta))
+        }))
+        .into_any_element()
+}
+
+/// The colour a tool block is filed under, on the four readings the chat panel already uses: a
+/// look is informational, a change is a change, a removal is destructive, a command ran. The ten
+/// ACP kinds share them rather than growing ten tokens nobody could tell apart.
+fn tool_colour(kind: ToolKind) -> Rgba {
+    match kind {
+        ToolKind::Read | ToolKind::Search | ToolKind::Fetch => theme::accent(),
+        ToolKind::Edit | ToolKind::Move => theme::warning(),
+        ToolKind::Delete => theme::danger(),
+        ToolKind::Execute => theme::success(),
+        ToolKind::Think | ToolKind::SwitchMode => theme::info(),
+        // A delegation is where the work went, so it reads as its own thing rather than borrowing
+        // the colour of a thought.
+        ToolKind::Delegate => theme::accent_muted(),
+        ToolKind::Other => theme::text_muted(),
+    }
+}
+
+fn status_colour(status: ToolStatus) -> Rgba {
+    match status {
+        ToolStatus::Pending => theme::text_faint(),
+        ToolStatus::InProgress => theme::accent(),
+        ToolStatus::Completed => theme::success(),
+        ToolStatus::Failed => theme::danger(),
+    }
+}
+
+fn status_label(status: ToolStatus) -> &'static str {
+    match status {
+        ToolStatus::Pending => "pending",
+        ToolStatus::InProgress => "running",
+        ToolStatus::Completed => "done",
+        ToolStatus::Failed => "failed",
+    }
+}
+
+/// A tool's title: plain for most kinds, a code chip for a command. A command reads the way one
+/// does in the app's own markdown — monospace on a raised surface — because the title has no room
+/// for the coloured edge every other surface here is identified by.
+fn tool_title(kind: ToolKind, title: String) -> gpui::Div {
+    let text = mono(title, theme::text())
+        .text_size(theme::font(theme::Family::Conversation, theme::Role::Label));
+    if kind != ToolKind::Execute {
+        return text;
+    }
+    div()
+        .bg(theme::surface_raised())
+        .px_1()
+        .py(px(1.))
+        .child(text)
+}
+
+/// A tool call: what it did, to what, and how it went — before any of what it produced.
+/// `delegate` is the subagent this block is the entry point to, where it is one: a `Delegate` call
+/// whose spawned agent has spoken. Then the block switches the transcript instead of unfolding its
+/// own detail — what a reader wants from a delegation is the other transcript, not the summary of
+/// it. A delegation with no agent behind it yet stays inert.
+///
+/// `awaiting` is set where a permission prompt is drawn under this block. The card then reads as
+/// blocked on the reader rather than as whatever status the harness last stamped on it — which is
+/// `pending`, and `pending` alone cannot tell "input still streaming" from "waiting for you".
+#[allow(clippy::too_many_arguments)]
+fn tool_block(
+    agent: AgentId,
+    index: usize,
+    call: &kubiq_proto::conversation::ToolCallRecord,
+    open: bool,
+    delegate: Option<String>,
+    awaiting: bool,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let colour = if awaiting {
+        theme::warning()
+    } else {
+        tool_colour(call.kind)
+    };
+    let expandable = !call.content.is_empty();
+    let call_id = call.id.clone();
+
+    // A title that wraps — a long command, most often — grows the row rather than being
+    // clipped to one line's height: `min_h` is the floor, not the ceiling, and `items_start`
+    // keeps the icon and the status pinned to the first line instead of drifting to the
+    // paragraph's centre.
+    let mut header = div()
+        .id(view.eid(&format!("tool-{index}")))
+        // Named by the block it draws, so a fold is legible from outside: which cards a run left
+        // on screen is the question, and a card that answers only "some card" cannot settle it.
+        .debug_selector(move || format!("tool-card-{index}"))
+        .min_h(px(30.))
+        .px_2()
+        .py_1()
+        .flex()
+        .flex_none()
+        .items_start()
+        .gap_2()
+        .child(
+            Icon::new(if open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .with_size(Size::XSmall)
+            .text_color(if expandable {
+                theme::text_faint()
+            } else {
+                theme::border()
+            })
+            .mt(px(2.)),
+        )
+        .child(
+            mono(call.kind.label(), colour)
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label))
+                .mt(px(1.)),
+        )
+        .child(
+            tool_title(call.kind, call.title.clone())
+                .flex_1()
+                .min_w(px(0.)),
+        );
+
+    header = header.child(
+        if awaiting {
+            mono("needs you", theme::warning())
+        } else {
+            mono(status_label(call.status), status_colour(call.status))
+        }
+        .text_size(theme::font(theme::Family::Conversation, theme::Role::Label))
+        .mt(px(1.)),
+    );
+
+    if let Some(target) = delegate {
+        header = header
+            .cursor_pointer()
+            .hover(|this| this.bg(theme::hover()))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.view_conversation_agent(agent, Some(target.clone()), cx);
+            }))
+            .tooltip(|window, cx| {
+                gpui_component::tooltip::Tooltip::new("Read this agent's transcript")
+                    .build(window, cx)
+            });
+    // A block with nothing behind it does not expand: a chevron that opens on emptiness says the
+    // detail is missing rather than absent.
+    } else if expandable {
+        header = header
+            .cursor_pointer()
+            .hover(|this| this.bg(theme::hover()))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_conversation_tool(agent, call_id.clone(), cx);
+            }));
+    }
+
+    let mut card = div()
+        .flex()
+        .flex_col()
+        .flex_none()
+        .bg(theme::pane_bg())
+        .border_l(px(theme::accent_edge()))
+        .border_color(colour)
+        .child(header);
+
+    if open && expandable {
+        card = card.child(
+            div()
+                .px_2()
+                .py_2()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .border_t_1()
+                .border_color(theme::border())
+                .children(call.content.iter().map(content).collect::<Vec<_>>()),
+        );
+    }
+
+    card.into_any_element()
+}
+
+fn content(item: &ToolContent) -> AnyElement {
+    match item {
+        ToolContent::Text(text) => div()
+            .flex()
+            .flex_col()
+            .children(
+                text.lines()
+                    .map(|line| {
+                        mono(line.to_string(), theme::text_muted())
+                            .text_size(theme::font(theme::Family::Conversation, theme::Role::Label))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element(),
+        ToolContent::Diff {
+            path,
+            old_text,
+            new_text,
+        } => diff(path, old_text.as_deref(), new_text),
+    }
+}
+
+/// An edit, as the block that went and the block that came. Line for line rather than matched:
+/// there is no diff engine here, and a bad alignment reads as changes nobody made.
+fn diff(path: &str, old_text: Option<&str>, new_text: &str) -> AnyElement {
+    let mut rows: Vec<AnyElement> = vec![
+        mono(path.to_string(), theme::text_muted())
+            .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta))
+            .into_any_element(),
+    ];
+    if let Some(old) = old_text {
+        rows.extend(
+            old.lines()
+                .map(|line| diff_line("-", line, theme::danger(), theme::danger_soft())),
+        );
+    }
+    rows.extend(
+        new_text
+            .lines()
+            .map(|line| diff_line("+", line, theme::success(), theme::success_soft())),
+    );
+
+    div().flex().flex_col().children(rows).into_any_element()
+}
+
+fn diff_line(marker: &str, text: &str, fg: Rgba, bg: Rgba) -> AnyElement {
+    div()
+        .flex()
+        .flex_none()
+        .gap_2()
+        .px_1()
+        .bg(bg)
+        .child(
+            mono(marker.to_string(), fg)
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+        )
+        .child(
+            mono(text.to_string(), fg)
+                .flex_1()
+                .min_w(px(0.))
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+        )
+        .into_any_element()
+}
+
+/// What the agent is asking to be allowed to do, and the answers it offered.
+///
+/// Drawn in the transcript, under the tool call it authorises — `call` is that call, where the
+/// transcript holds it. The request's own patch guarantees only a call id, so the title and the
+/// detail are read off the call first and the patch second; with neither, the prompt still says
+/// what it can and still offers every option, because a request left unanswered blocks the turn.
+///
+/// The element ids carry the `request_id`, not a position: two prompts on screen at once are two
+/// different questions, and an id that moved when the first was answered would hand the second
+/// one's clicks to whatever took its place.
+fn permission(
+    agent: AgentId,
+    pending: &Pending,
+    call: Option<&kubiq_proto::conversation::ToolCallRecord>,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let request_id = pending.request_id.clone();
+    let what = prompt_what(pending, call);
+    let items: &[ToolContent] = pending.tool_call.content.as_deref().unwrap_or_default();
+
+    // The request's own detail, which is what a `switch_mode` prompt's plan and a pre-approval
+    // diff arrive as. Only the patch's: the call's own content is the block above this one, and
+    // drawing it twice would read as two operations.
+    let detail: Vec<AnyElement> = items.iter().map(content).collect();
+
+    // **Clamped to four lines, by arithmetic rather than by measuring** — the same reading
+    // `prompt_shape` signs the row with, so the row's cached height and what is drawn here agree.
+    // Each part is cut to its own four-line box with `overflow_hidden`: the title by `line_clamp`
+    // (ellipsis), the detail by a height of four label lines, whole elements cut off rather than
+    // the raw string cut mid-syntax. A prompt at or under the limit is drawn exactly as before.
+    let (title_lines, detail_lines) = prompt_lines(&what, items);
+    let title_clamped = title_lines > PROMPT_CLAMP_LINES;
+    let detail_clamped = detail_lines > PROMPT_CLAMP_LINES;
+    let clamped = title_clamped || detail_clamped;
+
+    let buttons = permission_buttons(agent, pending, &format!("{}-permission", view.id), cx);
+
+    div()
+        .px_3()
+        .py_2()
+        .flex()
+        .flex_none()
+        .flex_col()
+        .gap_2()
+        .bg(theme::warning_soft())
+        .border_l(px(theme::accent_edge()))
+        .border_color(theme::warning())
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    mono("NEEDS YOU", theme::warning())
+                        .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+                )
+                // Only when something was cut: the way to the rest, with the same answers.
+                .when(clamped, |this| {
+                    let request_id = request_id.clone();
+                    this.child(icon_button_tip(
+                        view.eid(&format!("permission-expand-{request_id}")),
+                        IconName::Maximize,
+                        "Show full request",
+                        true,
+                        cx.listener(move |this, _, _, cx| {
+                            this.open_permission_dialog(agent, request_id.clone(), cx);
+                        }),
+                    ))
+                }),
+        )
+        .child(
+            div()
+                .w_full()
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Body))
+                .text_color(theme::text())
+                .when(title_clamped, |this| {
+                    this.line_clamp(PROMPT_CLAMP_LINES).text_ellipsis()
+                })
+                .child(SharedString::from(what)),
+        )
+        // The request's own content is what a long diff or a long plan makes unreadable (T-175):
+        // capped and scrolled in its own region so it cannot push the answer buttons below it out
+        // of reach, the way a modal's body scrolls under `MODAL_MAX_HEIGHT` rather than growing the
+        // modal itself.
+        .when(!detail.is_empty(), |this| {
+            let region = div()
+                .id(view.eid(&format!("permission-detail-{request_id}")))
+                .flex()
+                .flex_col()
+                .gap_1();
+            this.child(if detail_clamped {
+                // Four lines of the label size, cut clean: no scroll, because the dialog is
+                // where the rest is read.
+                region
+                    .max_h(theme::font(theme::Family::Conversation, theme::Role::Label) * 6.5)
+                    .overflow_hidden()
+                    .children(detail)
+            } else {
+                // The old safety net: a few very long wrapped lines are still capped and scroll.
+                region
+                    .max_h(px(theme::permission_detail_max_h()))
+                    .overflow_y_scroll()
+                    .children(detail)
+            })
+        })
+        // A request that offered no option at all is still worth drawing: it says the turn is
+        // blocked, which is the thing the reader has to know. Answering it needs the harness to
+        // offer something.
+        .when(buttons.is_empty(), |this| {
+            this.child(
+                mono("the harness offered no answer to this", theme::text_faint())
+                    .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta)),
+            )
+        })
+        .child(div().flex().items_center().gap_2().children(buttons))
+        .into_any_element()
+}
+
+/// How many lines a prompt shows inline before it is cut and offers the dialog.
+const PROMPT_CLAMP_LINES: usize = 4;
+
+/// Columns a prompt line is assumed to wrap at. An estimate: the clamp is decided without
+/// measuring, so it has to be a pure function of the request — which is also what lets
+/// [`prompt_shape`] sign the row with it.
+const PROMPT_COLS: usize = 70;
+
+/// What the prompt says it is asking: the request's own title, else the call's, else a stock line.
+fn prompt_what(
+    pending: &Pending,
+    call: Option<&kubiq_proto::conversation::ToolCallRecord>,
+) -> String {
+    pending
+        .tool_call
+        .title
+        .clone()
+        .or_else(|| call.map(|call| call.title.clone()))
+        .unwrap_or_else(|| "The agent is asking to go ahead".to_string())
+}
+
+fn wrapped_lines(text: &str) -> usize {
+    text.lines()
+        .map(|line| line.chars().count().div_ceil(PROMPT_COLS).max(1))
+        .sum::<usize>()
+        .max(1)
+}
+
+/// The estimated line counts of a prompt's title and of its detail.
+fn prompt_lines(what: &str, items: &[ToolContent]) -> (usize, usize) {
+    let detail = items
+        .iter()
+        .map(|item| match item {
+            ToolContent::Text(text) => wrapped_lines(text),
+            ToolContent::Diff {
+                old_text, new_text, ..
+            } => 1 + old_text.as_deref().map_or(0, wrapped_lines) + wrapped_lines(new_text),
+        })
+        .sum();
+    (wrapped_lines(what), detail)
+}
+
+/// What a prompt draws, in one number: everything that decides its height. Folded into the
+/// signature of the row it is drawn in, so a prompt arriving, being answered or changing is a
+/// re-measure rather than a stale height.
+fn prompt_shape(pending: &Pending) -> u64 {
+    let items: &[ToolContent] = pending.tool_call.content.as_deref().unwrap_or_default();
+    let (title, detail) = prompt_lines(pending.tool_call.title.as_deref().unwrap_or(""), items);
+    hashed((
+        &pending.request_id,
+        title.min(PROMPT_CLAMP_LINES + 1),
+        detail.min(PROMPT_CLAMP_LINES + 1),
+        items.len(),
+        pending.options.len(),
+    ))
+}
+
+/// The answer buttons of one prompt, for the inline prompt and the dialog alike — one builder, so
+/// the two cannot drift. `prefix` keeps the element ids of the two apart.
+fn permission_buttons(
+    agent: AgentId,
+    pending: &Pending,
+    prefix: &str,
+    cx: &mut Context<AppState>,
+) -> Vec<AnyElement> {
+    let request_id = &pending.request_id;
+    pending
+        .options
+        .iter()
+        .map(|option| {
+            let id = ElementId::Name(format!("{prefix}-{request_id}-{}", option.option_id).into());
+            let request_id = request_id.clone();
+            // The option id is echoed back exactly as it arrived: it is the harness's token, and
+            // nothing here reads it. `kind` is the only thing this looks at, and only to draw.
+            let option_id = option.option_id.clone();
+            let answer = cx.listener(move |this, _, _, cx| {
+                this.answer_permission(agent, request_id.clone(), option_id.clone(), cx);
+            });
+            let icon = Some(match (option.kind.allows(), option.kind.remembers()) {
+                (true, false) => IconName::Check,
+                (true, true) => IconName::CircleCheck,
+                (false, false) => IconName::Close,
+                (false, true) => IconName::Delete,
+            });
+            // Filled for going ahead, ghost for refusing; the icon is what separates "this time"
+            // from "and remember". Two axes, because `kind` has two.
+            if option.kind.allows() {
+                primary_button(id, icon, option.name.clone(), answer).into_any_element()
+            } else {
+                ghost_button(id, icon, option.name.clone(), answer).into_any_element()
+            }
+        })
+        .collect()
+}
+
+/// A permission request read in full: the title, everything it says in a body that scrolls inside
+/// the modal, and the same answers as the inline prompt. Answering goes through
+/// `answer_permission`, which closes the dialog; Cancel and Escape close it without answering.
+/// Drawn only while the request is still pending (`AppState::permission_dialog_target`).
+pub fn permission_dialog(
+    agent: AgentId,
+    pending: &Pending,
+    window: &mut Window,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let what = prompt_what(pending, None);
+    // The header holds one line; the body holds the whole text.
+    let first = what.lines().next().unwrap_or_default();
+    let title = if first.chars().count() > 80 {
+        format!("{}\u{2026}", first.chars().take(80).collect::<String>())
+    } else {
+        first.to_string()
+    };
+    let items: &[ToolContent] = pending.tool_call.content.as_deref().unwrap_or_default();
+    let body = div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .w_full()
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Body))
+                .text_color(theme::text())
+                .child(SharedString::from(what)),
+        )
+        .children(items.iter().map(content).collect::<Vec<_>>())
+        .into_any_element();
+
+    let mut footer = permission_buttons(agent, pending, "permission-dialog", cx);
+    footer.push(
+        ghost_button(
+            "permission-dialog-cancel",
+            None,
+            "Cancel",
+            cx.listener(|this, _, _, cx| this.close_permission_dialog(cx)),
+        )
+        .into_any_element(),
+    );
+    let view = cx.entity();
+    kit::modal(
+        "permission-dialog",
+        theme::warning(),
+        &title,
+        body,
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .children(footer)
+            .into_any_element(),
+        crate::ui::dismiss(
+            &view,
+            crate::state::Layer::PermissionDialog,
+            |this, _, cx| this.close_permission_dialog(cx),
+        ),
+        window,
+    )
+}
+
+/// That something is waiting, kept in view above the footer while the prompt itself is anywhere in
+/// the transcript.
+///
+/// Answering is blocking, so a prompt scrolled out of sight would read as an agent that had
+/// stopped for no reason.
+///
+/// **The strip is answerable, and it is the way to the prompt.** It carries yes / no / all for the
+/// oldest request, because the one control on screen when a turn is blocked should be the one that
+/// unblocks it — a strip that only reported the question made a reader hunt for the prompt to
+/// answer a question they had already read. Clicking anywhere else on it does that hunt for them:
+/// it switches to whoever raised the request and scrolls to the call it authorises, so the two
+/// ways of answering lead to the same place rather than competing.
+///
+/// **It counts, it does not list.** With several up it names the oldest and says how many are
+/// behind it; the rest are answered by working through them, one strip at a time, because each
+/// one's options are its own.
+fn needs_you_strip(
+    conversation: &Conversation,
+    oldest: &Pending,
+    waiting: usize,
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    // The same join the prompt itself does: the patch names the operation only sometimes, and the
+    // call in the transcript names it always.
+    let what = oldest
+        .tool_call
+        .title
+        .clone()
+        .or_else(|| {
+            match conversation
+                .tool_block_index(&oldest.tool_call.id)
+                .and_then(|ix| conversation.blocks.get(ix))
+            {
+                Some(ConvBlock::Tool { call, .. }) => Some(call.title.clone()),
+                _ => None,
+            }
+        })
+        .unwrap_or_else(|| "an operation".to_string());
+    // Whose question it is, named where it is not this transcript's own: with a delegate blocked
+    // and the main agent on screen, "an operation" is not enough to go on.
+    let whose = conversation
+        .pending_subagent(oldest)
+        .map(|id| conversation.subagent_name(id));
+
+    let agent = conversation.id;
+    let slot = view.slot;
+    let request = oldest.request_id.clone();
+
+    // One button per reading the request actually offered, and none for a reading it did not.
+    let answers = [
+        (
+            "yes",
+            "Yes",
+            true,
+            oldest
+                .option_for(true)
+                .map(|option| option.option_id.clone()),
+        ),
+        (
+            "all",
+            "All",
+            true,
+            oldest
+                .always_option()
+                .map(|option| option.option_id.clone()),
+        ),
+        (
+            "no",
+            "No",
+            false,
+            oldest
+                .option_for(false)
+                .map(|option| option.option_id.clone()),
+        ),
+    ];
+    let buttons: Vec<AnyElement> = answers
+        .into_iter()
+        .filter_map(|(part, label, allows, option)| {
+            let option = option?;
+            let answer_for = request.clone();
+            let click = cx.listener(move |this, _, _, cx| {
+                this.answer_permission(agent, answer_for.clone(), option.clone(), cx)
+            });
+            Some(if allows {
+                primary_button(view.eid(part), None, label, click).into_any_element()
+            } else {
+                ghost_button(view.eid(part), None, label, click).into_any_element()
+            })
+        })
+        .collect();
+
+    let mut strip = div()
+        .id(view.eid("needs-you"))
+        .px_3()
+        .py_1p5()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_2()
+        .bg(theme::warning_soft())
+        .border_l(px(theme::accent_edge()))
+        .border_color(theme::warning())
+        .child(
+            Icon::new(IconName::TriangleAlert)
+                .with_size(Size::XSmall)
+                .text_color(theme::warning()),
+        )
+        .child(
+            mono("NEEDS YOU", theme::warning())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+        );
+
+    // The count is a mark rather than a clause: "and 3 more waiting" read as part of what the
+    // operation was, and the number is the part a reader is counting down.
+    if waiting > 1 {
+        strip = strip.child(waiting_count(waiting, view));
+    }
+
+    strip
+        .child(
+            div()
+                .id(view.eid("needs-you-go"))
+                .flex()
+                .flex_1()
+                .min_w(px(0.))
+                .items_center()
+                .gap_1p5()
+                .cursor_pointer()
+                .when_some(whose, |this, whose| {
+                    this.child(
+                        mono(whose, theme::warning())
+                            .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta)),
+                    )
+                })
+                .child(
+                    mono(what, theme::text_muted())
+                        .flex_1()
+                        .min_w(px(0.))
+                        .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+                )
+                .tooltip(|window, cx| {
+                    gpui_component::tooltip::Tooltip::new("Go to what is waiting").build(window, cx)
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.reveal_permission(agent, slot, request.clone(), cx)
+                })),
+        )
+        .children(buttons)
+        .child(
+            mono("⌘⌥Y / ⌘⌥N", theme::text_faint())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+        )
+        .into_any_element()
+}
+
+/// How many requests are outstanding, drawn as a count and only above one.
+fn waiting_count(waiting: usize, view: &ConversationView) -> AnyElement {
+    div()
+        .id(view.eid("needs-you-count"))
+        .h(px(16.))
+        .min_w(px(16.))
+        .px_1()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(theme::warning())
+        .child(
+            mono(waiting.to_string(), theme::pane_bg())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+        )
+        .tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(format!(
+                "{waiting} requests waiting — the oldest is named here"
+            ))
+            .build(window, cx)
+        })
+        .into_any_element()
+}
+
+/// A short label with the whole of itself on hover — the shape every readout in the footer and
+/// the composer's picker row takes, because the row has space for a mark and none for a number.
+fn tipped(id: ElementId, label: String, tip: String, colour: Rgba) -> AnyElement {
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .child(
+            mono(label, colour)
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta)),
+        )
+        .tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+        })
+        .into_any_element()
+}
+
+/// What the `tot` readout stands for while a delegate's transcript is up.
+///
+/// Says the two things a reader has to know to trust the number: it is this delegate's spend
+/// rather than the conversation's, and it is **this instance's** — banked by the spawning call's
+/// id, so two delegates of one type read two figures rather than one bucket printed twice
+/// (`T-259`). Where the harness identified no instance behind its reports there is nothing to
+/// show, and the tip says that rather than borrowing the type's total.
+fn delegate_spend_tip(conversation: &Conversation, tab: &SubagentTab) -> String {
+    let Some((total, cached)) = conversation.delegate_tokens(&tab.id) else {
+        return format!("{} \u{2014} nothing counted for it yet", tab.name);
+    };
+    let who = tab.kind.as_deref().unwrap_or("this delegate");
+    let mut tip = format!(
+        "{} tokens billed by {who} \u{b7} {} read back from cache \
+         \u{b7} a flow, only ever growing",
+        format_tokens(total),
+        format_tokens(cached)
+    );
+    tip.push_str(
+        " \u{b7} no context level is reported for a delegate, so no ring is drawn beside it",
+    );
+    tip
+}
+
+/// The whole of what the `tot` readout stands for: what the three letters mean, then the five ways
+/// a token is billed, then what each spawned subagent spent of it.
+///
+/// The first clause is the distinction the footer lives or dies by. `tot` is a **flow** — summed
+/// over every turn, only ever growing — where the ring beside it is a **level** that falls the
+/// moment the conversation is compacted. A three-letter label is only honest if hovering it says
+/// which of the two it is.
+///
+/// One line, `·`-separated, like every other tooltip in the row — and the subagent half is drawn
+/// only where a subagent spent something, so a conversation that spawned none reads exactly as it
+/// did before.
+fn spend_tip(conversation: &Conversation) -> String {
+    let Some(spend) = conversation.spend else {
+        return String::new();
+    };
+    let mut tip = format!(
+        "Total \u{2014} \
+         \u{b7} {} tokens \u{b7} in {} \u{b7} out {} \u{b7} thinking {} \u{b7} cache read {} \
+         \u{b7} cache creation {}",
+        format_tokens(spend.total()),
+        format_tokens(spend.input),
+        format_tokens(spend.output),
+        format_tokens(spend.thinking),
+        format_tokens(spend.cache_read),
+        format_tokens(spend.cache_creation),
+    );
+    for (name, total) in conversation.subagent_spend() {
+        tip.push_str(&format!(" \u{b7} {name} {}", format_tokens(total)));
+    }
+    tip
+}
+
+/// What the harness said about itself: which one it is and as whom, what it has spent, and how much
+/// of the context window is gone.
+///
+/// **No numbers in the row that a mark can carry.** The money and the rate-limit windows are gone
+/// outright, and what is left says the least it can on screen and the whole of it on hover — the
+/// footer is glanced at, not read. What a turn *runs as* is not here at all any more: the model,
+/// the thinking level and the mode are the composer's own pickers, live for the conversation's
+/// whole life, and a read-only pill beside them would be the same fact drawn twice.
+///
+/// The ring is drawn only where a window was reported. A percentage of a size nobody named is a
+/// wrong ring, and a wrong ring is worse than none.
+///
+/// **The row reports whoever is being read.** With a delegate's transcript up it says what that
+/// delegate spent, not what the conversation spent — a reader looking at one agent's turns wants
+/// that agent's numbers, and the conversation's total is the one thing that is on screen either
+/// way from the switcher's count. Two limits of the wire show through here, and neither is papered
+/// over:
+///
+/// - **A delegate's spend is this delegate's.** `UsageRecord::subagent_id` names the spawning
+///   call, so two `general-purpose` delegates are two figures; `UsageRecord::subagent` stays the
+///   *type*, which is what the breakdown lower down the tooltip aggregates by. Where a harness
+///   reports no instance there is nothing to draw, and nothing here borrows the type's total.
+/// - **A delegate has no context level at all.** A subagent's usage report repeats the *parent's*
+///   occupancy, so there is no per-delegate window to draw — and the parent's ring beside a
+///   delegate's transcript would be a number about somebody else. So the ring is dropped rather
+///   than borrowed, on the same rule as the paragraph above it.
+///
+fn footer(
+    conversation: &Conversation,
+    subagents: &[SubagentTab],
+    cache_ring: bool,
+    quota: Option<&QuotaSnapshot>,
+    view: &ConversationView,
+) -> AnyElement {
+    // Whether there is anything to report yet. A conversation just launched has no spend, no
+    // context reading and no quota to show, and a row of padding with nothing in it is a strip the
+    // reader has to notice is meaningless rather than one that is simply not there — so the row
+    // collapses to nothing rather than drawing empty. See T-68.
+    let mut has_content = false;
+
+    let mut row = div()
+        .px_3()
+        .py_1()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_1p5()
+        .child(div().flex_1().min_w(px(0.)));
+
+    // Whose numbers the rest of the row is about. A delegate's transcript reports the delegate;
+    // the conversation's own reports the conversation, subagents folded in.
+    let delegate = conversation
+        .viewing_subagent()
+        .and_then(|id| subagents.iter().find(|tab| tab.id == id));
+    let (spend, spend_tip) = match delegate {
+        Some(tab) => (
+            conversation.delegate_tokens(&tab.id),
+            delegate_spend_tip(conversation, tab),
+        ),
+        None => (
+            conversation
+                .total_tokens()
+                .map(|total| (total, conversation.cached_tokens().unwrap_or(0))),
+            spend_tip(conversation),
+        ),
+    };
+
+    // Everything that has been spent, which is not what is in the window: a compacted
+    // conversation has spent millions and holds thousands. Drawn only where the harness counts it
+    // — a pill with nothing behind it is not drawn.
+    if let Some((total, _)) = spend {
+        // The uncached part of it, alongside the total — fresh input tokens, neither a cache read
+        // nor a cache write, the same figure `spend_tip`'s "in" already names. Only for the
+        // conversation's own transcript: a delegate's spend is banked by type with no such
+        // breakdown behind it (`Conversation::delegate_tokens`).
+        let label = format!("{} tot", format_tokens(total));
+        row = row.child(tipped(
+            view.eid("total-tokens"),
+            label,
+            spend_tip,
+            theme::text_muted(),
+        ));
+        has_content = true;
+    }
+
+    // How much of that total was context read back out of the cache rather than paid for again.
+    // Off by default and asked for in settings: it is a cost-of-running reading, not a
+    // how-is-this-turn-going one, and the row is glanced at. Its own colour, because a second
+    // accent ring beside the context one would read as the same fact twice.
+    if cache_ring
+        && let Some((total, cached)) = spend
+        && total > 0
+    {
+        let pct = ((cached as f64 / total as f64) * 100.0).round() as u8;
+        let (cached_label, total_label) = (format_tokens(cached), format_tokens(total));
+        let tip = match delegate {
+            Some(tab) => format!(
+                "cached {cached_label} / {total_label} {pct}% \u{2014} {}",
+                tab.name
+            ),
+            None => format!("cached {cached_label} / {total_label} {pct}%"),
+        };
+        row = row.child(
+            div()
+                .id(view.eid("cache-ring"))
+                .flex()
+                .flex_none()
+                .items_center()
+                .child(progress_ring_in(pct.min(100), 12., theme::info()))
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                }),
+        );
+        has_content = true;
+    }
+
+    // Only for the conversation's own transcript: no harness reports a delegate's own occupancy,
+    // and the parent's would be a reading about somebody else.
+    if let Some(pct) = conversation.context_pct().filter(|_| delegate.is_none()) {
+        let used = conversation.tokens();
+        let size = conversation.usage.as_ref().map_or(0, |usage| usage.size);
+        // The ring and the count are one fact drawn twice — how full the window is right now — so
+        // they say the same sentence on hover. A level, not a total: it falls when the harness
+        // compacts, which is exactly what tells it apart from `tot` beside it.
+        let tip = format!(
+            "Context window \u{2014} {} of {} tokens in it right now, {pct}% full. \
+             A level, not a total: it falls when the conversation is compacted.",
+            format_tokens(used),
+            format_tokens(size)
+        );
+        let ring_tip = tip.clone();
+        row = row
+            .child(
+                div()
+                    .id(view.eid("context-ring"))
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .child(progress_ring(pct, 12.))
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(ring_tip.clone()).build(window, cx)
+                    }),
+            )
+            .child(tipped(
+                view.eid("context-tokens"),
+                format!("{} ctx", format_tokens(used)),
+                tip,
+                theme::text_muted(),
+            ));
+        has_content = true;
+    }
+
+    // How much of the account's plan is left. An account fact, not a conversation one — two
+    // agents signed in here read the same window — so it is preferred from what the host cached
+    // for the account, and falls back to the reading Claude's bridge pushed into this
+    // conversation, which is all a window holds before the host has been asked. The default
+    // identity (empty account) has a plan too; a provider that named no limit draws nothing
+    // rather than a zero ring. Only on the conversation's own transcript, for the reason the
+    // context ring beside it is: a window belongs to the account, not to a delegate.
+    let pushed = conversation
+        .rate_limit
+        .as_ref()
+        .filter(|_| quota.is_none())
+        .and_then(|record| {
+            snapshot_from_rate_limit(&conversation.account, &conversation.harness, record, 0)
+        });
+    //
+    // Both rolling windows are drawn, as concentric bands: the short one outside — it is the one
+    // that stops the next turn — and the long one inside it, each in its own severity tone. A
+    // provider that stated one window keeps the single band, and the tooltip names every window it
+    // drew, because which band is which is not readable off the glyph.
+    // The default identity (empty account) is a key of its own in the host's cache: the user's
+    // own home, probed and pushed into like a named account's.
+    if let Some(snapshot) = quota.or(pushed.as_ref()).filter(|_| delegate.is_none()) {
+        if let Some(ring) = kit::quota_ring(
+            view.eid("quota-ring"),
+            snapshot,
+            12.,
+            chrono::Utc::now().timestamp_millis(),
+        ) {
+            row = row.child(ring);
+            has_content = true;
+        }
+    }
+
+    if !has_content {
+        return div().into_any_element();
+    }
+
+    row.into_any_element()
+}
+
+/// What one composer picker offers, after the caller's own substring filter — the same list
+/// `on_pick`'s index resolves against, so a filtered pick can never name the wrong row. `None` is
+/// "the harness has not advertised this config id", drawn as its own sentence rather than an
+/// empty picker.
+pub struct ConfigRow {
+    pub label: String,
+    pub selected: usize,
+    pub values: Vec<String>,
+    pub names: Vec<String>,
+}
+
+/// Build one for `config_id` from the conversation's advertised config and whatever is typed
+/// into the search field. `search` is matched case-insensitively against each choice's name —
+/// `to_lowercase()` and `contains`, the one filter every menu in the window uses; an empty query
+/// keeps everything. `None` when the harness has not offered this id at all — a harness with no
+/// modes never grows a mode picker.
+pub fn config_choices(
+    conversation: &Conversation,
+    config_id: &str,
+    search: &str,
+) -> Option<ConfigRow> {
+    let option = conversation.config.iter().find(|opt| opt.id == config_id)?;
+    let current = match &option.value {
+        ConfigValue::Select { current, .. } => current.as_str(),
+        ConfigValue::Flag { .. } => "",
+    };
+    let chosen = conversation
+        .chosen
+        .get(config_id)
+        .map(String::as_str)
+        .unwrap_or(current);
+    let all: &[ConfigChoice] = match &option.value {
+        ConfigValue::Select { choices, .. } => choices,
+        ConfigValue::Flag { .. } => &[],
+    };
+    let query = search.to_lowercase();
+    let choices: Vec<&ConfigChoice> = all
+        .iter()
+        .filter(|choice| choice.name.to_lowercase().contains(&query))
+        .collect();
+    let selected = choices
+        .iter()
+        .position(|choice| choice.value == chosen)
+        .unwrap_or(0);
+    let label = choices
+        .get(selected)
+        .map(|choice| choice.name.clone())
+        .unwrap_or_else(|| chosen.to_string());
+    let values = choices.iter().map(|choice| choice.value.clone()).collect();
+    let names = choices.iter().map(|choice| choice.name.clone()).collect();
+    Some(ConfigRow {
+        label,
+        selected,
+        values,
+        names,
+    })
+}
+
+/// The order the composer's pickers appear in. Fixed rather than read off `conversation.config`'s
+/// own order: the host may add ids to that list in whatever order it minted them, but the picker
+/// row reads left to right as "what to run as, how hard to think, which mode" every time.
+const CONFIG_ORDER: [&str; 3] = ["model", "thinking", "mode"];
+
+/// The composer's one action, drawn the way [`crate::ui::kit::primary_button`] draws a screen's
+/// one obvious action: filled, square, and the only solid block in the view.
+///
+/// Icon only. Send, Enqueue and Stop are one control in three states, and a word that changes
+/// width would move the button out from under the pointer as a turn starts; the word is the
+/// tooltip instead. Nothing to send drains the fill rather than removing the button, so the row
+/// never changes shape.
+fn action_button(
+    id: ElementId,
+    icon: IconName,
+    label: &'static str,
+    fill: Rgba,
+    enabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    div()
+        .id(id)
+        .size(px(26.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .bg(if enabled {
+            fill
+        } else {
+            theme::fade(fill, 0.35)
+        })
+        .child(
+            Icon::new(icon)
+                .with_size(Size::XSmall)
+                .text_color(theme::on_accent()),
+        )
+        .when(enabled, |this| {
+            this.cursor_pointer()
+                .hover(|this| this.bg(theme::fade(fill, 0.8)))
+                .on_click(on_click)
+        })
+        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(label).build(window, cx))
+        .into_any_element()
+}
+
+/// Stop, which is a square and not a cross.
+///
+/// The distinction is the whole of what the control means: a cross reads as *close this*, and this
+/// closes nothing. It ends the turn in flight — the transcript stays, the harness stays, and the
+/// next message goes to the same agent — which is what a square over a stream has meant since
+/// tape decks. Drawn rather than iconised because the icon set ships no square, and a square is
+/// four sides.
+fn stop_button(
+    id: ElementId,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    div()
+        .id(id)
+        .size(px(26.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .bg(theme::danger())
+        .cursor_pointer()
+        .hover(|this| this.bg(theme::fade(theme::danger(), 0.8)))
+        .child(
+            div()
+                .size(px(9.))
+                .rounded(px(1.5))
+                .flex_none()
+                .bg(theme::on_accent()),
+        )
+        .on_click(on_click)
+        .tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(
+                "Stop this turn \u{2014} the agent stays, and takes the next message",
+            )
+            .build(window, cx)
+        })
+        .into_any_element()
+}
+
+/// Which harness, and which identity answered — one chip, because they are one answer: this
+/// conversation is *that* harness signed in as *that* person. Read-only by design: it is chosen
+/// once, in the New agent menu, because a turn already taken was taken as somebody. It sits among
+/// the config chips because what a turn runs *as* belongs beside what it runs *with*.
+fn identity_chip(conversation: &Conversation, view: &ConversationView) -> AnyElement {
+    let mark = harness_icon(&conversation.harness);
+    let mut identity_tip = if conversation.account.is_empty() {
+        format!("{} \u{2014} default account", conversation.harness)
+    } else {
+        format!(
+            "{} \u{b7} signed in as {} \u{2014} chosen once, when the agent was started",
+            conversation.harness, conversation.account
+        )
+    };
+    // Whether this identity may spend past its plan is a fact about the account, so it hangs off
+    // the account chip rather than off a banner of its own: the `5h N%` readout was removed
+    // deliberately and this does not bring it back. Said only when the answer is no — an account
+    // that can still spill over has nothing to warn about.
+    if let Some(rate) = &conversation.rate_limit
+        && rate
+            .overage_status
+            .as_deref()
+            .is_some_and(|status| status != "allowed")
+    {
+        identity_tip.push_str(" \u{b7} overage ");
+        identity_tip.push_str(rate.overage_status.as_deref().unwrap_or_default());
+        if let Some(reason) = &rate.overage_reason {
+            identity_tip.push_str(&format!(" ({reason})"));
+        }
+    }
+
+    // Only the first two characters of the account, uppercased — the model chip wears one letter,
+    // this wears two, and either is a mark to recognise rather than a name to read.
+    let mark_text: String = conversation
+        .account
+        .chars()
+        .take(2)
+        .collect::<String>()
+        .to_uppercase();
+
+    div()
+        .h(px(26.))
+        .px_2()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_2()
+        .border_l(px(theme::accent_edge()))
+        .border_color(theme::border())
+        .id(view.eid("identity"))
+        .child(
+            Icon::new(mark)
+                .with_size(Size::XSmall)
+                .text_color(theme::text()),
+        )
+        .when(!mark_text.is_empty(), |this| {
+            this.child(
+                mono(mark_text, theme::text())
+                    .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta)),
+            )
+        })
+        .tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(identity_tip.clone()).build(window, cx)
+        })
+        .into_any_element()
+}
+
+/// The field that steers this agent, and the Stop that interrupts it.
+fn composer(
+    app: &AppState,
+    conversation: &Conversation,
+    view: &ConversationView,
+    window: &Window,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    // A harness that takes no second turn says so where the field would be, rather than leaving
+    // one that swallows what is typed.
+    if !conversation.accepts_input {
+        return div()
+            .px_2()
+            .py_1p5()
+            .flex()
+            .flex_none()
+            .child(
+                mono(
+                    "This agent has ended \u{2014} its transcript stays, and it takes no more turns.",
+                    theme::text_faint(),
+                )
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
+            )
+            .into_any_element();
+    }
+
+    let Some(input) = app.column_inputs.get(view.slot).cloned() else {
+        return div().into_any_element();
+    };
+    let entity = cx.entity();
+    let id = conversation.id;
+    let slot = view.slot;
+    // Attachments alone are something to send: the prompt that goes out is what was typed *plus*
+    // every attached path as a mention, so a turn that is only files is not an empty one.
+    let can_send = !input.read(cx).value().trim().is_empty() || !conversation.attached.is_empty();
+    let working = conversation.run == Run::Working;
+
+    // What this turn runs as, for the conversation's whole life rather than only before it
+    // launched: `SetAgentConfig` is answered by a running harness as readily as by a pending one,
+    // and a level nobody can see or change is a level nobody knows they are paying for. The row
+    // sits *under* the field, beside Send — what a turn will run as belongs next to the control
+    // that starts it — and never blocks typing: the user may send before discovery finishes, and
+    // the host then launches with the harness's own default.
+    let config_row = {
+        let search = app.picker_search.read(cx).value().to_string();
+        let search_focused = app
+            .picker_search
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
+
+        // What the thinking picker currently says, read once: the model chip wears its first
+        // letter, so the two are never out of step.
+        let thinking = config_choices(conversation, "thinking", "").map(|row| row.label);
+        let letter = thinking.as_deref().and_then(|level| {
+            level
+                .chars()
+                .next()
+                .map(|first| first.to_uppercase().to_string())
+        });
+
+        let pickers: Vec<AnyElement> = CONFIG_ORDER
+            .iter()
+            .filter_map(|&config_id| {
+                // Only the model picker filters — thinking and mode are at most six rows, and a
+                // filter field over six rows is furniture.
+                let query = if config_id == "model" {
+                    search.as_str()
+                } else {
+                    ""
+                };
+                let row = config_choices(conversation, config_id, query)?;
+                let values = row.values;
+                let cid = config_id.to_string();
+
+                // The chip says the least that identifies the choice; the tooltip says the whole
+                // of it. A model id is `vendor-family-version-date` and a thinking level is a
+                // word, and neither fits a row that also has to hold a field.
+                let (label, tip) = match config_id {
+                    "model" => {
+                        let short = short_model_label(&conversation.harness, &row.label);
+                        match (&letter, &thinking) {
+                            (Some(letter), Some(level)) => (
+                                format!("{short} \u{b7} {letter}"),
+                                format!("{} \u{b7} {level} thinking", row.label),
+                            ),
+                            _ => (short, row.label.clone()),
+                        }
+                    }
+                    "thinking" => (
+                        letter.clone().unwrap_or_else(|| row.label.clone()),
+                        format!("{} thinking", row.label),
+                    ),
+                    _ => (
+                        row.label.clone(),
+                        format!("{} \u{b7} permission mode", row.label),
+                    ),
+                };
+
+                let mut picker = Picker::new(view.eid(&format!("{config_id}-picker")), label)
+                    .style(PickerStyle::Chip)
+                    .anchor(MENU_ANCHOR_UP)
+                    .items(row.names)
+                    .selected(row.selected)
+                    .open(conversation.open_config.as_deref() == Some(config_id));
+                if config_id == "model" {
+                    picker = picker.search(&app.picker_search, search_focused);
+                }
+                let cid_toggle = cid.clone();
+                let cid_pick = cid.clone();
+                let picker = picker
+                    .on_toggle(handler(&entity, move |this, window, cx| {
+                        this.toggle_agent_config_menu(id, cid_toggle.clone(), window, cx)
+                    }))
+                    .on_pick(indexed(&entity, move |this, index, window, cx| {
+                        if let Some(value) = values.get(index) {
+                            this.pick_agent_config(id, cid_pick.clone(), value.clone(), window, cx);
+                        }
+                    }))
+                    .on_dismiss(handler(&entity, move |this, window, cx| {
+                        this.dismiss_agent_config_menu(id, window, cx)
+                    }));
+                Some(
+                    div()
+                        .id(view.eid(&format!("{config_id}-chip")))
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .child(picker)
+                        .tooltip(move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                        })
+                        .into_any_element(),
+                )
+            })
+            .collect();
+
+        if pickers.is_empty() {
+            mono("Discovering models\u{2026}", theme::text_faint())
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label))
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .children(pickers)
+                .into_any_element()
+        }
+    };
+
+    // No keyboard hint. Enter, cmd/ctrl+Enter and shift+Enter are what every text field on the
+    // machine already does, and a permanent line of shortcut text under every composer is furniture
+    // the user reads once. The row carries what changes instead: what this turn will run as.
+    //
+    // Chrome is flush: the row takes its full height with no padding, its controls sit edge to
+    // edge, and each is its own 26px chip rather than a gap-separated item.
+    let controls = div()
+        .flex()
+        .items_center()
+        .child(identity_chip(conversation, view))
+        .child(config_row)
+        // Files for this turn. The picker is the window's own, raised over the explorer's tree and
+        // taking as many files as are wanted; what comes back is a tag apiece above the field, and
+        // becomes `@path` in the prompt only when it is sent. With no project open there is no
+        // tree and the button does nothing.
+        .child(
+            icon_button(
+                view.eid("attach"),
+                IconName::Plus,
+                false,
+                cx.listener(move |this, _, window, cx| {
+                    this.raise_composer_picker(id, slot, window, cx)
+                }),
+            )
+            .size(px(26.))
+            .tooltip(|window, cx| {
+                gpui_component::tooltip::Tooltip::new("Attach files").build(window, cx)
+            }),
+        )
+        .child(div().flex_1().min_w(px(0.)));
+
+    // Stop is there for the whole of a running turn, not only while the field is empty: the moment
+    // a message is sent is the moment the reader most wants it back, and a control that appears
+    // only when nothing is typed is a control that vanishes as soon as they start writing the
+    // follow-up. Beside it, when there is something to send, Enqueue — the turn in flight is not
+    // interrupted by typing at it, and what is typed goes out when it ends. Idle keeps one button.
+    // All three are what the Enter key answers through `AppState::send_or_enqueue`, so the buttons
+    // and the key never disagree.
+    let mut actions: Vec<AnyElement> = Vec::new();
+    if working {
+        actions.push(stop_button(
+            view.eid("stop"),
+            cx.listener(move |this, _, _, cx| this.cancel_turn(id, cx)),
+        ));
+        if can_send {
+            // A harness that steers takes the prompt into the turn in flight, so the button sends
+            // rather than holds — `send_or_enqueue` reads the same `steers` answer.
+            let steers = app.workbench.steers(&conversation.harness);
+            actions.push(action_button(
+                view.eid("send"),
+                if steers {
+                    IconName::ArrowUp
+                } else {
+                    IconName::Inbox
+                },
+                if steers { "Steer" } else { "Enqueue" },
+                theme::accent(),
+                true,
+                cx.listener(move |this, _, window, cx| this.send_or_enqueue(id, slot, window, cx)),
+            ));
+        }
+    } else {
+        actions.push(action_button(
+            view.eid("send"),
+            IconName::ArrowUp,
+            "Send",
+            theme::accent(),
+            can_send,
+            cx.listener(move |this, _, window, cx| this.send_or_enqueue(id, slot, window, cx)),
+        ));
+    }
+
+    // "Unloaded" is said once already — the glyph beside the three-dots menu, top left of the
+    // view, with the word itself in its tooltip. A composer that also spelled it out in prose
+    // would be saying the same fact twice, once as a mark and once as a sentence.
+    let field_el = div()
+        .flex()
+        .flex_none()
+        .flex_col()
+        .items_stretch()
+        // Up / Down walk what this conversation has sent, the way a shell does. Captured above the
+        // field, because the field's own `up` / `down` move the caret and stop there — and the key
+        // is handed back untouched when it is not the history's (caret below the first line, not
+        // browsing), so a draft of more than one line still navigates.
+        .capture_action(
+            cx.listener(move |this, _: &gpui_component::input::MoveUp, window, cx| {
+                if this.recall_history(slot, true, window, cx) {
+                    cx.stop_propagation();
+                }
+            }),
+        )
+        .capture_action(cx.listener(
+            move |this, _: &gpui_component::input::MoveDown, window, cx| {
+                if this.recall_history(slot, false, window, cx) {
+                    cx.stop_propagation();
+                }
+            },
+        ))
+        // A paste of a file or a picture is an attachment on this turn. Hung here rather than on
+        // the workbench root because this is the one node that knows *which* conversation the
+        // focused field types into — the slot is an index and nothing maps it back. A board with
+        // only text on it is handed back from inside the handler, and the field's own paste runs.
+        .on_action(
+            cx.listener(move |this, _: &crate::app::PasteIntoComposer, window, cx| {
+                this.paste_into_composer(id, slot, window, cx)
+            }),
+        )
+        .child(
+            div()
+                .id(view.eid("composer"))
+                .debug_selector(|| "composer-field".into())
+                .px_1p5()
+                .pt_0p5()
+                .cursor_text()
+                .child(
+                    Textarea::new(&input)
+                        .appearance(false)
+                        .bordered(false)
+                        .w_full()
+                        .text_size(theme::font(theme::Family::Conversation, theme::Role::Body)),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    let input = this.column_inputs[slot].clone();
+                    input.update(cx, |state, cx| state.focus(window, cx));
+                })),
+        )
+        .child(controls.children(actions));
+
+    let mut extras: Vec<AnyElement> = Vec::new();
+    // Attachments sit directly under the token and context row: they belong to the turn being
+    // written, which is the field right below them. The queue moved to the top of the bottom
+    // block — it is what is waiting, not what is being written.
+    if !conversation.attached.is_empty() {
+        extras.push(attachment_tags(id, view, &conversation.attached, cx));
+    }
+
+    if extras.is_empty() {
+        field_el.into_any_element()
+    } else {
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .children(extras)
+            .child(field_el)
+            .into_any_element()
+    }
+}
+
+/// What the agent is doing, as two chips in one line at the top of the bottom
+/// block.
+///
+/// The row spans the block's full width, and the two chips sit at its two
+/// edges — subagents flush left, todos flush right, whichever of them exist —
+/// with a flexible spacer between rather than `justify_between`, so a lone
+/// chip still reaches its border instead of hugging the left one. Both are
+/// built by the single [`activity_chip`] helper, so their chevrons cannot
+/// disagree with which panel `conversation.panel_open` says is open.
+///
+/// The left chip is the spawned subagents: how many, and — once asked — who
+/// they are. The right chip is the agent's own todo list: what it has checked
+/// off, and — once asked — what it plans to check off next. Collapsed is the
+/// resting state: `3 subagents` on the left, `2/5 todos` on the right, one fact
+/// each because a conversation's delegates or plans are worth a line and a list
+/// worth asking for. Opening either draws its list *upward*, over the
+/// transcript, flush against the line's own top edge, through the kit's
+/// `popover` — the composer must not move when a panel opens, because a control
+/// that walks away from the cursor is a control you have to chase. One panel at
+/// a time: asking for the other is a switch, not a second panel.
+///
+/// The subagent panel draws one row per agent, the conversation's own turns
+/// first then every subagent it has spawned, and clicking a row switches the
+/// transcript to it. The main agent's row never leaves the list: it is how the
+/// reader gets back. Neither half invents vocabulary — the main agent's word is
+/// [`Lifecycle::label`]'s and its colour [`lifecycle_colour`]'s, a subagent's
+/// are [`status_label`]'s and [`status_colour`]'s, read off the `Task` call
+/// that spawned it. A subagent whose spawning call is not in the transcript has
+/// no status to read, and says that rather than being claimed to be running.
+fn activity_bar(
+    conversation: &Conversation,
+    subagents: &[crate::state::conversation::SubagentTab],
+    view: &ConversationView,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let id = conversation.id;
+    let viewing = conversation.viewing_subagent();
+    let panel_open = conversation.panel_open;
+
+    let left = (!subagents.is_empty()).then(|| {
+        let open = panel_open == Some(ActivityPanel::Subagents);
+        let state = conversation_status(conversation);
+        let main_waiting = conversation.pending_count(None);
+        let (main_status, main_colour) = if main_waiting > 0 {
+            (needs_you_label(main_waiting), theme::warning())
+        } else {
+            (state.label(), crate::ui::work::status_colour(state))
+        };
+        let mut rows: Vec<AnyElement> = vec![agent_row(
+            view.eid("agent-tag-main"),
+            "agent-row-main".to_string(),
+            "Main agent".to_string(),
+            // What the main agent runs as is the footer's chip, right below: saying it twice would be
+            // the same fact drawn twice. A delegate has no chip of its own, which is why its row
+            // carries one.
+            None,
+            main_status,
+            None,
+            main_colour,
+            viewing.is_none(),
+            cx.listener(move |this, _, _, cx| {
+                this.view_conversation_agent(id, None, cx);
+                this.close_conversation_panel(id, cx);
+            }),
+        )];
+        rows.extend(subagents.iter().map(|tab| {
+            let target = tab.id.clone();
+            // The same pair the main row above reads, off the delegate instead of the
+            // conversation. A delegate blocked on several questions says how many, which is the
+            // one thing the shared vocabulary has no room for.
+            let pair = delegate_status(tab);
+            let (status, colour) = if tab.waiting > 0 {
+                (needs_you_label(tab.waiting), theme::warning())
+            } else {
+                (pair.label(), crate::ui::work::status_colour(pair))
+            };
+            agent_row(
+                view.eid(&format!("agent-tag-{}", tab.id)),
+                format!("agent-row-{}", tab.id),
+                tab.name.clone(),
+                // The agent label's second line (T-283): its type and its model, faint.
+                Some(tab.identity(&conversation.harness)).filter(|identity| !identity.is_empty()),
+                status,
+                Some(subagent_tip(conversation, tab)),
+                colour,
+                viewing == Some(tab.id.as_str()),
+                cx.listener(move |this, _, _, cx| {
+                    this.view_conversation_agent(id, Some(target.clone()), cx);
+                    this.close_conversation_panel(id, cx);
+                }),
+            )
+        }));
+
+        let count = subagents.len();
+        // What is still going. A delegate that came back is `Ended` whatever its result says, so
+        // it never lands in this count; one whose spawning call the transcript does not hold says
+        // nothing, so it does not either.
+        let active = subagents
+            .iter()
+            .map(delegate_status)
+            .filter(|pair| pair.lifecycle != Lifecycle::Ended && pair.doing != Doing::Unknown)
+            .count();
+        activity_chip(
+            view.eid("agent-switcher-header"),
+            "agent-switcher",
+            view.eid("agent-switcher-panel"),
+            "agent-switcher-panel",
+            subagent_count_label(active, count),
+            open,
+            true,
+            rows,
+            cx.listener(move |this, _, _, cx| {
+                this.toggle_conversation_panel(id, ActivityPanel::Subagents, cx);
+            }),
+        )
+    });
+
+    let right = (!conversation.plan.is_empty()).then(|| {
+        let open = panel_open == Some(ActivityPanel::Todos);
+        let total = conversation.plan.len();
+        let done = conversation
+            .plan
+            .iter()
+            .filter(|entry| matches!(entry.status, PlanStatus::Completed))
+            .count();
+        let shown = total.min(8);
+        let mut rows: Vec<AnyElement> = conversation
+            .plan
+            .iter()
+            .take(shown)
+            .map(|entry| {
+                let (mark, colour) = match entry.status {
+                    PlanStatus::Completed => ("\u{2713}", theme::success()),
+                    PlanStatus::InProgress => ("\u{25b6}", theme::accent()),
+                    PlanStatus::Pending => ("\u{25cb}", theme::text_faint()),
+                };
+                let font = theme::font(theme::Family::Conversation, theme::Role::Label);
+                div()
+                    .id(view.eid(&format!("todo-row-{}", entry.content)))
+                    .flex()
+                    .items_center()
+                    .gap_1p5()
+                    .child(mono(mark, colour).text_size(font))
+                    .child(mono(entry.content.clone(), colour).text_size(font))
+                    .into_any_element()
+            })
+            .collect();
+        if shown < total {
+            rows.push(
+                mono(
+                    format!("\u{2026} {} more", total - shown),
+                    theme::text_faint(),
+                )
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label))
+                .into_any_element(),
+            );
+        }
+        activity_chip(
+            view.eid("todo-switcher-header"),
+            "todo-switcher",
+            view.eid("todo-switcher-panel"),
+            "todo-switcher-panel",
+            format!("{done}/{total} todos"),
+            open,
+            false,
+            rows,
+            cx.listener(move |this, _, _, cx| {
+                this.toggle_conversation_panel(id, ActivityPanel::Todos, cx);
+            }),
+        )
+    });
+
+    let mut bar = div()
+        .id(view.eid("activity-bar"))
+        .flex()
+        .items_center()
+        .w_full()
+        .debug_selector(|| "activity-bar".into());
+    if let Some(left) = left {
+        bar = bar.child(left);
+    }
+    bar = bar.child(div().flex_1().min_w(px(0.)));
+    if let Some(right) = right {
+        bar = bar.child(right);
+    }
+    bar.into_any_element()
+}
+
+/// The one shell both activity chips are drawn from, so their metrics, hover and chevron can never
+/// drift apart. `chevron_first` puts the chevron before the label on the left chip and after it on
+/// the right, so both chevrons land on the row's outer edges; either way it is [`IconName::ChevronUp`]
+/// closed and [`IconName::ChevronDown`] open, read off the single `open` flag the caller passes in —
+/// there is no second place a chip could get that backwards. `rows` are the panel's own content,
+/// drawn only while `open`, through the same [`popover`] both chips share.
+#[allow(clippy::too_many_arguments)]
+fn activity_chip(
+    id: ElementId,
+    debug: &'static str,
+    panel_id: ElementId,
+    panel_debug: &'static str,
+    label: String,
+    open: bool,
+    chevron_first: bool,
+    rows: Vec<AnyElement>,
+    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let chevron = Icon::new(if open {
+        IconName::ChevronDown
+    } else {
+        IconName::ChevronUp
+    })
+    .with_size(Size::XSmall)
+    .text_color(theme::text_faint());
+    let text = mono(label, theme::text_muted())
+        .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta));
+
+    let mut chip = div()
+        .id(id)
+        .relative()
+        .px_2()
+        .py_1()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_1p5()
+        .cursor_pointer()
+        .hover(|this| this.bg(theme::hover()))
+        .debug_selector(move || debug.into());
+    chip = if chevron_first {
+        chip.child(chevron).child(text)
+    } else {
+        chip.child(text).child(chevron)
+    };
+    chip = chip.on_click(on_click);
+    if open {
+        // Drawn inside its own trigger, which already owns the click that closes it, so it takes
+        // no dismissal of its own.
+        chip = chip.child(popover(panel_id, px(240.), Some(panel_debug), None, rows));
+    }
+    chip.into_any_element()
+}
+
+/// What the collapsed header says: how many delegates are still working, and — where some have
+/// already finished — out of how many. `3 active subagents of 10` while seven are done; plain
+/// `3 active subagents` while all three are still running, because `of 3` is the same number
+/// twice. With none running the count alone is the fact worth a line: `10 subagents`.
+fn subagent_count_label(active: usize, total: usize) -> String {
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    if active == 0 {
+        return format!("{total} subagent{}", plural(total));
+    }
+    if active == total {
+        return format!("{active} active subagent{}", plural(active));
+    }
+    format!("{active} active subagent{} of {total}", plural(active))
+}
+
+/// What a row says instead of its status while it is blocked on a human. The count only where
+/// there is more than one to answer, because `need you 1` is a number nobody needed.
+fn needs_you_label(waiting: usize) -> String {
+    if waiting > 1 {
+        format!("need you \u{d7}{waiting}")
+    } else {
+        "need you".to_string()
+    }
+}
+
+/// What a delegate *is*, for the row's hover: the type the harness named, what it is answering
+/// with, and what effort it runs at.
+///
+/// Each clause is drawn only where the harness said it. No fallback to the parent conversation's
+/// own model or thinking level: a delegate launched on a smaller model is exactly what this
+/// tooltip exists to show, and borrowing the parent's answer would hide the one case worth
+/// hovering for. Nothing said at all leaves the delegate's name, which the row already carries.
+///
+/// Public because it is what the panel's row *says*, and a test that the row and [`reading_strip`]
+/// agree about a delegate's model has to be able to read one of the two.
+pub fn subagent_tip(
+    conversation: &Conversation,
+    tab: &crate::state::conversation::SubagentTab,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(kind) = &tab.kind {
+        parts.push(kind.clone());
+    }
+    if let Some(model) = &tab.model {
+        parts.push(short_model_label(&conversation.harness, model));
+    }
+    if let Some(thinking) = &tab.thinking {
+        parts.push(format!("{thinking} thinking"));
+    }
+    if parts.is_empty() {
+        return tab.name.clone();
+    }
+    format!("{} \u{2014} {}", tab.name, parts.join(" \u{b7} "))
+}
+
+/// One row of that list: a `pill`, because a pill is what this window already draws a small named
+/// fact as. Selected takes the accent edge and the full-strength text; the rest stay muted, so the
+/// list reads as one selected agent rather than as several equal buttons. The status sits at the
+/// far end, so a column of rows reads down either side.
+///
+/// **The identity sits beside the name, faint** — its type and its model,
+/// [`SubagentTab::identity`](crate::state::conversation::SubagentTab::identity), the agent label's
+/// second line (T-283). A delegate is chiefly identified by what it is and what it answers with,
+/// and a row that only had them on hover made the reader hover every row to compare three. Faint
+/// rather than muted because it is a qualifier of the name, not a second fact.
+///
+/// **`need you` takes the status's place rather than sitting beside it.** A delegate blocked on a
+/// human is not doing anything, so `running` and `need you` together would be one of them wrong —
+/// and the question is the useful reading of the two.
+// Nine, each a distinct thing the row draws or answers, and every one of them built inline by
+// the one caller — a struct to carry them would be ceremony around a private helper, the same
+// reading `kit::menu::menu_panel` makes.
+#[allow(clippy::too_many_arguments)]
+fn agent_row(
+    id: ElementId,
+    selector: String,
+    name: String,
+    model: Option<String>,
+    status: String,
+    tip: Option<String>,
+    status_colour: Rgba,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    pill(if selected {
+        theme::accent()
+    } else {
+        theme::border()
+    })
+    .id(id)
+    .debug_selector(move || selector.clone())
+    .h(px(22.))
+    .w_full()
+    .px_2()
+    .gap_1p5()
+    .cursor_pointer()
+    .when(selected, |this| this.bg(theme::surface_raised()))
+    .hover(|this| this.bg(theme::hover()))
+    // Name and model are one reading of who this is, so they share one flexible box: the model
+    // gives way before the name does when the row is narrow.
+    .child(
+        div()
+            .flex()
+            .flex_1()
+            .min_w(px(0.))
+            .items_center()
+            .gap_1p5()
+            .child(
+                mono(
+                    name,
+                    if selected {
+                        theme::text()
+                    } else {
+                        theme::text_muted()
+                    },
+                )
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta))
+                .flex_none(),
+            )
+            .when_some(model, |this, model| {
+                this.child(
+                    mono(model, theme::text_faint())
+                        .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro))
+                        .min_w(px(0.)),
+                )
+            }),
+    )
+    .child(
+        mono(status, status_colour)
+            .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+    )
+    .on_click(on_click)
+    .when_some(tip, |this, tip| {
+        this.tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+        })
+    })
+    .into_any_element()
+}
+
+/// The files this turn will carry, one tag each, wrapping onto as many lines as they need.
+///
+/// **A tag, not a path in the field.** A path spelled into the prompt cannot be clicked to see
+/// what it is, and cannot be taken back out without editing text the user did not type; a tag
+/// opens the file in the editor and drops itself. The mentions the harness reads are composed
+/// from these when the prompt is sent, so nothing new crosses the bus for an attachment.
+///
+/// **The colour is the size.** A file large enough to cost a noticeable part of the context window
+/// says so before the turn is spent on it, and a file large enough to fill it says so louder —
+/// [`size_reading`]'s three readings, drawn in the warning and danger tokens. A size no host
+/// reported is drawn plainly rather than guessed at. The whole path and the size in figures are
+/// the tooltip, because the tag itself has room for a file name and nothing else.
+/// What one attachment's tag says and what colour it says it in — the label, the tooltip, and the
+/// `fill`/`edge`/`colour` triple the kit's tag takes.
+///
+/// One reading, because the row above the field and the row under a sent turn are the same list
+/// at two moments and a size that changed colour on Send would be the interface contradicting
+/// itself. The label is the file name; the tooltip is the whole path from the project root, the
+/// size in figures, and the warning where [`size_reading`] gives one, because a tag has room for
+/// a name and nothing else.
+fn attachment_face(file: &Attachment) -> (String, String, Rgba, Rgba, Rgba) {
+    let reading = size_reading(file.size);
+    let (fill, edge, colour) = match reading {
+        SizeReading::Huge => (theme::danger_soft(), theme::danger(), theme::danger()),
+        SizeReading::Large => (theme::warning_soft(), theme::warning(), theme::warning()),
+        SizeReading::Plain => (theme::surface(), theme::border(), theme::text_muted()),
+    };
+
+    let name = match file.path.rsplit_once('/') {
+        Some((_, name)) => name.to_string(),
+        None => file.path.clone(),
+    };
+    let mut tip = file.path.clone();
+    let size = size_label(file.size);
+    if !size.is_empty() {
+        tip.push_str(" \u{00b7} ");
+        tip.push_str(&size);
+    }
+    if let Some(warning) = reading.warning() {
+        tip.push_str(" \u{2014} ");
+        tip.push_str(warning);
+    }
+    (name, tip, fill, edge, colour)
+}
+
+fn attachment_tags(
+    agent_id: AgentId,
+    view: &ConversationView,
+    attached: &[Attachment],
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let tags: Vec<AnyElement> = attached
+        .iter()
+        .map(|file| {
+            let attachment = file.id;
+            let (name, tip, fill, edge, colour) = attachment_face(file);
+
+            let open = file.path.clone();
+            removable_tag(
+                view.eid(&format!("attached-{attachment}")),
+                view.eid(&format!("attached-remove-{attachment}")),
+                name,
+                tip,
+                fill,
+                edge,
+                colour,
+                false,
+                cx.listener(move |this, _, _, cx| this.select_file(open.clone(), cx)),
+                cx.listener(move |this, _, _, cx| this.detach_file(agent_id, attachment, cx)),
+            )
+            .into_any_element()
+        })
+        .collect();
+
+    div()
+        .px_2()
+        .pt_1()
+        .flex()
+        .flex_wrap()
+        .flex_none()
+        .items_center()
+        .gap_1()
+        .children(tags)
+        .into_any_element()
+}
+
+/// Prompts typed while a turn was running, oldest first — each with a send-now that puts it on
+/// the wire immediately, an edit that loads it back into the field, and a delete that drops it
+/// outright. Sits at the top of the bottom block, above the activity bar, the footer and the
+/// composer: what is waiting to go out is not part of the message being written, so it does not
+/// hang off the field the way an attachment does. Drawn only when there is one: an empty queue
+/// draws nothing, the same discipline every pill in this file follows.
+fn queue_list(
+    agent_id: AgentId,
+    slot: usize,
+    view: &ConversationView,
+    queued: &[QueuedMessage],
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let rows: Vec<AnyElement> = queued
+        .iter()
+        .map(|message| {
+            let queued_id = message.id;
+            // One line: newlines and runs of blanks fold to a single space so a multiline prompt
+            // cannot break the row; `elided_with` cuts it to the width and carries the whole text
+            // as its tooltip.
+            let line = message
+                .text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            div()
+                .id(view.eid(&format!("queued-{queued_id}")))
+                .pl_2()
+                .h(px(26.))
+                .w_full()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_2()
+                .overflow_hidden()
+                .bg(theme::surface())
+                .border_l(px(theme::accent_edge()))
+                .border_color(theme::border())
+                .child(
+                    kit::elided_with(
+                        view.eid(&format!("queued-text-{queued_id}")),
+                        line,
+                        message.text.clone(),
+                        theme::text_muted(),
+                        theme::font(theme::Family::Conversation, theme::Role::Label),
+                    )
+                    .font_family(theme::MONO_FONT),
+                )
+                .child(icon_button_tip(
+                    view.eid(&format!("queued-send-now-{queued_id}")),
+                    IconName::ArrowUp,
+                    "Send now",
+                    true,
+                    cx.listener(move |this, _, _, cx| {
+                        this.send_queued_message_now(agent_id, queued_id, cx);
+                    }),
+                ))
+                .child(icon_button_tip(
+                    view.eid(&format!("queued-edit-{queued_id}")),
+                    IconName::Replace,
+                    "Edit",
+                    true,
+                    cx.listener(move |this, _, window, cx| {
+                        this.edit_queued_message(agent_id, slot, queued_id, window, cx);
+                    }),
+                ))
+                .child(icon_button_tip(
+                    view.eid(&format!("queued-delete-{queued_id}")),
+                    IconName::Delete,
+                    "Delete",
+                    true,
+                    cx.listener(move |this, _, _, cx| {
+                        this.delete_queued_message(agent_id, queued_id, cx);
+                    }),
+                ))
+                .into_any_element()
+        })
+        .collect();
+
+    div()
+        .px_2()
+        .pt_1()
+        .flex()
+        .flex_col()
+        .flex_none()
+        .gap_1()
+        .children(rows)
+        .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kubiq_proto::conversation::{ConvContent, ConvUpdate, ToolCallPatch};
+    use kubiq_proto::work::AgentId;
+
+    /// The hover's clock and its tooltip, in the zone they are read in.
+    #[test]
+    fn a_message_time_reads_as_a_clock_and_a_full_stamp() {
+        // 2026-01-01T00:00:05Z, read two hours east.
+        let zone = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        assert_eq!(
+            message_time(1_767_225_605_000, &zone),
+            Some((
+                "02:00".to_string(),
+                "2026-01-01 02:00:05 +02:00".to_string()
+            ))
+        );
+        assert_eq!(message_time(i64::MAX, &zone), None, "no calendar holds it");
+    }
+
+    /// A typed line break stays one; a fence and a paragraph gap are left alone.
+    #[test]
+    fn user_line_breaks_become_hard_breaks_outside_fences() {
+        assert_eq!(user_markdown("a\nb\n\nc"), "a  \nb\n\nc");
+        assert_eq!(
+            user_markdown("x\n```\na\nb\n```\ny"),
+            "x  \n```\na\nb\n```\ny"
+        );
+        assert_eq!(user_markdown("a\r\nb\r\n\r\nc"), "a  \nb\n\nc");
+        assert_eq!(user_markdown("```code```\na\nb"), "```code```  \na  \nb");
+    }
+
+    fn conversation() -> Conversation {
+        Conversation::new(
+            AgentId::generate(),
+            "Claude Code".to_string(),
+            "work".to_string(),
+        )
+    }
+
+    fn thought(seq: u64, id: &str) -> ConvUpdate {
+        ConvUpdate::ThoughtChunk {
+            content: ConvContent::Text(format!("reasoning {seq}")),
+            message_id: Some(id.to_string()),
+            subagent: None,
+        }
+    }
+
+    fn plan(conversation: &Conversation) -> Vec<Row> {
+        let visible = conversation.visible_blocks().to_vec();
+        plan_rows(
+            conversation,
+            &visible,
+            &HashMap::new(),
+            &[],
+            0,
+            px(400.),
+            px(13.),
+        )
+    }
+
+    /// A harness that flushes its reasoning as three messages said nothing by the boundaries
+    /// between them, so the transcript draws one box rather than three identical ones.
+    #[test]
+    fn a_run_of_thoughts_is_one_row() {
+        let mut c = conversation();
+        for (seq, id) in [(1, "t1"), (2, "t2"), (3, "t3")] {
+            c.apply(seq, thought(seq, id));
+        }
+        assert_eq!(c.blocks.len(), 3, "three messages, three blocks");
+
+        let rows = plan(&c);
+        let thinking: Vec<&Row> = rows
+            .iter()
+            .filter(|row| matches!(row.kind, RowKind::Thinking { .. }))
+            .collect();
+        assert_eq!(thinking.len(), 1, "one box for the run");
+        assert!(
+            matches!(&thinking[0].kind, RowKind::Thinking { blocks, .. } if blocks == &[0, 1, 2]),
+            "and it stands for every block in it"
+        );
+        assert_eq!(
+            thinking[0].anchor,
+            Some(0),
+            "anchored on the first, which is where a jump to any of them lands"
+        );
+    }
+
+    /// Consecutive means consecutive: prose between two thoughts is the agent having said
+    /// something, and folding across it would put a reply inside a box captioned `THINKING`.
+    #[test]
+    fn prose_between_two_thoughts_breaks_the_run() {
+        let mut c = conversation();
+        c.apply(1, thought(1, "t1"));
+        c.apply(
+            2,
+            ConvUpdate::AgentChunk {
+                content: ConvContent::Text("Here is what I found.".to_string()),
+                message_id: Some("m1".to_string()),
+                subagent: None,
+                at: None,
+            },
+        );
+        c.apply(3, thought(3, "t2"));
+
+        let rows = plan(&c);
+        let thinking: Vec<usize> = rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::Thinking { blocks, .. } => Some(blocks.len()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(thinking, vec![1, 1], "two runs of one, not one run of two");
+    }
+
+    /// A streaming thought grows without a block being added, so the row's signature has to move
+    /// on the bodies — otherwise the height cache draws it at the height it had a chunk ago.
+    #[test]
+    fn a_growing_thought_moves_its_row_signature() {
+        let mut c = conversation();
+        c.apply(1, thought(1, "t1"));
+        let before = plan(&c)[0].sig;
+        c.apply(2, thought(2, "t1"));
+        assert_ne!(plan(&c)[0].sig, before, "the box got taller");
+    }
+
+    /// A cached row height is a height at one width *and* one type size, so both are in the
+    /// signature the cache is keyed on: grow the conversation family and every row is measured
+    /// again rather than drawn at the height it had two points ago.
+    #[test]
+    fn a_row_signature_moves_with_the_width_and_the_type_size() {
+        let width = px(400.);
+        let size = theme::font(theme::Family::Conversation, theme::Role::Body);
+        let sig = row_signature(width, size, 7);
+        assert_eq!(sig, row_signature(width, size, 7), "nothing moved");
+        assert_ne!(
+            sig,
+            row_signature(width, size + px(2.), 7),
+            "a larger conversation size restates every height"
+        );
+        assert_ne!(
+            sig,
+            row_signature(width + px(10.), size, 7),
+            "and so does a resize"
+        );
+    }
+
+    /// A permission prompt is not a block, so it is invisible to everything this function reads
+    /// off `conversation.blocks` — the count of blocks on screen, and the length of the last one.
+    /// A reader sitting at the tail while a tool call waits on permission still has to be followed
+    /// down to the prompt, so the signature has to move when `conversation.pending` does, even
+    /// though the last block on screen (the tool call itself, still `InProgress`) has not changed
+    /// at all.
+    #[test]
+    fn a_pending_prompt_moves_the_tail_signature() {
+        let mut c = Conversation::new(
+            AgentId::generate(),
+            "Claude Code".to_string(),
+            "work".to_string(),
+        );
+        c.apply(
+            1,
+            ConvUpdate::AgentChunk {
+                content: ConvContent::Text("Let me check that file.".to_string()),
+                message_id: Some("m1".to_string()),
+                subagent: None,
+                at: None,
+            },
+        );
+        let visible = c.visible_blocks().to_vec();
+        let before = tail_signature(&c, &visible);
+        assert_eq!(
+            tail_signature(&c, &visible),
+            before,
+            "nothing said, nothing moved"
+        );
+
+        c.apply(
+            2,
+            ConvUpdate::PermissionRequest {
+                request_id: "r1".to_string(),
+                tool_call: ToolCallPatch::default(),
+                options: Vec::new(),
+            },
+        );
+        let visible = c.visible_blocks().to_vec();
+        assert_ne!(
+            tail_signature(&c, &visible),
+            before,
+            "a prompt arrived at the tail with no block changed to say so — the follow has to \
+             notice it anyway"
+        );
+    }
+
+    /// A long prompt is clamped to four lines, and what decides it is in the row signature: a
+    /// short one is not clamped, and a prompt whose text grew re-measures.
+    #[test]
+    fn a_long_prompt_is_clamped_and_signed() {
+        let short = "Run cargo test";
+        let long = format!("{}\n", "word ".repeat(40)).repeat(6);
+        assert!(prompt_lines(short, &[]).0 <= PROMPT_CLAMP_LINES);
+        assert!(prompt_lines(&long, &[]).0 > PROMPT_CLAMP_LINES);
+        let pending = |title: &str| Pending {
+            request_id: "r1".to_string(),
+            tool_call: ToolCallPatch {
+                title: Some(title.to_string()),
+                ..ToolCallPatch::default()
+            },
+            options: Vec::new(),
+        };
+        assert_ne!(prompt_shape(&pending(short)), prompt_shape(&pending(&long)));
+        // Past the clamp, more text does not change what is drawn, so it does not re-measure.
+        assert_eq!(
+            prompt_shape(&pending(&long)),
+            prompt_shape(&pending(&format!("{long}{long}")))
+        );
+    }
+
+    /// A chip row is height. The same sentence with files under it is a taller block, so both
+    /// halves of what the row planner reads — the signature that invalidates a measurement and
+    /// the estimate a row is first drawn at — have to move when the attachments do. Without this
+    /// the turn would be laid out at the height of its prose and its chips would be clipped.
+    #[test]
+    fn a_sent_turns_chips_are_part_of_its_height() {
+        let plain = ConvBlock::User {
+            text: "review this".to_string(),
+            attached: Vec::new(),
+            at: None,
+        };
+        let with_files = ConvBlock::User {
+            text: "review this".to_string(),
+            attached: vec![Attachment {
+                id: 0,
+                path: "src/lib.rs".to_string(),
+                size: Some(12),
+            }],
+            at: None,
+        };
+
+        let (plain_sig, plain_estimate) = block_shape(&plain);
+        let (files_sig, files_estimate) = block_shape(&with_files);
+        assert_ne!(plain_sig, files_sig, "a chip changes what the row draws");
+        assert!(
+            files_estimate > plain_estimate,
+            "a chip row is a line the block did not have"
+        );
+    }
+
+    /// And the tail reads them too: the chips arrive on the same update the text does, so a turn
+    /// landing at the bottom with files on it has to pull a reader who is following the tail.
+    #[test]
+    fn a_sent_turns_chips_move_the_tail_signature() {
+        let mut c = conversation();
+        c.attach("src/lib.rs".to_string(), Some(12));
+        c.expect_attachments();
+        c.apply(
+            1,
+            ConvUpdate::UserChunk {
+                content: ConvContent::Text("review this".to_string()),
+                message_id: Some("u1".to_string()),
+                at: None,
+            },
+        );
+        let visible = c.visible_blocks().to_vec();
+        let with_files = tail_signature(&c, &visible);
+
+        let mut plain = conversation();
+        plain.apply(
+            1,
+            ConvUpdate::UserChunk {
+                content: ConvContent::Text("review this".to_string()),
+                message_id: Some("u1".to_string()),
+                at: None,
+            },
+        );
+        let visible = plain.visible_blocks().to_vec();
+        assert_ne!(tail_signature(&plain, &visible), with_files);
+    }
+}

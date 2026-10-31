@@ -516,7 +516,7 @@ the best available store per platform.
 
 None. `am` neither captures, copies nor roams this login: the harness keeps it in the account's
 own config home, signed in there by `am account login` or the first run, and refreshes it itself
-(`D194` in Ubiq's `_docs/tech/decisions.md`).
+(`D194` in Kubiq's `_docs/tech/decisions.md`).
 
 ### Shared-home run (agent-manager, `D194`)
 
@@ -824,7 +824,7 @@ Copy skills into the per-run `$CODEX_HOME/.agents/skills/<name>/SKILL.md` (works
 ### Tool approval in headless mode
 
 Whether Codex asks at all is its `approval_policy`: the provisioner writes `never` for the
-unattended `danger-full-access` mode and `on-request` for every other mode (Ubiq's `D209`). What it
+unattended `danger-full-access` mode and `on-request` for every other mode (Kubiq's `D209`). What it
 asks arrives as server→client requests, each with `{ threadId, turnId, itemId }` joining it to the
 item it is about. `io/codex.rs` parks every one as a permission request and answers with the
 person's pick, in each method's own response shape:

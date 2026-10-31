@@ -1,7 +1,7 @@
 # `am` as a library — storage extension points
 
 This doc is for an embedder linking `agent-manager` as a Rust crate (`use
-agent_manager::…`) rather than shelling out to the `am` binary — e.g. Ubiq, a
+agent_manager::…`) rather than shelling out to the `am` binary — e.g. Kubiq, a
 web UI, or a CI job. It focuses on what makes embedding worthwhile: **every
 persistent store `am` reads from is a trait**, so you can back accounts,
 profiles, skills, MCPs, templates, and sessions with a database or in-memory

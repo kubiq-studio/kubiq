@@ -8,7 +8,7 @@ status: current
 related: [settings, how-to-find-the-logs]
 ---
 
-**Updates** shows which build of Ubiq is running and looks for a newer one. Nothing is installed
+**Updates** shows which build of Kubiq is running and looks for a newer one. Nothing is installed
 without your say: a downloaded update waits until you restart or quit.
 
 ## The parts
@@ -23,8 +23,8 @@ without your say: a downloaded update waits until you restart or quit.
 | **Check now** | Looks straight away |
 | **Download** | Fetches the available update |
 | **Open download page** | Shown instead of **Download** when this build cannot update itself; opens the page in your browser |
-| **Restart and install** | Once downloaded: closes Ubiq and installs |
-| **Install on quit** | Once downloaded: installs the next time you close Ubiq |
+| **Restart and install** | Once downloaded: closes Kubiq and installs |
+| **Install on quit** | Once downloaded: installs the next time you close Kubiq |
 | **Release notes** | Opens what changed in the update |
 
 ## What you can do here

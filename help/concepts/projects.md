@@ -1,7 +1,7 @@
 ---
 id: projects
 title: Projects
-summary: A folder Ubiq has opened, and everything it remembers about it.
+summary: A folder Kubiq has opened, and everything it remembers about it.
 keywords: [project, folder, open, forget, locate, clone, temporary]
 order: 10
 status: current
@@ -10,11 +10,11 @@ related: [panes, sessions, workbench-all-projects, workbench-modes]
 
 ## What it is
 
-A *project* is a folder Ubiq has opened, together with everything Ubiq remembers about it. The
+A *project* is a folder Kubiq has opened, together with everything Kubiq remembers about it. The
 explorer, the Git screen, the knowledge base and every agent you start all work against the project
 you are in. An agent always starts in its project's folder.
 
-Ubiq keeps a list of every project you have opened. The project picker in the titlebar groups it
+Kubiq keeps a list of every project you have opened. The project picker in the titlebar groups it
 three ways: projects open in this window, projects open in another window (with that window's
 letter), and history. You can add a folder, clone a repository ([how to](how-to-clone-a-project)), or open a project on a remote
 machine from the picker. Dropping a folder onto the editor opens it at once as a temporary project.
@@ -30,14 +30,14 @@ panes, and the panes of the projects behind keep running.
 
 ## Closing, forgetting and a missing folder
 
-Closing a project ends its terminals and unloads its conversations, and Ubiq asks first when any are
+Closing a project ends its terminals and unloads its conversations, and Kubiq asks first when any are
 open or a file is unsaved. A conversation you marked persistent can be resumed later; see
 [Conversations](concepts-conversations).
 
-**Forget** removes the project from Ubiq's list and everything Ubiq remembers about it. It never
+**Forget** removes the project from Kubiq's list and everything Kubiq remembers about it. It never
 touches the folder on disk. If a project's folder has moved or been unplugged, its row shows the path
 as a warning and offers **Locate**, which points the project at the new folder and keeps its colour
-and history. Ubiq never removes a project because its folder went missing.
+and history. Kubiq never removes a project because its folder went missing.
 
 ## Why it works this way
 

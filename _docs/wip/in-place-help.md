@@ -7,7 +7,7 @@ summary: An inspector-style help mode — point at any part of the window and re
 read_when: you are marking up a screen area with a `UiId`, working on the in-place help overlay, or keying anything durable to a place on the screen
 updated: 2026-09-29
 verified: 2026-09-29
-code_anchors: [crates/ubiq/src/state/ui_id.rs, crates/ubiq/src/ui/ident.rs, crates/ubiq/src/ui/help_target.rs, crates/ubiq/src/ui/rail.rs, crates/ubiq/src/ui/titlebar.rs, crates/ubiq/tests/ui_id.rs]
+code_anchors: [crates/kubiq/src/state/ui_id.rs, crates/kubiq/src/ui/ident.rs, crates/kubiq/src/ui/help_target.rs, crates/kubiq/src/ui/rail.rs, crates/kubiq/src/ui/titlebar.rs, crates/kubiq/tests/ui_id.rs]
 depends_on: [wip-help, feat-workbench, tech-ui, inbox-ui-id]
 ---
 
@@ -30,7 +30,7 @@ stops responding normally; whatever the cursor is over is drawn with a transluce
 and a balloon saying what it is and what it does. Moving the mouse moves the highlight. Nothing
 clicks through. The mode persists until it is explicitly closed.
 
-That is a different shape from the help Ubiq already has. [`help.md`](./help.md) describes a panel
+That is a different shape from the help Kubiq already has. [`help.md`](./help.md) describes a panel
 that answers *where am I* — a five-rung ladder from the focused panel, the destination and the rail
 mode to a page. In-place help answers *what is that* — the user is pointing at a specific thing and
 wants a sentence about it, not a manual page about the screen it lives on. The two want the same
@@ -59,9 +59,9 @@ than by the author in review. So the identity scheme is specified first, and spe
 the feature that motivated it.
 
 **There is no existing registry to extend.** The roughly 355 kebab-case strings under
-`crates/ubiq/src/ui/` exist to satisfy GPUI's `ElementId` for hover, scroll and focus bookkeeping.
+`crates/kubiq/src/ui/` exist to satisfy GPUI's `ElementId` for hover, scroll and focus bookkeeping.
 They are not unique across the tree, carry no hierarchy, and mean nothing outside the frame that
-built them. `crates/ubiq/src/ui/rail.rs` — the most recognisable area in the product — has almost
+built them. `crates/kubiq/src/ui/rail.rs` — the most recognisable area in the product — has almost
 none. Repurposing them would make identity a rendering artifact, which is the one thing it must not
 be.
 
@@ -74,7 +74,7 @@ ui-id   := segment ( "." segment )*      1..=8 segments, <= 96 characters
 segment := [a-z] ( [a-z0-9] | "-" )*     must not end in "-", must not contain "--"
 ```
 
-`crates/ubiq/src/state/ui_id.rs`, `UiId` and `validate()`. Lowercase kebab inside a level, a dot
+`crates/kubiq/src/state/ui_id.rs`, `UiId` and `validate()`. Lowercase kebab inside a level, a dot
 between levels: `rail`, `rail.mode.tasks`, `titlebar.new-terminal-menu`. The depth and length limits
 exist so that "how deep can this go" has an answer; nothing in the catalogue is near either.
 
@@ -124,11 +124,11 @@ name are the same id.
 
 ### 2.4 The catalogue
 
-`ui_id::CATALOGUE` in `crates/ubiq/src/state/ui_id.rs`: a `const` slice of every name the interface
+`ui_id::CATALOGUE` in `crates/kubiq/src/state/ui_id.rs`: a `const` slice of every name the interface
 knows, with a named constant per entry. It is the answer to *is that a real target?* — for
 `_tools/helpbundle.py` checking a `ui.*` context key, for a preference naming a control, for
 anything listing the places a user can be pointed at. `is_known()` is the check;
-`catalogue_is_well_formed()` and `crates/ubiq/tests/ui_id.rs` are what keep the literals honest,
+`catalogue_is_well_formed()` and `crates/kubiq/tests/ui_id.rs` are what keep the literals honest,
 since a `const fn` cannot validate its own argument.
 
 It covers the two areas phase 3a marks: the rail, its mark, its mode column, its project badges and
@@ -165,14 +165,14 @@ either option. Nothing in the tree consumes it yet, and `_tools/helpbundle.py` d
 
 | Option | Shape | Costs |
 |---|---|---|
-| **The existing `context:` field**, under a `ui.*` namespace | Reuses the whole pipeline §5 of the help document describes — the packer's validation, `catalog.json`'s `context{}` map, `crates/ubiq/src/app/help.rs` — and needs no new machinery and no `crates/ubiq-proto` change | `context` is one rung of a five-rung ladder that must resolve to exactly one page, which is why the packer's exactly-once rule exists; and every bound key needs a page reachable from `nav.order`. Binding hundreds of controls that way floods the nav tree with stub pages whose only reader is a balloon |
+| **The existing `context:` field**, under a `ui.*` namespace | Reuses the whole pipeline §5 of the help document describes — the packer's validation, `catalog.json`'s `context{}` map, `crates/kubiq/src/app/help.rs` — and needs no new machinery and no `crates/kubiq-proto` change | `context` is one rung of a five-rung ladder that must resolve to exactly one page, which is why the packer's exactly-once rule exists; and every bound key needs a page reachable from `nav.order`. Binding hundreds of controls that way floods the nav tree with stub pages whose only reader is a balloon |
 | **A blurb in the target catalogue, plus a many-to-many `targets:` field on help pages** | The sentence lives beside the name, written by whoever named the element, present for every name; the page field is the optional "read more", with no exclusivity and no nav obligation. `context:` keeps its job unchanged | The catalogue stops being a `const` list in Rust and becomes a data file with a packer and a lint behind it — `G315`. Two bindings to understand instead of one |
 
 The second is what [`inbox/ui-id-proposal.md`](../inbox/ui-id-proposal.md) §5 argues for, on the
 grounds that what an inspector shows over a button is one sentence and a manual page is the wrong
 unit for it — and it is what phase 2 built, for the balloon's half. The page's half is phase 3b's.
 
-Whichever wins, one constraint holds: **no `crates/ubiq-proto` change.** The help catalog already
+Whichever wins, one constraint holds: **no `crates/kubiq-proto` change.** The help catalog already
 reaches the interface, and a content binding that needed a new message would be a crate-boundary
 design of its own.
 
@@ -182,35 +182,35 @@ design of its own.
 
 | Piece | Where |
 |---|---|
-| `UiId`, the grammar, the hierarchy, the context-key conversion | `crates/ubiq/src/state/ui_id.rs` |
+| `UiId`, the grammar, the hierarchy, the context-key conversion | `crates/kubiq/src/state/ui_id.rs` |
 | The static catalogue and `rail_mode()` | same file |
 | `MarkRect`, `UiMark`, `MarkRegistry`, `deepest_hit()` | same file |
-| `.ui_id(...)`, the per-window registry, `hit_at()` | `crates/ubiq/src/ui/ident.rs` |
-| `begin_frame()`, called once per frame | `crates/ubiq/src/ui/shell.rs`, `render()` |
-| Tests for the grammar, the hierarchy, the catalogue and the hit-test | `crates/ubiq/tests/ui_id.rs` |
+| `.ui_id(...)`, the per-window registry, `hit_at()` | `crates/kubiq/src/ui/ident.rs` |
+| `begin_frame()`, called once per frame | `crates/kubiq/src/ui/shell.rs`, `render()` |
+| Tests for the grammar, the hierarchy, the catalogue and the hit-test | `crates/kubiq/tests/ui_id.rs` |
 
 **Phase 2 — the targeting mode and the overlay. Built.**
 
 | Piece | Where |
 |---|---|
-| `TargetInfo`, the `const` description table, `describe()` | `crates/ubiq/src/state/ui_id.rs` |
-| `HelpTargeting` — the mode, and the cursor while it is up | `crates/ubiq/src/state/workbench.rs` |
-| `Layer::HelpTarget`, the top rung | `crates/ubiq/src/state/overlay.rs` |
-| `open_help_target`, `close_help_target`, `move_help_target` | `crates/ubiq/src/app/help.rs` |
-| The rung in `top_layer`, and the first arm of `cancel_dialog` | `crates/ubiq/src/app/shell.rs` |
-| `PointAtSomething`, bound to ⇧F1 in `Workbench` and in `Input` | `crates/ubiq/src/app/mod.rs` |
-| `OverflowRow::PointAtSomething` — the menu row | `crates/ubiq/src/state/workbench.rs`, `crates/ubiq/src/ui/overflow_menu.rs` |
-| The catcher, the highlight, the balloon and its placement, the Done bar | `crates/ubiq/src/ui/help_target.rs` |
-| `hit_mark_at` — the lookup with the rectangle attached | `crates/ubiq/src/ui/ident.rs` |
-| The balloon's width, its assumed room and its gap | `crates/ubiq/src/theme.rs` |
-| Placement, the description table, and the first real layout | `crates/ubiq/tests/ui_id.rs` |
-| The peel order and the cursor's lifetime | `crates/ubiq/tests/dismiss.rs` |
+| `TargetInfo`, the `const` description table, `describe()` | `crates/kubiq/src/state/ui_id.rs` |
+| `HelpTargeting` — the mode, and the cursor while it is up | `crates/kubiq/src/state/workbench.rs` |
+| `Layer::HelpTarget`, the top rung | `crates/kubiq/src/state/overlay.rs` |
+| `open_help_target`, `close_help_target`, `move_help_target` | `crates/kubiq/src/app/help.rs` |
+| The rung in `top_layer`, and the first arm of `cancel_dialog` | `crates/kubiq/src/app/shell.rs` |
+| `PointAtSomething`, bound to ⇧F1 in `Workbench` and in `Input` | `crates/kubiq/src/app/mod.rs` |
+| `OverflowRow::PointAtSomething` — the menu row | `crates/kubiq/src/state/workbench.rs`, `crates/kubiq/src/ui/overflow_menu.rs` |
+| The catcher, the highlight, the balloon and its placement, the Done bar | `crates/kubiq/src/ui/help_target.rs` |
+| `hit_mark_at` — the lookup with the rectangle attached | `crates/kubiq/src/ui/ident.rs` |
+| The balloon's width, its assumed room and its gap | `crates/kubiq/src/theme.rs` |
+| Placement, the description table, and the first real layout | `crates/kubiq/tests/ui_id.rs` |
+| The peel order and the cursor's lifetime | `crates/kubiq/tests/dismiss.rs` |
 
 §7 is what it decided. It touches no element outside the overlay itself, as designed.
 
 **Phase 3a — the rail and the titlebar. Built.** Every one of the thirty-eight catalogue names
-carries `.ui_id(...)` on a real element: `crates/ubiq/src/ui/rail.rs` (the rail itself, the mark,
-the modes column, each rail mode, the project badges group) and `crates/ubiq/src/ui/titlebar.rs`
+carries `.ui_id(...)` on a real element: `crates/kubiq/src/ui/rail.rs` (the rail itself, the mark,
+the modes column, each rail mode, the project badges group) and `crates/kubiq/src/ui/titlebar.rs`
 (the row, the project cluster, back/forward, the command field, the actions cluster and each
 action in it). Two shapes needed a small addition on top of a bare `.ui_id(mode)` call:
 
@@ -227,7 +227,7 @@ action in it). Two shapes needed a small addition on top of a bare `.ui_id(mode)
 
 `nav_control` is called once per direction with a different name each time, so it took a `UiId`
 parameter to carry it through; `command_field` and `bell` are each called exactly once and mark
-themselves internally instead. `crates/ubiq/tests/ui_id.rs` renders the
+themselves internally instead. `crates/kubiq/tests/ui_id.rs` renders the
 real `AppState` behind a window with two open projects — one project makes `RAIL_PROJECTS` draw
 with zero badges and a zero-width rectangle, which is real but not what "sane rectangle" means for
 a mechanical check — and asserts every claimed name is recorded with a non-zero rectangle, that
@@ -255,7 +255,7 @@ receiver `relative`, because an absolute child measures against its nearest posi
 consequence is that `.ui_id()` and `.absolute()` conflict on one element, and the wrapper is what
 gets marked.
 
-**The registry is per window, and double-buffered.** `crates/ubiq/src/ui/ident.rs` holds one
+**The registry is per window, and double-buffered.** `crates/kubiq/src/ui/ident.rs` holds one
 `MarkRegistry` per `WindowId` in a thread-local — frame bookkeeping, not application state, and
 routing it through `AppState` would mean an `Entity::update` inside prepaint. The two buffers are
 forced by ordering: the whole element tree, overlay included, is built before layout runs, so an
@@ -275,7 +275,7 @@ on screen, and it hit-tests correctly.
 **The coordinate space is the window's, and phase 2 proved it.** `G316` was the open question under
 all of the above: no `.ui_id()` had ever been laid out, so whether `canvas` prepaint reports bounds
 in window coordinates or relative to some ancestor was an assumption.
-`a_mark_records_where_the_element_really_is` in `crates/ubiq/tests/ui_id.rs` lays out a titlebar and
+`a_mark_records_where_the_element_really_is` in `crates/kubiq/tests/ui_id.rs` lays out a titlebar and
 a rail in a real GPUI window — the test platform, no graphics device — and asserts the rail is
 recorded at `(0, 34)` rather than `(0, 0)`. Window coordinates, which is what the hit-test and the
 highlight both assume. The same test proves the two other halves of that row: the marked divs come
@@ -285,7 +285,7 @@ documented one-frame lag behaving as designed. What it does *not* cover is a mar
 children of its own or one that is already `.absolute()` — `G318`.
 
 `MarkRect` is the crate's own rectangle rather than GPUI's `Bounds<Pixels>`, which is what lets
-`crates/ubiq/tests/ui_id.rs` drive the whole lookup — nesting, overlap, exact ties, shared edges,
+`crates/kubiq/tests/ui_id.rs` drive the whole lookup — nesting, overlap, exact ties, shared edges,
 zero-area rectangles, an empty registry, a cursor over nothing — with no window and no rendering.
 
 ## 5. What phases 1, 2 and 3a deliberately leave out

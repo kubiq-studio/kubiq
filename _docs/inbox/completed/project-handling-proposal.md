@@ -11,7 +11,7 @@ depends_on: [tech-architecture, tech-transport, feat-workbench]
 
 # Proposal — project handling
 
-A project is the unit a window is opened on: a name, a folder, a colour, and what Ubiq remembers
+A project is the unit a window is opened on: a name, a folder, a colour, and what Kubiq remembers
 about it between runs. Today it lives entirely in the UI as invented fixtures. This proposes moving
 it to the host, behind the same message set every other capability crosses, with a storage seam that
 can be swapped and a crate boundary that makes the UI's lack of filesystem access mechanical rather
@@ -19,9 +19,9 @@ than voluntary.
 
 ## 1. Where it stands
 
-`crates/ubiq/src/state/windows.rs` holds `Project` — name, path, colour, terminals, and a `when`
+`crates/kubiq/src/state/windows.rs` holds `Project` — name, path, colour, terminals, and a `when`
 string — and `WindowRegistry`, a GPUI global owning both the catalogue and which window holds which
-project. The catalogue is seeded from `crates/ubiq/src/state/sample.rs` and dies with the process.
+project. The catalogue is seeded from `crates/kubiq/src/state/sample.rs` and dies with the process.
 
 Three things follow, and each is a reason to move. **The UI owns durable state**, so nothing
 survives a restart and nothing can without the UI half writing to disk. **A project is a `usize` into
@@ -55,9 +55,9 @@ share a crate, which makes cheating a one-line import. Three crates make it a co
 
 | Crate | Holds | Depends on |
 |---|---|---|
-| `crates/ubiq-proto/` | The message set, the bus, the log sink | Nothing that draws, nothing that touches disk |
-| `crates/ubiq-host/` | Projects, files, git, sessions, harnesses, processes, PTYs | The protocol crate, agent-manager, gitoxide |
-| `crates/ubiq/` | Windows, panes, chrome, theme, the projection | The protocol crate — **not** the host crate |
+| `crates/kubiq-proto/` | The message set, the bus, the log sink | Nothing that draws, nothing that touches disk |
+| `crates/kubiq-host/` | Projects, files, git, sessions, harnesses, processes, PTYs | The protocol crate, agent-manager, gitoxide |
+| `crates/kubiq/` | Windows, panes, chrome, theme, the projection | The protocol crate — **not** the host crate |
 
 Only the binary names both, and it names the host once: to start it and hand the UI the other end of
 the bus. The UI crate cannot reach around the bus because the host's types are not in its dependency
@@ -67,7 +67,7 @@ anywhere in its tree. When the host detaches, the binary becomes two binaries an
 framing; nothing else moves, because nothing else was allowed to know.
 
 Two consequences worth stating before they surprise someone. **Harness definitions move host-side**:
-`crates/ubiq-host/src/agent.rs` becomes the host's, and the UI learns agent types from the `AgentTypes`
+`crates/kubiq-host/src/agent.rs` becomes the host's, and the UI learns agent types from the `AgentTypes`
 message the contract already has. And **the log sink does not cross** — it is a `tracing` layer both
 halves write to, installed by the binary, so it goes to the protocol crate; a detached host's records
 would need a diagnostics message family, which is D24's known cost and stays a backlog row.
@@ -112,7 +112,7 @@ not one this proposal needs answered: the two kinds of id never meet.
 ### Ids everywhere else
 
 If a project is a ULID, the rest of the contract should be one too. Pane and session ids are `Uuid`
-in `crates/ubiq-proto/src/messages.rs`, which would leave the message set carrying two id schemes for no
+in `crates/kubiq-proto/src/messages.rs`, which would leave the message set carrying two id schemes for no
 reason anyone could state a year from now.
 
 **The argument is not really ULID versus UUID — it is that a contract-wide id change is the only
@@ -125,7 +125,7 @@ while they are being touched. Later they cost a second sweep.
 36. Old and new cannot interoperate, which costs nothing while the bus is an in-memory channel and no
 message log is kept — and is the reason to do it before a socket exists rather than after.
 
-The surface is small: 39 mentions across six files, four generation sites, and `uuid` leaves Ubiq's
+The surface is small: 39 mentions across six files, four generation sites, and `uuid` leaves Kubiq's
 manifest. Three things to get right, none of them large:
 
 - **Use a monotonic generator.** Two ids minted in the same millisecond sort arbitrarily otherwise,
@@ -164,7 +164,7 @@ A third family beside the pane and session families. Every variant names a proje
 `ProjectError`, not an empty folder. Making new folders is a separate flow that does not exist.
 
 **Forgetting is not deleting.** `ForgetProject` removes the record, and the project's own directory
-in Ubiq's config — its view state and its cache — and touches nothing inside the project's folder.
+in Kubiq's config — its view state and its cache — and touches nothing inside the project's folder.
 The word in the UI is "Forget" for that reason.
 
 **`OpenedProject` is how `last_opened_at` gets stamped.** The UI reports that a window pointed at a
@@ -214,13 +214,13 @@ to a string.
 ## 5. Persistence
 ## 5. Persistence
 
-Five classes of durable state, one movable config root, two store traits, and the rule that Ubiq
+Five classes of durable state, one movable config root, two store traits, and the rule that Kubiq
 holds bindings while agent-manager holds definitions — all of it in
 [`config-persistence-proposal.md`](../config-persistence-proposal.md), which is where the catalogue's
 own store is specified.
 
 The two facts this document leans on: **the catalogue is one TOML file behind a `ProjectStore`
-trait**, and **everything Ubiq remembers about a project lives in Ubiq's config root keyed by the
+trait**, and **everything Kubiq remembers about a project lives in Kubiq's config root keyed by the
 project's ULID**, never inside the project's own folder.
 
 ## 6. Failure
@@ -256,11 +256,11 @@ row.
 ## 7. One host, many windows
 
 **A catalogue is process-wide; the coordinator is per window.** Each `AppState` opens its own bus in
-`crates/ubiq/src/app/boot.rs` and starts its own coordinator thread. Two hosts with a catalogue each
+`crates/kubiq/src/app/boot.rs` and starts its own coordinator thread. Two hosts with a catalogue each
 would race the store file and disagree about what exists — and "headless host" is singular by
 definition.
 
-So: **one host per process**, with the bus in `crates/ubiq-proto/src/bus.rs` growing a hub — a client id
+So: **one host per process**, with the bus in `crates/kubiq-proto/src/bus.rs` growing a hub — a client id
 per window, pane-family messages routed to the window owning the pane, project-family messages
 broadcast to every window. A daemon with two attached UIs is the same routing problem, so the work
 is not spent twice, and it closes the existing gap where two windows cannot see each other's panes.
@@ -275,9 +275,9 @@ reached around the bus, the shape rule 1 exists to forbid, and it does not solve
 `WindowRegistry` keeps its job — which window holds which project, the picker's three groups, the
 one-window-per-project rule — and loses the catalogue. Its `projects` vector becomes a projection
 keyed by `ProjectId`, `WindowSlot` holds ids instead of indices, and the project fixtures in
-`crates/ubiq/src/state/sample.rs` go. `terminals` reads from the snapshot; `when` is rendered from
+`crates/kubiq/src/state/sample.rs` go. `terminals` reads from the snapshot; `when` is rendered from
 `last_opened_at` at draw time, because how long ago something was is a fact about the moment it is
-drawn. The registry stays pure logic, so `crates/ubiq/tests/windows.rs` keeps testing it without a
+drawn. The registry stays pure logic, so `crates/kubiq/tests/windows.rs` keeps testing it without a
 frame, and both stores get the same treatment over their memory implementations.
 
 **An empty catalogue is a new state.** On first run there are no projects, and the current rule — a
@@ -291,7 +291,7 @@ it.
 
 1. **The ids.** ULID behind newtypes across the contract. Independent of everything below, small,
    and cheapest before a second id scheme exists.
-2. **The config root.** Resolution order, `ubiq.toml`, and the redirect that keeps a development
+2. **The config root.** Resolution order, `kubiq.toml`, and the redirect that keeps a development
    run out of the user's real accounts and credentials. Cheap, and everything else lands in it.
 3. **The catalogue.** Record, snapshot, both store traits, their file and memory implementations,
    the project family, `BrowseHost`, the UI projection. Add, forget, rename, recolour and open
@@ -323,11 +323,11 @@ Ten decision rows, if this is taken:
 - Projects persist as one TOML file behind a store trait. SQLite is a later swap, and it lands on
   the per-project cache rather than the catalogue.
 - View state is persisted by the host as an opaque value it never parses, keyed by interface or by
-  project, and Ubiq writes nothing inside a project's own folder.
-- One config root resolves every store, movable by flag, environment or a bootstrap `ubiq.toml`, and
+  project, and Kubiq writes nothing inside a project's own folder.
+- One config root resolves every store, movable by flag, environment or a bootstrap `kubiq.toml`, and
   moving it moves the embedded library's roots with it.
-- Ubiq stores bindings, never definitions: profiles, harnesses, accounts, skills and plugins stay
-  agent-manager's, projected over the bus rather than copied into a store of Ubiq's own.
+- Kubiq stores bindings, never definitions: profiles, harnesses, accounts, skills and plugins stay
+  agent-manager's, projected over the bus rather than copied into a store of Kubiq's own.
 - One host per process, with a routing hub in the bus, replacing one coordinator per window.
 
 Two rule amendments: a window may hold no project when the catalogue is empty, and the UI holds

@@ -35,7 +35,7 @@
 # `preserve_order` feature its map is an `IndexMap` and keys come out in
 # insertion order instead. That feature is not agent-manager's choice — it
 # arrives through Cargo's workspace-wide feature unification, because Zed's
-# `gpui`/`http_client` crates (which `crates/ubiq` needs) turn it on. So the
+# `gpui`/`http_client` crates (which `crates/kubiq` needs) turn it on. So the
 # same request is `{"id":1,"jsonrpc":...}` under `cargo test -p agent-manager`
 # and `{"jsonrpc":"2.0","id":1,...}` under `cargo test --workspace`.
 #

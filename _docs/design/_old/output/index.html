@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ubiq — Agent Manager</title>
+<title>Kubiq — Agent Manager</title>
 <style>
 :root{
   --bg: oklch(99% 0.002 240);
@@ -110,7 +110,7 @@ h1 .g{background:linear-gradient(110deg,var(--accent),oklch(62% 0.19 305));-webk
 </head>
 <body>
   <header class="bar">
-    <div class="brand"><span class="mark">◇</span><b>Ubiq</b><span class="ver">v0.4.2</span></div>
+    <div class="brand"><span class="mark">◇</span><b>Kubiq</b><span class="ver">v0.4.2</span></div>
     <div class="spacer"></div>
     <button class="icon-btn" id="themeBtn" title="Toggle theme">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5 5l1.7 1.7M17.3 17.3 19 19M19 5l-1.7 1.7M6.7 17.3 5 19"/></svg>
@@ -120,7 +120,7 @@ h1 .g{background:linear-gradient(110deg,var(--accent),oklch(62% 0.19 305));-webk
   <main class="wrap">
     <div class="eyebrow"><span class="ln"></span>Tauri desktop · local-first</div>
     <h1>One desk for every <span class="g">coding agent</span> you run.</h1>
-    <p class="sub">Ubiq launches claude, codex, gemini and more into your repos — orchestrates them in parallel, streams every terminal live, and keeps you in the loop over chat.</p>
+    <p class="sub">Kubiq launches claude, codex, gemini and more into your repos — orchestrates them in parallel, streams every terminal live, and keeps you in the loop over chat.</p>
 
     <div class="cards">
       <a class="card" href="agent-manager.html">
@@ -132,7 +132,7 @@ h1 .g{background:linear-gradient(110deg,var(--accent),oklch(62% 0.19 305));-webk
           <div class="pv-bar"><i></i><i></i><i></i></div>
           <div class="pv-body">
             <div class="pv-side"><div class="pv-row a"></div><div class="pv-row"></div><div class="pv-row" style="width:65%"></div><div class="pv-row" style="width:72%"></div></div>
-            <div class="pv-main"><span class="c">$ ubiq run --agent claude</span><br><span class="g">✓</span> mapped 3 modules<br>● writing auth/verify.ts<br><span class="g">✓ 20 passing</span> <span class="c">1.4s</span></div>
+            <div class="pv-main"><span class="c">$ kubiq run --agent claude</span><br><span class="g">✓</span> mapped 3 modules<br>● writing auth/verify.ts<br><span class="g">✓ 20 passing</span> <span class="c">1.4s</span></div>
           </div>
         </div>
         <p>Real xterm.js terminals per agent, parallel subagent fan-out, project launcher and an agent-types registry.</p>
@@ -168,7 +168,7 @@ h1 .g{background:linear-gradient(110deg,var(--accent),oklch(62% 0.19 305));-webk
   <footer class="foot"><span class="dot"></span>3 agents idle · backend-refactor running · ⌘K to jump</footer>
 
 <script>
-const root=document.documentElement, KEY="ubiq-theme";
+const root=document.documentElement, KEY="kubiq-theme";
 function apply(t){root.dataset.theme=t;localStorage.setItem(KEY,t);}
 apply(localStorage.getItem(KEY)||"dark");
 document.getElementById("themeBtn").onclick=()=>apply(root.dataset.theme==="dark"?"light":"dark");

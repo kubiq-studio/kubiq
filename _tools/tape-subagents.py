@@ -3,13 +3,13 @@
 # requires-python = ">=3.12"
 # dependencies = ["rich"]
 # ///
-"""Read a Ubiq tape of a Claude Code conversation: when each subagent ran, and what it cost.
+"""Read a Kubiq tape of a Claude Code conversation: when each subagent ran, and what it cost.
 
 Run it through `just`: `just tape-subagents` for the whole report, `just tape-subagents -- <tape>`
 for a specific capture, `just tape-subagents-json` for the same analysis as JSON.
 
 A tape is one JSON object per line — `seq`, `at_ms`, `dir`, `kind`, `agent`, the `ConvUpdate` under
-`message`, and the harness's own `raw` line where one travelled (`crates/ubiq-proto/src/bus.rs`). It
+`message`, and the harness's own `raw` line where one travelled (`crates/kubiq-proto/src/bus.rs`). It
 is far too big for a context window and its shape is in the joins, so this walks it line by line and
 keeps only aggregates. Nothing here loads the tape whole.
 
@@ -282,14 +282,14 @@ def find_tape(arg: str | None) -> Path:
         return path
 
     roots: list[Path] = [Path.cwd(), WORKSPACE, REPO]
-    if os.environ.get("UBIQ_TAPE_DIR"):
-        roots.insert(0, Path(os.environ["UBIQ_TAPE_DIR"]))
+    if os.environ.get("KUBIQ_TAPE_DIR"):
+        roots.insert(0, Path(os.environ["KUBIQ_TAPE_DIR"]))
     for root in roots:
-        for pattern in ("_data/claude-subagents*.jsonl", "ubiq-tape-*.jsonl", "_data/ubiq-tape-*.jsonl"):
+        for pattern in ("_data/claude-subagents*.jsonl", "kubiq-tape-*.jsonl", "_data/kubiq-tape-*.jsonl"):
             found = [p for p in root.glob(pattern) if p.is_file()]
             if found:
                 return max(found, key=lambda p: p.stat().st_mtime)
-    sys.exit("no tape found — pass one as an argument, or set UBIQ_TAPE_DIR, or drop a capture in _data/")
+    sys.exit("no tape found — pass one as an argument, or set KUBIQ_TAPE_DIR, or drop a capture in _data/")
 
 
 def parse_raw(text) -> dict:
@@ -1226,7 +1226,7 @@ def to_json(an: Analysis) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(
         prog="tape-subagents.py",
-        description="When each subagent in a Ubiq tape spawned, stopped and was marked ended, and what it cost.",
+        description="When each subagent in a Kubiq tape spawned, stopped and was marked ended, and what it cost.",
     )
     ap.add_argument("tape", nargs="?", help="the capture to read; the newest tape in _data/ otherwise")
     ap.add_argument("--json", action="store_true", help="emit the analysis as JSON and print no report")

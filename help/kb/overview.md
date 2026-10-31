@@ -3,7 +3,7 @@ id: kb-overview
 title: The knowledge base
 summary: KB mode on the rail — a project's documents, read from folders, repositories and wikis that need not be inside the project.
 keywords: [knowledge base, kb, documents, wiki, sources, markdown, notes]
-context: [rail.kb, panel.ubiq.kb.explorer]
+context: [rail.kb, panel.kubiq.kb.explorer]
 targets: [ui.rail.mode.kb]
 order: 10
 status: current
@@ -11,8 +11,8 @@ related: [kb-documents, kb-sources, guides-knowledge-base, workbench-explorer]
 ---
 
 Pick **KB** on the rail to read a project's documents: markdown, plain text, images and diagrams. They
-come from *sources* — a folder, a git repository Ubiq keeps up to date, or a wiki Ubiq keeps for the
-project — and none of them has to sit inside the project's own folder. The agents Ubiq starts for the
+come from *sources* — a folder, a git repository Kubiq keeps up to date, or a wiki Kubiq keeps for the
+project — and none of them has to sit inside the project's own folder. The agents Kubiq starts for the
 project can read and write the same documents.
 
 The left panel is titled **Documents**. It lists every source's files in one tree, the way the

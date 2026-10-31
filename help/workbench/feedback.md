@@ -9,7 +9,7 @@ related: [workbench-titlebar, troubleshooting, workbench-logs]
 ---
 
 **Send feedback** ![Send feedback](../img/ui/board-comment.png) in the [title bar](workbench-titlebar)
-opens a dialog for telling the Ubiq team about a bug or an idea. It works with or without a project
+opens a dialog for telling the Kubiq team about a bug or an idea. It works with or without a project
 open. Nothing is captured or sent until you press **Send**.
 
 ## The parts
@@ -36,7 +36,7 @@ there is one. An **Open** button appears if the report has a page, and **Done** 
 ## What you can do here
 
 - Find the button beside the bell and help: [The title bar](workbench-titlebar).
-- Read what Ubiq recorded before you report a problem: [The log console](workbench-logs).
+- Read what Kubiq recorded before you report a problem: [The log console](workbench-logs).
 - Check a known symptom first: [Troubleshooting](troubleshooting).
 - Look up where reports go: **Settings**, then **Feedback**.
 
@@ -44,10 +44,10 @@ there is one. An **Open** button appears if the report has a page, and **Done** 
 
 - **Send** is dimmed: the title is empty, a report is already on its way, or this build has no
   destination. The line under the button says which.
-- **Take screenshot** is missing: this system does not allow Ubiq to photograph its window. Paste an
+- **Take screenshot** is missing: this system does not allow Kubiq to photograph its window. Paste an
   image instead.
 - **Take screenshot** brings back no picture: permission was refused or the capture failed, and a
-  short note says so. Allow screen capture for Ubiq in the system's settings, or paste an image.
+  short note says so. Allow screen capture for Kubiq in the system's settings, or paste an image.
 - **Paste image** says the clipboard has no image: copy a picture first, then paste.
 - You want the report to go somewhere else: the destination is set under **Settings**, then
   **Feedback**.

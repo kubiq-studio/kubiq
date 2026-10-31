@@ -1021,7 +1021,7 @@ cat > /dev/null"#;
     fn only_an_opted_in_acp_harness_sends_the_runs_mcp_servers() {
         let dir = tempfile::TempDir::new().unwrap();
         let server = crate::config::McpServer {
-            id: "ubiq".to_string(),
+            id: "kubiq".to_string(),
             transport: crate::config::McpTransport::Http,
             command: None,
             args: Vec::new(),

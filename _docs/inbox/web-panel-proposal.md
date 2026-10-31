@@ -11,7 +11,7 @@ depends_on: [feat-workbench, tech-architecture, tech-structure, tech-decisions, 
 
 # Proposal — web panels, and Excalidraw editing as the first one
 
-Ubiq draws Excalidraw scenes and cannot edit them. This proposes the mechanism that would change
+Kubiq draws Excalidraw scenes and cannot edit them. This proposes the mechanism that would change
 that: **a web panel** — a dock panel whose body is a webview pointed at the interface's own loopback
 origin, talking to Rust over a typed bridge — and **Excalidraw as its first tenant**, loading the
 file's JSON, reporting changes back, and saving through the file family that already exists.
@@ -23,7 +23,7 @@ a named reason, with the hinges written down.
 ## 1. Where it stands
 
 **The scene viewer is read-only by design, and says so twice.**
-`crates/ubiq/src/ui/viewer/scene.rs` paints a `state::scene::Scene` parsed from the file's JSON, and
+`crates/kubiq/src/ui/viewer/scene.rs` paints a `state::scene::Scene` parsed from the file's JSON, and
 its module doc states: *"The viewer is read-only. It draws the scene and nothing else; editing is
 not proposed and is not built."*
 [`completed/file-viewers-proposal.md`](./completed/file-viewers-proposal.md) §7 is where that came
@@ -35,22 +35,22 @@ not binary to the interface: `draws_bytes()` is true for `Image` alone, so it la
 `FileBody::Text` with a real `EditorState` that `viewer/mod.rs` reads the scene source out of and
 never draws. The dirty dot, `⌘S`, save-as and `D37`'s version check are already wired to it. And
 `WriteProjectFile { project_id, rel_path, bytes, expected }` with `ProjectFileWritten { version }`
-are in `crates/ubiq-proto/src/messages.rs` today. **This proposal adds no transport message.**
+are in `crates/kubiq-proto/src/messages.rs` today. **This proposal adds no transport message.**
 
 **There is no webview in the workspace.** No `wry`, `tao`, `tauri` or `objc2-web-kit` in
 `Cargo.lock`, and neither `gpui` nor `gpui-component` declares a `webview` feature at the pinned
 revisions — there is no `WebView` element to reach for. This is the one place the proposal adds a
 dependency, and §3 is the argument for it.
 
-**But an HTML surface already exists, in the right crate.** `crates/ubiq/src/web_export/` runs one
+**But an HTML surface already exists, in the right crate.** `crates/kubiq/src/web_export/` runs one
 process-wide `tiny_http` listener on `127.0.0.1:0`, registering roots under a slug and returning
 `http://127.0.0.1:<port>/<slug>/`. `D55` put it in the interface deliberately. It is the origin a
 webview needs, already built and already sanctioned.
 
-**And so does a disposable content-addressed cache.** `crates/ubiq/src/state/diagrams.rs` keys
+**And so does a disposable content-addressed cache.** `crates/kubiq/src/state/diagrams.rs` keys
 SHA-256 over a cache-format marker, the renderer's version, the palette and the source, writing
 through a sibling temp file and a rename. That is §5's shape — including the part where a new
-version of Ubiq re-fetches what it needs: put the bundle's version in the key and staleness stops
+version of Kubiq re-fetches what it needs: put the bundle's version in the key and staleness stops
 being a policy and becomes arithmetic.
 
 ## 2. The rule
@@ -84,8 +84,8 @@ full-refresh terminals under a stream of escape sequences is the load the UI has
 GPU-drawn native tree carries it without a serialisation boundary in the render path."* That objects
 to a serialisation boundary **in the per-frame render path of the whole application**. A web panel
 puts none anywhere near a frame: every other surface stays as it is, and one panel — opened
-deliberately, closed when done — hosts a component that draws itself. `D7` chose what draws Ubiq; it
-did not decide no part of Ubiq may ever be HTML, and `D55` proved that by shipping an HTML surface.
+deliberately, closed when done — hosts a component that draws itself. `D7` chose what draws Kubiq; it
+did not decide no part of Kubiq may ever be HTML, and `D55` proved that by shipping an HTML surface.
 
 **`D44` is the closer call, and it went the other way for a reason that does not hold here.** It
 rejected an offscreen webview for Mermaid in favour of `merman`, reasoning that *"a Mermaid document
@@ -106,7 +106,7 @@ So the line drawn here is `D44`'s, extended rather than contradicted:
 > **Rendering belongs in the interface. Authoring in somebody else's format belongs to somebody
 > else's editor.**
 
-The two platforms Ubiq ships are the two where this is cheapest: macOS gets `WKWebView` from the
+The two platforms Kubiq ships are the two where this is cheapest: macOS gets `WKWebView` from the
 system, Windows gets WebView2 from a runtime Windows 10 and 11 carry. Linux — WebKitGTK, a real
 install burden — has no release recipe in this tree, so the decision it would force is not due yet.
 
@@ -159,7 +159,7 @@ may be either:
 | Embedded webview | `wry`'s IPC handler | `evaluate_script` |
 | External browser | `POST /_web/<app>/<token>/bridge` | long-poll on the same route |
 
-`assets/web/bridge.js` picks whichever exists and exposes `ubiq.post(msg)` and `ubiq.on(handler)`. A
+`assets/web/bridge.js` picks whichever exists and exposes `kubiq.post(msg)` and `kubiq.on(handler)`. A
 chrome page is written once and never learns which container it is in.
 
 On the Rust side a web app is a descriptor — id, chrome entry point, the bundle it requires, and its
@@ -179,8 +179,8 @@ from becoming an RPC surface with the interface's whole authority behind it.
 ### 4.4 The chrome
 
 One HTML file and one module per app in `assets/web/<app>/`, baked in the way `web_export`'s CSS and
-JS already are: `build.rs` gzips, `assets.rs` `include_bytes!`es. Mount the component, wire `ubiq.on`
-to it, wire its change callback to `ubiq.post`. It is *not* the vendor bundle, which is §5.
+JS already are: `build.rs` gzips, `assets.rs` `include_bytes!`es. Mount the component, wire `kubiq.on`
+to it, wire its change callback to `kubiq.post`. It is *not* the vendor bundle, which is §5.
 
 ## 5. The asset cache
 
@@ -301,10 +301,10 @@ webview appears only when the user asks to edit, which is what makes this compat
 read-only rule rather than a repeal of it.
 
 It is the shape [`capture-proposal.md`](./capture-proposal.md) already chose when it reversed
-read-only for a scene Ubiq authored — *"The scene editor edits a capture, not a document"* — and it
+read-only for a scene Kubiq authored — *"The scene editor edits a capture, not a document"* — and it
 answers the question that proposal left open, *whether `.excalidraw` files should become editable now
-the machinery exists*: yes, and not through that machinery. Capture edits a scene Ubiq made with
-Ubiq's own tools and never needs a browser; this edits a document somebody else's application owns,
+the machinery exists*: yes, and not through that machinery. Capture edits a scene Kubiq made with
+Kubiq's own tools and never needs a browser; this edits a document somebody else's application owns,
 in that application. Neither blocks the other.
 
 **The toggle it arrives as, and the gap it closes.** Excalidraw is `has_preview() == false` today, so
@@ -329,7 +329,7 @@ after a session of edits is a large git diff even where little moved, and a roun
 byte-identical to the one that was read. Two partial mitigations: write only when the element set or
 the persisted `appState` subset actually differs, and preserve the file's own `source` and `type`
 fields rather than emitting the editor's. Neither makes the diff small. A user who wants a tidy diff
-should not round-trip a file they did not change, and Ubiq should not save one it was only shown.
+should not round-trip a file they did not change, and Kubiq should not save one it was only shown.
 
 
 ## 8. Failure
@@ -380,7 +380,7 @@ guard, and it is worth exactly what it is enforced with.
 Decision rows, if this is taken:
 
 - **The interface may host a webview in a panel, over its own origin, for authoring in a format
-  somebody else owns.** `D7` governs what draws Ubiq, `D44` where a picture is produced; neither
+  somebody else owns.** `D7` governs what draws Kubiq, `D44` where a picture is produced; neither
   covers this, and §3 is the argument.
 - **A web panel is a document, a bridge and an origin, never a browser** — no navigation, no second
   origin, a CSP that says so, a bridge carrying content rather than capability.
@@ -411,14 +411,14 @@ Open questions this does not settle, for `backlog.md` if it is taken:
   modules *and* a module worker under a custom scheme is the one thing the probe could not test and a
   wrong answer is a hard failure. Loopback is proven; this is the optimisation to try afterwards.
 - What happens when jsDelivr regenerates a `+esm` bundle and the recorded hashes stop matching —
-  whether the fix is re-snapshotting on a version bump, or vendoring the closure somewhere Ubiq
+  whether the fix is re-snapshotting on a version bump, or vendoring the closure somewhere Kubiq
   controls.
 
 
 ## Related docs
 
 - [`completed/file-viewers-proposal.md`](./completed/file-viewers-proposal.md) — the read-only rule this proposes to lift for documents, and the viewer model it lifts it within
-- [`capture-proposal.md`](./capture-proposal.md) — the other reversal of read-only, for scenes Ubiq authored, and the open question this answers
+- [`capture-proposal.md`](./capture-proposal.md) — the other reversal of read-only, for scenes Kubiq authored, and the open question this answers
 - [`../tech/architecture.md`](../tech/architecture.md) — rule 2 and rule 6, which §2 and §5 work inside
 - [`../tech/decisions.md`](../tech/decisions.md) — `D7`, `D44`, `D45`, `D55`, `D37`
 - [`../features/workbench.md`](../features/workbench.md) — the dock, the viewer toggle, and the workarea cache

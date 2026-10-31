@@ -3,7 +3,7 @@ id: agents-columns
 title: The agents columns and sidebar
 summary: What a column shows — header, tabs, thread and footer — and the sidebar that lists every conversation in the project.
 keywords: [columns, sidebar, thread, footer, sessions list, session, missions, bench]
-context: [panel.ubiq.agents.explorer]
+context: [panel.kubiq.agents.explorer]
 order: 15
 status: current
 related: [agents-starting, agents-conversation]

@@ -1,6 +1,6 @@
 name: release-drone
 
-# The drone (`ubiq-drone`), one lean binary per triple, published beside the app. Native runners
+# The drone (`kubiq-drone`), one lean binary per triple, published beside the app. Native runners
 # where one exists; the Intel macOS binary is cross-built on the arm64 runner.
 on:
   workflow_call:
@@ -33,22 +33,22 @@ jobs:
           key: drone-${{ matrix.triple }}
       - name: Build
         shell: bash
-        run: cargo build -p ubiq-drone --release --target "${{ matrix.triple }}"
+        run: cargo build -p kubiq-drone --release --target "${{ matrix.triple }}"
       - name: Package
         shell: bash
         run: |
           set -euo pipefail
           out="target/${{ matrix.triple }}/release"
-          name="Ubiq-drone-${{ matrix.triple }}"
+          name="Kubiq-drone-${{ matrix.triple }}"
           if [[ "${{ matrix.triple }}" == *windows* ]]; then
-            7z a "$name.zip" "./$out/ubiq-drone.exe"
+            7z a "$name.zip" "./$out/kubiq-drone.exe"
           else
-            tar -C "$out" -czf "$name.tar.gz" ubiq-drone
+            tar -C "$out" -czf "$name.tar.gz" kubiq-drone
           fi
       - uses: actions/upload-artifact@v4
         with:
           name: release-drone-${{ matrix.triple }}
           if-no-files-found: error
           path: |
-            Ubiq-drone-${{ matrix.triple }}.tar.gz
-            Ubiq-drone-${{ matrix.triple }}.zip
+            Kubiq-drone-${{ matrix.triple }}.tar.gz
+            Kubiq-drone-${{ matrix.triple }}.zip

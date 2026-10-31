@@ -3,7 +3,7 @@ id: git-refs
 title: The Branches panel
 summary: The panel of branches, remotes, tags, stashes and submodules, and how picking one moves the history.
 keywords: [branch, tag, remote, ref, checkout, merge, delete, stash, submodule]
-context: [panel.ubiq.git.refs]
+context: [panel.kubiq.git.refs]
 order: 40
 status: current
 related: [git-overview, git-history]

@@ -16,10 +16,10 @@ decides what an agent may reach. Both are sections of [Settings](settings). What
 
 | Setting | What it changes for you |
 |---|---|
-| **Installed** | One row per harness Ubiq knows, dimmed when it is not on this machine, with the plan usage of its first signed-in account under it |
-| **Command** / **Custom command** | Sets the command Ubiq starts that harness with; it reads **Custom command** once you have set one |
+| **Installed** | One row per harness Kubiq knows, dimmed when it is not on this machine, with the plan usage of its first signed-in account under it |
+| **Command** / **Custom command** | Sets the command Kubiq starts that harness with; it reads **Custom command** once you have set one |
 | What this harness said it can do | An info button on harnesses added from the registry, listing what the harness reported it supports; [Inside a conversation](agents-conversation) describes it |
-| **ACP registry** | Finds more harnesses from the Agent Client Protocol registry; **Check** looks for them on this machine, **Locate…** points Ubiq at one's command, **Download**, **Install** and **Update** fetch it, and **Show … more** lists those not found |
+| **ACP registry** | Finds more harnesses from the Agent Client Protocol registry; **Check** looks for them on this machine, **Locate…** points Kubiq at one's command, **Download**, **Install** and **Update** fetch it, and **Show … more** lists those not found |
 | **Identities** | Your accounts, grouped by name, each with its harnesses and their sign-in state |
 | **Add harness** | Opens the sign-in dialog to create an account and sign a harness in |
 | **Enable … ACP** | One switch per tool that has both a native and a registry version; off, only the native one is offered, which states more about context and spend |

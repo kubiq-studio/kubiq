@@ -3,11 +3,11 @@ id: wip-help
 title: How in-app help works
 kind: wip
 status: draft
-summary: The mechanics of Ubiq's help system end to end — the content tree and its page frontmatter, the packer and the bundle it writes, how the app finds and unpacks it, how the panel renders and navigates a page, how a context key becomes a page, what the MCP server exposes, and what happens at every point where something is missing.
+summary: The mechanics of Kubiq's help system end to end — the content tree and its page frontmatter, the packer and the bundle it writes, how the app finds and unpacks it, how the panel renders and navigates a page, how a context key becomes a page, what the MCP server exposes, and what happens at every point where something is missing.
 read_when: you are writing a help page, changing the packer or the bundle, wiring a screen to contextual help, or debugging why the help panel shows the wrong thing
 updated: 2026-10-27
 verified: 2026-09-19
-code_anchors: [crates/ubiq/src/app/help.rs, crates/ubiq/src/app/help_images.rs, crates/ubiq/src/state/help.rs, crates/ubiq/src/ui/help/mod.rs, crates/ubiq-host/src/mcp/help.rs, _tools/helpbundle.py]
+code_anchors: [crates/kubiq/src/app/help.rs, crates/kubiq/src/app/help_images.rs, crates/kubiq/src/state/help.rs, crates/kubiq/src/ui/help/mod.rs, crates/kubiq-host/src/mcp/help.rs, _tools/helpbundle.py]
 depends_on: [inbox-help, feat-workbench, tech-ui, tech-transport, tech-operations, wip-kb]
 ---
 
@@ -25,7 +25,7 @@ Help is four artifacts and one rule connecting them.
 | The content tree | `help/` | a human, in markdown | yes — in git, later a submodule |
 | The bundle | `target/help/help.bundle` | `_tools/helpbundle.py` | no — `target/` is ignored |
 | The unpacked root | `<config root>/ui/help/<version>/` | the host, on first open | no — a cache |
-| The built-in stub | compiled into `crates/ubiq` | `include_str!` | yes |
+| The built-in stub | compiled into `crates/kubiq` | `include_str!` | yes |
 
 The rule: **the content tree is the only thing anyone edits, and every derived table in the bundle
 comes out of the pages themselves.** There is no second place to register a page.
@@ -39,11 +39,11 @@ A page moves through six steps, and a human is present for exactly the first one
 1. **Authored** — `help/git/changes.md`, markdown under frontmatter.
 2. **Packed** — `just help-bundle` runs `_tools/helpbundle.py`, which validates the tree, resolves
    ids, inverts the context map and deflates everything into `target/help/help.bundle`, one
-   `UBIQBND1` file. `dev`, `verbose`, `build`, `bundle` and `bundle-win` all depend on `help-bundle`,
+   `KUBQBND1` file. `dev`, `verbose`, `build`, `bundle` and `bundle-win` all depend on `help-bundle`,
    so packing is not a step anyone has to remember — it runs before any of them.
 3. **Shipped** — `just bundle` and `just bundle-win` copy that file beside the binary. Development
    runs out of `target/` too, since `dev` and `build` pack it there before `cargo run`/`cargo build`.
-4. **Resolved** — the host looks in `UBIQ_HELP_BUNDLE`, then beside the binary, then `target/`, then
+4. **Resolved** — the host looks in `KUBIQ_HELP_BUNDLE`, then beside the binary, then `target/`, then
    gives up (§4).
 5. **Unpacked** — once, into `<config root>/ui/help/<version>/`. Plain files from here on.
 6. **Drawn** — `HelpReady` reaches the UI, and the panel renders through
@@ -70,7 +70,7 @@ Required on every page. It is read once, by the packer; no YAML is parsed at run
 | `status` | no | `current` (default), `draft` (renders with a work-in-progress note), `planned` (listed greyed, opens the stub body) |
 | `related` | no | Ids drawn as a "see also" strip at the foot of the page |
 | `redirects` | no | Paths or ids this page used to answer to, so old links keep working |
-| `since` | no | The Ubiq version the page describes, surfaced when it is newer than the running build |
+| `since` | no | The Kubiq version the page describes, surfaced when it is newer than the running build |
 | `hidden` | no | `true` for a page the help never shows: validated like any page, but out of the nav, the catalogue and the bundle, and nothing may route to it — no `context`, `targets`, `redirects`, `related` or `order`, no image, and no listed page may link to it. The onboarding wizard's pages (`help/onboarding/`) are the case: authored here, compiled into the interface (`features/onboarding.md`) |
 
 ```yaml
@@ -79,7 +79,7 @@ id: git-changes
 title: Reviewing and staging changes
 summary: What the Changes panel shows, how to stage a hunk, and what the badges mean.
 keywords: [stage, unstage, hunk, diff, revert]
-context: [panel.ubiq.git-changes]
+context: [panel.kubiq.git-changes]
 order: 20
 status: current
 related: [git-overview, git-history]
@@ -89,8 +89,8 @@ related: [git-overview, git-history]
 ### 2.2 Body
 
 Plain GFM, rendered by the window's one markdown renderer,
-`crates/ubiq/src/ui/viewer/markdown.rs::render` — tables, task lists, code fences, and the
-`ubiq-diagram-fence` extension, so a ```` ```mermaid ```` block in a help page draws as a diagram
+`crates/kubiq/src/ui/viewer/markdown.rs::render` — tables, task lists, code fences, and the
+`kubiq-diagram-fence` extension, so a ```` ```mermaid ```` block in a help page draws as a diagram
 like anywhere else.
 
 Two conventions the renderer does not enforce:
@@ -109,14 +109,14 @@ Three forms, all handled by `ui::on_link(root, Some(base))` with `base` set to t
 |---|---|
 | `[the Changes panel](git-changes)` | another help page, by id — **the form to use** |
 | `[the Changes panel](../git/changes.md)` | the same page, by path; works, but breaks if the file moves |
-| `[git mode](ubiq://./git)` | somewhere in the running interface |
+| `[git mode](kubiq://./git)` | somewhere in the running interface |
 | `[staging](git-changes#staging-a-hunk)` | a heading in another page |
 | `[the ACP spec](https://…)` | the system browser, through `cx.open_url` |
 
-`ubiq://./<view>` is the project-less form: *this view, in the current project*. Help content ships
-before it knows any project ULID, so it can never write one; a page that links to `ubiq://./git`
+`kubiq://./<view>` is the project-less form: *this view, in the current project*. Help content ships
+before it knows any project ULID, so it can never write one; a page that links to `kubiq://./git`
 opens git mode in whatever project is open, and does nothing if none is. The full
-`ubiq://<project>/<view>` form still parses, and is what the user gets if they copy a link out of
+`kubiq://<project>/<view>` form still parses, and is what the user gets if they copy a link out of
 the panel to send to someone.
 
 ### 2.4 Images
@@ -158,10 +158,10 @@ depended on by `dev`, `verbose`, `build`, `bundle` and `bundle-win` (except `hel
 | `just help-check` | validate only. Part of `just verify`; passes trivially when `help/` is absent |
 | `just help-clean` | remove `target/help/` |
 
-`bundle`/`clean` take `--out-dir DIR`, default `target/help`. Ubiq Studio compiles both `ubiq` and
-`ubiq-studio` into its own `target/`, one level up from this checkout, so its Justfile calls this
+`bundle`/`clean` take `--out-dir DIR`, default `target/help`. Kubiq Studio compiles both `kubiq` and
+`kubiq-studio` into its own `target/`, one level up from this checkout, so its Justfile calls this
 same script with `--out-dir target/help` pointed there instead — the packer itself knows nothing
-about Studio (`_docs/tech/operations.md` in `ubiq-studio`).
+about Studio (`_docs/tech/operations.md` in `kubiq-studio`).
 
 Validation is the whole value of the step, and it fails the build rather than warning:
 
@@ -173,18 +173,18 @@ Validation is the whole value of the step, and it fails the build rather than wa
   rather than silently unbinding a page
 - every page is reachable from `nav.order`, except a `hidden` one, which never is
 
-What it writes is the existing `UBIQBND1` format — deflated entries, a JSON index, a `u64` LE index
-offset, the magic — so the reader in `crates/ubiq/src/web_export/archive.rs` opens it with no
+What it writes is the existing `KUBQBND1` format — deflated entries, a JSON index, a `u64` LE index
+offset, the magic — so the reader in `crates/kubiq/src/web_export/archive.rs` opens it with no
 change. Alongside the pages it writes one derived entry, `catalog.json`:
 
 ```json
 {
   "version": "2026.09.1",
-  "namespace": "ubiq",
+  "namespace": "kubiq",
   "pages": [{"id": "git-changes", "path": "git/changes.md", "title": "…", "summary": "…",
              "order": 20, "status": "current", "related": ["git-overview"]}],
   "nav": ["index", "getting-started", "…"],
-  "context": {"panel.ubiq.git-changes": "git-changes", "rail.git": "git-overview"},
+  "context": {"panel.kubiq.git-changes": "git-changes", "rail.git": "git-overview"},
   "redirects": {"git/staging.md": "git-changes"}
 }
 ```
@@ -195,9 +195,9 @@ That file is the runtime's entire index. Nothing at runtime walks the tree or pa
 
 The host resolves a bundle at first open, first hit wins:
 
-1. `UBIQ_HELP_BUNDLE` — an explicit path, for tests and for content authors iterating
+1. `KUBIQ_HELP_BUNDLE` — an explicit path, for tests and for content authors iterating
 2. beside the binary — `Contents/Resources/help.bundle` in the `.app`, `help.bundle` next to
-   `ubiq.exe`
+   `kubiq.exe`
 3. `target/help/help.bundle`, walking up from the executable — the development case
 4. nothing → `HelpState::Unavailable`
 
@@ -205,7 +205,7 @@ On a hit it extracts into `<config root>/ui/help/<version>/`, writing to `<versi
 renaming — the same "the rename is the only proof of done" discipline as the web asset bundle. A
 version already present is used as is; older versions are removed after a successful extract.
 
-The config root is `ubiq_host::config::resolve`, and `ui/` under it is the shared workarea
+The config root is `kubiq_host::config::resolve`, and `ui/` under it is the shared workarea
 (`projects::shared_workarea`), so help sits beside the web bundles rather than inventing a location.
 
 ## 5. From "where am I" to a page
@@ -215,7 +215,7 @@ The UI computes a context key and asks for the page bound to it. Resolution stop
 | Rung | Key | Source |
 |---|---|---|
 | 1 | an explicit page | a screen's own `help_page() -> Option<&'static str>` |
-| 2 | `panel.<name>` | `PanelKind::name()` of the focused panel — `"ubiq.git-changes"` |
+| 2 | `panel.<name>` | `PanelKind::name()` of the focused panel — `"kubiq.git-changes"` |
 | 3 | `view.<name>` | `state::nav::View` of the current destination |
 | 4 | `rail.<name>` | `state::workbench::RailMode` |
 | 5 | `index` | the landing page |
@@ -235,7 +235,7 @@ Everything that is not a property of one page:
 ```toml
 [help]
 version = "2026.09.1"
-namespace = "ubiq"
+namespace = "kubiq"
 
 [nav]
 order = ["index.md", "getting-started.md", "concepts/", "agents/", "workbench/", "git/"]
@@ -248,7 +248,7 @@ order = ["index.md", "getting-started.md", "concepts/", "agents/", "workbench/",
 
 `PanelKind::Help` — `PanelClass::Free`, `home()` → `Region::Right`, closable, not mode-owned, so it
 survives a rail-mode change. It docks, moves and closes like any other panel, and its layout
-persists under the stable name `"ubiq.help"`.
+persists under the stable name `"kubiq.help"`.
 
 Three ways in, all the same panel: the `?` in the titlebar's right cluster, **F1** (which opens the
 page for the current context, §5), and a **Help** row in the overflow menu.
@@ -311,7 +311,7 @@ long time and a contributor who has never run `just help-bundle` must not be sto
 
 ## 8. What an agent sees
 
-`crates/ubiq-host/src/mcp/help.rs`, a built-in server reaching the harness through
+`crates/kubiq-host/src/mcp/help.rs`, a built-in server reaching the harness through
 `McpRef::InProcess`, rewritten by `provision::host_inproc_mcps` into a loopback HTTP server before
 the harness is launched.
 
@@ -323,7 +323,7 @@ the harness is launched.
 | `help_for_context` | the page bound to a context key |
 
 Everything is addressed by `id`, which is why ids are worth their cost: a page the agent cites can
-be pasted back to the user as `ubiq://./help/<id>` and will open.
+be pasted back to the user as `kubiq://./help/<id>` and will open.
 
 ## 9. Adding to help
 

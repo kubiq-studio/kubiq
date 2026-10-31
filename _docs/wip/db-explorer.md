@@ -3,11 +3,11 @@ id: wip-db-explorer
 title: The database explorer — a DB rail mode, from the proof to the base
 kind: wip
 status: draft
-summary: The design for bringing the database-explorer proof into the base as an opt-in rail mode after IDE — a fifth crate `ubiq-db` (the engine, drivers behind a feature), a database message family scoped by project, host-side sessions on worker threads with three read-only layers, connections in a tracked `db.toml` with passwords AES-256-GCM encrypted under a per-install key kept in the OS keychain, three new panel kinds (explorer left, table tabs centre, SQL tabs bottom), a Databases section in project settings, and the ordered work packages that build it.
-read_when: you are building any part of the DB rail mode — the `ubiq-db` crate, the database message family, the host's sessions or secrets, the explorer, table or SQL panels, or the Databases settings section
+summary: The design for bringing the database-explorer proof into the base as an opt-in rail mode after IDE — a fifth crate `kubiq-db` (the engine, drivers behind a feature), a database message family scoped by project, host-side sessions on worker threads with three read-only layers, connections in a tracked `db.toml` with passwords AES-256-GCM encrypted under a per-install key kept in the OS keychain, three new panel kinds (explorer left, table tabs centre, SQL tabs bottom), a Databases section in project settings, and the ordered work packages that build it.
+read_when: you are building any part of the DB rail mode — the `kubiq-db` crate, the database message family, the host's sessions or secrets, the explorer, table or SQL panels, or the Databases settings section
 updated: 2026-10-26
 verified: 2026-10-01
-code_anchors: [crates/ubiq/src/ui/rail.rs, crates/ubiq/src/state/dock.rs, crates/ubiq/src/ui/kb/mod.rs, crates/ubiq/src/ui/sink/project.rs, crates/ubiq-proto/src/messages.rs, crates/ubiq-host/src/store/project_dir.rs, crates/ubiq-host/src/connectors/store.rs]
+code_anchors: [crates/kubiq/src/ui/rail.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/ui/kb/mod.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq-proto/src/messages.rs, crates/kubiq-host/src/store/project_dir.rs, crates/kubiq-host/src/connectors/store.rs]
 depends_on: [tech-architecture, tech-transport, feat-workbench, tech-decisions, wip-kb]
 ---
 
@@ -25,11 +25,11 @@ General > Modes.
 
 It goes in the base, not in the `Contributions` extension seam, for two reasons that seam cannot meet: the
 mode must sit after IDE inside the base's own group, and it needs three new `PanelKind` arms in a
-closed enum (`crates/ubiq/src/state/dock.rs`).
+closed enum (`crates/kubiq/src/state/dock.rs`).
 
 ## 1. Crate layout
 
-**A fifth crate, `crates/ubiq-db`** — the proof engine moved, renamed, and split along one cargo feature:
+**A fifth crate, `crates/kubiq-db`** — the proof engine moved, renamed, and split along one cargo feature:
 
 | Part | Modules | Feature | Who uses it |
 |---|---|---|---|
@@ -41,26 +41,26 @@ closed enum (`crates/ubiq/src/state/dock.rs`).
   `=0.63.0` (`std`, `visitor`, no `recursive-protection`), `tracing`. `drivers` adds `rusqlite`,
   `mysql`, `tiberius`, `sqlx-core`/`sqlx-postgres` `=0.8.6`, `tokio`, `tokio-util`, `futures-util`,
   `chrono` — exactly the proof's set and features.
-- **`log` becomes `tracing`.** The statement log is `tracing::info!` under target `ubiq_db::sql`; the
+- **`log` becomes `tracing`.** The statement log is `tracing::info!` under target `kubiq_db::sql`; the
   base's log sink collects it (§3).
 - **The model types gain `Serialize`/`Deserialize`.** `ConnectionConfig` already has them; `Value`,
   `DataType`, `ColumnMeta`, `ResultSet`, `TableRef`, `DbObject`, `ObjectKind`, `RowEdit`, `Plan`,
-  `PlanNode` get them. The wire is MessagePack (`ubiq_proto::wire`), so `f64` and bytes are fine.
-- **`ubiq-db` is a leaf**: it names no Ubiq crate, the way `crates/agent-manager` names none.
-- **Wire types live in `ubiq-db`, re-exported by `ubiq-proto`.** `ubiq-proto` depends on `ubiq-db`
-  with default features and a new `ubiq-proto/src/db.rs` `pub use`s the model, then adds only what
+  `PlanNode` get them. The wire is MessagePack (`kubiq_proto::wire`), so `f64` and bytes are fine.
+- **`kubiq-db` is a leaf**: it names no Kubiq crate, the way `crates/agent-manager` names none.
+- **Wire types live in `kubiq-db`, re-exported by `kubiq-proto`.** `kubiq-proto` depends on `kubiq-db`
+  with default features and a new `kubiq-proto/src/db.rs` `pub use`s the model, then adds only what
   is the contract's own: the ids, `DbConnection`, `SecretEdit`, `DbNode`, `DbListing`, `DbFailure`,
   `DbRun`, `DbOutcome`. Defining the model twice (once for the engine, once for the wire) is the drift
-  this avoids; the cost is that a contract change to `ColumnMeta` is a change in `ubiq-db`.
-- **`ubiq-host` gains a `db` feature** — `["dep:ubiq-db", "ubiq-db/drivers", "dep:rustls", "dep:ring",
+  this avoids; the cost is that a contract change to `ColumnMeta` is a change in `kubiq-db`.
+- **`kubiq-host` gains a `db` feature** — `["dep:kubiq-db", "kubiq-db/drivers", "dep:rustls", "dep:ring",
   "dep:base64"]` — and `full` includes it, so the coordinator gates on `full` as it does today.
-  `ubiq-drone` builds the host without defaults and so without `db`; it answers the family with
+  `kubiq-drone` builds the host without defaults and so without `db`; it answers the family with
   `DbFailure::Unavailable`.
-- **The checks.** `just ui` builds `-p ubiq` alone, so `drivers` is off there and any interface code
-  naming `ubiq_db::driver` fails to compile — the dependency graph enforces "the interface opens no
-  connection" the way the proof's crate split did. `just ui` gains one grep: `cargo tree -p ubiq -e
+- **The checks.** `just ui` builds `-p kubiq` alone, so `drivers` is off there and any interface code
+  naming `kubiq_db::driver` fails to compile — the dependency graph enforces "the interface opens no
+  connection" the way the proof's crate split did. `just ui` gains one grep: `cargo tree -p kubiq -e
   no-dev` must contain none of `rusqlite`, `mysql`, `tiberius`, `sqlx-core`. `just host` and `just
-  core` are unchanged and keep passing: `ubiq-db` has no GPUI and is not in `agent-manager`'s graph.
+  core` are unchanged and keep passing: `kubiq-db` has no GPUI and is not in `agent-manager`'s graph.
 
 **TLS, the cost nobody chose.** `tiberius`'s `rustls` feature takes `tokio-rustls` with default
 features, which turns on rustls's `aws_lc_rs` — so `aws-lc-rs`, `aws-lc-sys` (a C build), `cmake` and
@@ -68,7 +68,7 @@ features, which turns on rustls's `aws_lc_rs` — so `aws-lc-rs`, `aws-lc-sys` (
 decided:
 
 1. `mysql` 28 calls `ClientConfig::builder()`, which panics when two providers are compiled and none
-   is installed. The host's new `ubiq-host/src/db/mod.rs` installs `ring` as the process default once, in
+   is installed. The host's new `kubiq-host/src/db/mod.rs` installs `ring` as the process default once, in
    `Db::new` (`CryptoProvider::install_default`, its `Err` — already installed — ignored). Every
    existing rustls site in the base names its provider explicitly (`connectors::tls::provider`,
    `remote::tls_provider`), so none of them changes behaviour. `tiberius` honours an installed
@@ -83,12 +83,12 @@ the knowledge-base family's discipline (`wip/kb.md`). Architecture rule 4, a pan
 message, governs the pane family; this family has no pane and names its own objects with ids, as the
 Kb, work and connector families do.
 
-**New ids** (`crates/ubiq-proto/src/ids.rs`): `DbConnId` — minted by the **host** on first save, on
+**New ids** (`crates/kubiq-proto/src/ids.rs`): `DbConnId` — minted by the **host** on first save, on
 `AiProviderId`'s discipline, stable across renames; `DbSessionId` — minted by the **interface**, one
 per table or SQL tab, so a reply for a closed tab is discarded by id; `DbQueryId` — minted by the
 interface per run, `SearchId`'s discipline, and the handle Stop cancels by; `DbProbeId` — one Test.
 
-**Records** (`ubiq-proto/src/db.rs`): `DbConnection { id, config, password: PasswordState }`
+**Records** (`kubiq-proto/src/db.rs`): `DbConnection { id, config, password: PasswordState }`
 where `config.password` is always `None` on the wire towards the interface and `PasswordState` is
 `None | Saved | Missing | Session`; `SecretEdit { Keep, Set(String), Clear }`; `DbNode { Databases,
 Schemas { database }, Objects { database, schema }, Columns { table } }`; `DbListing { Names(Vec),
@@ -128,7 +128,7 @@ but the listing and the connection state goes to the asker only.
 
 **Structured, not SQL, where the host must be authoritative.** A table page and a batch of row edits
 travel as `TableRef` + fragments and as `RowEdit`s, never as rendered SQL: the host renders them with
-the same `ubiq_db::edit` functions the interface used for the preview, validates the WHERE/ORDER BY
+the same `kubiq_db::edit` functions the interface used for the preview, validates the WHERE/ORDER BY
 with `validate_fragment`, and so the statement that runs is the statement the preview showed by
 construction. Only the SQL editor sends text, because the text *is* the user's input.
 
@@ -138,7 +138,7 @@ near `MAX_FRAME`. Table tabs page (200 rows, `LIMIT/OFFSET` or `OFFSET … FETCH
 count is a separate `count_table` the first page asks for with `count: true`. There are no
 server-side cursors.
 
-## 3. The host — `crates/ubiq-host/src/db/`
+## 3. The host — `crates/kubiq-host/src/db/`
 
 | File | Holds |
 |---|---|
@@ -168,17 +168,17 @@ and the running statement's reply arrives as `DbFailure::Cancelled`.
 synonym's tab).
 
 1. *AST* — before anything is sent to a server, every statement of a read-only run passes
-   `ubiq_db::sql::check_read_only` (fail closed); a refusal is `DbFailure::ReadOnly` naming the rule.
+   `kubiq_db::sql::check_read_only` (fail closed); a refusal is `DbFailure::ReadOnly` naming the rule.
    The interface runs the same check for its live diagnostic and badge, but only the host's answer
    decides.
 2. *Engine* — `query_with`/`execute_with` with `ExecOptions { read_only: true }`: Postgres/MySQL
    read-only transactions, SQLite `query_only` + `sqlite3_stmt_readonly`, SQL Server's `BEGIN TRAN …
    ROLLBACK` backstop. `DbApplyEdits` on a read-only session is refused before rendering.
 3. *Limits and log* — `timeout_ms` (meta and pages 30 s; the SQL editor 5 min unless the tab sets
-   another), `row_limit` (above), and every executed statement logged at `info` under `ubiq_db::sql`
+   another), `row_limit` (above), and every executed statement logged at `info` under `kubiq_db::sql`
    with project, connection, session, elapsed time and row count, the SQL cut at 2 000 characters.
-   `crates/ubiq-proto/src/log.rs` gains `Subsystem::Db`, classified from `ubiq_db` and
-   `ubiq_host::db`, and `DEFAULT_FILTER` gains `ubiq_db=debug`. No connection string and no password
+   `crates/kubiq-proto/src/log.rs` gains `Subsystem::Db`, classified from `kubiq_db` and
+   `kubiq_host::db`, and `DEFAULT_FILTER` gains `kubiq_db=debug`. No connection string and no password
    is ever logged.
 
 **Apply edits** renders with `edit::render_batch`, runs the statements in one session between
@@ -189,7 +189,7 @@ synonym's tab).
 **Connections — `<data dir>/db.toml`, tracked.** `ProjectData::db_connections()` returns
 `self.dir.join("db.toml")`, beside `kb_sources()`; every path goes through `ProjectDirs::data(id)`,
 never composed. The file follows the project's storage mode (`D173`): under the config root for a
-Ubiq-managed project, in `.ubiq/` — committed — for a project-managed one, so a team shares its
+Kubiq-managed project, in `.kubiq/` — committed — for a project-managed one, so a team shares its
 connection list. `FOLLOWS` in `project_dir.rs` gains `"db.toml"`, and `GITIGNORE`'s committed list
 names it. Written with `atomic::write_atomic`, `version = 1` at the top, missing read as empty,
 `FileTaskStore`'s convention.
@@ -223,13 +223,13 @@ this machine's, so the file belongs to this machine's config root and never to a
 `git add -f` could reach. Not in `FOLLOWS`; Forget removes it with the project's directory. One entry
 per connection: `nonce` and `ciphertext`, base64. The AEAD is `ring::aead::AES_256_GCM` through
 `LessSafeKey`, a fresh 96-bit nonce from `SystemRandom` on every write, and associated data
-`ubiq-db:v1:<project id>:<connection id>` — a ciphertext copied onto another entry fails to open.
+`kubiq-db:v1:<project id>:<connection id>` — a ciphertext copied onto another entry fails to open.
 
 **The key — one per install, in the OS keychain.** 32 bytes from `SystemRandom`, generated on the
 first password ever saved, filed through the base's one secret store,
-`crates/ubiq-host/src/connectors/store.rs`'s `Store`, as a fifth namespace: `db_key` =
+`crates/kubiq-host/src/connectors/store.rs`'s `Store`, as a fifth namespace: `db_key` =
 `CredentialId { harness: "db", name: "secrets-key" }` with `set_db_key`/`db_key`, beside
-`ai_key`/`ssh_key`. Not the `keyring` crate `crates/ubiq` declares: the host's `OsSecretStore` is the
+`ai_key`/`ssh_key`. Not the `keyring` crate `crates/kubiq` declares: the host's `OsSecretStore` is the
 platform's real store, and `Store::usable` already answers whether it works. **Per install, not per
 project**, because a per-project key buys no isolation — the same user, keychain and process open
 every one of them — while costing a keychain item, and on macOS an access prompt, per project; the
@@ -251,7 +251,7 @@ Plaintext crosses the bus only towards the host, inside `SaveDbConnection`, `Tes
 
 ## 5. The interface
 
-**The mode.** `ids::RAIL_DB = "ubiq.rail.db"` (`crates/ubiq/src/ext/ids.rs`), `RailMode::DB`
+**The mode.** `ids::RAIL_DB = "kubiq.rail.db"` (`crates/kubiq/src/ext/ids.rs`), `RailMode::DB`
 (`state/workbench.rs`), `uid::RAIL_MODE_DB = "rail.mode.db"` (`state/ui_id.rs`), `View::Db`
 (`state/nav.rs`), and a `RailModeSpec` registered in `ui/rail.rs`'s `modes()` **immediately after
 IDE's** — registration order is rail order:
@@ -260,7 +260,7 @@ IDE's** — registration order is rail order:
 |---|---|
 | `group`, `label`, `slug` | `RAIL_PROJECT`, `"DB"`, `"db"` |
 | `note` | "Browse and query the project's databases." |
-| `icon` | `UbiqIcon::ModeDb`, `icons/mode-db.svg`, drawn by the `ubiq-icons` loop |
+| `icon` | `KubiqIcon::ModeDb`, `icons/mode-db.svg`, drawn by the `kubiq-icons` loop |
 | `availability` | `Availability::OptIn` — off until General > Modes ticks it (`ViewPrefs::opted_in_modes`) |
 | `has_pane_region`, `needs_project` | `true`, `true` |
 | `opens_left`, `opens_right` | `true`, `false` |
@@ -273,9 +273,9 @@ IDE's** — registration order is rail order:
 
 | Kind | `name()` | Class / home | Drawn when | Payload |
 |---|---|---|---|---|
-| `DbExplorer` | `ubiq.db.explorer` | `Edge` / Left | project, DB mode | — |
-| `DbTable(String)` | `ubiq.db.table` | `Centre` / Centre | project, DB mode, tab open | `db:<conn>:<database>:<schema>:<name>` |
-| `DbSql(String)` | `ubiq.db.sql` | `Free` / Bottom | project, DB mode, tab open | `dbsql:<session id>` |
+| `DbExplorer` | `kubiq.db.explorer` | `Edge` / Left | project, DB mode | — |
+| `DbTable(String)` | `kubiq.db.table` | `Centre` / Centre | project, DB mode, tab open | `db:<conn>:<database>:<schema>:<name>` |
+| `DbSql(String)` | `kubiq.db.sql` | `Free` / Bottom | project, DB mode, tab open | `dbsql:<session id>` |
 
 All three are mode-owned. `from_name` answers `DbExplorer` only; the two tabs are rebuilt from their
 payload, as `Kb(String)` is. A restored `DbTable` re-queries its first page; a restored `DbSql` gets
@@ -283,12 +283,12 @@ its connection, database and text back from `ViewPrefs::db_sql_drafts` (the view
 64 KiB a draft), with no result. Closing either sends `DbCloseSession`; a table with pending edits
 and a SQL tab mid-run ask first (`kit::confirm_modal`).
 
-**State.** `crates/ubiq/src/state/db/` on the open project (`open.db`, beside `open.kb`): `mod.rs`
+**State.** `crates/kubiq/src/state/db/` on the open project (`open.db`, beside `open.kb`): `mod.rs`
 (`DbState` — connections, keystore, tree, menu, the open tabs, the password prompt), `tree.rs` (the
 proof's `structure.rs` with its loaders removed: nodes, `Load`, `visible`, `humanise_rows`, the
 filter), `pending.rs` (the proof's, unchanged — it is pure), `table.rs`, `sql.rs`. Widget entities a
 tab needs a `Window` for (`InputState`, the code editor, `TableState`) are queued and built in
-`render`, `pending_kb_docs`' pattern. Handlers live in `crates/ubiq/src/app/db/` (`mod.rs` with
+`render`, `pending_kb_docs`' pattern. Handlers live in `crates/kubiq/src/app/db/` (`mod.rs` with
 `receive_db`, called from `app/wire.rs`; `explorer.rs`, `table.rs`, `sql.rs`, `settings.rs`).
 
 **The explorer — KB-like.** `kit::panel` with `kit::panel_header("Databases")` carrying two
@@ -315,13 +315,13 @@ pending. `cell_input.rs` keeps the NULL/empty-string rule and the bool select, d
 routing.
 
 **`DbSql` — a bottom-dock tab, several at once.** The proof's `sql_editor.rs`: gpui-component's code
-editor with the `sql` grammar (already a feature of `crates/ubiq`'s `gpui-component`), a connection
+editor with the `sql` grammar (already a feature of `crates/kubiq`'s `gpui-component`), a connection
 and database picker, live diagnostics from `sql::analyze` and `check_read_only`, Run (statement under
 the cursor or the selection) and Run all (each statement, one result tab each), the timer and Stop
 (`DbCancel`), Explain and Explain analyze into `plan.rs`, a read-only toggle (forced on a read-only
 connection), and a confirm before a write statement runs.
 
-**The Databases section.** `crates/ubiq/src/ui/sink/project.rs` gains `ext_ids::PROJECT_DB` and a
+**The Databases section.** `crates/kubiq/src/ui/sink/project.rs` gains `ext_ids::PROJECT_DB` and a
 `databases` section, `SectionGate::WithRecord`, drawn like `kb`: one row per connection — name, kind,
 host/database or file, read-only marker, `saved`/`not saved`/`session` — with Test, Edit and Remove (icon actions with tooltips),
 a keystore warning row when `DbKeystore::Unavailable`, and **Add connection**. Add and Edit raise
@@ -337,18 +337,18 @@ picker's two steps); *New database…* picks a folder, prompts a file name and s
 | Proof app file | Lands in | What changes |
 |---|---|---|
 | `app.rs` | `app/db/*.rs` | every handler sends a message; no `SharedConn`, no `run_blocking` |
-| `workbench.rs`, `ui/{mod,topbar,dock,centre,status}.rs`, `runtime.rs`, `main.rs` | — | deleted: the dock, rail and status are Ubiq's |
-| `store.rs` | `ubiq-host/src/db/store.rs` | host-side TOML, no passwords |
+| `workbench.rs`, `ui/{mod,topbar,dock,centre,status}.rs`, `runtime.rs`, `main.rs` | — | deleted: the dock, rail and status are Kubiq's |
+| `store.rs` | `kubiq-host/src/db/store.rs` | host-side TOML, no passwords |
 | `structure.rs` | `state/db/tree.rs` | loaders become `DbTree` messages |
 | `pending.rs` | `state/db/pending.rs` | none |
-| `theme.rs` | `crates/ubiq/src/theme.rs` | see below |
+| `theme.rs` | `crates/kubiq/src/theme.rs` | see below |
 | `ui/tree.rs` | `ui/db/mod.rs` | kit rows, filter bar, `kit::context_menu` instead of `ContextMenuExt` |
 | `ui/connection_dialog.rs` | `ui/db/conn_form.rs` | `kit::modal`; host picker instead of `prompt_for_paths`; write-only password |
 | `ui/table_view.rs`, `ui/result_grid.rs` | `ui/db/table.rs`, `ui/db/grid.rs` | reads `DbState`, sends `DbTablePage`/`DbApplyEdits` |
 | `ui/cell_input.rs`, `ui/json_editor.rs` | `ui/db/cell_input.rs`, `ui/db/json.rs` | tokens and sizes only |
 | `ui/sql_editor.rs`, `ui/plan_view.rs` | `ui/db/sql.rs`, `ui/db/plan.rs` | sends `DbQuery`/`DbCancel`; results from `DbQueryResult` |
 
-**Look and feel.** No literal colour outside `theme.rs`: the proof's palette maps onto Ubiq's existing
+**Look and feel.** No literal colour outside `theme.rs`: the proof's palette maps onto Kubiq's existing
 tokens (surfaces, text, borders, accent, danger, warning, success), and seven tokens are new, with a
 value in both palettes — `db_row_edited`, `db_row_inserted`, `db_row_deleted`,
 `db_statement_active`, `db_read_only`, `db_read_only_soft`, `db_plan_hot`. Every type size is
@@ -364,35 +364,35 @@ are declared once in the interface's keymap under a `"DbSql"`/`"DbTable"` contex
   the INDEX row and the code map.
 - `features/workbench.md` — DB in the mode list and the PROJECT group order; the three panel kinds.
 - `tech/transport-contract.md` — a database family section, every variant above.
-- `tech/decisions.md` — three rows: the `ubiq-db` crate with wire types re-exported by the proto;
+- `tech/decisions.md` — three rows: the `kubiq-db` crate with wire types re-exported by the proto;
   `aws-lc-rs` accepted with `ring` installed as process default; per-install AES-256-GCM key in the
   keychain over ciphertext in the config root's `local/`.
 - `tech/project-structure.md`, `AGENTS.md` — five crates plus the library, not four.
-- `tech/operations.md` — the `just ui` driver grep, `cargo test --manifest-path ubiq/Cargo.toml -p ubiq-db --features drivers`.
+- `tech/operations.md` — the `just ui` driver grep, `cargo test --manifest-path kubiq/Cargo.toml -p kubiq-db --features drivers`.
 - `tech/ui-and-design.md` — the seven tokens; `features/logs.md` — `Subsystem::Db`.
-- `crates/ubiq-host/src/store/project_dir.rs` — `GITIGNORE`'s list and `FOLLOWS` (code, but read as a
+- `crates/kubiq-host/src/store/project_dir.rs` — `GITIGNORE`'s list and `FOLLOWS` (code, but read as a
   document by every store author).
 - A help page, `help/db/overview`, bound to `rail.db`; a `"db/"` entry in `help/manifest.toml`; the
   mode in `help/workbench/` and the glossary.
-- Skills: the file map of `ubiq-ui`, the module map of `ubiq-host`, the message list of
-  `ubiq-transport` (each skill's `reference/` folder).
+- Skills: the file map of `kubiq-ui`, the module map of `kubiq-host`, the message list of
+  `kubiq-transport` (each skill's `reference/` folder).
 - `backlog.md` — `aws-lc-sys` on Windows unproven; the drone answers `Unavailable`; no idle-session
   close; no server-side cursors; no SSH tunnel.
 
 ## 7. Work packages
 
 Each is one Sonnet subagent; at most three run at once and no two own a file at the same time. Cargo
-runs from the workspace root: `cargo build -p ubiq-proto|ubiq-host|ubiq` resolves the patched base. Base
+runs from the workspace root: `cargo build -p kubiq-proto|kubiq-host|kubiq` resolves the patched base. Base
 tests cannot run in the root's resolution, so they run as `just base-test` does — `cargo test
---manifest-path ubiq/Cargo.toml -p <crate> <filter>` — paying the second build. Every prompt says:
+--manifest-path kubiq/Cargo.toml -p <crate> <filter>` — paying the second build. Every prompt says:
 Edit/Write only, never a script for a single edit; do not stash or revert others' work. The whole
 series lands as one base change, so the documents written in WP9 are in the same commit as the code.
 
 **The lock procedure** (WP1, measured against a scratch copy of the base). Adding the drivers to a
-base crate and resolving (`cargo metadata --manifest-path ubiq/Cargo.toml --format-version 1`) only
-*adds* entries to `ubiq/Cargo.lock` — no existing one moves — but resolves fresh: `whoami` 1.6.1
+base crate and resolving (`cargo metadata --manifest-path kubiq/Cargo.toml --format-version 1`) only
+*adds* entries to `kubiq/Cargo.lock` — no existing one moves — but resolves fresh: `whoami` 1.6.1
 (with `redox_syscall` 0.8.1 and `plain`), `io-enum` 1.3.0, `derive_utils` 0.16.0, where the root lock
-has 1.5.2, 1.2.1 and 0.15.1. Then `cargo update --manifest-path ubiq/Cargo.toml -p whoami --precise
+has 1.5.2, 1.2.1 and 0.15.1. Then `cargo update --manifest-path kubiq/Cargo.toml -p whoami --precise
 1.5.2`, `-p io-enum --precise 1.2.1`, `-p derive_utils --precise 0.15.1` — the versions the
 engine was built and tested with — and the workspace root's lock is re-seeded from the base's;
 `just lock-agrees` then finds no disagreement. `lru` 0.18.3 needs no pin: the base already resolves it. From then on **the base lock
@@ -401,14 +401,14 @@ and `fs_extra` are new to the base lock, and are the TLS cost of §1.
 
 | # | Package | Owns | After | Acceptance |
 |---|---|---|---|---|
-| WP1 | **`ubiq-db`**: move `dbx-core`, split `model`, `drivers` feature, serde derives, `log`→`tracing`; base workspace member; the lock procedure; the `just ui` driver grep; the crate and TLS decision rows | `ubiq/crates/ubiq-db/**`, `ubiq/Cargo.toml`, `ubiq/Cargo.lock`, `Cargo.lock`, `ubiq/Justfile` (`ui`), `tech/decisions.md` | — | `cargo test --manifest-path ubiq/Cargo.toml -p ubiq-db --features drivers`; `cargo tree --manifest-path ubiq/Cargo.toml -p ubiq-db -e no-dev` shows no driver; `just lock-agrees` |
-| WP2 | **Contract**: ids, `ubiq-proto/src/db.rs`, the variants, `project_id()` arms, `Subsystem::Db`; the new variants named in the coordinator's and `app/wire.rs`'s catch-all arms only; transport-contract section | `crates/ubiq-proto/**`, those two match arms, `tech/transport-contract.md` | WP1 | `cargo build -p ubiq-proto -p ubiq-host -p ubiq`; `cargo test --manifest-path ubiq/Cargo.toml -p ubiq-proto` (a round trip per variant) |
-| WP3 | **Storage and secrets**: `db/store.rs`, `db/secrets.rs`, `ProjectData::db_connections`, `FOLLOWS`/`GITIGNORE`, `Store::db_key` namespace, the `db` feature; the secrets decision row | `crates/ubiq-host/src/db/{store,secrets}.rs`, `store/project_dir.rs`, `connectors/store.rs`, `crates/ubiq-host/Cargo.toml` | WP2 | `cargo build -p ubiq-host`; `cargo test --manifest-path ubiq/Cargo.toml -p ubiq-host db::` — round trip, a wrong AAD refused, a lost key reads `Missing`, no password in `db.toml` |
-| WP4 | **Sessions and dispatch**: `db/{mod,session,jobs}.rs`, the `ring` default, the coordinator's family block, `client_gone` cleanup, cancel | `crates/ubiq-host/src/db/{mod,session,jobs}.rs`, `coordinator.rs` | WP3 | `cargo build -p ubiq-host`; host tests against a temp SQLite file: tree, page, query, read-only refusal (layer 1 and 2), edits rolled back on error, cancel |
-| WP5 | **Interface shell**: mode spec and ids, `RailMode::DB`, `View::Db`, icon and SVG, three `PanelKind` arms and adapter, `default_db_layout`, `state/db/mod.rs` with every field (sub-states stubbed), `app/db/mod.rs` + `receive_db`, all seven theme tokens, the keymap actions, `PROJECT_DB` slot | `ext/ids.rs`, `state/{workbench,ui_id,nav,dock}.rs`, `ui/rail.rs`, `ui/kit/icons.rs`, the SVG, `ui/dock/mod.rs`, `app/panels.rs`, `state/db/mod.rs`, `app/db/mod.rs`, `app/wire.rs`, `theme.rs`, the keymap, `tests/rail_container.rs` | WP2 | `cargo build -p ubiq --all-targets` and the base `just ui` greps; `cargo test --manifest-path ubiq/Cargo.toml -p ubiq --test rail_container` (DB after IDE, hidden until opted in) |
-| WP6 | **Explorer and settings**: the explorer panel, filter, menus, `state/db/tree.rs`, the Databases section, `conn_form.rs`, the password prompt | `ui/db/mod.rs`, `ui/db/conn_form.rs`, `state/db/tree.rs`, `app/db/{explorer,settings}.rs`, `ui/sink/project.rs` | WP5 (WP4 to run it) | `cargo build -p ubiq --all-targets`; tests for `db_menu_entries` and the filter over a loaded tree |
-| WP7 | **Table tab**: `state/db/{table,pending}.rs`, `ui/db/{table,grid,cell_input,json}.rs`, `app/db/table.rs` | those files | WP5 | `cargo build -p ubiq --all-targets`; the proof's `pending` tests moved and passing |
-| WP8 | **SQL tab**: `state/db/sql.rs`, `ui/db/{sql,plan}.rs`, `app/db/sql.rs`, `db_sql_drafts` in `state/prefs.rs` | those files | WP5 | `cargo build -p ubiq --all-targets`; a test that Run picks the statement under the cursor |
+| WP1 | **`kubiq-db`**: move `dbx-core`, split `model`, `drivers` feature, serde derives, `log`→`tracing`; base workspace member; the lock procedure; the `just ui` driver grep; the crate and TLS decision rows | `kubiq/crates/kubiq-db/**`, `kubiq/Cargo.toml`, `kubiq/Cargo.lock`, `Cargo.lock`, `kubiq/Justfile` (`ui`), `tech/decisions.md` | — | `cargo test --manifest-path kubiq/Cargo.toml -p kubiq-db --features drivers`; `cargo tree --manifest-path kubiq/Cargo.toml -p kubiq-db -e no-dev` shows no driver; `just lock-agrees` |
+| WP2 | **Contract**: ids, `kubiq-proto/src/db.rs`, the variants, `project_id()` arms, `Subsystem::Db`; the new variants named in the coordinator's and `app/wire.rs`'s catch-all arms only; transport-contract section | `crates/kubiq-proto/**`, those two match arms, `tech/transport-contract.md` | WP1 | `cargo build -p kubiq-proto -p kubiq-host -p kubiq`; `cargo test --manifest-path kubiq/Cargo.toml -p kubiq-proto` (a round trip per variant) |
+| WP3 | **Storage and secrets**: `db/store.rs`, `db/secrets.rs`, `ProjectData::db_connections`, `FOLLOWS`/`GITIGNORE`, `Store::db_key` namespace, the `db` feature; the secrets decision row | `crates/kubiq-host/src/db/{store,secrets}.rs`, `store/project_dir.rs`, `connectors/store.rs`, `crates/kubiq-host/Cargo.toml` | WP2 | `cargo build -p kubiq-host`; `cargo test --manifest-path kubiq/Cargo.toml -p kubiq-host db::` — round trip, a wrong AAD refused, a lost key reads `Missing`, no password in `db.toml` |
+| WP4 | **Sessions and dispatch**: `db/{mod,session,jobs}.rs`, the `ring` default, the coordinator's family block, `client_gone` cleanup, cancel | `crates/kubiq-host/src/db/{mod,session,jobs}.rs`, `coordinator.rs` | WP3 | `cargo build -p kubiq-host`; host tests against a temp SQLite file: tree, page, query, read-only refusal (layer 1 and 2), edits rolled back on error, cancel |
+| WP5 | **Interface shell**: mode spec and ids, `RailMode::DB`, `View::Db`, icon and SVG, three `PanelKind` arms and adapter, `default_db_layout`, `state/db/mod.rs` with every field (sub-states stubbed), `app/db/mod.rs` + `receive_db`, all seven theme tokens, the keymap actions, `PROJECT_DB` slot | `ext/ids.rs`, `state/{workbench,ui_id,nav,dock}.rs`, `ui/rail.rs`, `ui/kit/icons.rs`, the SVG, `ui/dock/mod.rs`, `app/panels.rs`, `state/db/mod.rs`, `app/db/mod.rs`, `app/wire.rs`, `theme.rs`, the keymap, `tests/rail_container.rs` | WP2 | `cargo build -p kubiq --all-targets` and the base `just ui` greps; `cargo test --manifest-path kubiq/Cargo.toml -p kubiq --test rail_container` (DB after IDE, hidden until opted in) |
+| WP6 | **Explorer and settings**: the explorer panel, filter, menus, `state/db/tree.rs`, the Databases section, `conn_form.rs`, the password prompt | `ui/db/mod.rs`, `ui/db/conn_form.rs`, `state/db/tree.rs`, `app/db/{explorer,settings}.rs`, `ui/sink/project.rs` | WP5 (WP4 to run it) | `cargo build -p kubiq --all-targets`; tests for `db_menu_entries` and the filter over a loaded tree |
+| WP7 | **Table tab**: `state/db/{table,pending}.rs`, `ui/db/{table,grid,cell_input,json}.rs`, `app/db/table.rs` | those files | WP5 | `cargo build -p kubiq --all-targets`; the proof's `pending` tests moved and passing |
+| WP8 | **SQL tab**: `state/db/sql.rs`, `ui/db/{sql,plan}.rs`, `app/db/sql.rs`, `db_sql_drafts` in `state/prefs.rs` | those files | WP5 | `cargo build -p kubiq --all-targets`; a test that Run picks the statement under the cursor |
 | WP9 | **Documents, help, verify**: §6's list, `help/db/`, the skills' maps; then the whole gate | `_docs/**`, `help/**`, `.claude/skills/**`, `AGENTS.md` | WP1–WP8 | `just verify` at the workspace root, `just base-test`, `just docs-lint`, `just docs-check` |
 
 Parallel lanes: WP3 → WP4 (host) runs beside WP5 (interface) once WP2 lands; WP6, WP7 and WP8 run
@@ -417,7 +417,7 @@ together once WP5 lands — they share no file, because WP5 wrote every shared o
 
 ## Next steps
 
-1. A `ubiq-db` MCP server beside `ubiq-kb`, so an agent can list the project's connections and run a
+1. A `kubiq-db` MCP server beside `kubiq-kb`, so an agent can list the project's connections and run a
    read-only query through layer 1–3 without being handed a password.
 2. Per-person connections — a connection a user keeps out of the shared `db.toml` of a
    project-managed project.
@@ -427,7 +427,7 @@ together once WP5 lands — they share no file, because WP5 wrote every shared o
 ## Related docs
 
 - [`../tech/architecture.md`](../tech/architecture.md) — the bus every database message crosses, and
-  the rule nothing writes inside a project folder except `.ubiq/`
+  the rule nothing writes inside a project folder except `.kubiq/`
 - [`../tech/transport-contract.md`](../tech/transport-contract.md) — where the database family's
   section goes
 - [`../tech/decisions.md`](../tech/decisions.md) — `D173`, which `db.toml` follows, and the three rows

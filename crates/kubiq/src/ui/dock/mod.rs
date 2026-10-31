@@ -1,0 +1,1627 @@
+//! The window's arrangement: a dock of movable panels, and the adapter that makes one.
+//!
+//! Every area of the workbench is a **panel** in a tree the user rearranges by dragging — tabs
+//! come from the middle of a group, rows and columns from its edges. The tree, the drag, the drop
+//! indicators and the serialisation are the component library's; what Kubiq owns is which panels
+//! exist, where each may sit, and how they are drawn ([`skin`]).
+//!
+//! **A panel is a view, and `AppState` is the only owner of state.** The library requires a panel
+//! to be an entity that renders, focuses and emits, which is the half of `D17` this reverses. The
+//! half that stays is the one that mattered: [`WorkbenchPanel`] holds a weak `AppState` handle and
+//! a [`PanelKind`], and its render delegates straight to the area functions that exist. Adding a
+//! panel is an arm of a `match`, not a new owner of state.
+//!
+//! The three facts beside them are not an exception to that. They are what the library asks a panel
+//! *outside* a render — whether it is drawn, whether it is in the tree, and what a file panel
+//! writes into the saved arrangement — and each is pushed to the panel rather than read back,
+//! because the dock asks them while the window is mid-update and reading the window there is a
+//! panic rather than a stale answer.
+//!
+//! **In IDE mode each open file is a panel.** Its tab therefore belongs to the group it sits in,
+//! which is what lets a file be dragged beside another, and the centre panel steps aside for as
+//! long as one is open. The tab key travels in the panel's payload rather than in its name, because
+//! a name is a `&'static str` and is the same for every file.
+//!
+//! **Moving a panel does not rebuild it.** A dragged tab is re-parented by id, so a dragged
+//! terminal is the same `TerminalView`, on the same stream, under the same harness — and it is
+//! laid out in its new rectangle, measures itself, and posts `TerminalResize`. *A move is a
+//! resize*, and nothing here has to arrange that.
+
+pub mod skin;
+
+use std::sync::Arc;
+
+use gpui::{
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, ExternalPaths, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, ParentElement as _, Pixels, Render, Rgba,
+    SharedString, Styled, WeakEntity, Window, div, px,
+};
+use gpui_component::dock::{
+    BasePanel, BasePanelView, DockArea, DockLayout, DockPlacement, InsertTarget, PaneRef, Panel,
+    PanelEvent, PanelId, PanelInfo, PanelState, TabGroup, panel_handle,
+};
+
+use kubiq_proto::ids::{PaneId, TaskId};
+
+use crate::app::AppState;
+use crate::state::RailMode;
+use crate::state::dock::{ChatId, PanelKind, Region};
+use crate::state::editor::ViewLayout;
+use crate::state::git::{CHANGES_WIDTH, SIDEBAR_WIDTH};
+use crate::state::settings::TabClose;
+use crate::theme;
+use crate::ui::{
+    agents, board, browser, chat, db, editor, empty, explorer, git, help, kb, logs, mission, outline, rail,
+    search, terminal,
+};
+
+/// The version a saved layout is written under. It travels with the preferences schema, because
+/// the layout blob is one field of the same document.
+pub const LAYOUT_VERSION: usize = crate::state::prefs::SCHEMA as usize;
+
+/// Kubiq's region as the library's placement, and back. The two enums are the same four values;
+/// keeping our own is what stops `state/` naming a widget library.
+pub fn placement_of(region: Region) -> DockPlacement {
+    match region {
+        Region::Centre => DockPlacement::Center,
+        Region::Left => DockPlacement::Left,
+        Region::Right => DockPlacement::Right,
+        Region::Bottom => DockPlacement::Bottom,
+    }
+}
+
+pub fn region_of(placement: DockPlacement) -> Region {
+    match placement {
+        DockPlacement::Center => Region::Centre,
+        DockPlacement::Left => Region::Left,
+        DockPlacement::Right => Region::Right,
+        DockPlacement::Bottom => Region::Bottom,
+    }
+}
+
+/// One movable panel: what it is, and the window it reads.
+///
+/// It holds no state of its own beyond the kind that identifies it — a pane id, a tab key, or
+/// nothing at all.
+/// Everything it draws comes from `AppState`, which is why a panel can be dragged, tabbed and
+/// rebuilt from a saved layout without anything being lost.
+pub struct WorkbenchPanel {
+    kind: PanelKind,
+    /// The window this panel is a view of, weakly: the state owns the dock, the dock owns this,
+    /// and a strong handle back would be a cycle the window never gets out of.
+    app: WeakEntity<AppState>,
+    /// Where the keyboard rests for a panel that is not a terminal. A terminal answers with its
+    /// emulator's handle instead, which is what puts keystrokes on the harness.
+    focus_handle: FocusHandle,
+    /// A terminal panel's emulator handle — **pushed by the window, never read back from it**, for
+    /// `visible`'s reason: the dock asks a panel for its focus handle while it is removing one
+    /// (`DockArea::remove_panel` checks whether the panel held focus, then hands focus on), which
+    /// happens inside the window's own update. Reading `AppState` there was the crash on a pane's
+    /// exit. Kept current by `AppState::settle_visibility`.
+    terminal_focus: Option<FocusHandle>,
+    /// Whether the panel is drawn at all — **pushed by the window, never read back from it.**
+    ///
+    /// The dock asks this question while it is reconciling a tree, and it reconciles from inside
+    /// the window's own update: a toggled region, an added panel, a layout written down. Reading
+    /// `AppState` there would be reading an entity that is already leased, which is a panic rather
+    /// than a stale answer. So the one fact the dock needs of a panel out of band is the one fact
+    /// the window keeps current, in `AppState::settle_visibility`.
+    visible: bool,
+    /// Whether the panel is in the dock's tree. What tells a terminal panel the user closed —
+    /// which kills its harness, and a file panel's which closes its tab — from one displaced by a
+    /// whole arrangement being installed over it, which must not.
+    attached: bool,
+    /// Set when the **window** took this panel out of the tree and deliberately did not put it
+    /// back. `attached` alone cannot say so: it reads the same as a tab the user closed, because
+    /// the library reports both the same way and the only thing that tells them apart is a
+    /// displaced panel being re-added in the same edit.
+    ///
+    /// A chat tab and a mission panel are the two the settle drops on purpose — `D156`'s rule
+    /// that a switch places neither — keeping the entity and dropping only the placement, so
+    /// nothing re-adds them and [`BasePanel::on_removed`] was reading the sweep as the user
+    /// closing the tab: `closed_chat_tab` then took the tab out of the project and the panel out
+    /// of `AppState::panels`, and the mode's own blob could never rebuild the leaf again (`T-52`).
+    /// Consumed by the deferred close, so it can only ever swallow the removal it was set for.
+    displaced: bool,
+    /// Which of its viewer's layouts a file panel's file is in — **pushed by the window** for the
+    /// same reason `visible` is, and for one more: [`BasePanel::dump`] is reached from inside the
+    /// window's own update, so the payload a panel writes has to be a fact it already holds.
+    layout: ViewLayout,
+}
+
+impl WorkbenchPanel {
+    pub fn new(kind: PanelKind, app: WeakEntity<AppState>, cx: &mut App) -> Entity<Self> {
+        cx.new(|cx| Self {
+            kind,
+            app,
+            focus_handle: cx.focus_handle(),
+            terminal_focus: None,
+            visible: true,
+            attached: false,
+            displaced: false,
+            layout: ViewLayout::default(),
+        })
+    }
+
+    /// Tell the panel whether it is drawn. Answers whether that changed, so the window only
+    /// redraws when it did.
+    pub fn set_visible(&mut self, visible: bool) -> bool {
+        let changed = self.visible != visible;
+        self.visible = visible;
+        changed
+    }
+
+    /// Tell a terminal panel which emulator handle is its keyboard — see [`Self::terminal_focus`].
+    pub fn set_terminal_focus(&mut self, handle: Option<FocusHandle>) {
+        self.terminal_focus = handle;
+    }
+
+    pub fn kind(&self) -> &PanelKind {
+        &self.kind
+    }
+
+    /// Whether the panel is in the dock's tree. What stops a panel already restored from a saved
+    /// arrangement being added to it a second time.
+    pub fn attached(&self) -> bool {
+        self.attached
+    }
+
+    /// Say that the window is about to leave this panel out of the tree on purpose — see
+    /// [`Self::displaced`]. Called by `AppState::settle_layout` for the one panel it takes out
+    /// without putting back, and only for a panel that was on screen, so the flag is always
+    /// consumed by the removal it was set for.
+    pub fn displace(&mut self) {
+        self.displaced = true;
+    }
+
+    /// Tell a file panel which layout its file is in, for the payload it writes down. Answers
+    /// whether that changed, like [`WorkbenchPanel::set_visible`].
+    pub fn set_layout(&mut self, layout: ViewLayout) -> bool {
+        let changed = self.layout != layout;
+        self.layout = layout;
+        changed
+    }
+
+    /// The handle a dock hands a panel, carrying its title across the renderer seam.
+    pub fn handle(panel: &Entity<Self>) -> Arc<dyn BasePanelView> {
+        panel_handle(panel.clone())
+    }
+
+    /// What the tab says and how it is drawn.
+    pub fn tab(&self, cx: &App) -> TabInfo {
+        let Some(app) = self.app.upgrade() else {
+            return TabInfo {
+                label: SharedString::from(self.kind.name()),
+                ..TabInfo::default()
+            };
+        };
+        let app = app.read(cx);
+        match &self.kind {
+            PanelKind::Terminal(pane_id) => {
+                let pane = app.pane(*pane_id);
+                let label = app.pane_label(*pane_id);
+                let dot = match pane.map(|pane| pane.running) {
+                    Some(true) => theme::success(),
+                    _ => theme::text_faint(),
+                };
+                let (label, tooltip) = match label {
+                    Some(label) => tab_label(&label),
+                    None => (SharedString::from("pane"), None),
+                };
+                TabInfo {
+                    label,
+                    dot_colour: Some(dot),
+                    tooltip,
+                    pinned: app.tab_pinned(&self.kind, cx),
+                    ..TabInfo::default()
+                }
+            }
+            PanelKind::Logs => {
+                let dot = kubiq_proto::log::logs()
+                    .loudest()
+                    .filter(|level| *level >= kubiq_proto::log::LogLevel::Warn)
+                    .map(logs::level_colour);
+                TabInfo {
+                    label: "Logs".into(),
+                    dot_colour: dot,
+                    ..TabInfo::default()
+                }
+            }
+            PanelKind::Search => TabInfo {
+                label: "Search".into(),
+                ..TabInfo::default()
+            },
+            PanelKind::Outline => TabInfo {
+                label: "Outline".into(),
+                ..TabInfo::default()
+            },
+            PanelKind::Help => TabInfo {
+                label: "Help".into(),
+                ..TabInfo::default()
+            },
+            // A mission's tab names the mission the way a file's names its file: the project's
+            // own word for one (M18) and the anchor task's key, which is what the reader knows it
+            // by. A window no longer holding the task falls back to the term alone.
+            PanelKind::Mission(task_id) => {
+                let key = app
+                    .work(cx)
+                    .and_then(|work| work.task(*task_id))
+                    .and_then(|task| task.key.clone());
+                let term = app.mission_term(cx);
+                TabInfo {
+                    label: match key {
+                        Some(key) => SharedString::from(format!("{term} {key}")),
+                        None => SharedString::from(term),
+                    },
+                    ..TabInfo::default()
+                }
+            }
+            // The document tab says the same thing the side panel's does, because it is the same
+            // mission — the shape is which region it is in, not a different name.
+            PanelKind::MissionView(task_id) => {
+                let key = app
+                    .work(cx)
+                    .and_then(|work| work.task(*task_id))
+                    .and_then(|task| task.key.clone());
+                let term = app.mission_term(cx);
+                TabInfo {
+                    label: match key {
+                        Some(key) => SharedString::from(format!("{term} {key}")),
+                        None => SharedString::from(term),
+                    },
+                    ..TabInfo::default()
+                }
+            }
+            PanelKind::Explorer => TabInfo {
+                label: "Explorer".into(),
+                ..TabInfo::default()
+            },
+            // A chat tab's label names what it is attached to, the way a file's names what it
+            // holds — an unattached tab says so rather than repeating "Chat" on every tab.
+            PanelKind::Chat(id) => {
+                let attached = app
+                    .open_project(cx)
+                    .and_then(|open| open.chats.iter().find(|tab| tab.id == *id))
+                    .and_then(|tab| tab.attached);
+                // The record is read through `teams_agent` rather than `work()`: the tab is the
+                // project on screen's, but under `TeamsSpan::Window` what it is attached to may
+                // be another held project's agent (`T-149`), and the active project's projection
+                // has no row for it — the tab would read "New chat" over a live conversation.
+                let agent = attached.and_then(|agent| app.teams_agent(agent, cx));
+                // The agent's title, cut to the same length a terminal's is, and the standard
+                // tooltip. A rename of an attached tab is the agent's (`RenameConversation`), so
+                // it is already the title; only a tab attached to nothing keeps a name of its own.
+                let (label, tooltip) = match (agent, app.tab_name(&self.kind)) {
+                    (Some(agent), _) => tab_label(&app.agent_label(agent)),
+                    (None, Some(name)) => truncate_tab_title(&name),
+                    (None, None) => (SharedString::from("New chat"), None),
+                };
+                // The hexagon the agents column's tab wears too (T-99/T-102), from the one
+                // vocabulary both read — a reader scanning the tab row is asking which
+                // conversation wants them, and the label alone does not answer it. A tab attached
+                // to nothing wears no mark — there is no conversation there to have a state. The
+                // conversation is read the way the record is, through its owning project: the
+                // active project's alone misses another held project's agent and falls back to
+                // the record, which is not the conversation the panel below is drawing.
+                let status = agent.map(|agent| {
+                    crate::state::status::agent_status(agent, app.teams_conversation(agent.id, cx))
+                });
+                TabInfo {
+                    label,
+                    tooltip,
+                    dot_status: status,
+                    pinned: app.tab_pinned(&self.kind, cx),
+                    ..TabInfo::default()
+                }
+            }
+            PanelKind::Centre => TabInfo {
+                label: centre_title(app.workbench.rail_mode).into(),
+                ..TabInfo::default()
+            },
+            // A file's tab is the file's own report — its name, what it is looking at and whether
+            // it is dirty — which is `ui/editor.rs`'s to say.
+            PanelKind::File(key) => match app.file(key, cx) {
+                Some(file) => {
+                    let explorer = app.explorer(cx);
+                    TabInfo {
+                        label: editor::label(file),
+                        title_colour: explorer
+                            .map(|explorer| editor::git_colour(file, explorer))
+                            .unwrap_or_else(theme::text_muted),
+                        dot_colour: did_save_or_dirty(file).then(|| editor::dirty_colour(file)),
+                        dot_pulse: false,
+                        dot_status: None,
+                        temporary: file.temporary,
+                        tooltip: None,
+                        bookmarks: app.bookmark_count(key, cx),
+                        pinned: file.pinned,
+                        icon: None,
+                    }
+                }
+                // The tab of a file this window no longer holds. It is hidden rather than drawn,
+                // so this is the name it keeps its slot under.
+                None => TabInfo {
+                    label: SharedString::from(crate::state::editor::from_tab_key(key).0),
+                    ..TabInfo::default()
+                },
+            },
+            PanelKind::GitRefs => TabInfo {
+                label: "Branches".into(),
+                ..TabInfo::default()
+            },
+            PanelKind::GitChanges => TabInfo {
+                label: "Changes".into(),
+                ..TabInfo::default()
+            },
+            PanelKind::GitHistory => TabInfo {
+                label: "History".into(),
+                ..TabInfo::default()
+            },
+            PanelKind::GitDiff => TabInfo {
+                label: "Diff".into(),
+                ..TabInfo::default()
+            },
+            PanelKind::KbExplorer => TabInfo {
+                label: "Documents".into(),
+                ..TabInfo::default()
+            },
+            // A document's tab is the document's own report, from the same two functions a file's
+            // tab uses — it is the same `OpenFile`. There is no git colour: a source is not the
+            // project, and the explorer has nothing to say about a path inside one.
+            PanelKind::Kb(key) => match app.kb_doc(key, cx) {
+                Some(doc) => TabInfo {
+                    label: editor::label(doc),
+                    title_colour: theme::text_muted(),
+                    dot_colour: did_save_or_dirty(doc).then(|| editor::dirty_colour(doc)),
+                    tooltip: Some(SharedString::from(doc.path.clone())),
+                    pinned: doc.pinned,
+                    ..TabInfo::default()
+                },
+                // The tab of a document this window no longer holds, keeping its slot.
+                None => TabInfo {
+                    label: SharedString::from(
+                        crate::state::KbDocKey::from_tab_key(key)
+                            .map(|key| key.name().to_string())
+                            .unwrap_or_else(|| key.clone()),
+                    ),
+                    ..TabInfo::default()
+                },
+            },
+            PanelKind::DbExplorer => TabInfo {
+                label: "Databases".into(),
+                ..TabInfo::default()
+            },
+            // The two database tabs report themselves, as a file's tab does: their label, their
+            // dirty dot and their running pulse are the panel packages' to say.
+            PanelKind::DbTable(key) => db::table::tab(app, key, cx),
+            PanelKind::DbSql(key) => db::sql::tab(app, key),
+            PanelKind::Browser(key) => browser::tab(app, key, cx),
+            // One slot, two things in it: the tab says which, the way a file's tab says what it is
+            // looking at.
+            PanelKind::Task => TabInfo {
+                label: match app.board(cx).is_some_and(|board| board.draft) {
+                    true => "New task".into(),
+                    false => "Task".into(),
+                },
+                ..TabInfo::default()
+            },
+            PanelKind::AgentsExplorer => TabInfo {
+                label: "Agents".into(),
+                ..TabInfo::default()
+            },
+            // A named board's tab is the board's own name, beside the default board's "Tasks".
+            PanelKind::Board(key) => TabInfo {
+                label: app
+                    .board(cx)
+                    .and_then(|board| board.boards.list.iter().find(|b| b.id.as_str() == key))
+                    .map(|b| SharedString::from(b.name.clone()))
+                    .unwrap_or_else(|| SharedString::from(key.clone())),
+                ..TabInfo::default()
+            },
+        }
+    }
+}
+
+/// A pane's title, shortened for the tab. Past fifteen characters it is cut down to fifteen and
+/// marked with a hyphen — the first fifteen for a plain title, the *last* fifteen when there is an
+/// `@`, because that is the half a `user@host` or a prompt's path keeps its meaning in. The full
+/// title comes back as the tooltip so nothing is actually lost, only hidden until hovered.
+const TAB_TITLE_KEEP: usize = 15;
+
+/// An agent's or a pane's tab: its title cut by [`truncate_tab_title`], and the standard agent
+/// tooltip — led by the full title when the cut took some of it away.
+fn tab_label(label: &crate::state::work::AgentLabel) -> (SharedString, Option<SharedString>) {
+    let (short, cut) = truncate_tab_title(&label.title);
+    let lines: Vec<&str> = cut
+        .as_ref()
+        .map(|full| full.as_ref())
+        .into_iter()
+        .chain((!label.tooltip.is_empty()).then_some(label.tooltip.as_ref()))
+        .collect();
+    let tooltip = (!lines.is_empty()).then(|| SharedString::from(lines.join("\n")));
+    (short, tooltip)
+}
+
+fn truncate_tab_title(title: &str) -> (SharedString, Option<SharedString>) {
+    if title.chars().count() <= TAB_TITLE_KEEP {
+        return (SharedString::from(title.to_string()), None);
+    }
+    let label = if title.contains('@') {
+        let tail: String = title
+            .chars()
+            .rev()
+            .take(TAB_TITLE_KEEP)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        format!("-{tail}")
+    } else {
+        let head: String = title.chars().take(TAB_TITLE_KEEP).collect();
+        format!("{head}-")
+    };
+    (
+        SharedString::from(label),
+        Some(SharedString::from(title.to_string())),
+    )
+}
+
+/// The dirty/save indicator appears only while the file has something to say — a dot on a
+/// clean, idle tab would be furniture, not information.
+fn did_save_or_dirty(file: &crate::state::OpenFile) -> bool {
+    file.dirty()
+        || matches!(
+            (&file.save, &file.body),
+            (
+                crate::state::SaveState::Failed(_) | crate::state::SaveState::Saving(_),
+                _
+            ) | (
+                _,
+                crate::state::FileBody::Failed(_) | crate::state::FileBody::Loading
+            )
+        )
+}
+
+/// What the centre's tab is called. It follows the rail mode, because the centre is what the rail
+/// selects between.
+fn centre_title(mode: RailMode) -> &'static str {
+    match mode {
+        RailMode::IDE => "Editor",
+        // The centre is one document, not the mode, so the tab says what it holds.
+        RailMode::KB => "Document",
+        RailMode::DB => "Table",
+        RailMode::SINK => "Kitchen sink",
+        other => other.label(),
+    }
+}
+
+/// Everything a tab's skin needs to draw it: the label, the title's colour, whether a status dot
+/// sits at the row's right edge and what it says, and whether the tab is a temporary preview.
+#[derive(Clone)]
+pub struct TabInfo {
+    pub label: SharedString,
+    pub title_colour: Rgba,
+    pub dot_colour: Option<Rgba>,
+    /// Whether that dot fades in and out. A conversation that is working or wants the reader is
+    /// the only thing that asks for it — a terminal's running dot and a file's dirty dot are
+    /// states, not activity, and `false` is what leaves them still.
+    pub dot_pulse: bool,
+    /// A chat tab's own mark, drawn as the hexagon [`skin`] wears in place of [`Self::dot_colour`]
+    /// (T-99/T-102) — the lifecycle and activity pair the agents column's tab reads off the same
+    /// vocabulary. `None` for every other kind, and for a chat tab attached to nothing: a plain
+    /// dot answers "is something going on", which a terminal or a log tab still needs; a
+    /// conversation's tab answers the richer question the hexagon was built for instead.
+    pub dot_status: Option<crate::state::status::Status>,
+    pub temporary: bool,
+    /// The untruncated title, shown on hover when [`Self::label`] is a trimmed version of it.
+    pub tooltip: Option<SharedString>,
+    /// How many bookmarks the file holds, so a tab says so while their lines are off screen.
+    /// Zero everywhere else, and zero is drawn as nothing.
+    pub bookmarks: usize,
+    /// Protected from close. Drawn as a small glyph before the label; `false` for every kind that
+    /// offers no pin at all.
+    pub pinned: bool,
+    /// A glyph drawn before the label. `None` for every kind but the browser's.
+    pub icon: Option<gpui_component::IconName>,
+}
+
+impl Default for TabInfo {
+    fn default() -> Self {
+        Self {
+            label: SharedString::default(),
+            title_colour: theme::text(),
+            dot_colour: None,
+            dot_pulse: false,
+            dot_status: None,
+            temporary: false,
+            tooltip: None,
+            bookmarks: 0,
+            pinned: false,
+            icon: None,
+        }
+    }
+}
+
+impl BasePanel for WorkbenchPanel {
+    fn panel_name(&self) -> &'static str {
+        self.kind.name()
+    }
+
+    /// A panel that has nothing to show is hidden rather than removed: it keeps its place in the
+    /// tree and its tab slot, and comes back where it was left. What decides it is
+    /// [`crate::state::dock::PanelKind`]'s own rule, applied by the window — see the field.
+    fn visible(&self, _: &App) -> bool {
+        self.visible
+    }
+
+    /// Pinned is what suppresses a tab's × — the pin is read through the weak `app` handle, the
+    /// way an overridden label is, since it is a fact this panel does not keep itself.
+    fn closable(&self, cx: &App) -> bool {
+        let pinned = self
+            .app
+            .upgrade()
+            .is_some_and(|app| app.read(cx).tab_pinned(&self.kind, cx));
+        self.kind.closable() && !pinned
+    }
+
+    /// The dock is where focus is decided, and `AppState` learns it from here rather than the other
+    /// way round. A terminal panel becoming the displayed tab is what sends `Focus`; any other
+    /// panel becoming it clears the focused pane, so no pane receives keystrokes.
+    /// **The answer waits a turn, for the reason [`BasePanel::on_removed`] does.**
+    ///
+    /// This arrives while the dock is reconciling, which is *inside this panel's own update*. What
+    /// the window does about it ends in writing the arrangement down, and writing it down reads
+    /// every panel in the tree — including this one, which is still leased. Doing it here is
+    /// therefore not a race but a certainty, so it is deferred to after the lease has ended.
+    fn set_active(&mut self, active: bool, _window: &mut Window, cx: &mut Context<Self>) {
+        if !active {
+            return;
+        }
+        let kind = self.kind.clone();
+        let app = self.app.clone();
+        cx.defer(move |cx| {
+            _ = app.update(cx, |app, cx| {
+                // Which panel is displayed is what gives contextual help its `panel.<name>` rung.
+                // Pushed from here for the reason the focused pane is: the dock is where this is
+                // decided, and the window learns it rather than asking.
+                app.note_active_panel(kind.clone(), cx);
+                match kind.pane() {
+                    Some(pane_id) => app.focus_pane(pane_id, cx),
+                    None => {
+                        app.blur_panes(cx);
+                        // A file panel becoming the displayed tab is what makes its file the
+                        // active one: the dock is where that is decided, and the editor learns it
+                        // from here.
+                        if let Some(key) = kind.tab_key() {
+                            app.activate_file(key, cx);
+                        }
+                        // The same one mode along: a document panel becoming the displayed tab
+                        // is what moves the documents explorer's highlight onto it.
+                        if let Some(key) = kind.kb_key() {
+                            app.activate_kb_doc(key, cx);
+                        }
+                        // A board tab becoming the displayed one is what puts the tasks view on
+                        // that board (`T-360`); the default board's is the centre panel.
+                        if let Some(key) = kind.board_key() {
+                            app.select_board(kubiq_proto::work::BoardId(key.to_string()), cx);
+                        } else if kind == PanelKind::Centre
+                            && app.workbench.rail_mode == crate::state::RailMode::TASKS
+                        {
+                            app.select_board(kubiq_proto::work::BoardId::DEFAULT, cx);
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    fn on_added_to(&mut self, _: WeakEntity<TabGroup>, _: &mut Window, _: &mut Context<Self>) {
+        self.attached = true;
+    }
+
+    /// **Closing a terminal or chat panel does what the settings say the × means, closing a file
+    /// panel closes its tab, and being displaced does neither.**
+    ///
+    /// The × has two honest readings — take the tab away, or end what it was looking at — and
+    /// `UiSettings::terminal_close`, `agent_terminal_close` and `agent_chat_close` are where the
+    /// user says which. `Hide` is what this always did.
+    ///
+    /// `Close` is the destructive one, and the two kinds do not treat it alike. A terminal's takes
+    /// effect: the pane is the harness, ending it is what the setting says, and it is a gesture
+    /// the user asked to mean that. A chat tab's asks first, through the conversation's own Delete
+    /// confirm — **a transcript is never deleted unasked**, because the conversation is the host's
+    /// and outlives every view of it, this one included.
+    ///
+    /// The three settings are told apart by `AppState::pane_is_agent`, which matches the pane's
+    /// resolved `agent_type` against the harness catalogue the host sent — a plain shell's is a
+    /// program name and matches nothing.
+    ///
+    /// The library reports both the same way: a panel is told it left the dock whether the user
+    /// closed its tab or a whole arrangement was installed over it. The two have to be told apart,
+    /// because one of them takes a harness off the screen. So the answer waits a turn — a
+    /// displaced panel is put back in the same edit, and hears [`BasePanel::on_added_to`] again
+    /// before this runs.
+    ///
+    /// Waiting is also what makes it safe: this arrives while the dock is reconciling, which is
+    /// inside the window's own update, and a pane's fate is the window's to decide.
+    fn on_removed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.attached = false;
+        let kind = self.kind.clone();
+        if kind.pane().is_none()
+            && kind.tab_key().is_none()
+            && kind.kb_key().is_none()
+            && kind.db_key().is_none()
+            && kind.browser_key().is_none()
+            && kind.chat_id().is_none()
+        {
+            return;
+        }
+        let app = self.app.clone();
+        let panel = cx.weak_entity();
+        cx.defer(move |cx| {
+            // Two ways this is not a close: the panel was displaced and put back in the same edit,
+            // and the window took it out on purpose and kept the entity (`WorkbenchPanel::displace`).
+            // The flag is taken rather than read, so it answers once and only for this removal —
+            // and taken unconditionally, because a `||` that short-circuited on `attached` would
+            // leave it set for the next one.
+            let closed = panel
+                .update(cx, |panel, _| {
+                    let displaced = std::mem::take(&mut panel.displaced);
+                    !panel.attached && !displaced
+                })
+                .unwrap_or(false);
+            if !closed {
+                return;
+            }
+            // Every arm calls `AppState` directly. This already runs inside `app.update`, so
+            // reaching for `close_panel` here — which takes a second lease to get at the dock —
+            // would be a circular lease and a panic, not a close.
+            _ = app.update(cx, |app, cx| match &kind {
+                PanelKind::Terminal(pane_id) => {
+                    let ui = &app.workbench.settings.ui;
+                    let setting = if app.pane_is_agent(*pane_id) {
+                        ui.agent_terminal_close
+                    } else {
+                        ui.terminal_close
+                    };
+                    match setting {
+                        // `close_pane` queues the `PanelEdit::Close` itself, so it is not preceded
+                        // by a `detach_pane` that would queue a second one for the same panel.
+                        TabClose::Close => app.close_pane(*pane_id, cx),
+                        TabClose::Hide => app.detach_pane(*pane_id, cx),
+                    }
+                }
+                PanelKind::File(key) => app.closed_file_panel(key, cx),
+                PanelKind::Kb(key) => app.closed_kb_panel(key, cx),
+                PanelKind::DbTable(_) | PanelKind::DbSql(_) => app.closed_db_panel(&kind, cx),
+                PanelKind::Browser(_) => app.closed_browser_panel(&kind, cx),
+                PanelKind::Chat(id) => {
+                    // The agent has to be read before the tab goes: `closed_chat_tab` takes the
+                    // tab out of the project, and the attachment goes with it.
+                    let agent = (app.workbench.settings.ui.agent_chat_close == TabClose::Close)
+                        .then(|| app.chat_tab_agent(*id, cx))
+                        .flatten();
+                    app.closed_chat_tab(*id, cx);
+                    if let Some(agent) = agent {
+                        app.workbench.confirm_end_conversation = Some(agent);
+                        cx.notify();
+                    }
+                }
+                _ => {}
+            });
+        });
+    }
+
+    /// What a saved layout carries for this panel: **what it is looking at, never what it drew.**
+    ///
+    /// Two panels write more than their name, because their name is the same for every one of
+    /// them. A file writes its tab key — and only that, never the view mode it was left in
+    /// (T-202, see [`file_payload`]); a terminal writes its pane's id, which is what lets the
+    /// arrangement put a pane back where the user left it when the window still holds it. Never a
+    /// parsed scene, a computed diff or a rendered diagram: those are functions of bytes the host
+    /// will send again.
+    fn dump(&self, _: &App) -> PanelState {
+        let mut state = PanelState::new(self.kind.name());
+        if let Some(key) = self
+            .kind
+            .tab_key()
+            .or_else(|| self.kind.kb_key())
+            .or_else(|| self.kind.db_key())
+            .or_else(|| self.kind.board_key())
+        {
+            state.info = PanelInfo::panel(file_payload(key));
+        }
+        if let Some(pane_id) = self.kind.pane() {
+            state.info = PanelInfo::panel(pane_payload(pane_id));
+        }
+        if let Some(id) = self.kind.chat_id() {
+            state.info = PanelInfo::panel(chat_payload(id));
+        }
+        if let Some(task_id) = self.kind.mission_id() {
+            state.info = PanelInfo::panel(mission_payload(task_id));
+        }
+        state
+    }
+}
+
+impl Panel for WorkbenchPanel {
+    fn title(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let TabInfo { label, .. } = self.tab(cx);
+        div().child(label)
+    }
+
+    /// The dock's own padding would inset the coloured left edge every surface is identified by,
+    /// which `D18` says has to sit on the boundary. Every panel here draws its own frame.
+    fn inner_padding(&self, _: &App) -> bool {
+        false
+    }
+}
+
+impl EventEmitter<PanelEvent> for WorkbenchPanel {}
+
+impl Focusable for WorkbenchPanel {
+    /// A terminal panel's keyboard *is* its emulator's, so focusing the panel puts keystrokes on
+    /// the harness with nothing in between. Every other panel answers with its own handle, which
+    /// is how "when the focused panel is not a terminal, no pane holds the keyboard" is true by
+    /// construction rather than by a rule someone has to remember.
+    ///
+    /// Never reads `AppState`: the dock asks this from inside the window's own update.
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.terminal_focus
+            .clone()
+            .unwrap_or_else(|| self.focus_handle.clone())
+    }
+}
+
+impl Render for WorkbenchPanel {
+    /// **The panel renders by updating `AppState` from inside its own render**, which is sound
+    /// because a child view's render runs in the layout pass, after the parent's has returned: the
+    /// state is not leased at this point. That is what lets every area module keep the
+    /// `fn(&AppState, &mut Context<AppState>)` signature it already has — the adapter is a
+    /// `match`, and nothing under `ui/` was rewritten to become a panel.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let kind = self.kind.clone();
+        self.app
+            .update(cx, |app, cx| match &kind {
+                // A board tab draws its own board; the default board is the centre's.
+                PanelKind::Board(key) => crate::state::board::with_view_board(
+                    kubiq_proto::work::BoardId(key.clone()),
+                    || body(&kind, app, window, cx),
+                ),
+                PanelKind::Centre if app.workbench.rail_mode == crate::state::RailMode::TASKS => {
+                    crate::state::board::with_view_board(kubiq_proto::work::BoardId::DEFAULT, || {
+                        body(&kind, app, window, cx)
+                    })
+                }
+                _ => body(&kind, app, window, cx),
+            })
+            .unwrap_or_else(|_| div().into_any_element())
+    }
+}
+
+/// One panel's body, drawn by the area module that already owned it.
+///
+/// Every arm is a call into `ui/` with the signature those modules already have, which is what
+/// makes the adapter a `match` rather than a rewrite.
+fn body(
+    kind: &PanelKind,
+    app: &AppState,
+    window: &mut Window,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    match kind {
+        PanelKind::Terminal(pane_id) => terminal::pane(app, *pane_id, cx),
+        PanelKind::Logs => logs::render(app, cx),
+        PanelKind::Search => search::render(app, window, cx),
+        PanelKind::Outline => outline::render(app, window, cx),
+        PanelKind::Explorer => explorer::render(app, window, cx),
+        PanelKind::Chat(id) => {
+            chat::render(app, crate::state::ChatHost::Tab(*id), window, cx).into_any_element()
+        }
+        PanelKind::Centre => drop_target(centre(app, window, cx), cx),
+        PanelKind::File(key) => drop_target(editor::render_file(app, key, window, cx), cx),
+        PanelKind::GitRefs => git::refs::render(app, window, cx).into_any_element(),
+        PanelKind::GitChanges => git::changes::render(app, window, cx).into_any_element(),
+        PanelKind::GitHistory => git::history::render(app, window, cx).into_any_element(),
+        PanelKind::GitDiff => git::diff::render(app, cx).into_any_element(),
+        PanelKind::KbExplorer => kb::render(app, cx),
+        PanelKind::Kb(key) => drop_target(kb::render_doc(app, key, window, cx), cx),
+        PanelKind::DbExplorer => db::explorer::render(app, cx),
+        PanelKind::DbTable(key) => db::table::render(app, key, cx),
+        PanelKind::DbSql(key) => db::sql::render(app, key, cx),
+        PanelKind::Browser(key) => browser::render(app, key, window, cx),
+        PanelKind::Task => board::panel(app, window, cx),
+        PanelKind::Board(_) => drop_target(centre(app, window, cx), cx),
+        PanelKind::AgentsExplorer => agents::sidebar::render(app, cx).into_any_element(),
+        PanelKind::Mission(task_id) => mission::render(app, *task_id, window, cx),
+        PanelKind::MissionView(task_id) => mission::full::tab(app, *task_id, window, cx),
+        PanelKind::Help => help::render(app, window, cx),
+    }
+}
+
+/// Catch a file or folder dropped from outside the app onto the centre panel or a file tab.
+///
+/// Only these two: the explorer, the chat and the terminal are sibling panels with their own drop
+/// behaviour (move/copy, an attachment), and wrapping them here too would make both gestures
+/// half-happen underneath whichever one the drop actually lands on.
+fn drop_target(body: AnyElement, cx: &mut Context<AppState>) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .size_full()
+        .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, _window, cx| {
+            this.deliver_paths(paths.paths(), cx);
+            cx.stop_propagation();
+        }))
+        .drag_over::<ExternalPaths>(|style, _, _, _| style.bg(theme::accent_soft()))
+        .child(body)
+        .into_any_element()
+}
+
+/// The centre region's one panel. Which screen it is is the rail's answer, which is what the rail
+/// has always decided; what has changed is that the screen is now a panel like any other.
+fn centre(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> AnyElement {
+    let wb = &app.workbench;
+    let has_project = app.project(cx).is_some();
+
+    let mode = wb.rail_mode;
+    let Some(spec) = mode.spec() else {
+        // Nothing is registered under the mode the window is standing in — a second edition
+        // removed it while a blob still named it. The empty page says so rather than a blank.
+        return not_built(mode);
+    };
+
+    // The three questions the old match asked, in the order it asked them. A mode that is about
+    // the application rather than about a project answers whether or not one is open: the sink
+    // draws its own fixtures, and Control reports on the host, which is running either way. Every
+    // other mode is a project's, as the rail says by putting it under `PROJECT`, and with none
+    // open there is no work to draw — so it says what the editor says.
+    if spec.needs_project && !has_project {
+        return empty::no_project(cx);
+    }
+    match spec.centre {
+        Some(centre) => centre(app, window, cx),
+        None => not_built(mode),
+    }
+}
+
+/// A rail mode with no screen behind it. A stated gap, not an error state.
+fn not_built(mode: RailMode) -> AnyElement {
+    empty::empty_page(
+        mode.label(),
+        mode.note(),
+        rail::mode_icon(mode),
+        Some(empty::not_built()),
+    )
+    .into_any_element()
+}
+
+// ── Building the arrangement ────────────────────────────────────────
+
+/// The arrangement a window opens in, and the one a discarded layout falls back to: the explorer
+/// on the left border, the chat on the right, the centre above an empty bottom region.
+///
+/// **Nothing is in the bottom region and it opens closed.** A pane exists because the coordinator
+/// says it does, so its panel arrives with `WorkspaceSpawned`; the console is opened from the
+/// new-pane control's menu. What the region gives a fresh window is its size and its strip, so
+/// there is somewhere for the first of either to land.
+pub fn default_layout(
+    dock: &Entity<DockArea>,
+    panel: &mut impl FnMut(PanelKind, &mut App) -> Option<Entity<WorkbenchPanel>>,
+    window: &mut Window,
+    cx: &mut App,
+    rail_mode: RailMode,
+) {
+    // The mode's own, or the IDE's (`D184`). This used to be a `_ =>` arm, which is exactly the
+    // shape that gives a contributed mode a plausible-looking wrong default rather than an error:
+    // `None` on the spec now *says* "the IDE's" instead of falling into it.
+    let layout = rail_mode
+        .spec()
+        .and_then(|spec| spec.default_layout)
+        .unwrap_or(default_ide_layout);
+    layout(dock, panel, window, cx);
+}
+
+/// Default layout for IDE mode: explorer on the left, centre in the middle, the right region
+/// empty and shut until a persistent agent or the user asks for a chat.
+pub(crate) fn default_ide_layout(
+    dock: &Entity<DockArea>,
+    panel: &mut dyn FnMut(PanelKind, &mut App) -> Option<Entity<WorkbenchPanel>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    // **No chat tab is minted here.** The right region opens empty, the way the bottom does: a
+    // scaffold tab would be an agent panel attached to nothing, in a region nobody asked to see,
+    // and `AppState::sync_chat_panels` would only swap it for the project's own empty tab. What
+    // puts a chat on screen is an attachment or the user — see `AppState::settle_panels`.
+    //
+    // Only a terminal is ever refused, and neither of these is one.
+    let (Some(explorer), Some(centre)) =
+        (panel(PanelKind::Explorer, cx), panel(PanelKind::Centre, cx))
+    else {
+        return;
+    };
+    let explorer = WorkbenchPanel::handle(&explorer);
+    let centre = WorkbenchPanel::handle(&centre);
+
+    dock.update(cx, |dock, cx| {
+        dock.set_center(DockLayout::tabs().panel_view(centre, cx), window, cx);
+        install(
+            dock,
+            Region::Left,
+            DockLayout::tabs().panel_view(explorer, cx),
+            px(theme::explorer_width()),
+            window,
+            cx,
+        );
+        install(
+            dock,
+            Region::Right,
+            DockLayout::tabs(),
+            px(theme::chat_width()),
+            window,
+            cx,
+        );
+        install(
+            dock,
+            Region::Bottom,
+            DockLayout::tabs(),
+            px(theme::dock_height()),
+            window,
+            cx,
+        );
+        // The right region holds the chats and opens only when a persistent agent claims a tab,
+        // or when the user asks. The bottom is empty until a pane lands. Both start put away,
+        // and both start empty.
+        for region in [Region::Right, Region::Bottom] {
+            if dock.is_dock_open(placement_of(region)) {
+                dock.toggle_dock(placement_of(region), window, cx);
+            }
+        }
+    });
+}
+
+/// Default layout for Git mode: refs on the left, changes on the right, the commit list in the
+/// centre. The pane region stays empty and closed.
+pub(crate) fn default_git_layout(
+    dock: &Entity<DockArea>,
+    panel: &mut dyn FnMut(PanelKind, &mut App) -> Option<Entity<WorkbenchPanel>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (Some(refs), Some(history), Some(changes)) = (
+        panel(PanelKind::GitRefs, cx),
+        panel(PanelKind::GitHistory, cx),
+        panel(PanelKind::GitChanges, cx),
+    ) else {
+        return;
+    };
+    let refs = WorkbenchPanel::handle(&refs);
+    let history = WorkbenchPanel::handle(&history);
+    let changes = WorkbenchPanel::handle(&changes);
+
+    dock.update(cx, |dock, cx| {
+        dock.set_center(DockLayout::tabs().panel_view(history, cx), window, cx);
+        install(
+            dock,
+            Region::Left,
+            DockLayout::tabs().panel_view(refs, cx),
+            px(SIDEBAR_WIDTH),
+            window,
+            cx,
+        );
+        install(
+            dock,
+            Region::Right,
+            DockLayout::tabs().panel_view(changes, cx),
+            px(CHANGES_WIDTH),
+            window,
+            cx,
+        );
+        install(
+            dock,
+            Region::Bottom,
+            DockLayout::tabs(),
+            px(theme::dock_height()),
+            window,
+            cx,
+        );
+        if dock.is_dock_open(placement_of(Region::Bottom)) {
+            dock.toggle_dock(placement_of(Region::Bottom), window, cx);
+        }
+    });
+}
+
+/// Default layout for KB mode: the documents explorer on the left, the document in the centre.
+///
+/// One side rather than Git's two: the knowledge base has an explorer and a reading area, and
+/// nothing a third region would hold. The right and the bottom are installed all the same, so the
+/// sizes are there when a panel is dragged into one, and both start shut.
+pub(crate) fn default_kb_layout(
+    dock: &Entity<DockArea>,
+    panel: &mut dyn FnMut(PanelKind, &mut App) -> Option<Entity<WorkbenchPanel>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (Some(explorer), Some(centre)) = (
+        panel(PanelKind::KbExplorer, cx),
+        panel(PanelKind::Centre, cx),
+    ) else {
+        return;
+    };
+    let explorer = WorkbenchPanel::handle(&explorer);
+    let centre = WorkbenchPanel::handle(&centre);
+
+    dock.update(cx, |dock, cx| {
+        dock.set_center(DockLayout::tabs().panel_view(centre, cx), window, cx);
+        install(
+            dock,
+            Region::Left,
+            DockLayout::tabs().panel_view(explorer, cx),
+            px(theme::explorer_width()),
+            window,
+            cx,
+        );
+        install(
+            dock,
+            Region::Right,
+            DockLayout::tabs(),
+            px(theme::chat_width()),
+            window,
+            cx,
+        );
+        install(
+            dock,
+            Region::Bottom,
+            DockLayout::tabs(),
+            px(theme::dock_height()),
+            window,
+            cx,
+        );
+        for region in [Region::Right, Region::Bottom] {
+            if dock.is_dock_open(placement_of(region)) {
+                dock.toggle_dock(placement_of(region), window, cx);
+            }
+        }
+    });
+}
+
+/// Default layout for DB mode: the databases explorer on the left, the "no table open" page in the
+/// centre until a table opens, an empty right, and an empty bottom the first SQL tab lands in.
+/// Both start shut, as KB's do.
+pub(crate) fn default_db_layout(
+    dock: &Entity<DockArea>,
+    panel: &mut dyn FnMut(PanelKind, &mut App) -> Option<Entity<WorkbenchPanel>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (Some(explorer), Some(centre)) = (
+        panel(PanelKind::DbExplorer, cx),
+        panel(PanelKind::Centre, cx),
+    ) else {
+        return;
+    };
+    let explorer = WorkbenchPanel::handle(&explorer);
+    let centre = WorkbenchPanel::handle(&centre);
+
+    dock.update(cx, |dock, cx| {
+        dock.set_center(DockLayout::tabs().panel_view(centre, cx), window, cx);
+        install(
+            dock,
+            Region::Left,
+            DockLayout::tabs().panel_view(explorer, cx),
+            px(theme::explorer_width()),
+            window,
+            cx,
+        );
+        install(
+            dock,
+            Region::Right,
+            DockLayout::tabs(),
+            px(theme::chat_width()),
+            window,
+            cx,
+        );
+        install(
+            dock,
+            Region::Bottom,
+            DockLayout::tabs(),
+            px(theme::dock_height()),
+            window,
+            cx,
+        );
+        for region in [Region::Right, Region::Bottom] {
+            if dock.is_dock_open(placement_of(region)) {
+                dock.toggle_dock(placement_of(region), window, cx);
+            }
+        }
+    });
+}
+
+/// One edge region, at the size the theme calls its default. Every region collapses, because a
+/// region the user cannot put away is a frame again.
+fn install(
+    dock: &mut DockArea,
+    region: Region,
+    layout: DockLayout,
+    size: Pixels,
+    window: &mut Window,
+    cx: &mut Context<DockArea>,
+) {
+    let placement = placement_of(region);
+    dock.set_dock(placement, layout, window, cx);
+    dock.set_dock_size(placement, size, window, cx);
+    dock.set_dock_collapsible(placement, true, window, cx);
+}
+
+/// Whether the dock's tree already holds a panel. What stops a file panel restored from a saved
+/// arrangement being added a second time by the queued edit that also asked for it.
+pub fn holds(dock: &Entity<DockArea>, panel: &Entity<WorkbenchPanel>, cx: &App) -> bool {
+    let id = PanelId::from(panel.entity_id());
+    let dock = dock.read(cx);
+    [Region::Centre, Region::Left, Region::Right, Region::Bottom]
+        .into_iter()
+        .any(|region| {
+            dock.layout(placement_of(region))
+                .is_some_and(|tree| tree.panels().any(|panel| panel == id))
+        })
+}
+
+/// Whether a panel is one the user can actually see right now.
+///
+/// The mirror of [`reveal`]: the same walk of the tree, asked rather than acted on, which is why it
+/// lives beside it. Holding a panel is not the same as showing it, and three things take one off
+/// the screen without taking it out of the arrangement — the edge region put away, a sibling tab
+/// displayed in its place, and the panel's own rule saying the current mode does not draw it. A
+/// caller that wants "visible" has to rule out all three, so this rules out all three.
+pub fn on_screen(dock: &Entity<DockArea>, panel: &Entity<WorkbenchPanel>, cx: &App) -> bool {
+    if !panel.read(cx).visible {
+        return false;
+    }
+    let id = PanelId::from(panel.entity_id());
+    let dock = dock.read(cx);
+    [Region::Bottom, Region::Left, Region::Right, Region::Centre]
+        .into_iter()
+        .find_map(|region| {
+            let placement = placement_of(region);
+            let tree = dock.layout(placement)?;
+            let node = tree.find_panel_node(id)?;
+            // The centre is the one region that cannot be put away.
+            if region != Region::Centre && !dock.is_dock_open(placement) {
+                return Some(false);
+            }
+            let found = tree.find_node(node)?;
+            let PaneRef::Tabs { panels, active_ix } = found.kind() else {
+                return Some(false);
+            };
+            Some(panels.iter().position(|panel| *panel == id) == Some(active_ix))
+        })
+        // A panel the tree does not hold at all is not on screen.
+        .unwrap_or(false)
+}
+
+/// Put a panel in a region, joining the group that is already there.
+pub fn add(
+    dock: &Entity<DockArea>,
+    panel: &Entity<WorkbenchPanel>,
+    region: Region,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let handle = WorkbenchPanel::handle(panel);
+    dock.update(cx, |dock, cx| {
+        dock.add_panel_view(handle, placement_of(region), None, window, cx);
+    });
+}
+
+/// Bring a panel that is already in the arrangement back on screen.
+///
+/// The console is not closable — it keeps its place in the tree — so "show me the console" is a
+/// reveal rather than an add: whichever region holds it is brought back if it was put away, and its
+/// tab is made the one its group displays. A panel the tree does not hold is put in its home region
+/// first, which is what makes this safe to call for a panel that has never been installed.
+pub fn reveal(
+    dock: &Entity<DockArea>,
+    panel: &Entity<WorkbenchPanel>,
+    home: Region,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !holds(dock, panel, cx) {
+        add(dock, panel, home, window, cx);
+    }
+    let id = PanelId::from(panel.entity_id());
+    dock.update(cx, |dock, cx| {
+        let found = [Region::Bottom, Region::Left, Region::Right, Region::Centre]
+            .into_iter()
+            .find_map(|region| {
+                dock.layout(placement_of(region))
+                    .and_then(|tree| tree.find_panel_node(id))
+                    .map(|node| (region, node))
+            });
+        let Some((region, node)) = found else { return };
+        // The centre is not a region that can be put away, so only an edge is ever brought back.
+        let placement = placement_of(region);
+        if region != Region::Centre && !dock.is_dock_open(placement) {
+            dock.toggle_dock(placement, window, cx);
+        }
+        // Where the panel already sits in its group. Activating it must not move it: a reveal is
+        // "show me this tab", and a tab that jumped to the end of the strip every time it was
+        // picked would reorder the arrangement behind the user's back.
+        let at = dock
+            .layout(placement)
+            .and_then(|tree| tree.find_node(node))
+            .and_then(|found| match found.kind() {
+                PaneRef::Tabs { panels, active_ix } => panels
+                    .iter()
+                    .position(|panel| *panel == id)
+                    .map(|ix| (ix, active_ix)),
+                _ => None,
+            });
+        match at {
+            // Already the tab its group displays: the region above is all this had to do.
+            Some((ix, active)) if ix == active => {}
+            // Reinserted at the index it already holds, which leaves the strip's order untouched —
+            // and its group has at least two tabs here, so the detach cannot prune the node.
+            Some((ix, _)) => dock.move_panel(
+                id,
+                InsertTarget::Tabs {
+                    node,
+                    ix: Some(ix),
+                    activate: true,
+                },
+                window,
+                cx,
+            ),
+            None => {}
+        }
+    });
+}
+
+/// Take a panel out of the dock for good. Only a terminal and a file ever leave — every other panel
+/// is hidden instead, which is what keeps its place in the tree.
+pub fn remove(
+    dock: &Entity<DockArea>,
+    panel: &Entity<WorkbenchPanel>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    dock.update(cx, |dock, cx| {
+        dock.remove_panel(panel.clone(), window, cx);
+    });
+}
+
+/// Close a panel from its own tab, going round the group that holds it.
+///
+/// **The library refuses to take the last panel out of a region**, so that a dock can never be
+/// emptied. Kubiq wants the opposite: an emptied region collapses (`AppState::hide_emptied_regions`)
+/// and comes back with a fresh panel in it, so a last terminal, chat, file or console is as
+/// closable as any other. The panel's own [`PanelKind::closable`] is still the whole of the policy;
+/// this only avoids asking [`TabGroup`] for permission it would refuse.
+pub fn close_panel(panel: &Entity<WorkbenchPanel>, window: &mut Window, cx: &mut App) {
+    let app = panel.read(cx).app.clone();
+    let panel = panel.clone();
+    _ = app.update(cx, |app, cx| {
+        let dock = app.dock().clone();
+        remove(&dock, &panel, window, cx);
+    });
+}
+
+// ── The placement policy ────────────────────────────────────────────
+
+/// Put back any panel that has landed in a region its class forbids.
+///
+/// The library's drop is region-blind — a group offers a drop or it does not — so the policy is
+/// applied where the arrangement is known rather than where the pointer is: an Edge panel dropped
+/// in the centre is moved back to its home border on the same edit, and the drop reads as refused.
+/// Answered as a `bool` so a caller knows whether the layout it was about to write down is the one
+/// still on screen.
+pub fn enforce_placement(
+    dock: &Entity<DockArea>,
+    kind_of: &impl Fn(PanelId) -> Option<PanelKind>,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let mut strays: Vec<(PanelId, Region)> = Vec::new();
+
+    dock.update(cx, |dock, _| {
+        for region in [Region::Centre, Region::Left, Region::Right, Region::Bottom] {
+            let Some(tree) = dock.layout(placement_of(region)) else {
+                continue;
+            };
+            for panel in tree.panels() {
+                let Some(kind) = kind_of(panel) else { continue };
+                if !kind.class().allows(region) {
+                    strays.push((panel, kind.home()));
+                }
+            }
+        }
+    });
+
+    if strays.is_empty() {
+        return false;
+    }
+
+    for (panel, home) in strays {
+        let target = dock.update(cx, |dock, _| first_group(dock, home));
+        let Some(node) = target else { continue };
+        dock.update(cx, |dock, cx| {
+            dock.move_panel(
+                panel,
+                InsertTarget::Tabs {
+                    node,
+                    ix: None,
+                    activate: true,
+                },
+                window,
+                cx,
+            );
+        });
+    }
+    true
+}
+
+/// The first tab group in a region, which is where a panel put back in it goes.
+fn first_group(dock: &DockArea, region: Region) -> Option<gpui_component::dock::NodeId> {
+    let tree = dock.layout(placement_of(region))?;
+    let mut found = None;
+    tree.root().walk(&mut |node| {
+        if found.is_none() && matches!(node.kind(), PaneRef::Tabs { .. }) {
+            found = Some(node.id());
+        }
+    });
+    found
+}
+
+// ── Persistence ─────────────────────────────────────────────────────
+
+/// Rebuild a saved arrangement, or answer `false` for one this build cannot use.
+///
+/// Two rules from the proposal are enforced here rather than described. **A stale version is
+/// discarded whole** for the default arrangement, because a half-applied layout is worse than none.
+/// And **layout persists; harnesses do not** — a saved terminal leaf is dropped and the tree
+/// normalises around the gap, so a window reopens with its side panels, its console and its open
+/// files where they were, and no terminals. Restoring those is `Q1`.
+pub fn restore(
+    dock: &Entity<DockArea>,
+    saved: &serde_json::Value,
+    panel: &mut impl FnMut(PanelKind, &mut App) -> Option<Entity<WorkbenchPanel>>,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let Ok(state) = serde_json::from_value::<gpui_component::dock::DockAreaState>(saved.clone())
+    else {
+        tracing::debug!("discarding an unreadable dock layout");
+        return false;
+    };
+    if state.version != Some(LAYOUT_VERSION) {
+        tracing::debug!(
+            "discarding a dock layout written for version {:?}",
+            state.version
+        );
+        return false;
+    }
+
+    let centre = rebuild(&state.center, panel, cx);
+    let mut regions: Vec<(Region, DockLayout, Pixels, bool)> = Vec::new();
+    for (saved, region) in [
+        (&state.left_dock, Region::Left),
+        (&state.right_dock, Region::Right),
+        (&state.bottom_dock, Region::Bottom),
+    ] {
+        let Some(saved) = saved else { continue };
+        // A region whose every panel was dropped is installed empty rather than left out. Leaving
+        // it out kept whatever the mode before it had in that region on screen, under the incoming
+        // mode's rail — and an empty region is a legal arrangement here: the pane region starts
+        // that way, and its strip is where a pane is opened from.
+        let layout = rebuild(saved.panel(), panel, cx).unwrap_or_else(DockLayout::tabs);
+        regions.push((region, layout, saved.size(), saved.open()));
+    }
+
+    // A layout that rebuilt no centre is one whose every centre panel this build has lost. The
+    // default is the honest answer, rather than a window with nothing in the middle.
+    let Some(centre) = centre else { return false };
+
+    dock.update(cx, |dock, cx| {
+        dock.set_center(centre, window, cx);
+        for (region, layout, size, open) in regions {
+            install(dock, region, layout, size, window, cx);
+            // The blob says whether the region was on screen. A region is forced to match — left
+            // shut by the mode we sat in meanwhile, it is reopened here, and one that was shut is
+            // shut again — because coming back to a mode must restore the whole arrangement, not
+            // just the panels inside a region that already happened to be open.
+            if open != dock.is_dock_open(placement_of(region)) {
+                dock.toggle_dock(placement_of(region), window, cx);
+            }
+        }
+    });
+    true
+}
+
+/// One saved node as a layout this build can install.
+///
+/// Kubiq rebuilds the tree itself rather than through the library's global panel registry, because
+/// a registered builder is handed the dock area and never the window's `AppState` — and every panel
+/// here is a view of exactly one window's state. Nothing is lost by it: the names are Kubiq's own,
+/// so nothing else can be in the file.
+///
+/// `None` means the node rebuilt to nothing — every panel under it was dropped — and the caller
+/// leaves the slot out rather than installing an empty container.
+fn rebuild(
+    state: &PanelState,
+    panel: &mut impl FnMut(PanelKind, &mut App) -> Option<Entity<WorkbenchPanel>>,
+    cx: &mut App,
+) -> Option<DockLayout> {
+    match &state.info {
+        PanelInfo::Stack { sizes, axis } => {
+            let mut layout = match axis {
+                0 => DockLayout::h_split(),
+                _ => DockLayout::v_split(),
+            };
+            let mut any = false;
+            for (ix, child) in state.children.iter().enumerate() {
+                let Some(child) = rebuild(child, panel, cx) else {
+                    continue;
+                };
+                any = true;
+                layout = layout.child(child, sizes.get(ix).copied());
+            }
+            any.then_some(layout)
+        }
+        PanelInfo::Tabs { active_index } => {
+            let mut layout = DockLayout::tabs();
+            let mut count = 0;
+            for child in &state.children {
+                // A leaf this build cannot rebuild — a terminal, always — is dropped.
+                let Some(kind) = leaf(child) else {
+                    continue;
+                };
+                // A panel the window will not supply — a terminal whose pane has gone — is dropped
+                // the same way an unreadable leaf is.
+                let Some(built) = panel(kind, cx) else {
+                    continue;
+                };
+                layout = layout.panel_view(WorkbenchPanel::handle(&built), cx);
+                count += 1;
+            }
+            (count > 0).then(|| layout.active_index((*active_index).min(count - 1)))
+        }
+        // A bare leaf where a container belongs is read as a group of one, so a hand-edited file
+        // cannot lose a panel.
+        PanelInfo::Panel(_) => {
+            let kind = leaf(state)?;
+            let built = panel(kind, cx)?;
+            Some(DockLayout::tabs().panel_view(WorkbenchPanel::handle(&built), cx))
+        }
+    }
+}
+
+/// One saved leaf as the kind it names.
+///
+/// Every panel but a file is its name and nothing else. A file's name is the same for all of them,
+/// so it is the payload beside it that says which tab it is — and *only* which tab: the view mode
+/// the tab was left in is not in the payload and never rides a saved arrangement, because a
+/// per-document view mode is memory-only (T-202). See [`file_payload`].
+fn leaf(state: &PanelState) -> Option<PanelKind> {
+    if state.panel_name == PanelKind::TERMINAL {
+        let PanelInfo::Panel(payload) = &state.info else {
+            // A terminal panel from a build that wrote no payload names no pane.
+            return None;
+        };
+        return pane_from_payload(payload);
+    }
+    if state.panel_name == PanelKind::CHAT {
+        let PanelInfo::Panel(payload) = &state.info else {
+            // A chat panel from a build that wrote no payload names no tab.
+            return None;
+        };
+        return chat_from_payload(payload);
+    }
+    if state.panel_name == PanelKind::MISSION {
+        let PanelInfo::Panel(payload) = &state.info else {
+            // A mission panel from a build that wrote no payload names no mission.
+            return None;
+        };
+        return mission_from_payload(payload);
+    }
+    if state.panel_name == PanelKind::MISSION_VIEW {
+        let PanelInfo::Panel(payload) = &state.info else {
+            return None;
+        };
+        // The same payload, rebuilt into the other shape — which one it is is the name's answer.
+        return mission_from_payload(payload)
+            .and_then(|kind| kind.mission_id().map(PanelKind::MissionView));
+    }
+    let is_file = state.panel_name == PanelKind::File(String::new()).name();
+    let is_doc = state.panel_name == PanelKind::Kb(String::new()).name();
+    // The two database tabs write the same payload under names of their own, and rebuild from the
+    // key alone: a restored table re-queries its first page, a restored SQL tab gets its text back
+    // from `ViewPrefs::db_sql_drafts`.
+    let is_table = state.panel_name == PanelKind::DB_TABLE;
+    let is_sql = state.panel_name == PanelKind::DB_SQL;
+    let is_board = state.panel_name == PanelKind::BOARD;
+    if !is_file && !is_doc && !is_table && !is_sql && !is_board {
+        return PanelKind::from_name(&state.panel_name);
+    }
+    let PanelInfo::Panel(payload) = &state.info else {
+        // A file or document panel with no payload names no tab, so there is nothing to rebuild
+        // it as.
+        return None;
+    };
+    let kind = file_from_payload(payload)?;
+    // A knowledge-base document writes the same payload under its own panel name, so what the
+    // key rebuilds into is the name's answer rather than the payload's.
+    let key = || kind.tab_key().map(str::to_string);
+    match (is_doc, is_table, is_sql, is_board) {
+        (true, ..) => Some(PanelKind::Kb(key()?)),
+        (_, true, ..) => Some(PanelKind::DbTable(key()?)),
+        (_, _, true, _) => Some(PanelKind::DbSql(key()?)),
+        (_, _, _, true) => Some(PanelKind::Board(key()?)),
+        _ => Some(kind),
+    }
+}
+
+/// What a file panel writes into the dock's saved layout: **what it is looking at, not what it
+/// drew.** The tab key, and nothing else — the panel's name is the same for every file, so the key
+/// is what tells them apart.
+///
+/// **The view mode is deliberately not here** (T-202). A saved arrangement is on disk, and the
+/// ruling is that the *default* view mode persists — that is `UiSettings::markdown_open`, a
+/// setting — while a per-document override is remembered in memory only, on
+/// [`crate::state::editor::OpenFile::layout`], for as long as the tab is open. Writing the mode
+/// here is what made the override outlive a restart; a rail-mode or project switch keeps it
+/// anyway, because the `OpenFile` itself survives both and `AppState::settle_visibility` pushes
+/// its mode back onto the panel.
+pub fn file_payload(key: &str) -> serde_json::Value {
+    serde_json::json!({ "key": key })
+}
+
+/// What a terminal panel writes into the dock's saved layout: the pane it draws.
+///
+/// **Layout persists and harnesses do not**, so this is not a promise that the pane comes back — a
+/// leaf naming a pane the window no longer holds is dropped. It is what keeps a pane's *place*
+/// across the two things that rebuild the tree under it: a rail-mode switch and a project switch.
+pub fn pane_payload(pane_id: PaneId) -> serde_json::Value {
+    serde_json::json!({ "pane": pane_id.to_string() })
+}
+
+/// The same payload read back, or nothing for a payload that names no pane.
+pub fn pane_from_payload(payload: &serde_json::Value) -> Option<PanelKind> {
+    let pane_id = payload.get("pane")?.as_str()?.parse::<PaneId>().ok()?;
+    Some(PanelKind::Terminal(pane_id))
+}
+
+/// What a chat panel writes into the dock's saved layout: its own id, the way a terminal writes
+/// its pane's.
+pub fn chat_payload(id: ChatId) -> serde_json::Value {
+    serde_json::json!({ "chat": id.to_string() })
+}
+
+/// The same payload read back, or nothing for a payload that names no tab.
+pub fn chat_from_payload(payload: &serde_json::Value) -> Option<PanelKind> {
+    let id = payload.get("chat")?.as_str()?.parse::<ChatId>().ok()?;
+    Some(PanelKind::Chat(id))
+}
+
+/// What a mission panel writes: the anchor task it is about. **A mission has no id of its own**
+/// (M1), so this is a `TaskId` and the panel rebuilds from it — a leaf naming a task the project
+/// no longer holds draws the panel's own "no mission here" page rather than being dropped, since
+/// unlike a pane the record may still arrive.
+pub fn mission_payload(task_id: TaskId) -> serde_json::Value {
+    serde_json::json!({ "mission": task_id.to_string() })
+}
+
+/// The same payload read back, or nothing for a payload that names no mission.
+pub fn mission_from_payload(payload: &serde_json::Value) -> Option<PanelKind> {
+    let task_id = payload.get("mission")?.as_str()?.parse::<TaskId>().ok()?;
+    Some(PanelKind::Mission(task_id))
+}
+
+/// The same payload read back. A payload with no key names no tab and rebuilds to nothing.
+///
+/// A `layout` field from a build before T-202 is ignored rather than honoured: the tab opens in
+/// whatever the default says, which is the whole point of the ruling.
+pub fn file_from_payload(payload: &serde_json::Value) -> Option<PanelKind> {
+    let key = payload.get("key")?.as_str()?.to_string();
+    Some(PanelKind::File(key))
+}

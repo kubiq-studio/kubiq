@@ -25,7 +25,7 @@ An agent has changed files in a project that is a git repository. [Your first pr
 
 3. Choose how you read it. **unified** draws one column, removed lines then added lines, which suits added blocks. **split** draws old and new side by side, which suits edits to a line. Click each path in turn.
 4. Decide path by path. Press **+** on a row to stage it, so it goes into the next commit. Press **-** on a staged row to take it out again. The **+** on the **Unstaged** heading stages every path at once. Staging works per path, not per part of a file; [Stage a file](how-to-stage-a-file) has the detail.
-5. To throw a change away, right-click its row and pick **Discard**. Ubiq asks first, because a change that is not committed is in no commit to get back.
+5. To throw a change away, right-click its row and pick **Discard**. Kubiq asks first, because a change that is not committed is in no commit to get back.
 6. Write the commit message in the box under the lists: a subject, a blank line, then a body if you want one. **Commit** reads `Commit 2 files` for the count you staged, and is dimmed until there is a message and at least one staged path.
 
 ![The Changes panel with both paths under Staged and a message typed in the commit box above a Commit 2 files button](../img/guides/review-and-commit-2.png)

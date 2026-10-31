@@ -4,7 +4,7 @@ title: A2UI protocol — the wire
 kind: reference
 status: current
 summary: The Agent-to-UI protocol as an external contract — the six agent-to-renderer envelopes and the four renderer-to-agent ones, the surface lifecycle, the flat adjacency-list component model, JSON-Pointer data binding and two-way input, actions and function calls, catalog negotiation, the version landscape, and the SDKs that exist.
-read_when: you are deciding whether an agent-authored user interface can reach a Ubiq surface, or you need the exact shape of an A2UI message before writing a parser
+read_when: you are deciding whether an agent-authored user interface can reach a Kubiq surface, or you need the exact shape of an A2UI message before writing a parser
 updated: 2026-09-12
 verified: 2026-09-12
 depends_on: [ref-a2ui-catalog]
@@ -245,8 +245,8 @@ function calls may override it, and everything the agent sends is validated agai
 agent have to agree on well-known catalog ids for their systems to interoperate.
 
 The security argument rests here: an application that ships its own catalog **restricts the agent to
-exactly the components and visual language that exist in it**. Ubiq ships one, `catalogId`
-`https://ubiq.app/a2ui/v1_0/catalog.json`, extending the basic catalog by a single component; what
+exactly the components and visual language that exist in it**. Kubiq ships one, `catalogId`
+`https://kubiq.app/a2ui/v1_0/catalog.json`, extending the basic catalog by a single component; what
 is in it is described alongside the basic catalog in [A2UI catalogs and
 components](./a2ui-catalog.md).
 
@@ -254,7 +254,7 @@ components](./a2ui-catalog.md).
 
 - **AG-UI** — the standard transport binding for agent-to-user interaction.
 - **A2A** — a dedicated extension maps A2UI envelopes into A2A messages, standardising metadata
-  placement, capability negotiation and data-model synchronisation. Ubiq's own harness transport is
+  placement, capability negotiation and data-model synchronisation. Kubiq's own harness transport is
   a different protocol; see [the ACP wire reference](./acp-protocol.md).
 - **MCP** — A2UI travels over tool calls, tool outputs or resource subscriptions, and the repository
   carries a `catalogs/mcp` directory for it.
@@ -265,7 +265,7 @@ The repository holds a Python agent SDK under `agent_sdks/python`, renderers for
 Lit, React, Markdown and a shared `web_core`, and top-level `swift/`, `dart/` and `kotlin/`
 directories, alongside `conformance`, `blueprints`, `samples` and `eval`.
 
-**No Rust implementation exists** — not a renderer, not an agent SDK. Anything Ubiq does with A2UI
+**No Rust implementation exists** — not a renderer, not an agent SDK. Anything Kubiq does with A2UI
 starts from the JSON schemas. The separate A2A protocol has third-party Rust SDKs, but they carry
 no A2UI layer.
 
@@ -274,4 +274,4 @@ no A2UI layer.
 - [A2UI catalogs and components](./a2ui-catalog.md) — the widget vocabulary and the basic catalog.
 - [Agent Client Protocol (ACP) — wire reference](./acp-protocol.md) — the other agent protocol this
   library tracks.
-- [Proposal — A2UI surfaces in Ubiq](../inbox/a2ui-proposal.md) — what adopting this would cost.
+- [Proposal — A2UI surfaces in Kubiq](../inbox/a2ui-proposal.md) — what adopting this would cost.

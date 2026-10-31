@@ -7,7 +7,7 @@ summary: A session is a named piece of work that owns a folder and outlives the 
 read_when: you are changing how sessions are created, attached to, persisted, or how an agent is spawned into one
 updated: 2026-10-12
 verified: 2026-10-12
-code_anchors: [crates/ubiq-host/src/coordinator.rs, crates/ubiq-host/src/agent.rs, crates/ubiq-host/src/conversation.rs, crates/ubiq-host/src/conversation_record.rs, crates/agent-manager/src/session.rs]
+code_anchors: [crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/agent-manager/src/session.rs]
 depends_on: [tech-transport]
 review_cycle: monthly
 ---
@@ -72,21 +72,21 @@ what that composition reads and writes is the harness library's, in
 the pane: it is named by it, and it is deleted when the pane closes. No login is in it — a
 harness keeps its login in the account's own home (`D194`). One left behind by a process that was killed is deleted at the next start.
 
-**The record outlives the run directory.** A run is recorded under Ubiq's own root the moment it is
+**The record outlives the run directory.** A run is recorded under Kubiq's own root the moment it is
 composed — one directory per run, named by the pane's or the agent's id, holding the metadata of
 what was launched, where, as whom and in which face. Before that run directory is deleted — on a
 pane close, on a conversation being retired, and on the startup sweep of what a killed process left
 — the harness's own transcript is copied in beside that metadata and the record is stamped as
 finished. So a conversation's full record survives the pane it was held in, and a run that crashed
 leaves one too: its finish time is the sweep's, and its exit code is unknown rather than invented.
-Which files are a harness's record is the harness library's answer, not Ubiq's, and a harness that
+Which files are a harness's record is the harness library's answer, not Kubiq's, and a harness that
 does not answer leaves metadata alone.
 **A conversation the user marks persistent survives a restart, and the run directory is how.** That
 directory is not scaffolding around the conversation — it holds the harness's own session store,
 because every harness's config lever is pinned to it — so keeping it is what lets `--resume`, or
-ACP's `session/load`, work after Ubiq has been quit and reopened. A marked conversation is therefore
+ACP's `session/load`, work after Kubiq has been quit and reopened. A marked conversation is therefore
 *parked* rather than retired when its window closes or its harness exits: the harness stops, the
-directory stays. Ubiq's own row beside the metadata carries what a relaunch needs and the library's
+directory stays. Kubiq's own row beside the metadata carries what a relaunch needs and the library's
 record does not — the agent definition, the picks, where the message sequence had reached, the title, and the
 flag itself. Copying that directory instead of keeping it is what forks a conversation onto a second
 agent. `D97` is the decision and its costs.
@@ -111,8 +111,8 @@ as they are sent. When an ACP agent could not load its session, or refused the h
 replays them into the transcript so the user's side is not lost; an agent that loaded its session
 replays its own history, and a non-ACP harness is never given the file's replay (`D215`).
 
-**The row carries every flag that is Ubiq's rather than the harness's**, and persistence is one of
-three. `ConversationRecord` in `crates/ubiq-host/src/conversation_record.rs` holds `persistent`
+**The row carries every flag that is Kubiq's rather than the harness's**, and persistence is one of
+three. `ConversationRecord` in `crates/kubiq-host/src/conversation_record.rs` holds `persistent`
 beside `accept_all` — every permission the harness asks for answered with allow, in the host,
 unasked — and `debug_dump`, that one conversation's traffic written to a file. All three default to
 false where the row does not name them, all three are flipped from the conversation's own
@@ -174,14 +174,14 @@ coordinator; what crosses the bus is a description.
 
 ## Implementation
 
-`crates/ubiq-host/src/coordinator.rs` is the single source of truth. It runs on a thread of its own and
+`crates/kubiq-host/src/coordinator.rs` is the single source of truth. It runs on a thread of its own and
 holds one set of I/O resources per workspace, keyed by the ID the pane and the workspace share: the
 pseudo-terminal master for resizing, the writer for input, and a killer for closing. What crosses
 the bus is a description built at spawn — splitting that description from the resources is what
 lets it serialise. The session table itself, and the attach path over it, are a gap rather than a
 design change; both are listed in [`../backlog.md`](../backlog.md).
 
-`crates/ubiq-host/src/agent.rs` holds the agent-type registry the spawn path validates against, and
+`crates/kubiq-host/src/agent.rs` holds the agent-type registry the spawn path validates against, and
 the composer behind it. Its launch facts come from the embedded harness library rather than a
 hard-coded table — see [`../tech/agent-manager.md`](../tech/agent-manager.md). `Composed::exec` is
 what the coordinator asks for: it answers the harness under its policy when the run is confined, and

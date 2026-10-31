@@ -7,7 +7,7 @@ summary: The GPUI rendering model, the complete theme token set and the rule tha
 read_when: you are building or restyling a screen, adding a colour or a size, switching or extending a palette, raising a modal or the file picker, looking at a primitive on the style reference, or looking for the wireframe a layout came from
 updated: 2026-10-27
 verified: 2026-10-26
-code_anchors: [crates/ubiq/src/theme.rs, crates/ubiq/src/ui/onboarding/mod.rs, assets/icons/icons.yaml, _tools/icons.py, crates/ubiq/src/app/mod.rs, crates/ubiq/src/app/shell.rs, crates/ubiq/src/app/wire.rs, crates/ubiq/src/ui/viewer/diff.rs, crates/ubiq/src/ui/viewer/mod.rs, crates/ubiq/src/ui/viewer/md_options.rs, crates/ubiq/src/ui/mod.rs, crates/ubiq/src/ui/mark.rs, crates/ubiq/src/ui/work.rs, crates/ubiq/src/ui/outline.rs, crates/ubiq/src/ui/board/mod.rs, crates/ubiq/src/state/board.rs, crates/ubiq/src/ui/kit/mod.rs, crates/ubiq/src/ui/kit/controls.rs, crates/ubiq/src/ui/kit/colour.rs, crates/ubiq/src/ui/kit/files.rs, crates/ubiq/src/ui/kit/menu.rs, crates/ubiq/src/ui/kit/canvas.rs, crates/ubiq/src/ui/kit/blocks.rs, crates/ubiq/src/ui/kit/overlay.rs, crates/ubiq/src/state/overlay.rs, crates/ubiq/src/ui/kit/ribbon.rs, crates/ubiq/src/ui/kit/settings.rs, crates/ubiq/src/ui/kit/popover.rs, crates/ubiq/src/ui/size.rs, crates/ubiq/src/app/size.rs, crates/ubiq/src/ui/explorer.rs, crates/ubiq/src/ui/file_picker.rs, crates/ubiq/src/state/file_picker.rs, crates/ubiq/src/state/prefs.rs, crates/ubiq/src/ui/sink/style.rs, crates/ubiq/src/ui/shell.rs, crates/ubiq/src/ui/ribbon.rs, crates/ubiq/src/ui/settings.rs, crates/ubiq/src/ui/terminal.rs, crates/ubiq/src/ui/dock/mod.rs, crates/ubiq/src/ui/dock/skin.rs, crates/ubiq/src/ui/conversation/mod.rs, crates/ubiq/src/ui/teams/status.rs, crates/ubiq/src/ui/titlebar.rs, crates/ubiq/src/ui/navigator.rs, crates/ubiq/src/ui/viewer/scene.rs, crates/ubiq/tests/dismiss.rs, crates/ubiq/src/ui/remote_hosts.rs]
+code_anchors: [crates/kubiq/src/theme.rs, crates/kubiq/src/ui/onboarding/mod.rs, assets/icons/icons.yaml, _tools/icons.py, crates/kubiq/src/app/mod.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/wire.rs, crates/kubiq/src/ui/viewer/diff.rs, crates/kubiq/src/ui/viewer/mod.rs, crates/kubiq/src/ui/viewer/md_options.rs, crates/kubiq/src/ui/mod.rs, crates/kubiq/src/ui/mark.rs, crates/kubiq/src/ui/work.rs, crates/kubiq/src/ui/outline.rs, crates/kubiq/src/ui/board/mod.rs, crates/kubiq/src/state/board.rs, crates/kubiq/src/ui/kit/mod.rs, crates/kubiq/src/ui/kit/controls.rs, crates/kubiq/src/ui/kit/colour.rs, crates/kubiq/src/ui/kit/files.rs, crates/kubiq/src/ui/kit/menu.rs, crates/kubiq/src/ui/kit/canvas.rs, crates/kubiq/src/ui/kit/blocks.rs, crates/kubiq/src/ui/kit/overlay.rs, crates/kubiq/src/state/overlay.rs, crates/kubiq/src/ui/kit/ribbon.rs, crates/kubiq/src/ui/kit/settings.rs, crates/kubiq/src/ui/kit/popover.rs, crates/kubiq/src/ui/size.rs, crates/kubiq/src/app/size.rs, crates/kubiq/src/ui/explorer.rs, crates/kubiq/src/ui/file_picker.rs, crates/kubiq/src/state/file_picker.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/src/ui/sink/style.rs, crates/kubiq/src/ui/shell.rs, crates/kubiq/src/ui/ribbon.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ui/terminal.rs, crates/kubiq/src/ui/dock/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/ui/teams/status.rs, crates/kubiq/src/ui/titlebar.rs, crates/kubiq/src/ui/navigator.rs, crates/kubiq/src/ui/viewer/scene.rs, crates/kubiq/tests/dismiss.rs, crates/kubiq/src/ui/remote_hosts.rs]
 depends_on: [tech-architecture]
 review_cycle: quarterly
 ---
@@ -22,15 +22,15 @@ set on top for the components an application expects to be given rather than to 
 Three properties shape how UI code reads:
 
 **Views are structs that render.** A type implementing `Render` owns its state and produces an
-element tree from it. `AppState` in `crates/ubiq/src/app/mod.rs` is the root: it owns the window's own
+element tree from it. `AppState` in `crates/kubiq/src/app/mod.rs` is the root: it owns the window's own
 state — the dock, the console, the emulators — and one `OpenProject` per project the window holds,
 carrying that project's tree, files, panes and open chat tabs. Its render delegates to
-`crates/ubiq/src/ui/shell.rs`.
+`crates/kubiq/src/ui/shell.rs`.
 
 **`AppState` is the only owner of state, and not the only view.** The window's arrangement is a
 dock of movable panels, and the component library requires each panel to be an entity that renders,
 focuses and emits — `D42`, which half reverses `D17`. A panel is an adapter: `WorkbenchPanel` in
-`crates/ubiq/src/ui/dock/mod.rs` holds a weak `AppState` handle and a panel kind, and its render is
+`crates/kubiq/src/ui/dock/mod.rs` holds a weak `AppState` handle and a panel kind, and its render is
 a `match` that delegates to the same free functions every screen area is.
 
 **Mutation ends in a redraw request.** Nothing repaints because a field changed; it repaints because
@@ -40,7 +40,7 @@ that way, and one that forgets is a pane that stops updating.
 **A redraw the window has no use for is the one thing that may be skipped, and only for a stream.**
 The root is one entity, so any notify costs a whole window's frame — which a token arriving in a
 conversation nothing on screen is showing does not earn. `Message::ConversationUpdate` in
-`crates/ubiq/src/app/wire.rs` records the delta either way and asks for the frame only for a
+`crates/kubiq/src/app/wire.rs` records the delta either way and asks for the frame only for a
 conversation some surface shows, and only once per frame: `Conversation::notify_due()` is true for
 the first delta of a burst and the frame that draws it opens the next window, so a stream is
 coalesced by the drawing rather than by a timer, and nothing can be dropped. The test is the
@@ -50,29 +50,29 @@ counted is a screen that stops agreeing with the host.
 **Layout is flexbox.** Elements are composed with the same direction, grow, gap and alignment
 vocabulary as CSS flexbox, in Rust builder form.
 
-`crates/ubiq-app/src/lib.rs`'s `run` installs the component library and its assets, sets the palette
+`crates/kubiq-app/src/lib.rs`'s `run` installs the component library and its assets, sets the palette
 and binds the quit action, then asks for the first window. Windows themselves are opened by
 `app::open_project_window`, which is the only place one is created, so the first window and "open in
 a new window" go through the same code. Each window owns its own `AppState` and they share nothing
-but the palette, which is process-wide. Everything drawn belongs under `crates/ubiq/src/ui/`.
+but the palette, which is process-wide. Everything drawn belongs under `crates/kubiq/src/ui/`.
 
 ## Theme tokens
 
 **This document owns the token set.** Every colour in the UI comes from a token accessor in
-`crates/ubiq/src/theme.rs`. A literal colour anywhere else is a defect, with no exceptions worth
+`crates/kubiq/src/theme.rs`. A literal colour anywhere else is a defect, with no exceptions worth
 carving out — a one-off shade is the mechanism by which a themed application stops being themeable.
 
 **Content is not colour.** A colour read out of a document — a scene's stroke, its fill, the canvas
 ground it names, the pixels of an image embedded in it — is data the way the sixteen ANSI colours in
 a pane are data, and painting it is not a design decision. The rule above binds every colour the
-interface *chooses*: `crates/ubiq/src/ui/viewer/scene.rs` paints a scene's own colours and an
+interface *chooses*: `crates/kubiq/src/ui/viewer/scene.rs` paints a scene's own colours and an
 embedded image's bytes straight through, and reaches for a token for the only two things it decides
 itself — the placeholder a picture with nothing decodable in it draws as, and the text of a failure
 note.
 
 **Which token a *state* reads in is the interface's choice, and it is made in one file.**
-`crates/ubiq/src/ui/work.rs` is where a work record's state becomes a token: an activity or a bucket
-becomes a status colour, and a role becomes a glyph. `ubiq_proto::work` keeps the words and this
+`crates/kubiq/src/ui/work.rs` is where a work record's state becomes a token: an activity or a bucket
+becomes a status colour, and a role becomes a glyph. `kubiq_proto::work` keeps the words and this
 document's tokens keep the values, so the agents screen's columns, the Teams graph, the tasks
 board and the status bar cannot disagree about what running looks like.
 
@@ -232,7 +232,7 @@ survive as three of the Size section's four built-in presets — Compact, Regula
 alongside a fourth, Large, at 1.30.
 
 **The rule is held mechanically, the way the crate boundary is.** `just ui` rejects
-`text_size(px(<digit>` anywhere under `crates/ubiq/src`, and a literal icon size
+`text_size(px(<digit>` anywhere under `crates/kubiq/src`, and a literal icon size
 (`with_size(px(<digit>`, `Size::Size(px(<digit>`) beside it, next to the check that the interface
 never names the host. The digit is load-bearing: `text_size(px(font))`, where the size came out of
 `theme::font`, is legitimate and a bare `text_size(px(` would reject it.
@@ -262,12 +262,12 @@ to, measured from zero.
 
 **The window's rem size is the UI scale (`D153`).** `theme::dress_component_library` writes
 `gpui_component::Theme::font_size = px(REM_BASE * ui_scale())` (`REM_BASE` 16.0, the value in force
-before Ubiq ever wrote one) and `mono_font_size` from the content base. `gpui_component::Root` calls
+before Kubiq ever wrote one) and `mono_font_size` from the content base. `gpui_component::Root` calls
 `window.set_rem_size(cx.theme().font_size)` on every paint, and GPUI's whole Tailwind spacing scale
 — `p_3`, `gap_2`, `w_4`, `h_8` — expands to `rems(...)`, so that one number is what makes several
 hundred hand-placed spacings and every library internal measured in rems follow the scale with no
 call-site change. It is why a scale change calls `theme::redress`, not just `cx.notify()`. The cost
-is `D153`'s: Ubiq inherits the library's spacing judgement wholesale.
+is `D153`'s: Kubiq inherits the library's spacing judgement wholesale.
 
 **Switching goes through `theme::set_theme`, never through `Theme::set`.** It takes the two colour
 axes — palette and accent — resolves them into the one `Theme` every accessor reads, and dresses the
@@ -277,13 +277,13 @@ resolve, because a scale is a number the user set rather than something derived 
 hand. So it lives in a thread-local cell of its own beside the theme's, read through
 `theme::metrics` and set through `theme::set_metrics`, which is what makes a palette or accent
 switch structurally unable to undo a size the user chose — there is no resolution for it to be
-dropped by. Two theme systems are live at once: Ubiq's tokens, and the component library's
+dropped by. Two theme systems are live at once: Kubiq's tokens, and the component library's
 own theme, which is what colours the editor, the textarea, the scrollbars and the markdown view.
 `set_theme` moves both — `Theme::change` first, from the palette's `Mode`, then
-`theme::dress_component_library` writes Ubiq's tokens into the library's `ThemeColor` through
+`theme::dress_component_library` writes Kubiq's tokens into the library's `ThemeColor` through
 `DerefMut` and `sync_base` pushes the result down to the layer that paints scrollbars and resize
 handles. Only the fields that plainly correspond are written, and the two easy to mistake are the
-library's `accent`, which is its hover ground, and `primary`, which is the brand colour Ubiq's
+library's `accent`, which is its hover ground, and `primary`, which is the brand colour Kubiq's
 `accent` maps to. The theme is process-wide, so a second window opens in the palette, accent and
 size axis the first is in, and switching in either switches both.
 
@@ -321,7 +321,7 @@ restyling the shell should be one file to visit.
 | `ONBOARDING_WIDTH`, `ONBOARDING_HEIGHT` | The onboarding dialog: fixed, so a markdown step scrolls inside it and moving between steps never resizes the panel |
 | `ONBOARDING_CALLOUT_WIDTH`, `ONBOARDING_CALLOUT_ROOM`, `ONBOARDING_DOT`, `ONBOARDING_GLOW` | The card a highlight step shows beside its target, the height the placement arithmetic assumes for it (as `HELP_BALLOON_ROOM` does for the help balloon), a progress dot's side, and the width of the pulsing ring around a highlight's outline |
 | `SETTINGS_WIDTH`, `SETTINGS_HEIGHT`, `SETTINGS_NAV_WIDTH` | A settings page overlay: a fixed-size panel with a nav, not a one-question modal and not a resizable dialog. Both containers — application settings and the project dialog — take all three, because one component draws the nav-and-body split for both |
-| `A2UI_IMAGE_ICON`, `A2UI_IMAGE_AVATAR`, `A2UI_IMAGE_SMALL`, `A2UI_IMAGE_MEDIUM`, `A2UI_IMAGE_LARGE`, `A2UI_IMAGE_HEADER_H` | The six sizes an A2UI `Image` variant maps onto. The catalog names the variant and this file decides how big it is, because a payload Ubiq did not write must not be able to state a size |
+| `A2UI_IMAGE_ICON`, `A2UI_IMAGE_AVATAR`, `A2UI_IMAGE_SMALL`, `A2UI_IMAGE_MEDIUM`, `A2UI_IMAGE_LARGE`, `A2UI_IMAGE_HEADER_H` | The six sizes an A2UI `Image` variant maps onto. The catalog names the variant and this file decides how big it is, because a payload Kubiq did not write must not be able to state a size |
 | `A2UI_SVG_MAX` | The box an agent-authored picture is fitted into, aspect preserved — the ceiling on how much of a surface one drawing may take |
 | `MdWidth`, `MdDensity`, `MD_AVG_CHAR_WIDTH_EM`, `MD_CODE_LINE_HEIGHT`, `MD_INLINE_CODE_SIZE_EM` and the `md_*` functions | The Markdown preview's typography — `_docs/inbox/markdown-improvement-proposal.md` §3–§7, read by `ui/viewer/markdown.rs`. Unlike the rest of the table these are ratios over the body font size (`em`/`rem`), not `ui_scale`-scaled pixels, so a font-size change scales the preview without a second accessor |
 | `MdMinimapSide` | Which edge the markdown minimap docks to (proposal §12, T-118), `Left` by default — a plain two-value enum, not a size, so it takes no `scaled()` accessor; read by both `ui/plan.rs` and `ui/viewer/mod.rs` off the one `UiSettings::md_minimap_side` |
@@ -363,7 +363,7 @@ a different reason: it is shown and hidden rather than dragged, and so is the ag
 sidebar.
 
 Syntax colours are the one thing not tokenised here. They come from the component library's own
-highlighter theme, which `theme::set_theme` keeps in step with Ubiq's palette through the `Mode` the
+highlighter theme, which `theme::set_theme` keeps in step with Kubiq's palette through the `Mode` the
 registry row carries, so the editor and the
 chat's markdown never sit in a different mode from the chrome. That is the same posture as the
 library's buttons and scrollbars: not a literal, and so not an exception to the rule.
@@ -396,7 +396,7 @@ page rather than reasoned about.
   pane carries it yet, because focus across split panes is designed ahead of the code. A text field
   that holds the keyboard keeps that left edge and **adds an underline** on the bottom, so the
   active box is the one that is underlined. That treatment is `kit::field` in
-  `crates/ubiq/src/ui/kit/controls.rs`, the container every free-text input sits in — a surface with
+  `crates/kubiq/src/ui/kit/controls.rs`, the container every free-text input sits in — a surface with
   a coloured left edge, joined by a bottom underline in the focus colour while the input holds the
   keyboard. The command field, the project search, the chat composer,
   each agents column's composer, the board's filter and form fields, and the explorer's and the file picker's
@@ -406,18 +406,18 @@ page rather than reasoned about.
 - **Pane chrome stays two rows at most.** Identity and state on the first, context — folder, model,
   remaining context window — on the second. Anything more takes space from the terminal, which is
   the thing the user is actually reading.
-- **The terminal body is never styled by Ubiq.** A pane's emulator is given the surface, text and
+- **The terminal body is never styled by Kubiq.** A pane's emulator is given the surface, text and
   cursor tokens plus the terminal group — `pane_bg`, `text`, `accent`, `selection_background`,
   `link_underline`, `link_underline_hover` — so the surface it sits on matches the shell. The
   sixteen ANSI colours are the emulator's own defaults, because those are the colours the harness is
   choosing between, and remapping them changes what the agent said.
-  `crates/ubiq/src/ui/terminal.rs` builds that palette in `config()`, and it is the only
+  `crates/kubiq/src/ui/terminal.rs` builds that palette in `config()`, and it is the only
   place in the UI that converts a token into anything but a GPUI colour.
 - **Spacing comes from the framework's scale**, not from arbitrary pixel values. Sizes that are part
   of the layout — chrome heights, panel widths — are constants in `theme.rs` instead.
 - **There are no radii.** See *The shape of a surface* below; a corner radius anywhere is a defect
   in the same way a literal colour is.
-- **An empty page is the brand, not furniture.** `crates/ubiq/src/ui/mark.rs` owns it for every
+- **An empty page is the brand, not furniture.** `crates/kubiq/src/ui/mark.rs` owns it for every
   screen that has one: `alone()` is the mark at 200px and half opacity on the window's ground, which
   is what the centre panel shows with nothing open, and `backdrop()` paints the same mark at 0.16
   under a page's own words. The ring is an `svg()` tinted with `theme::mark`, one file for both
@@ -426,12 +426,12 @@ page rather than reasoned about.
 
 ## The shape of a surface
 
-**Nothing is rounded, and the left edge does the identifying.** Ubiq's surfaces are square; a
+**Nothing is rounded, and the left edge does the identifying.** Kubiq's surfaces are square; a
 coloured border on the left is what says what a surface is — accent for the thing the user is
 acting in, the status colour for something being reported, the project colour for the window
 itself. `ACCENT_EDGE` in `theme.rs` is its width, and `ui::kit::slab` is the shape.
 
-**The widgets Ubiq does not draw are square too.** `theme::dress_component_library` writes
+**The widgets Kubiq does not draw are square too.** `theme::dress_component_library` writes
 `Theme::radius` and `Theme::radius_lg` as zero, which is the one number every corner the component
 library rounds comes from — including the ones it would otherwise keep round whatever the theme
 said, since its `radius_full()` answers zero rather than a pill when the base radius is. A slider
@@ -520,7 +520,7 @@ answers "is anything above me", and an overlay something can be painted over han
 through `ui::dismiss(&view, rung, …)` instead of `ui::handler`, which yields while it is covered.
 One gesture peels one layer, exactly as Escape does. **Adding an overlay is a rung there and an arm
 in `top_layer`, and nothing else** — every layer below it is protected without being edited, which
-is what the hand-written guard per pair could never give (`D141`). `crates/ubiq/tests/dismiss.rs`
+is what the hand-written guard per pair could never give (`D141`). `crates/kubiq/tests/dismiss.rs`
 asserts it.
 
 **Escape is the window's, not the modal's.** A `kit::overlay` modal is a function returning an
@@ -533,7 +533,7 @@ everything typed into it. With nothing up it calls `cx.propagate()`, so a bare E
 explorer's, the terminal's and the search panel's; a surface that binds Escape at its own depth — the
 file picker, the navigator, the explorer's filter — still wins, because a deeper binding fires first.
 A modal raised in `ui::shell` without a rung in that list is a modal Escape walks past, which is what
-`crates/ubiq/tests/dismiss.rs` asserts.
+`crates/kubiq/tests/dismiss.rs` asserts.
 
 **A modal's body is not always static.** The harness login modal embeds a live `TerminalView` in
 its running step — a pane with a real byte stream, resized and focused exactly as a dock pane is.
@@ -668,7 +668,7 @@ exactly that reason. A handler that turns out to have no answer calls `cx.propag
 gets its key back — which is how the picker's `left` and `right` are caret keys again in a flat list.
 
 **A filter field and the tree under it are two focuses, and that is the default for every tree and
-collapsible list in Ubiq.** A key means what the focus it is aimed at says it means: the field keeps
+collapsible list in Kubiq.** A key means what the focus it is aimed at says it means: the field keeps
 every key a field keeps — Backspace first of all, which must never reach a row — so the list's own
 keys are bound at the panel and are live only while the list holds the keyboard. Three keys cross
 the boundary, because a field with a list under it is one control to the hand: `down` and `tab` step
@@ -696,7 +696,7 @@ rows are furniture, and the content zoom is not theirs to follow.
 
 **`gpui-component` first.** Its `Icon`, `Kbd`, `Badge`, `Editor`, `Textarea`, `Scrollbar`, markdown
 view and dock are used directly — the dock being the largest widget in the library and the whole of
-the window's arrangement, `D42`. `crates/ubiq/src/ui/kit/` holds only what the library does not give
+the window's arrangement, `D42`. `crates/kubiq/src/ui/kit/` holds only what the library does not give
 us — the slab every surface is drawn in and the card that is a slab you can pick, the field every
 text entry sits in, the state dot, the pill, the state chip, the removable tag whose `×` drops it
 and whose label does something when clicked, the toggle pill for an independent facet and the choice
@@ -773,7 +773,7 @@ featured swatches is a different control from a full HSV surface.
 `gpui_component::slider` rather than drawing a track of its own: the drag, the pointer capture, the
 keyboard and the accessibility role come with it, and none of them is worth rewriting for a
 palette. What the kit adds is the palette — the track's fill through the library's `background` and
-the thumb through its `text`, which is how a widget we do not draw gets Ubiq's tokens — a leading
+the thumb through its `text`, which is how a widget we do not draw gets Kubiq's tokens — a leading
 and a trailing icon slot, and a mandatory tooltip, taken by `Slider::new` because a slider carries
 no number and no unit and is therefore always an unlabelled control. The icons are the scale:
 `size-interface-small` at one end and `size-interface-large` at the other says what the axis means
@@ -927,7 +927,7 @@ verb: a section's `Add …`, and a one-off action a page offers once (`Save`, `C
 **Some surfaces are painted, not laid out.** Flexbox and `gpui-component` cover almost everything;
 what is left is geometry a box model cannot express — a dotted ground, a cubic connector between two
 points, a dashed outline, a trail of grains, a ring at a percentage. Those go through GPUI's
-`canvas` element, and the reusable ones are `crates/ubiq/src/ui/kit/canvas.rs`: each is one layer
+`canvas` element, and the reusable ones are `crates/kubiq/src/ui/kit/canvas.rs`: each is one layer
 that fills its parent absolutely, takes no click, and knows nothing about what it is drawing, so a
 caller stacks them in the order they should read. The canvas element itself is sized to fill that
 layer; a canvas that only laid out to its content would paint into a strip at the top of the pane. `progress_ring` in `controls.rs` is the same
@@ -939,7 +939,7 @@ once; a band may carry a radial tick (`Band::tick`), which `kit::quota_ring` use
 coloured by `theme::pace_tick`.
 
 **A graph is a board of blocks, and one module draws every one of them.**
-`crates/ubiq/src/ui/kit/blocks.rs` is the layer above `canvas.rs`: the stack those painted layers go
+`crates/kubiq/src/ui/kit/blocks.rs` is the layer above `canvas.rs`: the stack those painted layers go
 into, in the one order a graph reads in — ground, the fences on it, the links between what they hold,
 the blocks, and whatever goes over the lot. A caller adds things as it measures them and gets that
 order anyway, so two screens cannot draw the same graph with the z-order a notch apart. `Board` also
@@ -948,8 +948,8 @@ anyone measuring the geometry twice; `block` and `handle` answer the positioned,
 the caller hangs its own `on_drag` on it, which keeps the carried type the screen's rather than
 something the kit has to name. It takes plain rectangles at 100% zoom and scales all of them by the
 one zoom, so no call site multiplies a coordinate itself. The Teams canvas
-(`crates/ubiq/src/ui/teams/graph.rs`) and the kitchen sink's teamsim testbed
-(`crates/ubiq/src/ui/sink/teamsim.rs`) both draw through it. What it does *not* know is where
+(`crates/kubiq/src/ui/teams/graph.rs`) and the kitchen sink's teamsim testbed
+(`crates/kubiq/src/ui/sink/teamsim.rs`) both draw through it. What it does *not* know is where
 anything goes: that is `state/layout.rs`'s.
 
 **The kit knows nothing about the workbench.** Its interactive helpers take a plain
@@ -968,12 +968,12 @@ the layout pass, after the parent's has returned. The one thing a panel may not 
 `AppState` outside a render — the dock asks a panel whether it is visible while the window is
 mid-update, and the window pushes that answer to the panel rather than the panel reading it back.
 
-**The dock is the component library's; the skin is Ubiq's.** `crates/ubiq/src/ui/dock/skin.rs`
+**The dock is the component library's; the skin is Kubiq's.** `crates/kubiq/src/ui/dock/skin.rs`
 implements the library's three renderer traits and draws every pixel of a group: the tab strip at
 the same height as `kit::tab_strip`, the displayed tab marked on its bottom edge, a dot per panel,
 a close only where the panel offers one, the drop indicator, and the regions' resize strips. The
 tokens, the square surfaces and the coloured left edge therefore hold inside a group exactly as
-outside one, and Ubiq writes no drag, no drop geometry and no layout serialisation.
+outside one, and Kubiq writes no drag, no drop geometry and no layout serialisation.
 
 **Exactly one menu is open at a time**, tracked as a single `Option<MenuId>` on the workbench state.
 A trigger *opens* rather than toggles, so the open panel's outside-click dismissal cannot race the
@@ -1036,7 +1036,7 @@ last frame rather than state the application owns.
 
 **A row keyed by a ULID takes its id through `ui::eid`.** `ElementId`'s tuple form carries a `u64`
 and a ULID is twice that, so a row that names a task, a step or a project is built by `eid` and
-`eid2` in `crates/ubiq/src/ui/mod.rs` — one place, rather than the same `format!` at every call
+`eid2` in `crates/kubiq/src/ui/mod.rs` — one place, rather than the same `format!` at every call
 site. Hashing the id into a `u64` instead would collide silently, and an id that is not the id is a
 trap rather than a shortcut. A row keyed by an *enum discriminant* keeps the tuple form: a column
 and a filter pill are one of a fixed few, and nothing is gained by naming them in words.
@@ -1052,7 +1052,7 @@ can see instead of something the documentation asserts. What the page holds and 
 
 To add an area to the window:
 
-1. Put its state in `crates/ubiq/src/state/`, as data plus small mutators. Nothing that draws, and no
+1. Put its state in `crates/kubiq/src/state/`, as data plus small mutators. Nothing that draws, and no
    component-library type unless the widget's own state *is* the thing being modelled —
    `state/editor.rs` holds a buffer per open file for that reason, and it is the exception.
 2. Add a field to `AppState`, or to `OpenProject` when it belongs to a project rather than to the
@@ -1063,7 +1063,7 @@ To add an area to the window:
    its own view over that reach, and a map back from a record to the project that minted it — and
    resolves that project per record rather than assuming the active one. The Teams span is the
    worked example (`D154`).
-3. Write `crates/ubiq/src/ui/<area>.rs` as `fn render(&AppState, &mut Context<AppState>)`. Hang it
+3. Write `crates/kubiq/src/ui/<area>.rs` as `fn render(&AppState, &mut Context<AppState>)`. Hang it
    off `shell.rs` if it is chrome, or give it a `PanelKind` and an arm in `ui::dock::body` if it is
    a panel — [`../features/workbench.md`](../features/workbench.md) has that path in full.
 4. Reach for a `gpui-component` widget first. If there is none, and a second caller wants the same thing,
@@ -1094,7 +1094,7 @@ from `gpui-component` came out of a coherent family, so the shape count, the ink
 and the two-decimal rule are lifted for both — `sun` is nine shapes, `github` fills the box.
 `just icons-check` enforces the mechanical half; `just icons-sheet` and `just icons-audit` render
 the review sheets an icon is judged on, at 16, 24 and 64px in both palettes, against a frozen canon
-strip. The rules and the drawing loop are the `ubiq-icons` skill.
+strip. The rules and the drawing loop are the `kubiq-icons` skill.
 
 Micro-animation is not part of any of this: it is a state's property, driven by `with_animation` on
 the element, and it never produces an icon variant. The writing mark in `ui/conversation/mod.rs` is
@@ -1110,10 +1110,10 @@ prototype edited to satisfy a linter stops being evidence of what was designed.
 
 | Path | Holds |
 |---|---|
-| `_docs/design/wireframe-opus/` | The four earlier screen wireframes — project launcher, session, subagents, settings — plus a combined board. Superseded by `ubiq-layout.png` for the shell; see `D16` |
+| `_docs/design/wireframe-opus/` | The four earlier screen wireframes — project launcher, session, subagents, settings — plus a combined board. Superseded by `kubiq-layout.png` for the shell; see `D16` |
 | `_docs/design/output/` | HTML prototypes and their stylesheet, captured from a design tool |
 | `_docs/design/_old/` | Superseded wireframes, kept for reference |
-| `_docs/design/ubiq-layout.png` | **The target layout.** The workbench shell is built against this one |
+| `_docs/design/kubiq-layout.png` | **The target layout.** The workbench shell is built against this one |
 
 The wireframes are authored in a compact YAML form rather than by hand-editing diagram JSON; that
 format and its converter are described in [`diagram-format.md`](./diagram-format.md).

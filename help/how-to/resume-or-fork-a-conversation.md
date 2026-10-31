@@ -17,8 +17,8 @@ To resume one that has stopped:
 To fork one:
 
 1. Wait until the agent is idle, then open the same menu.
-2. Pick **Fork**. Ubiq copies the conversation and launches a second agent from this point; the first is untouched.
+2. Pick **Fork**. Kubiq copies the conversation and launches a second agent from this point; the first is untouched.
 
-To have a conversation come back after Ubiq restarts, pick **Make persistent** from the menu, or switch on **Restore conversations** under **Settings**, then **Editor**.
+To have a conversation come back after Kubiq restarts, pick **Make persistent** from the menu, or switch on **Restore conversations** under **Settings**, then **Editor**.
 
 **Resume** is dimmed while the agent is running, and **Fork** is dimmed while it is working and for harnesses that keep no history of their own. [Inside a conversation](agents-conversation) lists every item of the menu.

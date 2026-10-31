@@ -9,7 +9,7 @@ related: [settings, how-to-sign-in-a-connector, agents-accounts]
 ---
 
 A connector is you, signed in at a code host or workspace provider: GitHub, GitLab, Gitea, Azure
-DevOps, Atlassian or Google Workspace, in the cloud or on your own install. Ubiq uses it to list the
+DevOps, Atlassian or Google Workspace, in the cloud or on your own install. Kubiq uses it to list the
 repositories you clone and to reach issues and pull requests. Several connectors for one provider are
 ordinary, such as a work identity and a personal one. This is not the account a harness signs in as;
 see [Accounts](agents-accounts).
@@ -20,8 +20,8 @@ see [Accounts](agents-accounts).
 |---|---|
 | **Connect…** | Opens the connect dialog; its steps are in [Sign in a connector](how-to-sign-in-a-connector) |
 | **Provider**, **Instance** | In that dialog: which service, and the base URL of a self-managed install; empty means the provider's own cloud |
-| **How** | **Paste a token** (needs no registered application), **Enter a code** (you type a code Ubiq shows) or **Open a browser**; only the ways that work for that provider are offered |
-| **Application** | Which registered application Ubiq signs in through: **Default** where this build ships one, one of your registrations, or **Another instance…** |
+| **How** | **Paste a token** (needs no registered application), **Enter a code** (you type a code Kubiq shows) or **Open a browser**; only the ways that work for that provider are offered |
+| **Application** | Which registered application Kubiq signs in through: **Default** where this build ships one, one of your registrations, or **Another instance…** |
 | **Name** | What to call the identity; you can rename it later |
 | A connection row | Its name, the account it is, where it lives (**cloud** or the install's URL), a chip reading `valid`, `expired`, `unknown` or `missing`, and `pinned` when you trusted that server's certificate |
 | **Check** | Re-reads the stored token's expiry; a connection says `valid` when it has not expired, not that it will work |

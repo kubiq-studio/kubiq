@@ -24,7 +24,7 @@ stays true even when the alternative is gone. Cite an entry as `D7`, never by it
 
 ---
 
-### D1 — Ubiq integrates a terminal emulator rather than writing one
+### D1 — Kubiq integrates a terminal emulator rather than writing one
 
 Harnesses use the full ANSI vocabulary, the alternate screen and absolute cursor addressing. Writing
 a VT parser and terminal state engine is a project in itself, and a solved one.
@@ -91,7 +91,7 @@ than a module inside it.
 **Cost:** a boundary to maintain and one more manifest. It buys a library that other tools can
 embed, and that builds with no UI dependency at all.
 
-### D9 — Ubiq embeds the harness library rather than shelling out to `am`
+### D9 — Kubiq embeds the harness library rather than shelling out to `am`
 
 The application constructs a run programmatically and launches it in-process.
 
@@ -103,7 +103,7 @@ change here.
 
 ### D10 — Every colour goes through a theme token
 
-No literal colour outside `crates/ubiq/src/theme.rs`, and every token has a value in every palette
+No literal colour outside `crates/kubiq/src/theme.rs`, and every token has a value in every palette
 the registry holds — `D96` is what makes that a registry rather than a pair.
 
 **Cost:** a thread-local read per colour, and a token to name before any new shade can be used.
@@ -152,10 +152,10 @@ Captured prototypes and wireframes keep no frontmatter and are skipped by the li
 **Cost:** that material is invisible to the catalogue and the drift queue, so a wireframe can go
 stale silently. `ui-and-design.md` carries the pointer into it, and the reconciliation rule.
 
-### D16 — `ubiq-layout.png` is the target shell, and the earlier prototypes are superseded
+### D16 — `kubiq-layout.png` is the target shell, and the earlier prototypes are superseded
 
 The workbench is an IDE-shaped window — activity rail, explorer, tabbed editor, bottom terminal
-dock, right-hand chat — built against `_docs/design/ubiq-layout.png`. The `wireframe-opus` screens
+dock, right-hand chat — built against `_docs/design/kubiq-layout.png`. The `wireframe-opus` screens
 and the captured HTML prototypes under `_docs/design/output/` describe an earlier shape and no
 longer describe the shell.
 
@@ -165,7 +165,7 @@ divergence — `D15` exempts that folder from every check.
 
 ### D17 — A thin kit over the component library, and screen areas as functions rather than views
 
-`gpui-component` is used directly wherever it has a widget. `crates/ubiq/src/ui/kit/` holds only
+`gpui-component` is used directly wherever it has a widget. `crates/kubiq/src/ui/kit/` holds only
 what it lacks, is generic over no view, and never names `AppState`. Each screen area is a free
 function over the root view rather than a view of its own.
 
@@ -209,10 +209,10 @@ needs somewhere else to live before it can be shared.
 
 ### D20 — The emulator is `gpui-terminal`, vendored into the workspace
 
-`D1` says Ubiq integrates an emulator rather than writing one; this names it. `gpui-terminal` is a
+`D1` says Kubiq integrates an emulator rather than writing one; this names it. `gpui-terminal` is a
 GPUI component that parses VT with `alacritty_terminal` and accepts any `Read`/`Write` pair, which
 is exactly the shape a pane needs. It sits in `vendor/` as a workspace member rather than being
-pulled from crates.io or git, because upstream builds against the published `gpui` and Ubiq builds
+pulled from crates.io or git, because upstream builds against the published `gpui` and Kubiq builds
 against Zed's `main`, where two calls have a different shape.
 
 **Cost:** a copy of somebody else's crate in the tree, with the divergence recorded by hand and
@@ -223,7 +223,7 @@ honest as the README that holds it.
 
 The emulator wants something to read and something to write. It is given a `Write` that turns a
 keystroke into an input message and a blocking `Read` fed by the output messages routed to that
-pane, both from `crates/ubiq-proto/src/bus.rs`. The obvious alternative — handing the emulator the
+pane, both from `crates/kubiq-proto/src/bus.rs`. The obvious alternative — handing the emulator the
 pseudo-terminal directly, which is what its own example does — would have been fewer moving parts.
 
 **Why:** it is what makes rule 2 structural rather than aspirational. The UI cannot reach a
@@ -265,15 +265,15 @@ own: emptying it closes it, from whichever window the user was clicking in.
 
 ### D24 — Diagnostics go to one process-wide sink, not over the bus
 
-Every subsystem logs with `tracing`, a layer in `crates/ubiq-proto/src/log.rs` pushes each event into one
+Every subsystem logs with `tracing`, a layer in `crates/kubiq-proto/src/log.rs` pushes each event into one
 ring the whole process shares, and the window's console reads that ring directly. The alternative
 that would have honoured `D3` literally was a log message on the transport, with the coordinator
 forwarding its records to the window that owns it.
 
 **Why:** collection has to cost a subsystem nothing, or it does not happen. A `tracing::info!` with
 no sink to acquire and no handle to thread through a signature is what makes the harness library, the
-emulator and the framework collectable on the same terms as Ubiq's own modules — and none of them
-can be taught to send a message on Ubiq's bus. The sink stays outside `D3` on its own terms: records
+emulator and the framework collectable on the same terms as Kubiq's own modules — and none of them
+can be taught to send a message on Kubiq's bus. The sink stays outside `D3` on its own terms: records
 travel one way, a producer never reads, nothing in a record is a pane's state, a path or a handle,
 and neither half learns anything from it. A message-based log would also have made the console blind
 to everything emitted before the first window and after the last one.
@@ -316,12 +316,12 @@ so two id schemes coexist — but they never meet.
 
 ### D27 — The boundary between the halves is four crates, not a written rule
 
-`ubiq-proto` holds the contract, `ubiq-host` the processes and the catalogue, `ubiq` the interface,
-and `ubiq-app` the binary. The interface does not depend on the host, so reaching around the bus is
+`kubiq-proto` holds the contract, `kubiq-host` the processes and the catalogue, `kubiq` the interface,
+and `kubiq-app` the binary. The interface does not depend on the host, so reaching around the bus is
 a compile error rather than a one-line import. `just host` and `just ui` check the two directions
 mechanically, the way `just core` checks the harness library.
 
-The binary is its own crate because a `[[bin]]` inside `crates/ubiq` shares that package's
+The binary is its own crate because a `[[bin]]` inside `crates/kubiq` shares that package's
 `[dependencies]`: naming the host there would put it in the library's graph too, and Cargo has no
 per-target dependency table. An optional dependency does not help either, because an enabled one is
 a real dependency of every target in the package.
@@ -360,29 +360,29 @@ discarded rather than migrated.
 design question. And the host cannot validate view state at all, so a bad blob is only ever
 discovered by the half that wrote it.
 
-### D30 — Ubiq writes nothing inside a project's folder
+### D30 — Kubiq writes nothing inside a project's folder
 
-Everything Ubiq remembers about a project lives under its own config root, keyed by the project's
+Everything Kubiq remembers about a project lives under its own config root, keyed by the project's
 ULID. Forgetting a project then cleans up completely, a read-only or missing folder still has its
 view state, no repository acquires a file to gitignore, and no team has to agree on one. The git
 directory is inside the project's folder, so this covers it too: a *read* never writes a ref, never
 stages, and never lets libgit2 refresh the index stat cache.
 
-That root is movable — `--config-root`, then `UBIQ_CONFIG_DIR`, then the nearest `ubiq.toml`, then
-`~/.config/ubiq` — so a development run is self-contained by construction rather than by care. A
+That root is movable — `--config-root`, then `KUBIQ_CONFIG_DIR`, then the nearest `kubiq.toml`, then
+`~/.config/kubiq` — so a development run is self-contained by construction rather than by care. A
 malformed bootstrap file is an error, never a fallback: falling back to the user's real catalogue
 is precisely the accident the mechanism exists to prevent.
 
 **Cost:** a config root you cannot see is a foot-gun, which is why the status bar says when it is
 not the default. Redirecting the embedded harness library's own roots is not done yet, so a
-development run is self-contained only as far as Ubiq's own stores, which is filed as a gap.
+development run is self-contained only as far as Kubiq's own stores, which is filed as a gap.
 
 **Half reversed by `D122`.** What reversed is "never stages, never writes a ref": the Git screen's
 `WriteProjectGit` mutates the repository the user asked it to. What stands is the half that
-mattered for Ubiq's own files — nothing Ubiq owns lands in the project's folder — and the half
+mattered for Kubiq's own files — nothing Kubiq owns lands in the project's folder — and the half
 that keeps a status walk from touching the index.
 
-**One exception, by `D173`.** A **project-managed** project keeps its data in a `.ubiq/` folder
+**One exception, by `D173`.** A **project-managed** project keeps its data in a `.kubiq/` folder
 inside its own directory, because the point of that mode is that the data is committed and shared.
 This is the default rule for every other project, and the exception is chosen once, by the person
 creating the project, in the creation panel.
@@ -403,11 +403,11 @@ added through some future non-interactive path.
 
 ### D32 — A project's folder is chosen in the platform's dialog
 
-Ubiq drew its own folder browser, fed by a `BrowseHost` message, on the reasoning that a native
+Kubiq drew its own folder browser, fed by a `BrowseHost` message, on the reasoning that a native
 dialog browses the *interface's* filesystem rather than the host's. That reasoning is sound and the
 result was still worse: a list of directory names, with no bookmarks, no network volumes, no path
 field, no keyboard completion, and no resemblance to the chooser every other application on the
-machine opens. Ubiq would be rebuilding the file manager, badly, to protect a separation it does not
+machine opens. Kubiq would be rebuilding the file manager, badly, to protect a separation it does not
 have.
 
 So Add and Locate call `prompt_for_paths`, and `BrowseHost`, `HostListing` and `HostEntry` leave the
@@ -419,7 +419,7 @@ different answer: that is the explorer's, drawn in the interface over a project-
 detached host makes the dialog point at the wrong machine, and the browser this replaces would have
 to come back — as a host-side listing behind the same two messages, not as a third path. Filed.
 
-### D33 — A window with no project stays open, and Ubiq never closes a window by itself
+### D33 — A window with no project stays open, and Kubiq never closes a window by itself
 
 A window whose last project was closed used to close, with an exception carved out for a first run so
 that booting on an empty catalogue did not quit the application. The exception was the tell: "no
@@ -480,7 +480,7 @@ the sequence number and a pool, and it is filed rather than built.
 ### D37 — A save names the version it read, and is refused if that moved
 
 `WriteProjectFile` carries the `FileVersion` that came back with the contents, and a mismatch is a
-`Conflict` with the file untouched. Ubiq is not the only thing editing these files — the agents in
+`Conflict` with the file untouched. Kubiq is not the only thing editing these files — the agents in
 the panes are — so last-writer-wins would silently discard an agent's edit, which is exactly the
 class of loss the feature must not introduce. A write with no version means *create*, and is refused
 if anything is there; the other reading, "force overwrite", is a footgun the contract would be
@@ -490,7 +490,7 @@ A read cut short at the byte ceiling comes back with **no** version, which is wh
 buffer unsavable mechanically rather than by the interface remembering not to offer it.
 
 **Cost:** an extra stat either side of a read, and a conflict the user has to resolve by hand —
-Ubiq offers no merge. Writes are atomic and preserve the file's permissions, so a saved script does
+Kubiq offers no merge. Writes are atomic and preserve the file's permissions, so a saved script does
 not stop being executable.
 
 ### D38 — Each open file owns its buffer
@@ -509,8 +509,8 @@ which it was written not to.
 ### D39 — The work is the host's, tasks are written down per project, and sessions and agents stay its mocks
 
 The board and the graph draw one project's work, and the host owns all of it: a fifth message family
-in `crates/ubiq-proto/src/messages.rs`, a service in `crates/ubiq-host/src/work/`, and a `tasks.toml`
-per project beside the view state under Ubiq's own config root. That is the state-ownership rule
+in `crates/kubiq-proto/src/messages.rs`, a service in `crates/kubiq-host/src/work/`, and a `tasks.toml`
+per project beside the view state under Kubiq's own config root. That is the state-ownership rule
 applied to the last part of the tree that was inventing its own truth — with a fixture per window,
 two windows disagreed about the same work and a task made or dragged went with the window that made
 it.
@@ -523,7 +523,7 @@ live agent, so that half is finished rather than staged.
 **Every reply goes to the window that asked**, unlike the catalogue's. A project is open in exactly
 one window at a time, so the window that asked is the only one drawing that project's work and a
 broadcast would buy nothing. The service still answers in `Reply`, so a broadcast is one word away
-the day that changes; `Reply` lives in `crates/ubiq-host/src/reply.rs` rather than in `projects.rs`
+the day that changes; `Reply` lives in `crates/kubiq-host/src/reply.rs` rather than in `projects.rs`
 because two services answer in those terms and `projects::Reply` would be a lie about ownership.
 
 **A new project starts with an empty board, and the file is still written.** `TaskStore::load`
@@ -579,7 +579,7 @@ the drag does not provide, which is filed rather than built.
 
 ### D41 — Position is the interface's, membership is the host's
 
-Where a card sits on the orchestration canvas never crosses the bus. `crates/ubiq/src/state/layout.rs`
+Where a card sits on the orchestration canvas never crosses the bus. `crates/kubiq/src/state/layout.rs`
 owns every offset, a drag moves one, and nothing outside that window has an opinion about it. Which
 task an agent *serves* does cross, as `AssignAgent`, because that is a fact about the work rather
 than about the drawing — so a card dropped into another task's outline answers the pair: the
@@ -588,7 +588,7 @@ interface keeps the new offset and sends the new membership.
 The test is whether a second window looking at the same project would have to agree. It would about
 membership, and it could not about position, having its own canvas, its own zoom and its own
 arrangement. An arrangement is view state, which `D29` makes an opaque blob the interface owns and
-versions, so `Layout` staying in `crates/ubiq` is the same choice made twice rather than a new one.
+versions, so `Layout` staying in `crates/kubiq` is the same choice made twice rather than a new one.
 
 **Cost:** an agent whose record arrives after the screen was arranged has no offset of its own, so
 the interface owes it a placement rule; and an arrangement a user made is thrown away when the
@@ -598,7 +598,7 @@ project closes until it goes into that blob. Both are filed.
 
 Every area of the workbench — the terminals, the log console, the explorer, the chat, the centre —
 is a **panel** in a tree of tabbed groups the user drags, splits, tabs and zooms. The tree, the
-drag, the drop geometry and the serialisation are `gpui-component`'s `DockArea`; Ubiq supplies the
+drag, the drop geometry and the serialisation are `gpui-component`'s `DockArea`; Kubiq supplies the
 panels and a skin over the library's three renderer traits, and writes no drag, no drop indicator
 and no layout serialisation of its own. That is `D17`'s "gpui-component first" applied to the
 largest widget in the library — and the same entry's other half is what it costs.
@@ -632,14 +632,14 @@ step by hand.
 
 ### D43 — The host links libgit2 and computes hunks itself, rather than driving `git`
 
-`crates/ubiq-host` reads version control through `git2` and builds the hunks with `similar`. Both
+`crates/kubiq-host` reads version control through `git2` and builds the hunks with `similar`. Both
 are the host's alone: the interface gains no dependency, because a `FileDiff` crosses the bus as
 rows with their line numbers on them. The git family — the overview and the working-tree map — uses
 the same library, on a worker of its own; gitoxide is not a second reader.
 
 **Why:** the alternative is spawning `git diff` and parsing its output, which puts a text format
 between the host and the answer — the parser then owns every corner case the format has, and a
-`git` that is missing, old, or configured with a pager or a diff driver changes what Ubiq shows. A
+`git` that is missing, old, or configured with a pager or a diff driver changes what Kubiq shows. A
 library also answers the two bases directly, as a blob from a tree and a blob from the index, so
 `DiffBase` maps onto two calls rather than onto two command lines. And it keeps the whole thing
 testable in-process, which is what the rest of the file family's tests are written against.
@@ -764,7 +764,7 @@ host checked for existence — never a path the interface guessed at, and never 
 
 **Why:** a non-login shell reads `.zshrc` and not the agent definition that put Homebrew, `pyenv` and the
 rest on `PATH`, so a pane reported `command not found` for tools that were installed and worked in
-every other terminal — and Ubiq launched from Finder starts from a `PATH` that nothing has set up,
+every other terminal — and Kubiq launched from Finder starts from a `PATH` that nothing has set up,
 which is exactly the case the agent definition exists to fix. Picking a different shell from a menu would
 have moved that same defect onto a different program, so the spawn path was fixed first. The list
 being the host's is not a preference: a program on disk is a local fact, and no path crosses into
@@ -837,7 +837,7 @@ closing a tab delete exactly one run's state — credentials seeded into it incl
 a directory left by a killed process identifiable at the next start, which is when the host sweeps
 them.
 
-**Cost:** three of them. The environment a pane starts from is no longer Ubiq's own, so `pty::spawn`
+**Cost:** three of them. The environment a pane starts from is no longer Kubiq's own, so `pty::spawn`
 takes a `Program` rather than a program name — a confined run brings its whole environment, because
 the policy sanitized it. Confinement of a pane is macOS and Windows only. isol8 spawns with
 inherited stdio and a host cannot hand it a pseudo-terminal directly; on macOS the stopgap renders
@@ -854,11 +854,11 @@ project reads as broken until a recipe grants it — both are rows in the backlo
 A live agent's traffic uses the Agent Client Protocol's `session/update` vocabulary — its event
 names, its tool-call shape with a kind and a status and a diff, its permission options, its config
 options — in three places: the library's neutral event model, the message family in
-`crates/ubiq-proto/src/conversation.rs`, and the one mapper between them in
-`crates/ubiq-host/src/conversation.rs`. The transport stays the in-memory bus, and the identity that
+`crates/kubiq-proto/src/conversation.rs`, and the one mapper between them in
+`crates/kubiq-host/src/conversation.rs`. The transport stays the in-memory bus, and the identity that
 routes a conversation is the `agent_id` on every variant.
 
-**Why the vocabulary and not the protocol:** `D9` says Ubiq embeds the harness library rather than
+**Why the vocabulary and not the protocol:** `D9` says Kubiq embeds the harness library rather than
 shelling out to `am`. Putting JSON-RPC between two halves of one process would undo that for no
 gain. What is worth borrowing is the shape, because it was designed for exactly this problem by
 people who had to make it work against several harnesses — and because several harnesses in the
@@ -909,7 +909,7 @@ in-memory lookup, temporary or not.
 **Why a guest tab instead of a loose project:** the direct read was rejected once, in the proposal's
 own §3, for what it costs — reimplementing `FileVersion`, `is_binary`, `truncated` and every
 `FileError` arm, or shipping an editor whose save can eat an agent's work. That argument held for the
-*read*: `read_guest_file` (`crates/ubiq/src/app/mod.rs`) reimplements the same stat guard, the same
+*read*: `read_guest_file` (`crates/kubiq/src/app/mod.rs`) reimplements the same stat guard, the same
 truncation ceiling and the same NUL sniff a host read would, so a guest tab is exactly as safe to
 open as a project one. It stopped holding for the *save*: `OpenFile::savable()` requires
 `version: Some(_)`, and `read_guest_file` computes one, on the same "absent only when truncated"
@@ -922,10 +922,10 @@ which message carries it. `WriteHostFile` (`tech/transport-contract.md`, host br
 the one thing a project write has that this cannot: no root means no *creation* is safe to offer, so
 `expected` is mandatory rather than optional and there is no `overwrite` flag — every write here is
 an overwrite of exactly the file whose version this names, refused otherwise, and refused outright if
-the leaf is a symlink (`crates/ubiq-host/src/files/mod.rs::write_host_file`), the same refusal
+the leaf is a symlink (`crates/kubiq-host/src/files/mod.rs::write_host_file`), the same refusal
 `files::path::resolve_for_write` gives a project write through a link.
 
-**Cost:** `crates/ubiq/src/app/mod.rs` calls `Path::is_dir`, `std::fs::read` and `std::fs`'s write
+**Cost:** `crates/kubiq/src/app/mod.rs` calls `Path::is_dir`, `std::fs::read` and `std::fs`'s write
 metadata directly for the version, which architecture rule 2 otherwise forbids the interface —
 see the exception recorded in [`architecture.md`](./architecture.md), rule 2. Promoting a guest tab
 into the project that holds it is still not an in-place upgrade — its tab key is the absolute path,
@@ -933,11 +933,11 @@ not a project-relative one, so a real save-inside-the-project still means droppi
 
 ### D55 — The web-export server lives in the interface, not the host, and reads project files itself
 
-`crates/ubiq/src/web_export/` runs a local, on-demand HTTP server that serves a project's files
+`crates/kubiq/src/web_export/` runs a local, on-demand HTTP server that serves a project's files
 read-only, for browsing markdown and source in a real browser — started from the titlebar's browser
 button or the explorer's "Open in Web" item. It binds its own `tiny_http` listener on its own
 thread, walks the project tree with the `ignore` crate, and reads file bytes with `std::fs`,
-entirely inside the UI crate. No `ubiq-proto` message crosses for any of this — not to start the
+entirely inside the UI crate. No `kubiq-proto` message crosses for any of this — not to start the
 server, not to read a file, not to list a directory.
 
 **Why this is allowed under rule 1:** the interface holds the project's canonical absolute path,
@@ -952,18 +952,18 @@ bytes it reads directly, so a remote host would need this module rewound onto `R
 before it could keep working. That is an acceptable, explicitly deferred cost: nothing else in the
 interface depends on the web-export server, and detach is not implemented for anything else here
 either. The `ignore`-based tree walk also duplicates, rather than reuses, the host's own
-`ubiq-host/src/search/walk.rs` — the two never merge because the interface must not depend on the
+`kubiq-host/src/search/walk.rs` — the two never merge because the interface must not depend on the
 host crate, and the walker is a few lines against a crate the workspace's lockfile carries for other
 reasons.
 
-### D56 — The `ubiq` command is a generated script that runs `open -a`, not a symbolic link
+### D56 — The `kubiq` command is a generated script that runs `open -a`, not a symbolic link
 
-The shortcut Ubiq writes onto the shell's `PATH` is a small script carrying a `# ubiq-target:`
-marker, written by `crates/ubiq-host/src/cli_shortcut.rs`. On a macOS bundle it runs
-`open -a Ubiq.app "$@"`, so LaunchServices delivers the path to the window that is open. A
+The shortcut Kubiq writes onto the shell's `PATH` is a small script carrying a `# kubiq-target:`
+marker, written by `crates/kubiq-host/src/cli_shortcut.rs`. On a macOS bundle it runs
+`open -a Kubiq.app "$@"`, so LaunchServices delivers the path to the window that is open. A
 symbolic link to the executable was the obvious shape and was rejected: it starts a second
-application every time, and reaching the running one is the whole of what `ubiq .` is for. The
-marker is what makes *Remove* safe — a `ubiq` the user put on their own `PATH` carries no marker and
+application every time, and reaching the running one is the whole of what `kubiq .` is for. The
+marker is what makes *Remove* safe — a `kubiq` the user put on their own `PATH` carries no marker and
 is never deleted — and what makes a shortcut left behind by a moved or replaced build detectable
 rather than mysterious.
 
@@ -971,7 +971,7 @@ rather than mysterious.
 correct, so a moved application leaves a shortcut pointing at where it was; that is the `stale` case
 the settings section draws and the *Update* button rewrites. And off a macOS bundle there is no
 `open -a` to use: the script starts the binary itself, and what keeps that from becoming a second
-application is the single-instance handoff in `crates/ubiq-app/src/handoff.rs` — a socket beside
+application is the single-instance handoff in `crates/kubiq-app/src/handoff.rs` — a socket beside
 the config root on Unix, and on Windows a loopback port named in a file there, guarded by a random
 token and an acknowledgement. The handoff is per executable, so it only reaches a running window
 launched from the same build the script names.
@@ -996,7 +996,7 @@ the safe one is the one you get without knowing anything.
 told them, and the payload is wider than any single op needs — `to` is meaningful for two of the five
 and is refused for the other three, which is a runtime check where separate variants would have been
 a type. `Trash` also puts a platform dependency in the host for one gesture, and its behaviour is the
-platform's rather than Ubiq's: what "the trash" means, and whether there is one at all, is not
+platform's rather than Kubiq's: what "the trash" means, and whether there is one at all, is not
 something the host can promise on every filesystem it might be pointed at.
 
 ### D58 — A conversation's name is derived from the harness's command, not typed by the user
@@ -1011,7 +1011,7 @@ before a new `claude 4` would be minted.
 **Cost:** a conversation cannot be renamed *by the user* after it starts, because no rename message
 exists on the wire — that is a backlog gap, not a design decision. The derived name is a
 placeholder rather than a final answer: the harness may replace it with a `ConvUpdate::Title`, and
-`D90` lets Ubiq replace it with a reading of the opening exchange.
+`D90` lets Kubiq replace it with a reading of the opening exchange.
 
 ### D59 — A harness stays startable with no identity chosen after accounts exist
 
@@ -1036,7 +1036,7 @@ answers for a bare pick still exists — the form's identity picker is where it 
 Discovering what models a harness offers, and which reasoning levels each accepts, means running
 that harness's own probe commands — not free, and not something a pending conversation's first
 `ConfigOptions` should wait on twice. `FileHarnessCache`
-(`crates/ubiq-host/src/store/harness.rs`) writes the answer to
+(`crates/kubiq-host/src/store/harness.rs`) writes the answer to
 `<config root>/cache/harness-models.toml`, keyed on `(harness, account, version)`, where `version`
 is that harness binary's own `--version` (or equivalent) output. A hit skips the probe outright; a
 miss probes and writes.
@@ -1054,7 +1054,7 @@ conversations. It is editor-like tabs instead: `PanelKind::Chat(ChatId)` carries
 `PanelKind::File`'s carries a tab key, so many may be open at once, each free to move to any
 dockable region. A tab's attachment — which conversation it is looking at, or none — lives on
 `state::chat::ChatTab`, in `OpenProject::chats`, not on the conversation itself: the conversation is
-the host's, a tab is Ubiq's own arrangement over it, and closing a tab ends nothing.
+the host's, a tab is Kubiq's own arrangement over it, and closing a tab ends nothing.
 
 A conversation attached to one chat tab draws disabled in every other chat tab's attach
 picker and cannot be picked there, so the same conversation is never shown as two tabs on this one
@@ -1083,9 +1083,9 @@ whatever `PATH` the process holds. Run from a terminal that is the user's own, f
 launched from Finder or the dock it is a thin one that finds none of these binaries — `shells.rs`
 computed the fix long ago (`login_path()`, sourced from `$SHELL -lic 'printf %s "$PATH"'`) to find
 a pane's own shell, but nothing used it to repair the process's own environment.
-`ubiq_host::shells::repair_path` composes `PATH` (the current one, then the login shell's, then the
+`kubiq_host::shells::repair_path` composes `PATH` (the current one, then the login shell's, then the
 same `EXTRA_DIRS` homes) and writes it back with `std::env::set_var`, called exactly once, from
-`ubiq_app::run`, before any other thread exists — the one window in which mutating the process
+`kubiq_app::run`, before any other thread exists — the one window in which mutating the process
 environment is sound. That single repair fixes every bare-name spawn at once, in `agent-manager` and
 anywhere else in the process, rather than threading a resolved-program override through five
 harnesses.
@@ -1119,14 +1119,14 @@ harness share one remembered model.
 ### D64 — Navigation is the interface's own: no transport family, no new message
 
 Where the user is, how they got there and where they have written down are questions about one
-window's screens. The router in `crates/ubiq/src/app/nav.rs` answers them with the intents that
+window's screens. The router in `crates/kubiq/src/app/nav.rs` answers them with the intents that
 exist — activating a project through the registry, reading a file through the file family —
-and adds no message to `crates/ubiq-proto/src/messages.rs`. A destination names a project, never a
+and adds no message to `crates/kubiq-proto/src/messages.rs`. A destination names a project, never a
 window, so nothing about it is the host's to arbitrate; history is per window and not persisted at
 all. Bookmarks and recents ride the project's **existing opaque preference blob** through
 `SetPreferences` under `Scope::Project`, beside the furniture `ViewPrefs` carries, and the
 host neither parses nor validates them — which keeps the schema the interface's, exactly as the
-transport contract has it. Each destination is stored as its `ubiq://` text rather than as a serde
+transport contract has it. Each destination is stored as its `kubiq://` text rather than as a serde
 shape, so compatibility belongs to one parser and a record this build no longer understands is one
 lost bookmark instead of a lost blob.
 
@@ -1140,7 +1140,7 @@ A pasted access token and a user-supplied OAuth client secret have to reach the 
 alternative is worse for a desktop application: a temporary file is a plaintext file, and an
 environment-variable reference asks the user to restart with a variable set. So
 `SubmitConnectSecret` and `SetAppSecret` carry material, and the rule that admits them is a type
-rather than a list of blessed variants. `Secret` in `crates/ubiq-proto/src/messages.rs` is a
+rather than a list of blessed variants. `Secret` in `crates/kubiq-proto/src/messages.rs` is a
 newtype whose `Debug` writes `Secret(***)` and which has no `Display`, no `Deref` and no
 `AsRef<str>` — so `tracing::info!(token = %secret)` does not compile, `?secret` redacts itself, and
 `expose` is the single named way out. The log sink adds a second, weaker guard for fields a caller
@@ -1156,11 +1156,11 @@ Six providers — GitHub, GitLab, Gitea, Azure DevOps, Atlassian, Google Workspa
 table. A user cannot add a seventh; adding one is a change to `ProviderId` and to the host's table
 beside it. Forgejo is a Gitea fork with the same API surface and the same `/api/v1` base, so it
 connects as `gitea` against its own instance rather than earning a row. The half both crates need —
-the names, and which flows work where — is in `crates/ubiq-proto/src/connectors.rs` so the picker
+the names, and which flows work where — is in `crates/kubiq-proto/src/connectors.rs` so the picker
 can draw itself without a round trip; endpoints, embedded client ids and poll intervals stay
 private to the host.
 
-**Cost:** a service Ubiq does not name cannot be connected at all, however close its API is to one
+**Cost:** a service Kubiq does not name cannot be connected at all, however close its API is to one
 that is named. A generic OAuth client is a different feature, and the distance to it is shorter
 than it looks, since a self-hosted instance carries its own URL and client id.
 
@@ -1190,8 +1190,8 @@ ephemeral port would have to be pre-registered, which is a contradiction. A busy
 by name before any browser opens rather than silently picking another, because another port is a
 redirect URI no provider will accept.
 
-**Cost:** a locked-down environment that cannot bind 47821, or a second Ubiq mid-flow on the same
-machine, cannot complete a browser flow at all. Registering `ubiq://` would avoid it and is
+**Cost:** a locked-down environment that cannot bind 47821, or a second Kubiq mid-flow on the same
+machine, cannot complete a browser flow at all. Registering `kubiq://` would avoid it and is
 deferred — the scheme is the interface's own internal navigation URI, so one string would mean
 two things.
 
@@ -1210,7 +1210,7 @@ otherwise.
 ### D70 — Connectors choose a secure engine, and refuse to run without one
 
 agent-manager's default engine is `files` — plaintext, and appropriate for a captured harness login
-that is a plaintext file in a home directory to begin with. It is not appropriate for a bearer token Ubiq
+that is a plaintext file in a home directory to begin with. It is not appropriate for a bearer token Kubiq
 itself obtained, so the host builds the connector store as `os` explicitly rather than through
 `build_secret_store`, whose resolution reads an environment variable and falls back to plaintext. A
 machine with no usable secure store fails every flow by name, before a browser opens.
@@ -1219,7 +1219,7 @@ machine with no usable secure store fails every flow by name, before a browser o
 than degraded ones — and the failure is at connect time, which is later than a user would like to
 learn it.
 
-### D71 — Ubiq ships client ids, never client secrets
+### D71 — Kubiq ships client ids, never client secrets
 
 A secret embedded in a distributed binary is not a secret. So every built-in application is a
 **public client**: PKCE for Google, GitLab, Gitea, Atlassian Cloud and Azure DevOps Services, and
@@ -1252,7 +1252,7 @@ repository where there was none, and still over https (`G149`).
 The git worker is one shared thread whose `answer()` is synchronous, so anything queued there blocks
 everything behind it. A clone is minutes, over a network, and putting one in either queue would
 stall the branch name and the explorer's badges for every project in every window. So
-`crates/ubiq-host/src/repos/` spawns a thread per clone on the connector flows' shape — an id in
+`crates/kubiq-host/src/repos/` spawns a thread per clone on the connector flows' shape — an id in
 every message, the asker's mailbox for progress, a channel receiver as the only way to cancel — and
 hands the finished folder back to the coordinator over a channel, because a clone thread cannot
 reach the project catalogue.
@@ -1267,7 +1267,7 @@ Forgetting a project deletes its folder only when the record is `temporary` **an
 path lies strictly inside the ephemeral root. Either condition alone would be a data-loss bug:
 `temporary` is what a folder dragged in from anywhere on the disk carries too, and the
 ephemeral root is a setting a user could point at their home directory. The conjunction is what makes
-the deletion mean "a folder Ubiq made, in the place Ubiq made it".
+the deletion mean "a folder Kubiq made, in the place Kubiq made it".
 
 **Cost:** the gate depends on a resolved root the coordinator has to aim at the catalogue
 (`point_ephemeral_at()`), so the two halves of the condition are set in different places and a wrong
@@ -1328,7 +1328,7 @@ Everything else the host writes down is TOML, and the meter is the one thing TOM
 usage bucket is a running total that many small deltas add into, which is an upsert; a TOML store
 answers it by reading the whole file, adding, and writing the whole file back, on every report from
 every harness. And the record is unbounded — hours accumulate for as long as the user keeps using
-Ubiq — while the screen wants a window of them. Those two together are a database, so `rusqlite`
+Kubiq — while the screen wants a window of them. Those two together are a database, so `rusqlite`
 with the `bundled` feature, which compiles SQLite into the binary rather than depending on whatever
 the machine has.
 
@@ -1355,7 +1355,7 @@ catalogue, the settings and the view blobs stay TOML.
 
 ### D79 — The socket wire format is MessagePack, not postcard or bincode
 
-`crates/ubiq-proto/src/wire.rs` frames a `Message` as a 4-byte length prefix and a body encoded with
+`crates/kubiq-proto/src/wire.rs` frames a `Message` as a 4-byte length prefix and a body encoded with
 `rmp-serde`'s `to_vec_named`. Postcard and bincode were the obvious choices for a Rust-only wire —
 smaller, faster, no schema of their own — and both were rejected because the contract relies on
 properties they cannot provide. `ProjectSnapshot` flattens a `ProjectRecord` into itself with
@@ -1374,9 +1374,9 @@ size test in `wire.rs` would catch it.
 
 ### D80 — A remote attach is a bearer token over plaintext TCP, bound to every interface by default
 
-`crates/ubiq-host/src/remote.rs` authenticates a connecting UI with one long random token, generated
+`crates/kubiq-host/src/remote.rs` authenticates a connecting UI with one long random token, generated
 at startup and printed once; it runs no TLS, so the handshake and every frame after it cross the
-network as sent. `ubiq-app --serve` binds `0.0.0.0` unless told otherwise, because a single-interface
+network as sent. `kubiq-app --serve` binds `0.0.0.0` unless told otherwise, because a single-interface
 default would require the operator to know in advance which address their machine is reachable at,
 which is exactly what a first `--serve` run cannot assume. Each piece follows the transport contract's
 "Adding a variant" step 5: a structural choice, not a defect deferred — the alternative was
@@ -1392,7 +1392,7 @@ gap is `G168`, the backlog's register of open items.
 
 ### D81 — `HostId` stays out of the contract; the local host is always attached
 
-`crates/ubiq/src/app/hosts.rs`'s `Bus` multiplexes a window over several live host connections at
+`crates/kubiq/src/app/hosts.rs`'s `Bus` multiplexes a window over several live host connections at
 once — the local, in-process host plus any remotes added alongside it — rather than switching
 between them. The alternative was a single active host a window pointed at, one at a time, which was
 rejected because it would make a dropped remote connection take every terminal in the window with
@@ -1427,7 +1427,7 @@ so reads and writes anywhere the host process can; listing one directory at a ti
 terminal does not. The comparison holds only because both sit behind the same gate: a listing is
 answered for an attached client, and a remote one attaches by presenting the token (`D80`). It is
 not an argument for answering this family to anyone who has not. What containment the file family enforces
-(`crates/ubiq-host/src/files/path.rs`) answers a different question — keeping a project-relative path
+(`crates/kubiq-host/src/files/path.rs`) answers a different question — keeping a project-relative path
 inside its project's root once that root is chosen — and this family exists specifically to choose
 it, so there is nothing for a path to be contained inside.
 
@@ -1437,16 +1437,16 @@ half superseded by the decision register's own next entry — its body still cor
 describes a path the tree does not take. `G166` is the up-to-date account of what this family does
 and what it leaves undone.
 
-### D83 — Ubiq may call a model directly for the small namings, behind a provider seam
+### D83 — Kubiq may call a model directly for the small namings, behind a provider seam
 
 Every model interaction in the tree goes through a spawned harness, and that stays the rule for
-anything a user reads as work. It is the wrong shape for the half-sentence namings Ubiq performs
+anything a user reads as work. It is the wrong shape for the half-sentence namings Kubiq performs
 mechanically — a conversation called `claude 3`, a session named after its project, a commit box
 with nothing in it. Spawning a harness to produce eleven characters costs a process, a credential
 and a round trip to a paid endpoint.
 
 So there is one narrow exception, and it is drawn as a seam rather than as a special case. A
-`Assist` trait in `crates/ubiq-host/src/assist/` answers three questions — can you run, what can you
+`Assist` trait in `crates/kubiq-host/src/assist/` answers three questions — can you run, what can you
 hold, produce this text — and every backend behind it is chosen in one function from one setting.
 The first backend is the operating system's own on-device model, which is what makes the exception
 affordable: no account, no key, no network, nothing to leak. API providers and a local inference
@@ -1466,9 +1466,9 @@ signature suits a Swift FFI hop and an HTTP POST equally, which is the whole of 
 ready for a remote provider. A request runs on a one-off named thread holding a `Mailbox`, because
 the coordinator must keep answering every other window while a model thinks.
 
-**Cost:** the contract gains a fifteenth family, `crates/ubiq-host` gains its first cargo feature and
-its first target-specific dependency, and the claim "Ubiq calls no model" is no longer true without
-qualification — it reads *Ubiq spawns a harness for every piece of work, and calls a model
+**Cost:** the contract gains a fifteenth family, `crates/kubiq-host` gains its first cargo feature and
+its first target-specific dependency, and the claim "Kubiq calls no model" is no longer true without
+qualification — it reads *Kubiq spawns a harness for every piece of work, and calls a model
 directly only for a name it would otherwise invent mechanically*. The setting defaults to `Off`, so
 an existing user's behaviour is unchanged by upgrading, and every call site has to read correctly
 against a stub backend that reports assistance unavailable, which is the normal case on most
@@ -1497,7 +1497,7 @@ appears only for a provider the user chose.** A backend nobody asked for describ
 on-device model*; one the user named describes itself by that name.
 
 Availability is also asked, never inferred. There is no OS-version comparison and no device
-allow-list anywhere in Ubiq's code — the framework is asked whether it can run, and its answer is
+allow-list anywhere in Kubiq's code — the framework is asked whether it can run, and its answer is
 mapped onto the closed set. That is why an ineligible device, a model still downloading and a
 disabled system setting each read differently in the panel instead of collapsing into one shrug.
 
@@ -1536,8 +1536,8 @@ before the next frame.
 
 `D83` left the API providers behind the `Assist` seam with one thing missing: somewhere to keep a
 key. `agent_manager::Account` was the wrong home — an account carries credential *references* and
-models an authentication a harness runs *as*, never a provider Ubiq itself calls — so the answer is
-the connector family's: `OsSecretStore` under Ubiq's config root, in a namespace of its own
+models an authentication a harness runs *as*, never a provider Kubiq itself calls — so the answer is
+the connector family's: `OsSecretStore` under Kubiq's config root, in a namespace of its own
 (`ai-provider`), keyed by the record's own id. One store rather than a second one beside it, because
 whether the platform has a usable keychain at all is one fact and one probe.
 
@@ -1658,7 +1658,7 @@ put the answer somewhere. Neither is needed. The asked half is the first `Prompt
 host holds, and the answered half is what the pump watches go past, so the coordinator can notice
 that a conversation is namable rather than being told. What crosses the bus is one `ConversationNamed`, in
 the direction the naming actually travels, and no interface has to hold a request it did not make.
-It is deliberately not a `ConvUpdate`: it carries no `seq`, because it is Ubiq's reading rather than
+It is deliberately not a `ConvUpdate`: it carries no `seq`, because it is Kubiq's reading rather than
 something the harness said, and the pump that owns that sequence is not what produced it.
 
 **It departs from `D83`'s "a suggestion is advisory" and the departure is drawn narrowly.** What the
@@ -1681,7 +1681,7 @@ persists it, so a restart is back to `claude 2`.
 ### D91 — The machine's environment lives in `environment.toml`, outside `settings.json`
 
 A confined agent reaches its toolchain caches through `IsolateOptions::grant_toolchains_from_env`,
-which named a relocated `CARGO_HOME` or `GOPATH` by reading the *process* Ubiq was started with. A
+which named a relocated `CARGO_HOME` or `GOPATH` by reading the *process* Kubiq was started with. A
 terminal launch carries those, because a login shell set them; a GUI launch — the Dock, Finder,
 `open` — never ran one, so the same machine denies `cargo` the moment a confined agent tries it,
 with no host setting to fix. The values belong to the machine, not to a run: they do not vary by
@@ -1689,7 +1689,7 @@ project, they should not travel with a synced settings file, and a person editin
 fact about where their toolchains live rather than a preference.
 
 So they live in their own file, `<config root>/environment.toml`, read once at startup by
-`crates/ubiq-host/src/environment.rs` and never written by Ubiq itself. `[env]` supplies variables a
+`crates/kubiq-host/src/environment.rs` and never written by Kubiq itself. `[env]` supplies variables a
 run's launch environment gets unless the harness itself set the same name; `[[grants]]` is a second
 path list beside `HostSettings.extra_grants`, applied the same way. `IsolateOptions::grant_toolchains`
 — private until this, its only caller the process-reading form — became public so the host can hand
@@ -1749,7 +1749,7 @@ bounded at thirty seconds rather than by a runtime's cancellation.
 
 ### D97 — The run directory is the conversation: kept when it is marked, copied to fork it
 
-A run's configuration directory — `<ubiq root>/runs/<agent id>`, which `compose_run` pins every
+A run's configuration directory — `<kubiq root>/runs/<agent id>`, which `compose_run` pins every
 harness's config lever to — holds that harness's **own session store**: Claude Code's
 `projects/<slug>/*.jsonl`, Codex's rollouts, opencode's relocated data directory. It is not
 scaffolding around the conversation; within one harness on one host it *is* the conversation.
@@ -1763,13 +1763,13 @@ Three behaviours follow from reading it that way, and they replace three that as
 - **Fork** copies the directory and launches a second agent in the copy with the same harness
   session id. The two hold separate stores and diverge from the next turn on.
 - **Delete** is the only thing that removes it, and removes all three of the run directory, the
-  library's session record and Ubiq's own row together.
+  library's session record and Kubiq's own row together.
 
 **Why:** it is the only mechanism that is uniform across harnesses. `Harness::transcripts` is
 implemented by Claude Code alone, so nothing built on it could restore a Codex or opencode
 conversation; Claude's `--fork-session` and ACP's draft `session/fork` exist for two harnesses
 between them and not for the rest. Copying a directory needs none of that — it works because every
-harness's `config_anchor` relocates its store into one, a property Ubiq established for isolation
+harness's `config_anchor` relocates its store into one, a property Kubiq established for isolation
 and reuses here for free. It is also exact rather than approximate: no replay, no compaction, no
 seed format, and no lossy summary of what was said.
 
@@ -1810,7 +1810,7 @@ has a real denominator per model; it splits a delegate's spend out of the turn's
 subtracted from the turn delta) so a subagent's tokens never move the parent's ring; and it carries
 the full five-field `Spend` breakdown plus rate-limit windows, where ACP offers `used`/`size` and a
 cumulative cost. It also asks a human properly, via `--permission-prompt-tool stdio`. An ACP adapter
-is additionally a second process and a global npm install between Ubiq and the model — a dependency
+is additionally a second process and a global npm install between Kubiq and the model — a dependency
 the native path does not have, on an upstream nobody here controls.
 
 **Cost:** two bridges for one harness, so a conversation-vocabulary change is two edits and two test
@@ -1843,7 +1843,7 @@ once, at the moment a mode's own blob does not exist yet; a blob's own per-regio
 truth from then on, and the three constants are otherwise inert (`G328`).
 
 **Cost:** an IDE window's first look is barer than the target layout
-(`_docs/design/ubiq-layout.png`, `D16`) shows, until the user reaches for a region — a real change to
+(`_docs/design/kubiq-layout.png`, `D16`) shows, until the user reaches for a region — a real change to
 the first impression a project makes, traded for a window that never opens onto furniture nobody
 asked for.
 
@@ -1879,7 +1879,7 @@ hand-tune one of its six hued tokens against its own ground: what it can choose 
 correction is the same function for every palette. Project swatches stay outside the axis (`D19`),
 so those literals are still per palette.
 
-### D98 — Accepting every permission and capturing the traffic are Ubiq's flags on the conversation, answered in the host
+### D98 — Accepting every permission and capturing the traffic are Kubiq's flags on the conversation, answered in the host
 
 Two per-conversation booleans sit on `ConversationRecord` beside `persistent` and travel on
 `WorkAgent`: `accept_all`, which answers every permission request with the plain allow, and
@@ -1890,7 +1890,7 @@ mode it was going to be launched in, asks exactly what it would ask, and the onl
 changes is who answers. `Message::SetConversationAcceptAll` and `Message::SetConversationDebugDump`
 follow `SetConversationPersistent` end to end — durable row, `AgentChanged` broadcast, a row in the
 conversation's three-dots menu. The accept-all short-circuit is in the conversation pump
-(`crates/ubiq-host/src/conversation.rs`), which answers the request itself and **emits no
+(`crates/kubiq-host/src/conversation.rs`), which answers the request itself and **emits no
 `ConvUpdate::PermissionRequest` at all**, rather than emitting one and answering it afterwards.
 
 **Why:** a mode is one harness's vocabulary and not every harness has one that means this, so
@@ -1899,11 +1899,11 @@ silently does nothing for others. Answering in the host makes it mean the same t
 including for a harness whose modes offer nothing like it, and it composes with the mode instead of
 overwriting a pick the user made. The capture is the same argument from the other side: the
 process-wide tape owns the shape and the folder, so narrowing it to one agent is a flag
-and a sink, not a second format — and it is Ubiq's traffic being captured, which no harness could
+and a sink, not a second format — and it is Kubiq's traffic being captured, which no harness could
 report. Never showing the ask, rather than showing and retracting it, is forced: a permission is
 drawn as a live prompt on the tool call it authorises, and nothing in the transcript retracts one.
 
-**Cost.** Ubiq's override and the harness's own mode can disagree — a harness in its strictest mode
+**Cost.** Kubiq's override and the harness's own mode can disagree — a harness in its strictest mode
 still has every request allowed, and the mode picker gives no hint of it, so the menu row's label
 is the only place the truth is written. The transcript then holds tool calls whose authorisation
 the reader was never offered and cannot audit afterwards, which is the price of not drawing a
@@ -1997,7 +1997,7 @@ the same × that closes everything else.
 
 ### D102 — One loopback MCP server for the whole host, agent identity carried in the URL
 
-Ubiq injects its own MCP servers into every harness it launches (`crates/ubiq-host/src/mcp/`), and
+Kubiq injects its own MCP servers into every harness it launches (`crates/kubiq-host/src/mcp/`), and
 the question was how many listeners that is and how each request says who is calling.
 **One `tiny_http` loopback listener for the whole process**, bound once at startup and held by the
 `Coordinator`, answers `POST /mcps/<agent-or-pane-id>/<mcp-name>`. The listener keeps no session and
@@ -2073,14 +2073,14 @@ message does that.
 ### D104 — The interface may host a web panel, for authoring in a format somebody else owns
 
 A **web panel** is a named component rendered over the interface's own loopback origin, exchanging
-typed JSON frames with Rust. Ubiq drew Excalidraw scenes and could not edit them; this is the
+typed JSON frames with Rust. Kubiq drew Excalidraw scenes and could not edit them; this is the
 mechanism that changes that, and `D109` is the only tenant it is opened for.
 
 **Why this does not contradict `D7` or `D44`.** `D7` replaced a Tauri and `xterm.js` frontend with
 GPUI because *several full-refresh terminals under a stream of escape sequences* must not cross a
 serialisation boundary in the render path. A web panel puts none anywhere near a frame: every other
 surface stays as it is, and one panel, opened deliberately and closed when done, hosts a component
-that draws itself. `D7` chose what draws Ubiq; `D55` shipped an HTML surface before it. `D44` is the
+that draws itself. `D7` chose what draws Kubiq; `D55` shipped an HTML surface before it. `D44` is the
 closer call — it rejected an offscreen webview for Mermaid in favour of `merman`, because *drawing
 is the whole of what the interface is for* and a picture is a pure function of source and palette.
 Every word of that is about producing a picture, and it holds. **Editing is not a picture.** What no
@@ -2206,7 +2206,7 @@ answer; `G237` is the same question asked again, and a 25 MiB tenant makes it lo
 This reverses `completed/file-viewers-proposal.md` §7's *"editing is not proposed and should not
 be"*, for documents, and answers the open question `capture-proposal.md` left — *whether
 `.excalidraw` files should become editable once the machinery exists*: yes, and not through that
-machinery. Capture edits a scene Ubiq made with Ubiq's own tools and never needs a browser; this
+machinery. Capture edits a scene Kubiq made with Kubiq's own tools and never needs a browser; this
 edits a document somebody else's application owns, in that application.
 
 **The native painter keeps the read path, and that is what makes this compatible with the read-only
@@ -2233,13 +2233,13 @@ file is not byte-identical to the one that was read. Two mitigations are built a
 diff small: the buffer is written only when the element set or the persisted `appState` subset
 actually differs, so a document merely opened and looked at never marks the tab dirty, and the
 file's own `source` and `type` fields are preserved rather than the editor's. A user who wants a
-tidy diff should not round-trip a file they did not change, and Ubiq should not save one it was only
+tidy diff should not round-trip a file they did not change, and Kubiq should not save one it was only
 shown.
 
 ### D109 — `Edit` becomes a `ViewLayout`, once the container is the window
 
 This reverses `D108`'s "`Edit` is an action, not a fourth `ViewLayout`" — for the reason `D108` gave,
-because the premise behind it changed. `D108` reasoned from a browser window beside Ubiq's own: with
+because the premise behind it changed. `D108` reasoned from a browser window beside Kubiq's own: with
 that container, a fourth `ViewLayout` would have named a layout that rendered the same pixels as
 Preview, since there was nothing left for the panel itself to draw differently. `gpui-wry` puts a
 child webview inside the panel on macOS and Windows, so the panel has something to draw, and
@@ -2256,14 +2256,14 @@ offers.
 **Cost.** Every platform without `gpui-wry`'s finished Unix binding still has no fourth thing to
 draw, and keeps the external browser `D108` shipped — so the layout exists everywhere the saved
 arrangement can name it, but only two platforms can draw it. The mark-and-sweep that clips a native
-child view to its own dock tab (`crates/ubiq/src/ui/web_view.rs`) is a second piece of window-root
+child view to its own dock tab (`crates/kubiq/src/ui/web_view.rs`) is a second piece of window-root
 plumbing with no test of its own; its correctness rests on how GPUI orders prepaint across the root's
 children, not on an assertion.
 
 ### D110 — Remaining quota is an account fact, held as a list of gauges, cached in memory and never written down
 
 The counterpart to `D78`, and the opposite conclusion from the same question asked backwards. Spend
-is a **record**: nobody can ask a harness what it spent last Tuesday, so if Ubiq does not write it
+is a **record**: nobody can ask a harness what it spent last Tuesday, so if Kubiq does not write it
 down the answer is gone, which is what makes `usage.db` a database. Quota is **re-derivable** —
 asking again produces the current answer, and a stored one is only ever worse than a fresh one — so
 it is a cache the coordinator holds in memory, and a restart re-probes. A file would buy nothing and
@@ -2399,17 +2399,17 @@ ever spliced next to, so one column's reordering cannot disturb another's.
 than the change the user made. That is the price of the vector being the order, and it is paid by a
 file that is rewritten whole on every edit anyway.
 
-### D114 — Ubiq ships an A2UI catalog extension, and the renderer's component set is a registry rather than an enum
+### D114 — Kubiq ships an A2UI catalog extension, and the renderer's component set is a registry rather than an enum
 
 A2UI's security argument is that an application shipping its own catalog restricts the agent to
-exactly the components that exist in it. Ubiq takes the extension point at its narrowest: one
-component, `Svg`, declared in `crates/ubiq/src/state/a2ui/ubiq-catalog.json` under the `catalogId`
-`https://ubiq.app/a2ui/v1_0/catalog.json`, reaching the basic catalog through an `anyOf` in
+exactly the components that exist in it. Kubiq takes the extension point at its narrowest: one
+component, `Svg`, declared in `crates/kubiq/src/state/a2ui/kubiq-catalog.json` under the `catalogId`
+`https://kubiq.app/a2ui/v1_0/catalog.json`, reaching the basic catalog through an `anyOf` in
 `$defs/anyComponent` rather than by copying it. An agent that names the basic catalog gets the
-eighteen and nothing else; one that names Ubiq's gets nineteen.
+eighteen and nothing else; one that names Kubiq's gets nineteen.
 
 **The renderer answers that with a table, not a match arm.** `Kind::Extension { component, props }`
-keeps the payload of anything outside the basic catalog, and `crates/ubiq/src/ui/a2ui/registry.rs`
+keeps the payload of anything outside the basic catalog, and `crates/kubiq/src/ui/a2ui/registry.rs`
 is a static list of name against drawing function that `parse` routes by name. A closed enum would
 have made every extension a change to the parser, the type and every exhaustive match over it, which
 is the wrong shape for the thing a catalog exists to make cheap; and a name in neither the basic
@@ -2417,18 +2417,18 @@ catalog nor the table draws a placeholder that says what it was, rather than bei
 dropped component is indistinguishable from one the agent never sent.
 
 **Cost.** There are two sources of truth — the JSON catalog an agent reads and the Rust table the
-renderer draws from — and nothing but a test in `crates/ubiq/tests/a2ui.rs` holds them to the same
-names. A catalog that gains a component without a drawing function is a promise Ubiq does not keep,
+renderer draws from — and nothing but a test in `crates/kubiq/tests/a2ui.rs` holds them to the same
+names. A catalog that gains a component without a drawing function is a promise Kubiq does not keep,
 and one is an untyped `props` map, so each drawing function validates its own arguments instead of
 `serde` doing it once at the boundary.
 
 ### D115 — A drawn surface never follows a URL and never fetches
 
 An A2UI payload is authored by a model, and a component tree is a list of requests made of the
-renderer. Ubiq grants none of them that reach off the machine. An action carrying a `functionCall`
+renderer. Kubiq grants none of them that reach off the machine. An action carrying a `functionCall`
 is **reported rather than performed**, so `openUrl` puts its URL in the action log and opens
 nothing; `Image`, `Video` and `AudioPlayer` state their URL and draw a placeholder behind it; and
-the sanitizer in `crates/ubiq/src/state/a2ui/svg.rs` refuses `<use>`, `<image>`, any `href` or
+the sanitizer in `crates/kubiq/src/state/a2ui/svg.rs` refuses `<use>`, `<image>`, any `href` or
 `xlink:href`, any external `url()` — a local `url(#id)` is fine — and any `data:`, alongside script,
 foreign objects, event attributes, doctypes and entities.
 
@@ -2447,7 +2447,7 @@ would relax the rule is a decision about which origins a surface may reach, whic
 
 ### D116 — A drone attaches as an ordinary host, not as a project's remote origin
 
-`crates/ubiq-drone` is reached the way `ubiq --serve` is reached: it answers the whole contract on
+`crates/kubiq-drone` is reached the way `kubiq --serve` is reached: it answers the whole contract on
 one duplex byte stream, and the interface adds it to the hosts a window is attached to (`D81`). The
 shelved drone proposal chose the opposite — `remote: Option<RemoteOrigin>` on `ProjectRecord`, with
 the *local* coordinator routing that project's pane and file messages over a connection it held —
@@ -2484,7 +2484,7 @@ alternative — a frame type below the message layer — which would change `[u3
 every build that speaks it.
 
 What makes this sound is that the exception is *total*: a carrier frame is classified before
-anything else looks at it, and `ubiq_proto::carrier::Heartbeat::inbound` takes the message by value
+anything else looks at it, and `kubiq_proto::carrier::Heartbeat::inbound` takes the message by value
 and hands back only what should be delivered, so a pump cannot pass a `Ping` on by forgetting to
 match it. Step 4 of the transport contract's "Adding a variant" — handle it in the coordinator's
 dispatch — names this family as its single exception.
@@ -2538,7 +2538,7 @@ what brings Git's furniture back.
 
 ### D120 — Task MCP tools share the work handle, and broadcast what they change
 
-The built-in `manage-ubiq-tasks` server reads and writes the same `Work` a window does. The
+The built-in `manage-kubiq-tasks` server reads and writes the same `Work` a window does. The
 coordinator wraps `Work` in a cloneable `Handle` (`Arc<Mutex<Work>>`) and hands one clone to the
 MCP listener at bind. A tool takes the lock for one method and releases it before posting on the
 bus. Mutations go out as `TaskCreated` / `TaskChanged` / `TaskDeleted` to every window, because
@@ -2583,7 +2583,7 @@ reads.
 on the existing worker changes nothing about the cache's shape. A mutex would be the right lock if
 a second thread ever touched those handles; this thread is the only one that does.
 
-**Cost.** The worker serialises Ubiq's own writes, not an agent's `git commit` in the same second.
+**Cost.** The worker serialises Kubiq's own writes, not an agent's `git commit` in the same second.
 Pull refuses anything that is not a fast-forward, so a diverged branch is a terminal and not a
 merge. Fetch, pull and push over https use the credential helper, not a connector (`G145`); over
 ssh they use libssh2 (`D123`). Branch, stash and undo-commit joined the family later; a stash has
@@ -2639,9 +2639,9 @@ reconcile would file a flag the store does not back. `SetSettings` is the only s
 ### D125 — The askpass helper reads the keychain itself, so material never enters the interface
 
 OpenSSH reads a password from `/dev/tty`, not standard input, so a shelled-out `ssh` cannot be fed
-one. `SSH_ASKPASS` points at Ubiq's own binary with `SSH_ASKPASS_REQUIRE=force`, and the child's
-environment carries `UBIQ_ASKPASS_PROFILE` and `UBIQ_ASKPASS_ROOT` — an agent definition id and a config root,
-both references. The helper mode lives in `ubiq-app`, the one crate that names both halves, so it
+one. `SSH_ASKPASS` points at Kubiq's own binary with `SSH_ASKPASS_REQUIRE=force`, and the child's
+environment carries `KUBIQ_ASKPASS_PROFILE` and `KUBIQ_ASKPASS_ROOT` — an agent definition id and a config root,
+both references. The helper mode lives in `kubiq-app`, the one crate that names both halves, so it
 opens the host's secret store under that root and writes the secret on its own standard output,
 which is where OpenSSH reads an askpass answer from.
 
@@ -2655,8 +2655,8 @@ a child that can fetch its own; and it would contradict `D124`, which had just m
 host's half of an SSH profile. A path that exists only to carry a secret through a process that does
 not need it is a path that can leak it.
 
-**Cost.** The helper is a second entry point into `ubiq-app` whose contract is two environment
-variables, and it reaches `ubiq_host`'s store directly rather than over the bus — the one place the
+**Cost.** The helper is a second entry point into `kubiq-app` whose contract is two environment
+variables, and it reaches `kubiq_host`'s store directly rather than over the bus — the one place the
 binary uses its knowledge of both halves for something other than starting them. It is also
 untestable end to end without a real `ssh`: what a test can reach is the argv and the environment
 the child is given, not what OpenSSH does with them.
@@ -2704,10 +2704,10 @@ them.
 ### D127 — QuickJS is compiled into the interface behind a feature the binary defaults on
 
 The kitchen sink's script page evaluates JavaScript through `rquickjs`, declared optional in
-`crates/ubiq/Cargo.toml` and turned on by `crates/ubiq-app`'s `default` — the one manifest that
+`crates/kubiq/Cargo.toml` and turned on by `crates/kubiq-app`'s `default` — the one manifest that
 names both halves is the one place a build is made smaller. `assist-apple` used to take the same
 shape; it is off in `default`, because compiling it means a Swift toolchain and the macOS 26 SDK, a
-cost `quickjs` does not carry. `crates/ubiq/src/state/script.rs` is the whole of the surface —
+cost `quickjs` does not carry. `crates/kubiq/src/state/script.rs` is the whole of the surface —
 `available()`, `engine_name()`, and `eval(run: Run)` / `eval_timed(run, block_ms, total_ms)`
 returning a `ScriptOutcome`, plus the `validate` and `transpile` that `D128` puts in front of them —
 and the page is drawn whether or not anything is behind it. `D129` is the capability model a `Run`
@@ -2740,8 +2740,8 @@ a new decision rather than an extension of this one — `G260`.
 ### D128 — oxc is the script page's front end, in front of the interpreter
 
 Everything the script page does to a source before QuickJS sees it goes through `oxc`, declared in
-`crates/ubiq/Cargo.toml` with `codegen`, `semantic` and `transformer` and no default features. Two
-jobs sit on it, both in `crates/ubiq/src/state/script.rs`. `validate(prelude, source, dialect,
+`crates/kubiq/Cargo.toml` with `codegen`, `semantic` and `transformer` and no default features. Two
+jobs sit on it, both in `crates/kubiq/src/state/script.rs`. `validate(prelude, source, dialect,
 &OxcOptions)` parses both of the page's buffers and turns each diagnostic into a `Diagnostic` — which
 buffer it is in, the message, and the byte span resolved to a one-based line and column the editor
 can point at — plus how many lines were checked and how long it took, in a `SyntaxReport` whose
@@ -2789,17 +2789,17 @@ as a type check is reading it wrong.
 The interpreter `D127` puts in the process performs no effect of its own. What a script may reach
 beyond the language itself is entirely in what its `Run` carries: a `HostFacts` snapshot the
 interface serialises on its own thread before the run starts, and an `Intent` log the run writes
-into and the caller reads back out. `ubiq.project`, `ubiq.tasks.list`/`get`, `ubiq.ai.models`/
-`available` and `ubiq.search.last`/`files` answer straight out of that snapshot; `ubiq.tasks.create`,
-`ubiq.tasks.cancel`, `ubiq.ai.ask` and `ubiq.search.text` each build an `Intent` — namespace, call,
+into and the caller reads back out. `kubiq.project`, `kubiq.tasks.list`/`get`, `kubiq.ai.models`/
+`available` and `kubiq.search.last`/`files` answer straight out of that snapshot; `kubiq.tasks.create`,
+`kubiq.tasks.cancel`, `kubiq.ai.ask` and `kubiq.search.text` each build an `Intent` — namespace, call,
 arguments — append it to the run's log and answer `null`, exactly the rule `D115` puts on an A2UI
-local call. `ubiq.sink.ui(payload, handler)` is the fifth namespace and the odd one out: it declares
+local call. `kubiq.sink.ui(payload, handler)` is the fifth namespace and the odd one out: it declares
 a panel rather than reading or refusing anything, and the page draws it.
 
 Nothing survives a run, so a click on that panel has no closure to call. `AppState::
 fire_script_a2ui_action` does the A2UI page's own envelope-and-blocking-check work over the
 declared surface, then calls `replay_sink_script`, which evaluates the whole script again from the
-top with a `ScriptEvent` in hand; `ubiq.sink.event()` answers it, and the handler the second
+top with a `ScriptEvent` in hand; `kubiq.sink.event()` answers it, and the handler the second
 declaration registers is called once the script has finished. A script that wants a click to mean
 something has to be idempotent — the same discipline "nothing survives between runs" imposes on
 everything else the script does.
@@ -2864,7 +2864,7 @@ three, so `DronePreset` names those three rather than putting two controls in fr
 linger, **Managed** detaches at `never`. `ssh_connect::remote_command` is where a preset becomes a
 command line, and `linger_arg` where a project's `DroneOrigin` overrides the preset's own seconds.
 
-The knob is the *drone's* timer and never Ubiq's, because the whole point of a detached drone is
+The knob is the *drone's* timer and never Kubiq's, because the whole point of a detached drone is
 that the interface may be gone — closed, asleep, or behind a link that dropped — so a countdown
 held where the user is would never run when it is needed. It is re-asserted on every attach, over
 the socket preamble rather than the protocol, so changing it costs no restart and no pane.
@@ -2910,7 +2910,7 @@ local one silently; ids are ULIDs minted per catalogue, so that collision is a m
 
 ### D133 — The remote `PATH` is tried first and the deployer is the fallback
 
-`dial_ssh` runs the bare `ubiq-drone` on the far `PATH` exactly as it always has, and reaches
+`dial_ssh` runs the bare `kubiq-drone` on the far `PATH` exactly as it always has, and reaches
 `ensure_drone` only after the far shell has answered that there is nothing by that name — keyed on
 the shell's own exit 127, and on nothing else, so `ssh`'s 255 and a refused handshake are left to
 the classes they have. The re-dial happens once, and only when no `drone_path` was given: an
@@ -2929,11 +2929,11 @@ but *broken* is never replaced, because it ran.
 
 ### D134 — A drone shells to the machine's own `rg`, `ag` or `grep`, and never builds an index
 
-`ubiq_drone::search` probes once, in that order, and runs a one-shot exec per query: `rg --json`
+`kubiq_drone::search` probes once, in that order, and runs a one-shot exec per query: `rg --json`
 first, because it is the only one of the three that hands back exact match ranges rather than a
 highlighted line; then `ag`; then a bare `grep -rn`. The flags are built as argv and never as a
 shell string, so a query holding a quote or a semicolon is a query and not an injection. What comes
-back is translated into exactly the messages `ubiq_host::search::worker` sends, batched the same way
+back is translated into exactly the messages `kubiq_host::search::worker` sends, batched the same way
 and under the same ceilings, so the interface needs no branch for a drone's answer. `CancelSearch`
 kills the child. `Scope::Files` is the only scope served — tasks, chats and the knowledge base are
 the coordinator's own state, which a drone holds none of, so anything else answers an empty
@@ -2941,11 +2941,11 @@ the coordinator's own state, which a drone holds none of, so anything else answe
 
 **A drone never builds an index.** It is a guest on somebody else's machine, and the resident cost
 an index implies — a directory of state that outlives the search that asked for it — is the thing
-this whole design exists to avoid. Porting `ubiq_host::search`'s own walker instead would be that
+this whole design exists to avoid. Porting `kubiq_host::search`'s own walker instead would be that
 same cost in a different shape, and slower than a tool the machine carries.
 
 **Cost:** a machine with none of the three answers every search with `SearchError::Walk` naming what
-was tried, and the remedy is installing something rather than anything Ubiq can do — which is why
+was tried, and the remedy is installing something rather than anything Kubiq can do — which is why
 `D135` keeps the capability unadvertised there. Results also vary with the tool: `grep` gives a
 whole line where `rg` gives a range, and the three disagree about what they skip by default, so the
 same query over the same tree can read differently on two machines. And a drone's search is O(tree)
@@ -2953,7 +2953,7 @@ every time, where a local project's is answered from `tantivy`.
 
 ### D135 — A capability is advertised only once it has been probed
 
-`ubiq_drone::capabilities` is a function, not a `const`. `files` is unconditional; `search` is named
+`kubiq_drone::capabilities` is a function, not a `const`. `files` is unconditional; `search` is named
 only when `search::probe` actually found a tool on this machine's `PATH`. Whether a binary exists is
 a fact about the machine the drone happens to be running on, discovered at start and cached, not
 something the build knows.
@@ -3026,7 +3026,7 @@ every other agent's calls.
 
 ### D139 — The drone tool list is built per run from advertised capabilities
 
-`ubiq_drone::capabilities()` states the same rule for the interface: naming a capability a drone
+`kubiq_drone::capabilities()` states the same rule for the interface: naming a capability a drone
 would only refuse is worse than naming none, because an optimistic list puts something in front of a
 user, or here a model, that answers with a refusal every time. `drone_search` is offered only when
 the attached drone's `DroneIdentity` carries `search`, and `drone_shell` only when it carries
@@ -3045,7 +3045,7 @@ drone gains mid-run is invisible to it until the next one.
 **Superseded by `D205`.** `[Teams]` is removed; the record below is why the two stood side by side.
 
 `RailMode::Orchestration` is renamed `RailMode::TeamsOld`, labelled `[Teams]`, its screen
-(`ui/orchestration/*`), its state (`GraphView`) and its `ubiq://<project>/graph/...` nav slug all
+(`ui/orchestration/*`), its state (`GraphView`) and its `kubiq://<project>/graph/...` nav slug all
 otherwise unchanged. A new `RailMode::Teams`, labelled `Teams`, sits ahead of it in the rail's
 `PROJECT` group, with its own screen (`ui/teams/*`), its own state (`TeamsView` in
 `state/teams.rs`) and its own `OpenProject` field — copied from `[Teams]`'s shape rather than
@@ -3062,11 +3062,11 @@ one without the other regressing, and `[Teams]` stays the fallback a user can st
 
 **Cost:** two near-identical implementations — state, screen and app-layer helpers each duplicated
 — to keep in step by hand rather than by the compiler; a second entry in the rail's `PROJECT` group
-sharing one icon (`UbiqIcon::ModeTeams`) until one is drawn for `Teams` (`G275`); `prefs::SCHEMA`
+sharing one icon (`KubiqIcon::ModeTeams`) until one is drawn for `Teams` (`G275`); `prefs::SCHEMA`
 moved `3` to `4`, because the serialised `rail_mode: "Orchestration"` tag names nothing this
 build reads, so a saved rail-mode preference from before this change opens on defaults rather than
 the wrong mode; and `Teams` has no status-bar counts, which `[Teams]` has. `current_destination`
-answers `View::Teams` for the mode, with its own `ubiq://<project>/teams/...` slug alongside
+answers `View::Teams` for the mode, with its own `kubiq://<project>/teams/...` slug alongside
 `graph`'s, so the bookmark, back/forward and titlebar gaps `G274` named are closed; the two links
 share the `s:`/`a:` prefix and the optional `chat`/`tasks` tab, and only `teams` can carry a third,
 unsplit part naming a delegate. Whichever of the two eventually drops the bracket is `D47`'s to
@@ -3076,7 +3076,7 @@ update again.
 `Teams` draws (one row of boxes under a card, `state::layout::ring`) answers to
 `Conversation::subagents()`, not to a second `WorkAgent` per delegate. The wire carries the field
 for it — `ConvUpdate`'s `Option<Subagent>`, and `WorkAgent.parent` exists on the record — but the
-real coordinator sets `parent: None` on every agent it reports (`crates/ubiq-host/src/
+real coordinator sets `parent: None` on every agent it reports (`crates/kubiq-host/src/
 coordinator.rs`) and only `work/mock.rs` populates it, so a `WorkAgent` reading is a fixture's
 opinion, never a live one. Reading the conversation instead costs a delegate its own id: it is named
 by the `Task` call that spawned it, a `String` rather than an `AgentId`, so it has no pane, no
@@ -3153,8 +3153,8 @@ what this decision fills in — `AdoptProject` is that message.
 API URL and key at run time. The GitHub issues pair stays compiled-only, and the body below still
 explains why the default is compiled in rather than read from the environment.
 
-A report the user sends is the one thing Ubiq says to a service that is neither the user's harness
-nor a service they authorised, so `crates/ubiq-host/src/feedback` reads its URL, its API key, its
+A report the user sends is the one thing Kubiq says to a service that is neither the user's harness
+nor a service they authorised, so `crates/kubiq-host/src/feedback` reads its URL, its API key, its
 repository and its token through `option_env!` and nothing else — the same choice `D71` makes for a
 built-in application's client id, for the same reason. The alternative was a setting: a field beside
 the assist providers or the SSH profiles, editable from the interface or a config file.
@@ -3171,11 +3171,11 @@ button says so rather than offering a field to fill in.
 
 ### D144 — `detach_console` repoints standard handles to `NUL`, and only when the process is alone in its console
 
-`crates/ubiq-app/src/lib.rs`'s `detach_console` frees the console a Windows launch was given, so a
+`crates/kubiq-app/src/lib.rs`'s `detach_console` frees the console a Windows launch was given, so a
 double-click is a window and nothing else. Freeing a console this process is alone in destroys the
 console object while its three standard handles still name it, and a child spawned afterwards with
 inherited stdio then asks the kernel to hand a destroyed console to a new process — refused as
-`STATUS_NOT_SUPPORTED`, `os error 50` at the call site, which is what reached Ubiq on the confine
+`STATUS_NOT_SUPPORTED`, `os error 50` at the call site, which is what reached Kubiq on the confine
 shim a conversation starts (`crates/agent-manager/src/io/structured.rs`'s `spawn_piped`, the one
 spawn that inherits standard error rather than piping it). `GetConsoleProcessList` says whether this
 process is alone before `FreeConsole` runs, because afterwards there is nothing left to ask; alone,
@@ -3226,7 +3226,7 @@ constant is changed by hand.
 
 ### D146 — Help content is built outside the Rust build, and its bundle is never versioned
 
-`help/` is markdown in the tree; `_tools/helpbundle.py` validates it and writes one `UBIQBND1`
+`help/` is markdown in the tree; `_tools/helpbundle.py` validates it and writes one `KUBQBND1`
 archive to `target/help/help.bundle`, which `.gitignore` covers. Nothing in `cargo build` or
 any `build.rs` knows help exists, and `just bundle` / `just bundle-win` copy the file beside the
 binary only if it happens to be there.
@@ -3252,7 +3252,7 @@ image source underneath resolves a filesystem path but not an archive entry and 
 one — that is the same wall `G11` names for the knowledge base. Doc-relative links resolve with the
 existing `resolve_relative` and no new resolver. And the MCP server reads a file instead of sharing
 a reader handle with the interface across a crate boundary. Serving help through a web tenant would
-have solved the images alone, at the cost of a browser for content Ubiq draws natively.
+have solved the images alone, at the cost of a browser for content Kubiq draws natively.
 
 **Cost:** a few megabytes of disk per content version, an extraction pass on first open, and a cache
 directory that is one more thing under the config root to garbage-collect. Older version directories
@@ -3283,7 +3283,7 @@ overrides only, and a key two pages both claim fails the build.
 
 **Why:** a manual is reorganised more often than it is rewritten, and path-addressed links break
 silently when a page moves between folders — `redirects:` then keeps even a previously pasted
-`ubiq://./help/<id>` link alive. Putting `context:` on the page rather than in a central table gives
+`kubiq://./help/<id>` link alive. Putting `context:` on the page rather than in a central table gives
 one editing location instead of two, keeps the binding beside the prose that justifies it, and makes
 a deleted page take its binding with it rather than leave a dangling row.
 
@@ -3342,14 +3342,14 @@ and `mono_font_size` from the content base. `gpui_component::Root` calls
 rem.
 
 **Why:** GPUI's whole Tailwind-shaped spacing scale is rem-relative — every `p_3`, `gap_2`, `w_4`
-and `h_8` expands to `rems(...)` in `gpui_macros` — and Ubiq never wrote the number, so it sat at
+and `h_8` expands to `rems(...)` in `gpui_macros` — and Kubiq never wrote the number, so it sat at
 16px from the first release. Writing it is how several hundred hand-placed spacings, and every
 `gpui-component` internal measured in rems, start scaling with no call-site change at all. Any
 other route would mean touching every one of those call sites, which is exactly the change `D151`
 exists to avoid needing.
 
-**Cost:** Ubiq inherits `gpui-component`'s spacing judgement wholesale, and a library upgrade that
-re-tunes a rem value moves Ubiq's layout. Rem is also a length, so it cannot carry a type-only
+**Cost:** Kubiq inherits `gpui-component`'s spacing judgement wholesale, and a library upgrade that
+re-tunes a rem value moves Kubiq's layout. Rem is also a length, so it cannot carry a type-only
 ratio: the library's own text — input fields, the dock's tab labels, the table — follows the UI
 scale but not the text ratio (`G304`).
 
@@ -3385,7 +3385,7 @@ not expressible. Interning leaks a slug per distinct custom theme the process ev
 how many a person authors. And a custom theme's ground is its base's: an override map that lightens
 a dark fork still tells the component library and the highlighter *dark*.
 
-### D154 — Teams is scoped by a span the window owns, and the span is not part of a `ubiq://` address
+### D154 — Teams is scoped by a span the window owns, and the span is not part of a `kubiq://` address
 
 `state::teams::TeamsSpan` is `Project` or `Window`, and it is what the Teams canvas is scoped by —
 not the window's active project, which is what every other screen is scoped by. Under `Window` the
@@ -3426,13 +3426,13 @@ conversation. Every write and every record read the Teams screen makes needs a s
 `self.project(cx)` is a bug that only appears with two projects open. And one more thing on screen
 that a link cannot carry: the span a canvas was arranged in is not recoverable from the link to it.
 
-### D155 — `ubiq-ask`'s parked calls reuse `D138`'s table, generalised to a human answer
+### D155 — `kubiq-ask`'s parked calls reuse `D138`'s table, generalised to a human answer
 
-`crates/ubiq-host/src/ask.rs`'s `Asks` is `D138`'s pending-call design read again: a call with no
+`crates/kubiq-host/src/ask.rs`'s `Asks` is `D138`'s pending-call design read again: a call with no
 local fact to answer from is held by id, off the thread serving it, until something else supplies
-the answer. `D138` built that shape for a drone tool waiting on a remote host; `ubiq-ask`'s
+the answer. `D138` built that shape for a drone tool waiting on a remote host; `kubiq-ask`'s
 `ask_user_question` is the first call to ship parking on a person instead — `super::server::handle`
-(`crates/ubiq-host/src/mcp/server.rs`) moves the request off the listener's own thread before
+(`crates/kubiq-host/src/mcp/server.rs`) moves the request off the listener's own thread before
 calling into `mcp::ask::call`, on the reasoning `D138` states for its own case: every other agent's tool call
 comes through that one listener, and a parked one would hold all of them up. The coordinator answers
 it exactly as any other message — `Message::AnswerAsk` reaches `Asks::answer`, which releases the
@@ -3440,7 +3440,7 @@ waiting thread and returns at once, with neither side blocking on the other.
 
 **A parked call must still end when nobody ever answers, which the drone's table had no need to
 say out loud** — a remote host either replies or the connection drops, but a person may simply never
-come back to the tab. `ASK_TIMEOUT_SECS` (`crates/ubiq-proto/src/ask.rs`, one hour) is `Asks::wait`'s
+come back to the tab. `ASK_TIMEOUT_SECS` (`crates/kubiq-proto/src/ask.rs`, one hour) is `Asks::wait`'s
 own bound, releasing the call as `AskClosed::Timeout`; a conversation ending, unloading or dying
 releases every ask it parked as `AskClosed::Gone` through `Asks::end_for_agent`, so a wedged tool
 call is never the price of a closed tab, and a table dropped out from under a waiter reads the same
@@ -3459,7 +3459,7 @@ arrangement back into the project's per-mode prefs, so the corruption stuck. The
 applied at both switches: **a switch opens no region and adds no panel.** Only a gesture aimed at
 one — a click on a region's switch, a search, opening the console, asking for help — is allowed to.
 
-`AppState::settle_layout`'s leftover-restore loop (`crates/ubiq/src/app/panels.rs`) is where the
+`AppState::settle_layout`'s leftover-restore loop (`crates/kubiq/src/app/panels.rs`) is where the
 region half of this held wrong: a panel the window still held that the restored blob did not name
 was put back with `dock::reveal`, which opens the region it lands in. It uses `dock::add` instead,
 which does not, and which regions were open right after the restore is read and forced back
@@ -3576,7 +3576,7 @@ rather than on top of it.
 
 **The origin is established where the save enters the host and never inferred.**
 `Message::SavePlan` is the interface's message and nothing else sends one, so the host stamps
-`Human` on arrival; `ubiq-plan`'s `write_plan` is the only route to `Agent`, and stamps it with the
+`Human` on arrival; `kubiq-plan`'s `write_plan` is the only route to `Agent`, and stamps it with the
 calling agent's own key. `SavePlan` carries no origin field and must never grow one — a field would
 be a request, and an agent could then ask to be recorded as a person. `crate::plan::Saver` exists to
 make that structural rather than conventional: its only constructors are `human()` and `agent(key)`,
@@ -3628,7 +3628,7 @@ make it compose in one place and fail in another. Across projects is not a rule 
 impossibility: a run resolves through one project's store, so another project's agent definition is not a
 name it can see.
 
-**Cost:** three. The refusal can only be *reached* by a hand-edited `profile.toml` — Ubiq's own
+**Cost:** three. The refusal can only be *reached* by a hand-edited `profile.toml` — Kubiq's own
 form writes no `extends` — so it surfaces as a launch failing with that sentence rather than as a
 form refusing to save, which is late. A project agent definition is invisible to every surface that has no
 project in hand, including the new-mission dialog's assistant picker, so a project-scoped assistant
@@ -3639,7 +3639,7 @@ than a per-project ask, and is only cheap while a catalogue holds tens of projec
 ### D159 — A plan's annotations anchor to a stable block id kept in a sidecar, not a quoted-context match or a run-level id
 
 An annotation has to survive the document being edited — by a human in the editor, by an agent
-through `ubiq-plan`, or by a wholesale rewrite — and character offsets do not: an insertion
+through `kubiq-plan`, or by a wholesale rewrite — and character offsets do not: an insertion
 anywhere above a range silently moves every annotation below it, with no signal that it happened.
 Two other shapes were weighed. Quoted-context anchors — store the annotated text plus a few words
 either side and re-find it on load — are cheap and format-free, and fail silently once the quoted
@@ -3649,11 +3649,11 @@ library, and export becomes a render rather than a copy.
 
 **The chosen shape is a stable id per block, assigned by matching the parsed document against its
 previous version on every save** — identical text keeps its id, an edited block keeps it by
-word-overlap similarity (`crates/ubiq-host/src/plan/blocks.rs::match_blocks`), and a block nothing
+word-overlap similarity (`crates/kubiq-host/src/plan/blocks.rs::match_blocks`), and a block nothing
 matches is reported as vanished rather than silently dropped. The body stays plain markdown on
 disk, which is the export for free and the form an agent can read and rewrite with ordinary file
 tools; the block index and the annotation threads live in a sidecar beside it,
-`<TaskId>.annotations.json` (`crates/ubiq-host/src/store/plan.rs`), so a plan opened in any other
+`<TaskId>.annotations.json` (`crates/kubiq-host/src/store/plan.rs`), so a plan opened in any other
 editor is undamaged.
 
 **Cost:** an edit inside a block keeps its annotations, and a deleted block orphans them
@@ -3674,11 +3674,11 @@ page and its CSP, the annotation bridge, the in-page block-id assignment and its
 
 **The chosen surface is native, on `EditorState`, the engine every text buffer in the file viewer
 is drawn with.** It ships a selection range the application reads and writes, a Monaco-shaped
-decoration layer driving vim marks and bookmarks (`crates/ubiq/src/app/nav.rs`), and
+decoration layer driving vim marks and bookmarks (`crates/kubiq/src/app/nav.rs`), and
 `CompletionProvider`/`HoverProvider` traits with their popovers drawn and no implementation behind
 them until this feature. Building the plan editor is then "implement one provider trait and one
 popover against an engine compiled into the tree" rather than "write a rich text editor" — the
-only route that works on every platform Ubiq builds for, and the plan is not a diagram: it is
+only route that works on every platform Kubiq builds for, and the plan is not a diagram: it is
 where the planning loop happens.
 
 **Cost:** the writing surface is markdown source with a preview, not WYSIWYG rich text — nobody
@@ -3689,14 +3689,14 @@ asked for it, but the surface cannot grow into it later without becoming the web
 The annotation layer was built for plans and serves **any** markdown document a project holds.
 Rather than a parallel `Document*` family beside the `Plan*` one — two
 sets of messages, two host services and, inevitably, two block matchers that drift — every variant
-in the family stopped naming `(project_id, task_id)` and names a `ubiq_proto::plan::DocumentHandle`
+in the family stopped naming `(project_id, task_id)` and names a `kubiq_proto::plan::DocumentHandle`
 instead: `Plan { project_id, task_id }` or `File { project_id, rel_path }`. One matcher, one
 orphaning rule, one provenance layer, one sidecar format. The host resolves the handle to a
 `plan::Target` once, in `Coordinator::plan_job`, which is where a `rel_path` is contained inside
 the project and refused if it is not markdown; nothing below that point sees a path.
 
 **A file document's sidecar is `<file>.md.annotation.json`, beside the file, inside the user's
-repository.** That is a deliberate exception to `D30` — the first one that writes Ubiq's own
+repository.** That is a deliberate exception to `D30` — the first one that writes Kubiq's own
 bookkeeping into a project tree — taken because an annotation on a file the repository owns is
 about that file, has to survive a clone, and has to be reviewable: a thread that lived in the
 config root would be invisible to everyone but the machine that wrote it. The exception is
@@ -3715,32 +3715,32 @@ failure the paragraph above already rejects.
 
 **Cost:** a repository acquires a file to commit, which is exactly what `D30`
 existed to avoid; and the two sidecar spellings have to be remembered. In plan mode annotations
-also feed the agents through `ubiq-plan`; a file document's reach them through `ubiq-doc` (T-348),
+also feed the agents through `kubiq-plan`; a file document's reach them through `kubiq-doc` (T-348),
 the same handlers with the document named by a project-relative path — an agent asks for them, and
 an `@agent` comment on a file reaches the agent the file is bound to (`D207`).
 
 ### D162 — The GPUI interface is a cargo feature, `ui`, default-on
 
-`ubiq-app` builds one binary that is a window or nothing; a headless machine — a drone host, a CI
+`kubiq-app` builds one binary that is a window or nothing; a headless machine — a drone host, a CI
 runner — has no use for GPUI, `gpui-component`'s widget set or an asset source, and had no way to
-leave them out. `ui` is a default feature gating exactly those: `dep:ubiq`, the four GPUI
-crates, and everything in `crates/ubiq-app/src/lib.rs` that draws. `run(boot)` does the whole
+leave them out. `ui` is a default feature gating exactly those: `dep:kubiq`, the four GPUI
+crates, and everything in `crates/kubiq-app/src/lib.rs` that draws. `run(boot)` does the whole
 non-interface boot unconditionally — logging, the config root, the stores, the one host — and then
 calls `window()`, the interface's own function, only when `ui` is compiled in; without it, the
 process says so once on standard error and parks, the posture a served run takes regardless.
-`quickjs` names the facade's feature weakly (`ubiq?/quickjs`) so asking for it does not drag the
-interface back in. `ubiq-studio-app` forwards the same switch, adding its own interface half
-(`dep:ubiq-studio`) to it rather than declaring a second feature. `just headless` is the check,
+`quickjs` names the facade's feature weakly (`kubiq?/quickjs`) so asking for it does not drag the
+interface back in. `kubiq-studio-app` forwards the same switch, adding its own interface half
+(`dep:kubiq-studio`) to it rather than declaring a second feature. `just headless` is the check,
 proved by a `cargo tree` grep for a `gpui` crate rather than by the compile alone, since a stray
 `use` outside its `#[cfg(feature = "ui")]` would still link through some other path.
 
-**Cost:** `check`'s `ubiq-studio-app` line has to name `--features ui,quickjs` explicitly, because
+**Cost:** `check`'s `kubiq-studio-app` line has to name `--features ui,quickjs` explicitly, because
 `--no-default-features` there is `assist-apple`'s escape hatch (`T-34`) and would otherwise
 silently become a headless type-check that leaves the interface unchecked.
 
-### D163 — Logic both halves must agree on exactly may live in `ubiq-proto`, beside the messages and not as one
+### D163 — Logic both halves must agree on exactly may live in `kubiq-proto`, beside the messages and not as one
 
-`crates/ubiq-proto` is the contract, and the reflex is that only things that cross the bus belong
+`crates/kubiq-proto` is the contract, and the reflex is that only things that cross the bus belong
 in it. The block walk broke that reflex: the host splits a saved document into blocks to index them
 (`plan::blocks::match_blocks`) and the window split an edited section the same way to patch its own
 cache ahead of the host's answer (`state::document::parse_section_blocks`, removed with the section
@@ -3749,7 +3749,7 @@ to each other — neither result crosses the bus — but they have to produce th
 a cache built by different rules than the index disagrees with it on screen and says nothing. It
 was two copies, character for character identical, and staying that way by luck (`T-114`).
 
-**Shared logic goes in `ubiq-proto`, in its own module, when both halves must agree on the answer
+**Shared logic goes in `kubiq-proto`, in its own module, when both halves must agree on the answer
 and neither may depend on the other.** `blocks.rs` is the walk; `plan/blocks.rs` keeps the id
 matching, which is the host's alone, and re-exports the walk so its callers name one module. The
 test is *must they agree*, not *does it cross*: a helper only one half calls stays in that half, and
@@ -3757,7 +3757,7 @@ this is a module beside `messages.rs`, never a variant in it.
 
 **Cost:** the contract crate gains a dependency — `markdown` — and with it a reason for a build
 break in a crate that had almost none. Both halves carried it before this, so the move costs no
-compile time and `ubiq-host` dropped its own direct copy of the dependency; but the rule is a
+compile time and `kubiq-host` dropped its own direct copy of the dependency; but the rule is a
 door, and a second `just`-checked boundary (nothing here draws, nothing here touches disk) is what
 keeps it narrow.
 
@@ -3839,7 +3839,7 @@ field, and a phase history is a record of who asked, not of who claimed to. Read
 the mission's own state instead of the request makes the claim impossible to forge rather than
 merely implausible.
 
-**Cost:** an agent cannot ask on another's behalf, even a legitimate one — `ubiq-mission`'s
+**Cost:** an agent cannot ask on another's behalf, even a legitimate one — `kubiq-mission`'s
 `request_phase` always speaks as the coordinator it is, and a worker with something to say routes it
 through `message_agent` or `report_progress` instead of a phase request of its own.
 
@@ -3869,8 +3869,8 @@ sound: a mission with nothing pending has no phase a free move could collide wit
 
 Two choices made together, both against inventing a moving part S3 does not need. `journal.jsonl` is
 written with `OpenOptions::append(true)` and one line per write
-(`crates/ubiq-host/src/store/mission.rs::append_journal`), never through
-`crate::atomic::write_atomic`, the rewrite-and-rename helper every other store file in Ubiq uses: a
+(`crates/kubiq-host/src/store/mission.rs::append_journal`), never through
+`crate::atomic::write_atomic`, the rewrite-and-rename helper every other store file in Kubiq uses: a
 journal is exactly the file that helper is wrong for, because a crash between the rewrite and the
 rename would lose every line the file held, not just the one being added, which is the opposite of
 what an append-only log is for. `MissionRecord::documents` is the second half: the host reads
@@ -3887,7 +3887,7 @@ volume this design was built to scale past.
 
 **Superseded by `D217`.** Spawn requests, kinds and policy are gone. What stands is the split: the host asks one window through `MissionLaunch`, and the window mints the agent.
 
-`spawn_agent` on `ubiq-mission` posts `Message::MissionSpawnRequest` and returns at once — the host
+`spawn_agent` on `kubiq-mission` posts `Message::MissionSpawnRequest` and returns at once — the host
 never launches anything itself. The alternative was letting the host read `SpawnPolicy` and start
 the harness directly, the way a phase move's gate lives on the host: rejected, because the
 one-minter rule for an `AgentId` (`StartConversation`'s own precedent) would otherwise be broken
@@ -3933,7 +3933,7 @@ alternative — pasting the brief, the plan body and the latest journal lines in
 that announces the handover — was rejected: a pasted copy is a second fact that starts disagreeing
 with its source the moment either is edited afterwards, and a handoff is exactly the moment nothing
 about the mission is guaranteed to hold still. Every one of the four is a tool call on
-`ubiq-mission` regardless, so pointing at them costs the new coordinator one extra turn and
+`kubiq-mission` regardless, so pointing at them costs the new coordinator one extra turn and
 guarantees it reads what is actually current.
 
 **Cost:** the incoming coordinator's first turn is spent reading rather than acting, where a pasted
@@ -3942,9 +3942,9 @@ handoff is exactly the one where starting from a stale copy costs more.
 
 ### D173 — A project may keep its data in its own folder, as the one exception to `D30`
 
-`ProjectRecord::storage` names one of two modes. **Ubiq-managed** is `D30` exactly: everything
+`ProjectRecord::storage` names one of two modes. **Kubiq-managed** is `D30` exactly: everything
 hangs off the config root under `projects/<project ulid>/`, and nothing at all is written inside
-the project's folder. **Project-managed** puts the same data in a `.ubiq/` folder inside the
+the project's folder. **Project-managed** puts the same data in a `.kubiq/` folder inside the
 project's own directory, so a team commits its tasks, its plans and its project settings and every
 clone of the repository arrives with them. The mode is chosen in the creation panel, and changed
 afterwards only by `SetProjectStorage` — never by `UpdateProject` — because the two trees are
@@ -3954,7 +3954,7 @@ Three pieces make it work without any other part of the host learning about it. 
 `<config root>/projects/<ulid>/storage.toml`, names where the data went — that directory still
 exists for a project-managed project, so Forget and the orphan collector need no change, and a
 store resolves through `store::project_dir::ProjectDirs` rather than reading a catalogue it has no
-business reading. A **`.gitignore`** inside `.ubiq/`, written once and never rewritten, keeps the
+business reading. A **`.gitignore`** inside `.kubiq/`, written once and never rewritten, keeps the
 per-machine half out of the user's commits — and since `G356` that is one entry, `local/`, because
 the layout itself is the split: the shared half at the top of a data directory, everything one
 machine derives under `local/`, in both trees. And **`project.toml`** carries the
@@ -3976,7 +3976,7 @@ live conversation running in it is refused**, from the two tables the host keeps
 
 **Cost:** two places a project's data can be, which every future per-project store has to ask
 about rather than compose a path for. A project-managed project that is forgotten leaves its
-`.ubiq/` behind, by design — it is in the user's own tree — and adding the folder back gives it a
+`.kubiq/` behind, by design — it is in the user's own tree — and adding the folder back gives it a
 new id. And the move carries only what resolves through `ProjectDirs`: until `G355`, the plans,
 missions, knowledge-base roots and agent definitions stay under the config root, which is where
 their stores still read them.
@@ -4009,15 +4009,15 @@ eye, and the SSH sense is the one a future pass will trip over again.
 
 `ask_user_question` parks its tool call while a person is asked (`D138`, `D155`). Every harness in
 front of that call has a tool timeout of its own, and every one of them is far shorter than
-`ASK_TIMEOUT_SECS` — so the harness gives up before the human does, and no timeout Ubiq controls can
+`ASK_TIMEOUT_SECS` — so the harness gives up before the human does, and no timeout Kubiq controls can
 fix a timer it does not own.
 
 `register_question` removes the wait instead of lengthening it. The call validates the same
-`questions` with `ubiq_proto::ask::check`, mints the `AskId`, files it as *armed* against the calling
-conversation in `crates/ubiq-host/src/armed.rs`, and returns `{"registered": "<ask id>"}` on the
+`questions` with `kubiq_proto::ask::check`, mints the `AskId`, files it as *armed* against the calling
+conversation in `crates/kubiq-host/src/armed.rs`, and returns `{"registered": "<ask id>"}` on the
 listener's own thread — no thread spawned, nothing parked, nothing for a timeout to reach. The
 conversation's pump raises what is armed the instant it sees `TurnEnded`
-(`crates/ubiq-host/src/conversation.rs`, `fire_armed`), as the same `Message::AskUser` the parked
+(`crates/kubiq-host/src/conversation.rs`, `fire_armed`), as the same `Message::AskUser` the parked
 mode raises; the coordinator addresses it as it always did, the window draws the modal it always
 drew. On `AnswerAsk` the coordinator asks the armed table first: a row there has no call to release,
 so the outcome is rendered to prose and submitted as the next turn's prompt, exactly as
@@ -4031,8 +4031,8 @@ to, never both.
 
 **A second mode, not a replacement.** The parked call is the only shape that can pause an agent
 *mid-sequence* — per-item confirmation inside a long mechanical run, anything holding an open
-resource — and `crates/ubiq-host/src/ask.rs` keeps it unchanged. The two share
-`ubiq_proto::ask`'s vocabulary, the three transport messages and the whole of the dialog; the only
+resource — and `crates/kubiq-host/src/ask.rs` keeps it unchanged. The two share
+`kubiq_proto::ask`'s vocabulary, the three transport messages and the whole of the dialog; the only
 difference is what the outcome is delivered into, a channel or a prompt.
 
 **Cost:** two tools a model can pick wrongly between — the descriptions carry that weight, and
@@ -4071,7 +4071,7 @@ who wants to look first uses *Spawn ▾* and picks explicitly instead of typing 
 
 ### D177 — An extension container is a compile-time registry, populated once before the first window
 
-`crates/ubiq/src/ext` gives the base one mechanism for letting a second edition add to a closed
+`crates/kubiq/src/ext` gives the base one mechanism for letting a second edition add to a closed
 surface without an ABI, dynamic loading, or a plugin runtime: a `Registry<T>` — id-keyed,
 group-ordered, resolved once to a cached draw order and never walked in a draw path — plus a spec
 struct per container. A container declares its own group order; two items in one group order by
@@ -4084,17 +4084,17 @@ given id does. A declared removal that never resolves against a registered id pa
 the id is a `const`, for a second edition that references the id by string and cannot get one.
 
 **Cost:** every future container this mechanism hosts carries a permanent id, group and lint
-obligation. `crates/ubiq/src/ext` builds the mechanism with zero containers on top of it by design — a
+obligation. `crates/kubiq/src/ext` builds the mechanism with zero containers on top of it by design — a
 container with no contributor is a published API with no evidence it has the right shape, so each
 one lands only when something needs it, converting the base's own use of the closed surface it
 replaces in the same commit.
 
 ### D178 — Extension ids are `SlotId(&'static str)`, namespaced, and linted to one module
 
-An id in `crates/ubiq/src/ext` is `SlotId(&'static str)` — `Copy`, `Eq`, `Hash` — hierarchical and
+An id in `crates/kubiq/src/ext` is `SlotId(&'static str)` — `Copy`, `Eq`, `Hash` — hierarchical and
 owner-prefixed by convention: a container's id is a base-owned path (`settings/app`, `rail`), an
-item's id carries whoever registered it (`ubiq.settings.editor`, a second edition's own prefix for
-its own items). Every id the base declares is a `const` in `crates/ubiq/src/ext/ids.rs`, the one
+item's id carries whoever registered it (`kubiq.settings.editor`, a second edition's own prefix for
+its own items). Every id the base declares is a `const` in `crates/kubiq/src/ext/ids.rs`, the one
 module `just slots-check` allows to construct one from a string literal — the same treatment
 `just icons-check` already gives the icon registry. A second edition has no equivalent module: it
 registers by string literal and gets `D177`'s boot assertion in place of the compile error a base
@@ -4106,12 +4106,12 @@ same tax `D10`'s theme tokens and the icon registry already carry.
 
 ### D179 — A parsed store round-trips a field it does not itself know, and refuses a file above its own version
 
-`FileProjectStore::flush` and `FileTaskStore::save` (`crates/ubiq-host/src/store/file.rs`) no
+`FileProjectStore::flush` and `FileTaskStore::save` (`crates/kubiq-host/src/store/file.rs`) no
 longer rewrite `projects.toml` and `tasks.toml` straight from the typed `ProjectRecord` /
 `TaskRecord` list in memory. Each save reads whatever the file holds before the write, and for every
 row it is about to write — matched to the old file's row by `id` — copies forward any TOML key that
 is not one of the record's own field names. A key neither store's typed struct knows about — a
-Studio field kept on the same row, or one a newer Ubiq wrote — survives an ordinary
+Studio field kept on the same row, or one a newer Kubiq wrote — survives an ordinary
 load/modify/save cycle instead of silently vanishing, which is what a bare `serde` round trip
 through a struct with no catch-all field had always done. `store/mission.rs`'s single-record merge is
 the precedent, generalised here from one record per file to a list of them keyed by `id`;
@@ -4133,7 +4133,7 @@ makes.
 dialog) were closed enums, each matched exhaustively for a label, a nav icon and a body, and
 `ProjectNav` matched twice more for the count beside a row and for whether the live dialog answers
 to it at all. Both are `Copy` newtypes over a `SlotId`, and every one of those matches is a
-field on one `SettingsSectionSpec` (`crates/ubiq/src/ext/settings.rs`) — `D177`'s first container,
+field on one `SettingsSectionSpec` (`crates/kubiq/src/ext/settings.rs`) — `D177`'s first container,
 and its first two instances. The scope is a field on the spec, `container: App | Project`, rather
 than two types: the two navs are the same shape written twice, and one spec is what stops them
 drifting apart again. The base's own 15 + 8 are the base's own registrations, made in the same
@@ -4167,7 +4167,7 @@ is written there.
 
 `inbox/task-sources-proposal.md`'s R6 named `ConfigField` and left its shape open — it was the one
 piece of the task-source layer with no definition anywhere. It is settled here, in
-`crates/ubiq-proto/src/tasksrc.rs`: `key`, `label`, `kind`, `required`, `testable`, every field a
+`crates/kubiq-proto/src/tasksrc.rs`: `key`, `label`, `kind`, `required`, `testable`, every field a
 `&'static str` or a `bool`, and so `Copy`. `ConfigFieldKind` is `Text`, `Secret`, `Bool`,
 `Choice(&'static str)` and `MultiChoice(&'static str)`, where the string is a **facet name** rather
 than the candidates themselves: the candidates depend on which container is bound and are fetched by
@@ -4190,12 +4190,12 @@ reads one today, so that cost is deferred rather than paid twice.
 
 ### D182 — The task-source layer is a `tasksrc` module in each half, a blocking provider trait, and a per-project sidecar
 
-The first three slices of `inbox/task-sources-proposal.md` land as two modules. `ubiq-proto`'s
+The first three slices of `inbox/task-sources-proposal.md` land as two modules. `kubiq-proto`'s
 `tasksrc` holds the neutral vocabulary — `RemoteItem`, `RemoteLane`, `RemoteContainer`,
 `RemoteCheckItem`, `RemoteComment`, `RemoteDraft`, `RemotePatch`, `Revision`, the four
 `String`-backed provider-scoped ids, `ProviderCaps` and `Facets`. The ids are strings rather than
-ULIDs, which is the one place this family departs from `ids.rs`: the id is minted by a tracker Ubiq
-does not run, and its shape is that tracker's business. `ubiq-host`'s `tasksrc` holds
+ULIDs, which is the one place this family departs from `ids.rs`: the id is minted by a tracker Kubiq
+does not run, and its shape is that tracker's business. `kubiq-host`'s `tasksrc` holds
 `TaskProvider`, `Binding`, the link table and `Registry`, with the provider itself in a submodule.
 
 **The trait is blocking**, for `ureq`'s own reason: every call sits on a thread of its own and an
@@ -4203,7 +4203,7 @@ async runtime would be a second scheduler for nobody. Every method takes the res
 beside the `Binding` — the proposal's signatures take only the binding, but a binding names a
 `ConnectionId` and holds no material, so passing the identity is what keeps a token out of the file
 the binding is written to. `Registry` is a plain `Vec<Box<dyn TaskProvider>>` filled at boot, not
-`crates/ubiq/src/ext`'s `Registry<T>` (`D177`) — that one is the interface's extension machinery and
+`crates/kubiq/src/ext`'s `Registry<T>` (`D177`) — that one is the interface's extension machinery and
 the host has no dependency on it.
 
 Storage is `tasksrc.toml` under the project's data directory, found through `ProjectDirs` exactly as
@@ -4260,7 +4260,7 @@ of them.
 lookup, both directions of the deep-link mapping, the centre screen, the default layout,
 `ModeLayout::default_for`, and two tables of panel furniture. It is a `Copy` newtype over a
 `SlotId`, and every one of those matches is a field on one `RailModeSpec`
-(`crates/ubiq/src/ext/rail.rs`). `RailMode::groups()` no longer writes the APP/PROJECT split or the
+(`crates/kubiq/src/ext/rail.rs`). `RailMode::groups()` no longer writes the APP/PROJECT split or the
 order down at all: the split is which group a registration declares, the order is
 `ext::rail::GROUPS` then registration order, and the base's own ten are the base's own
 registrations in the same commit (`ui::rail::modes`).
@@ -4286,7 +4286,7 @@ container itself crosses the UI/host boundary, so it costs no wire change.
 disk. Four parts, and they are the reusable recipe for any other serialized enum that becomes a
 container — `PanelKind` next:
 
-1. **Encode as the id**, `"ubiq.rail.ide"`, not the variant's `Debug` name.
+1. **Encode as the id**, `"kubiq.rail.ide"`, not the variant's `Debug` name.
 2. **Alias the old names in the decoder.** `ext::rail::decode_id` maps the ten, so a schema-5 blob
    is read whole rather than discarded.
 3. **Keep an id nothing is registered under.** It is interned and written back out untouched. This
@@ -4307,7 +4307,7 @@ fixed.
 ### D185 — An inbound pass pulls only the fields the remote changed, parks an unmapped lane, and unlinks an item that left the filter
 
 The task-source layer's first pass over a bound board
-(`crates/ubiq-host/src/tasksrc/sync.rs`). One named thread, `ubiq-tasksrc`, holding the **third**
+(`crates/kubiq-host/src/tasksrc/sync.rs`). One named thread, `kubiq-tasksrc`, holding the **third**
 clone of `Handle(Arc<Mutex<Work>>)` after the coordinator and the MCP listener — `D120`'s write
 path, unchanged, because an imported task has to be an ordinary task from the moment it lands. The
 provider is asked with no lock held; every write afterwards is one `Work` method under the lock,
@@ -4322,7 +4322,7 @@ any of them, which is what keeps a second provider from having to re-answer them
    and the conflict rules of the outbound slice would have nothing to stand on.
 2. **An unmapped lane parks the task.** A remote lane the binding's map does not name leaves the
    task in whichever column it sits in and files the row as `LinkState::Parked` — the badge. The
-   settled Trello map binds `To Do`, `Doing` and `Done` and leaves the other four Ubiq lanes and
+   settled Trello map binds `To Do`, `Doing` and `Done` and leaves the other four Kubiq lanes and
    every other list unbound *on purpose*; a guess would move somebody's card silently, which is a
    worse failure than a task that visibly did not move. The lane's hash is deliberately **not**
    filed for a parked item, so binding that lane later moves the task on the next pass rather than
@@ -4363,7 +4363,7 @@ invariant 1), but every item on either was a conversion of something that used t
 enum's variant — moved, never added (`D180`, `D184`). `inbox-studio-extension`'s own anti-rot device
 (`X11`) is what M4 answers: **the kitchen sink registers one demo settings section and one demo
 rail mode, through `ext::settings::register` and `ext::rail::register`, with neither container's
-own module touched to add them** — `crates/ubiq/src/ui/sink/ext_demo.rs`, called from each
+own module touched to add them** — `crates/kubiq/src/ui/sink/ext_demo.rs`, called from each
 container's `base_registry()` beside the base's own conversions.
 
 **Why the sink is the host rather than either container's own module.** The demo needs no project
@@ -4385,7 +4385,7 @@ same number. The moment an eleventh mode is registered but not `Always` — off 
 demo is — the two numbers diverge, and the guard undercounted how many modes were actually hidden
 before the rail went empty: it let every `Always` mode be hidden in a project where the `When`
 contribution simply never fired, leaving nothing on screen at all
-(`crates/ubiq/tests/mode_restore.rs`'s `hiding_modes_never_empties_the_rail` caught it directly).
+(`crates/kubiq/tests/mode_restore.rs`'s `hiding_modes_never_empties_the_rail` caught it directly).
 Fixed by computing the ceiling from `mode_enabled` — how many modes are enabled for the project on
 screen — rather than from the registry's size, computed before the project is borrowed mutably
 rather than after.
@@ -4397,15 +4397,15 @@ own bookkeeping around `Availability` had a latent bug that only a non-`Always` 
 surface, exactly as invariant 9 predicts for a container nothing has really used yet.
 
 **What "broken" looks like on either container, verified by running the existing pinned tests
-rather than by eye.** `crates/ubiq/tests/settings_container.rs` and `rail_container.rs` pin the
+rather than by eye.** `crates/kubiq/tests/settings_container.rs` and `rail_container.rs` pin the
 base's rows byte-for-byte; extending both lists to include the demo entries and rerunning them is
 what "the section is really registered, in the right group, in the right order" means here — a
 misconfigured group panics at resolve time (`Registry::resolve`'s loud assertions), a duplicate id
 panics at boot, and a `When` predicate that stopped reading the switch would show as a rail icon
 that never reacts to the settings toggle, which is what a person clicking both would see directly.
 
-**Cost:** `crates/ubiq/src/ext/rail.rs`'s own legacy-table unit test and several pinned assertions in
-`crates/ubiq/tests/rail_container.rs` and `settings_container.rs` had to change from "true of every
+**Cost:** `crates/kubiq/src/ext/rail.rs`'s own legacy-table unit test and several pinned assertions in
+`crates/kubiq/tests/rail_container.rs` and `settings_container.rs` had to change from "true of every
 registered item" to "true of the base's original ten/fifteen" — a container's first real
 contribution is also the first time a test that quietly assumed the resolved list still means "the
 base's own" stops being true, and future contributions will find more of these rather than fewer.
@@ -4413,7 +4413,7 @@ base's own" stops being true, and future contributions will find more of these r
 ### D187 — A provider's configuration is drawn by one renderer that names no provider and matches no capability, and the schema had to learn to come back
 
 The task-source layer's `R6` says a provider declares `&'static [ConfigField]` and the base renders
-it. M7 is where that stopped being a claim: `crates/ubiq/src/ui/tasksrc.rs` draws the settings
+it. M7 is where that stopped being a claim: `crates/kubiq/src/ui/tasksrc.rs` draws the settings
 section, the import dialog, the card badge and the board's status item, and **nothing in it names
 Trello, Azure DevOps or ClickUp**. The only `match` in the renderer is over `ConfigFieldKind`'s five
 shapes, which is the closed set the contract crate owns — a provider needing a sixth cannot ship
@@ -4454,7 +4454,7 @@ than the interface's.**
    deliberate, bounded leak — a schema is four or five fields per provider and the pool
    deduplicates, so the same `"wiql"` read a hundred times is one allocation.
 2. **`Binding`, `Filter`, `Direction`, `Authority`, `LinkState` and `TaskLink` moved from
-   `ubiq-host` into `ubiq_proto::tasksrc`.** The settings surface edits a binding and
+   `kubiq-host` into `kubiq_proto::tasksrc`.** The settings surface edits a binding and
    `SetTaskSource` carries it back, so a binding is vocabulary both halves name. The host
    re-exports them, every existing path still reads, and the file a binding is written to is still
    `tasksrc/store.rs`'s alone.
@@ -4483,7 +4483,7 @@ the box is empty rather than showing dots for a value the interface does not hol
 ### D188 — The conflict table is two hash maps and a switch, a capability a provider lacks is stated rather than dropped, and the wire family finally has a host half
 
 M8 completes the task-source layer: the outbound write, the authority switch, drift and its
-surfaces, and the arms `crates/ubiq-host` owed the page `D187` drew. Until this, the settings
+surfaces, and the arms `crates/kubiq-host` owed the page `D187` drew. Until this, the settings
 section sent every message in §3.6 and nothing answered — `G364`, closed by this.
 
 **The conflict table, in full.** Each field of each linked task is compared on *both* sides, and the
@@ -4599,7 +4599,7 @@ and no way to re-ask for containers. Either alone stops `ListRemoteContainers` r
 why nothing downstream of them had ever run end to end.
 
 **The registry moves onto `Contributions` and the coordinator is handed it.** `task_providers` is a
-`ubiq_host::tasksrc::Registry`, not a `ubiq::ext::Registry<Spec>`. That is `X15`'s two kinds taken
+`kubiq_host::tasksrc::Registry`, not a `kubiq::ext::Registry<Spec>`. That is `X15`'s two kinds taken
 literally: a UI container is ordered, drawn and conditional, and a host service is none of those —
 it is resolved by id and never listed in order — so giving a provider a group, a label, an icon and
 a predicate to make the two look alike would be the framework mistake. What it does share are the
@@ -4672,13 +4672,13 @@ still deciding, and the answer they then gave had nowhere to go (`G360`, T-87).
 
 **The bound moves under the harness's, and the give-up becomes a result.** A silent parked call
 waits `ASK_PARK_SECS` — 45 seconds, chosen to sit under the shortest tool timeout this tree knows
-of any harness keeping, Codex's `tool_timeout_sec` default of 60. Ubiq is then the one that gives
+of any harness keeping, Codex's `tool_timeout_sec` default of 60. Kubiq is then the one that gives
 up, and it can say so in a form a model acts on: an ordinary tool result, `{"answered": [],
 "timedOut": true, …}`, not an `isError`. The bound is a property of the *call* rather than of
 `Asks`, which is why `Asks::wait_for` exists beside `Asks::wait`.
 
 **The dialog outlives the call, which is what makes 45 seconds free.** Giving up sends no
-`AskEnded`: the row moves to `crates/ubiq-host/src/armed.rs` under the same `AskId` in the raised
+`AskEnded`: the row moves to `crates/kubiq-host/src/armed.rs` under the same `AskId` in the raised
 state, and the coordinator's `AnswerAsk` arm asks that table first. So a late answer takes the
 arm-and-fire route and arrives as the agent's next turn, in prose that says which of the two it was.
 `Asks::give_up` reads the channel once more when the row is gone from under it, so an answer that
@@ -4713,7 +4713,7 @@ is why `settle` is shared by both arms rather than written twice.
 registering twice in one turn, and `Armed::fire` duly raised both at the turn boundary — at which
 point answering the first opened a turn while the second modal was still on screen, and the second
 answer prompted a conversation that was mid-turn. What a harness does with a prompt mid-turn
-is the harness's business, not Ubiq's, so the tree had a path it could not reason about (`G362`).
+is the harness's business, not Kubiq's, so the tree had a path it could not reason about (`G362`).
 
 **The raising is the unit, not the row.** Every row one `Armed::fire` puts on screen shares a
 `Batch`. Each dialog is answered on its own, in any order; the host records what each one said and
@@ -4757,7 +4757,7 @@ questions, so a conversation going takes real user input with it.
 profile's — and everything below about *not* capturing, copying, seeding or roaming a token still
 holds, unamended. Read this entry for the reasoning and `D194` for the key.
 
-Every profile — Ubiq's agent definition, the library's `Profile` — owns one fixed, persistent config
+Every profile — Kubiq's agent definition, the library's `Profile` — owns one fixed, persistent config
 home per harness. Every instance started from that profile uses it directly as the harness's config
 home (`CLAUDE_CONFIG_DIR` for Claude Code), concurrently, read-write for all of them. The login is
 performed into that home, one of two ways — the profile's first terminal run shows the harness's own
@@ -4765,7 +4765,7 @@ login screen, or an explicit sign-in runs `CLAUDE_CONFIG_DIR=<home> claude auth 
 then on the harness owns refresh and cross-process sharing, exactly as it does for a user running
 several `claude` against `~/.claude`. A run with **no profile** runs the harness against the user's
 own default config in place: no `CLAUDE_CONFIG_DIR` is set, nothing is copied, and nothing — no
-template, no onboarding or trust entry — is written into it. Neither `crates/agent-manager` nor Ubiq reads, copies, captures or
+template, no onboarding or trust entry — is written into it. Neither `crates/agent-manager` nor Kubiq reads, copies, captures or
 roams a harness token: `seed_login`, `harvest_login`, `sync_login`, `newest_login`, `scrub_login`,
 `Agents::sync_logins`' thirty-second pass, `am account import`'s Keychain extraction and zero-config
 seeding through `Claude::ambient_login` all go. The home is chosen **per profile, not per account**:
@@ -4773,11 +4773,11 @@ two profiles on one account log in separately and hold two independent OAuth gra
 token is ever shared between homes. On macOS the Keychain returns as the store — Claude Code names
 its item `Claude Code-credentials-<sha256(CLAUDE_CONFIG_DIR)[:8]>`, stable once the home is — so a
 confined run is granted the home read-write and that one Keychain item, and `D126`'s denial goes.
-The library exposes the home through an accessor, so Ubiq still names no harness path.
+The library exposes the home through an accessor, so Kubiq still names no harness path.
 
 **Per-run composition leaves the home.** Nothing per-run is written into a shared home. The run
 directory `<root>/runs/<key>` becomes a scratch directory beside it, holding per-run files passed by
-flag: MCP by `--mcp-config <scratch>/mcp.json --strict-mcp-config` (Ubiq's own MCP URLs embed the
+flag: MCP by `--mcp-config <scratch>/mcp.json --strict-mcp-config` (Kubiq's own MCP URLs embed the
 run key, so a shared file would cross runs); permissions, hooks and `apiKeyHelper` by `--settings
 <scratch>/settings.json`, layered over the home's user settings, which hold nothing per-run; instructions by
 `--append-system-prompt`; skills and MCP-as-skill by a per-run `--plugin-dir`, so a skill is named
@@ -4829,7 +4829,7 @@ is set, nothing is copied, and nothing is written into it — `D193`'s rule for 
 unchanged.
 
 Everything `D193` decided about the token itself stands: nothing captures, copies, seeds, harvests
-or roams a login, and the library exposes the home through an accessor so Ubiq still names no
+or roams a login, and the library exposes the home through an accessor so Kubiq still names no
 harness path. Only the key changed.
 
 **A login is performed into the home two ways.** Settings → Harnesses signs an account in — the
@@ -4908,13 +4908,13 @@ The skills and MCP servers a person can pick for an agent are kept in the librar
 format (`catalog.toml`, `mcp/<id>.json`, `skills/<id>/`), read and written through `FsRegistry` and
 its `CatalogStore` trait. There is one layer at `<root>/catalog` for the application and one at
 `<root>/projects/<id>/catalog` for each project, and a run resolves ids against the two overlaid, the
-project's winning by id (`crates/ubiq-host/src/catalog.rs`, `Catalog::registry_for`). The interface
+project's winning by id (`crates/kubiq-host/src/catalog.rs`, `Catalog::registry_for`). The interface
 sees a layer whole (`Message::Catalog`) and never the merge; an agent definition and a start carry
 ids only (`skills`, and catalog ids beside the built-in slugs in `mcps`). What replaces it is either
-a catalog table in Ubiq's own stores, which would have made the `am` CLI and the application two
+a catalog table in Kubiq's own stores, which would have made the `am` CLI and the application two
 catalogs that disagree about the same skill, or a fixed list of skills shipped with the build.
 
-**Two rules follow.** A catalog MCP id may not be one of Ubiq's built-in slugs, because both share one
+**Two rules follow.** A catalog MCP id may not be one of Kubiq's built-in slugs, because both share one
 `mcps` list and the built-in answers first at launch; the host refuses the save rather than let an
 entry sit unreachable. A remote skill source is a shallow git clone under `<root>/cache/skill-sources`
 (derived data, refetched when stale), and an install copies the folder into the layer with a record of
@@ -4922,7 +4922,7 @@ where it came from, so a skill keeps working with the source gone.
 
 **Cost.** The catalog file format is the library's, so a change to it is a change the host inherits,
 and a hand-edited `catalog.toml` can hold what the form does not show. A project layer sits under the
-config root even for a project that keeps its data in `.ubiq/` (`G355`), so it does not travel with a
+config root even for a project that keeps its data in `.kubiq/` (`G355`), so it does not travel with a
 clone. An install and a search shell out to `git` and, for the MCP registry, make an HTTP request, so
 they need `git` and a network on the host, and are answered late on a thread of their own. A linked
 skill is a path on the host's disk, which a clone of the project on another machine may not have.
@@ -4934,7 +4934,7 @@ who wrote a tool row per recipe would be keeping a second copy that drifts. The 
 instead, and the interface offers them beside the rows the user wrote.
 
 **A discovered tool is a `ListedTool` with `ToolOrigin::Discovered { runner }`, and nothing writes
-it down.** The runner sources are a seeded `ubiq_host::runners::Registry` on `Contributions`, a host
+it down.** The runner sources are a seeded `kubiq_host::runners::Registry` on `Contributions`, a host
 service for `D189`'s reason: resolved by id, never drawn. A scan runs on its own thread because
 `just` and `mise` are CLIs, each bounded by a two-second timeout, and the coordinator keeps the last
 result per project in memory. `ListTools` is answered from that cache at once; a scan starts when
@@ -4956,59 +4956,59 @@ which project a run belongs to and the host checks `single_instance` per project
 hangup, not a graceful terminate, until `Pty` exposes a pid. A hung runner CLI costs two seconds of
 staleness and no more, and a CLI that is not installed is an empty list with no message saying so.
 
-### D198 — *Open in Ubiq* is three per-user registry verbs, each marked with the executable it launches, and the machine is the record
+### D198 — *Open in Kubiq* is three per-user registry verbs, each marked with the executable it launches, and the machine is the record
 
 On Windows the Shell integration section writes three keys under
-`HKEY_CURRENT_USER\Software\Classes` — `*\shell\Ubiq`, `Directory\shell\Ubiq` and
-`Directory\Background\shell\Ubiq` — each with the label as its default value, the running
-executable as its `Icon`, a `UbiqTarget` value naming that executable, and a `command` subkey
+`HKEY_CURRENT_USER\Software\Classes` — `*\shell\Kubiq`, `Directory\shell\Kubiq` and
+`Directory\Background\shell\Kubiq` — each with the label as its default value, the running
+executable as its `Icon`, a `KubiqTarget` value naming that executable, and a `command` subkey
 running `"<exe>" "%1"` (`"%V"` for a folder's background). The host writes them,
-`crates/ubiq-host/src/shell_integration.rs`; the interface sends `Query`, `Install` or `Remove` and
+`crates/kubiq-host/src/shell_integration.rs`; the interface sends `Query`, `Install` or `Remove` and
 draws the answer. Per-user keys need no elevation and touch no other account; the machine-wide
 `HKEY_LOCAL_MACHINE` or `HKEY_CLASSES_ROOT` alternative would turn a button into a UAC prompt. A
 shell extension DLL, or the Windows 11 `IExplorerCommand` top-level menu, was rejected for the same
-reason the `ubiq` command is a script (`D56`): a COM server or a signed package is a second build
+reason the `kubiq` command is a script (`D56`): a COM server or a signed package is a second build
 artefact for one menu row.
 
-**The marker does both of the section's jobs, and nothing is stored.** Its presence proves Ubiq
-wrote a key, so *Remove* deletes only marked keys and never a `Ubiq` verb of the user's own; its
+**The marker does both of the section's jobs, and nothing is stored.** Its presence proves Kubiq
+wrote a key, so *Remove* deletes only marked keys and never a `Kubiq` verb of the user's own; its
 value, compared against the running executable without case, is how entries left by a moved or
 replaced build read as `stale`. A missing entry among the three reads as stale too, because
 *Update* is what restores it. There is no settings flag saying the integration is on: every answer
 reads the registry back, so a key removed by hand or written by another build is drawn as it is,
 and there is no second copy to disagree with the first. The path reaches the window through the
-single-instance handoff in `crates/ubiq-app/src/handoff.rs`, which on Windows is a loopback port
+single-instance handoff in `crates/kubiq-app/src/handoff.rs`, which on Windows is a loopback port
 plus a token file beside the config root.
 
 **Cost.** The entries name an executable path, so moving the application leaves them launching
 nothing until *Update* is pressed — the `stale` case drawn rather than repaired silently. On Windows
 11 the verbs sit under *Show more options*, the classic menu, because the top-level menu admits only
 packaged `IExplorerCommand` handlers. The binary is console-subsystem (`detach_console` in
-`crates/ubiq-app/src/lib.rs`), so a pick from Explorer flashes a console once before the handoff
+`crates/kubiq-app/src/lib.rs`), so a pick from Explorer flashes a console once before the handoff
 process exits. A multi-selection starts one process per item, and when no application is running
 those processes race for the handoff, so two can each become an application. The section is
 registered only in a window running on Windows; another platform's file manager is not joined.
 
-### D199 — The database engine is a leaf crate, `ubiq-db`, whose drivers sit behind a feature and whose model types are the wire's
+### D199 — The database engine is a leaf crate, `kubiq-db`, whose drivers sit behind a feature and whose model types are the wire's
 
 The database explorer needs one engine in two roles: the host opens connections, and the interface
 validates a cell, previews the SQL a batch of edits will run and flags a write in a read-only tab.
-`crates/ubiq-db` is that engine, built from a proof of the explorer. It names no Ubiq crate and
+`crates/kubiq-db` is that engine, built from a proof of the explorer. It names no Kubiq crate and
 draws nothing, the way `crates/agent-manager` names none. By default it carries the model
 (`DbError`, `TableRef`, `DbObject`, `ColumnMeta`, `ResultSet`, `Plan`) and the pure engine (`conn`,
 `value`, `sql`, `edit`) with `serde`, `serde_json`, `thiserror`, `tracing` and `sqlparser`, and no
 driver and no async runtime. The `drivers` feature adds the `driver` module, the four engines
 (`rusqlite`, `mysql`, `tiberius`, `sqlx-core`/`sqlx-postgres`) and the runtime crates they need;
-only the host enables it. `just ui` builds `-p ubiq` without it and greps its tree for the driver
+only the host enables it. `just ui` builds `-p kubiq` without it and greps its tree for the driver
 crates, so "the interface opens no connection" is enforced by the dependency graph and not by
 review.
 
-**The model types derive `Serialize` and `Deserialize`, and `ubiq-proto` re-exports them rather than
+**The model types derive `Serialize` and `Deserialize`, and `kubiq-proto` re-exports them rather than
 defining its own.** A wire copy of `ColumnMeta` would drift from the engine's the first time a
-field is added. The statement log is `tracing` under the target `ubiq_db::sql`, so the base's log
+field is added. The statement log is `tracing` under the target `kubiq_db::sql`, so the base's log
 sink collects it.
 
-**Cost:** a contract change to a model type is a change in `ubiq-db`, and `ubiq-proto` takes a
+**Cost:** a contract change to a model type is a change in `kubiq-db`, and `kubiq-proto` takes a
 dependency on a crate it does not own. The base lock resolves the whole driver graph, and
 the workspace root's `Cargo.lock` follows it: `whoami`, `io-enum` and `derive_utils` are pinned to
 `1.5.2`, `1.2.1` and `0.15.1` with `cargo update --precise`, because the fresh resolution picks
@@ -5041,7 +5041,7 @@ A connection list is shared (`db.toml` follows the project's storage mode, `D173
 a password: the store clears `password` and drops `password`, `pwd`, `sslpassword` and `sslkey`
 from `params` before writing. The password is sealed into `local/db-secrets.toml` under the config
 root (never in a project folder) with AES-256-GCM through `ring`, a fresh 96-bit nonce per write and
-the associated data `ubiq-db:v1:<project id>:<connection id>`, so a ciphertext copied onto another
+the associated data `kubiq-db:v1:<project id>:<connection id>`, so a ciphertext copied onto another
 entry does not open. The key is 32 random bytes, made on the first password ever saved and filed as
 the connector store's fifth namespace (`db` / `secrets-key`) — the host's `OsSecretStore`, not the
 `keyring` crate the interface declares, so `Store::usable` stays the one answer to whether the
@@ -5063,10 +5063,10 @@ keychain for it.
 
 ### D202 — The SQL servers are two MCP servers, each call on its own thread, answering in TOON
 
-An agent reaches a project's databases through `ubiq-sql-read` and `ubiq-sql-write`, two servers
+An agent reaches a project's databases through `kubiq-sql-read` and `kubiq-sql-write`, two servers
 rather than one with a mode, so what an agent definition grants is visible in its list of servers
 and the write tools are simply absent from the read one. Neither is in a default set. The listener
-serves one request at a time, so each SQL `tools/call` is moved onto an `ubiq-sql-call` thread, at
+serves one request at a time, so each SQL `tools/call` is moved onto an `kubiq-sql-call` thread, at
 most 8 at once, and a ninth is refused as busy rather than queued (`D138`'s shape). The coordinator
 builds `Db` before the listener so the servers hold an `AgentDb`, the same service a window reaches.
 
@@ -5081,21 +5081,21 @@ keyed by `(agent, id)`, bounded by count, bytes and a 10-minute idle TTL.
 characters loses its trailing rows; and the scalar row count is `row_count` because `rows` is the
 table.
 
-### D203 — The plan surface is drawn on `MdView`, and the window maps `ubiq_md` rows to the host's block ids by source range
+### D203 — The plan surface is drawn on `MdView`, and the window maps `kubiq_md` rows to the host's block ids by source range
 
 The annotated-document surface (`ui/document.rs`, framed by the plan dialog and by a markdown tab's
 `Annotation` layout) is an `MdView` with its annotation layer on, not a per-block `TextView` list of
 its own. That leaves two block models side by side: the host indexes a document into `PlanBlock`s
-through `ubiq_proto::blocks` and owns their ids, which is what keeps a thread anchored across a save
-(`D159`); the view lays out `ubiq_md` root rows. **The window joins them, and only the window**:
+through `kubiq_proto::blocks` and owns their ids, which is what keeps a thread anchored across a save
+(`D159`); the view lays out `kubiq_md` root rows. **The window joins them, and only the window**:
 `state::document::row_map()` finds each host block's source range by forward scan
-(`block_ranges()`) and places it in the row `ubiq_md::Document::block_at_offset` names for the
+(`block_ranges()`) and places it in the row `kubiq_md::Document::block_at_offset` names for the
 range's start. A row may hold several host blocks — a list is one row, each item one block — so a
 row sums their threads, a highlight on a row colours all of them, and a new thread targets the
 block holding the pressed offset, else the row's first. The wire is unchanged: every intent still
 names a host `BlockId`.
 
-The alternative was to move the host's index onto `ubiq-md` so a row *is* a block, which changes
+The alternative was to move the host's index onto `kubiq-md` so a row *is* a block, which changes
 what a `BlockId` covers for every existing sidecar; it is deferred (`_docs/backlog.md`).
 The window's own copy of the split went with the section editor, and `D163`'s second caller with
 it.
@@ -5107,7 +5107,7 @@ the margin, only in the rail.
 
 ### D204 — A contributed viewer is one open variant of `ViewerKind`, answered from a spec, and the built-in viewers stay closed
 
-A second edition adds an IDE viewer by registering a `ViewerSpec` (`crates/ubiq/src/ext/viewer.rs`,
+A second edition adds an IDE viewer by registering a `ViewerSpec` (`crates/kubiq/src/ext/viewer.rs`,
 `Contributions::viewers`); a tab drawn by it is `ViewerKind::Contributed(SlotId)`, and every match on
 the enum answers that arm from the spec — label, layouts, forced language, the drawing arm, the
 watcher's on-screen exception (`live_reload`). The six built-in viewers are **not** converted: each
@@ -5132,18 +5132,18 @@ offer that depends on the head of the text is invisible to the explorer's menu a
 
 `RailMode::TeamsOld` and everything only it used are gone: `ui/orchestration/*`, `GraphView` in
 `state/orchestration.rs`, `app/graph.rs`, the inspector's composer (`agent_input`), the
-`View::Graph` link arm and its `ubiq://<project>/graph/...` slug, and the status bar's counts for
+`View::Graph` link arm and its `kubiq://<project>/graph/...` slug, and the status bar's counts for
 that mode. `Teams` is the one graph screen. The host's work mints none of the eleven mock agents it carried
-(`crates/ubiq-host/src/work/mock.rs` keeps the five sessions): a project's agents are the live ones,
+(`crates/kubiq-host/src/work/mock.rs` keeps the five sessions): a project's agents are the live ones,
 and a deleted or archived task unlinks the live agents on it. `[Teams]`'s state tests are kept,
-ported onto `TeamsView` as `crates/ubiq/tests/teams_view.rs`.
+ported onto `TeamsView` as `crates/kubiq/tests/teams_view.rs`.
 
 **Why:** `D140` kept `[Teams]` as the fallback while `Teams` was unfinished. `Teams` carries the
 toolbar, the arrangements, the drag model, the tasks drawer and real conversations, and the mock
 agents existed only to fill a canvas that drew the host's whole projection — the only screen that
 did. Two near-identical implementations were the cost `D140` named, and nothing still pays for it.
 
-**Cost:** a saved rail mode naming `TeamsOld` or `ubiq.rail.teams-old` is read back as `Teams`
+**Cost:** a saved rail mode naming `TeamsOld` or `kubiq.rail.teams-old` is read back as `Teams`
 (`ext::rail::decode_id`), so a window left in `[Teams]` reopens on the newer screen rather than the
 one it was in; a `graph` link is not a link; `ctrl-<n>` past `Teams` counts one lower; and the
 `WorkList` a project with nothing running answers carries sessions and no agents, so `SendToAgent`
@@ -5174,7 +5174,7 @@ otherwise the source reads `Locked` and the window asks. Changing the password r
 each atomically, and is resumable: the header first names the new key *and* the old key sealed
 under it, then pages still under the old key id are re-sealed, then the old key is dropped — a
 crash between leaves a header the new password opens, and the next open finishes the job. The
-`ubiq-kb` MCP server never lists, reads or writes a protected wiki; `kb::ops` refuses one without
+`kubiq-kb` MCP server never lists, reads or writes a protected wiki; `kb::ops` refuses one without
 its key as a second line.
 
 **Why:** names in the clear keep the tree, renames and links working with no key and no index of
@@ -5212,8 +5212,8 @@ into the agent's thread row, in the host's voice. An agent that is not running w
 something to deliver is started by the host through its owning window's own resume path
 (`autostart_doc_agent` → `resume_conversation`) — the host is the one launcher, so two windows
 showing the document cannot both start it; a refused prompt
-leaves the entry queued and backs off, 2 s doubling to 60 s. Through the MCP tools — `ubiq-doc`,
-`ubiq-plan` and `ubiq-mission`'s `write_document` — an agent's write or answer on a document bound
+leaves the entry queued and backs off, 2 s doubling to 60 s. Through the MCP tools — `kubiq-doc`,
+`kubiq-plan` and `kubiq-mission`'s `write_document` — an agent's write or answer on a document bound
 to another agent is refused, naming that agent, and the windows hear `DocOwnershipConflict`. The
 check is advisory, not a security boundary.
 
@@ -5237,20 +5237,20 @@ on another machine.
 
 ### D208 — A document a person and an agent write together is merged, never overwritten, and only the person closes a thread
 
-One three-way text merge, `ubiq_proto::merge::merge3` — line-level, then word-level inside a region
+One three-way text merge, `kubiq_proto::merge::merge3` — line-level, then word-level inside a region
 both sides changed (skipped past 16 KB; every diff time-bounded); two insertions at one point both
 kept, or the longer alone when one extends the other; line endings compared as `\n` and written in
 ours'; a region still contested keeps **ours** and is reported with theirs. The host runs it on an
 agent's `write_doc`/`write_plan` (base = what that agent last read, or last *sent*; ours = the disk;
 theirs = the agent's body) — read under the plans lock, merged with it released, committed under it
-only if the disk is still what was read, else merged again. Every Ubiq write to an annotated file
+only if the disk is still what was read, else merged again. Every Kubiq write to an annotated file
 holds that lock: an agent's, a `SavePlan`, and a tab's `WriteProjectFile` of a markdown file with a
 sidecar, which the coordinator now writes itself and stamps as the user's provenance. The window runs
 the merge when a followed markdown tab's file moves (base = the tab's baseline, ours = the buffer,
 theirs = the disk), never while its own save is in flight. Either way the user's text wins a contested
 region and the losing passage becomes a thread on its block (once — a thread already saying it is not
 repeated): the agent's when the host merged it, and for a window's claim (`DocMergeConflicts`, checked
-against the disk) whoever the provenance stamps say wrote those lines, or an "edited outside Ubiq"
+against the disk) whoever the provenance stamps say wrote those lines, or an "edited outside Kubiq"
 label when they cannot say. A write whose saved body differs from what the agent sent answers
 `merged: true` and tells the agent to read again. A markdown tab follows its file live and, in
 annotation mode, saves itself after 1.5 s idle, re-armed after every merge. After every save a quoted
@@ -5267,7 +5267,7 @@ follows its lineage to the part holding its quote, else the first part. `read_do
 
 **Why:** the goal is a document that grows from both sides without either side ever being asked
 "reload?" or losing text. The merge has to be shared because the two halves must agree on what a
-conflict is, and `ubiq-proto` is the only crate both may depend on. Text, not block ids, is what is
+conflict is, and `kubiq-proto` is the only crate both may depend on. Text, not block ids, is what is
 merged, because a block split or moved by one side is still only lines to the other. The agent's base
 is what it sent rather than what was saved because that is what it believes the document holds: its
 next write, from its own text or from the merged body, then merges the user's edits in again instead
@@ -5276,9 +5276,9 @@ sidecar. Codes exist so a person or an agent can always tell where a block came 
 out of the sidecar leaves every persisted anchor exactly as it was.
 
 **Cost:** the agent's base is in memory — after a host restart a write has no base and falls back to
-the `expected_revision` refusal. An editor outside Ubiq takes no lock, so its write can still land
+the `expected_revision` refusal. An editor outside Kubiq takes no lock, so its write can still land
 between a check and a write. A window-side claim is anchored by the other side's text until the
-user's text is saved. `ubiq-mission`'s `write_document` still saves without the merge. The flash is
+user's text is saved. `kubiq-mission`'s `write_document` still saves without the merge. The flash is
 keyed by row, not lineage code (a tab outside annotation mode has no host blocks), so a reparse
 inside its 1.8 s can tint a neighbouring row. A split is read from text containment, so a block
 rewritten as it is split reads as an insertion.
@@ -5286,7 +5286,7 @@ rewritten as it is split reads as an insertion.
 ### D209 — Codex converses over its own app-server, asks per the permission mode, and states only the `codex` limit
 
 The `codex` harness's structured run is the native `codex app-server` JSON-RPC bridge
-(`crates/agent-manager/src/io/codex.rs`), and it is the default way Ubiq talks to Codex.
+(`crates/agent-manager/src/io/codex.rs`), and it is the default way Kubiq talks to Codex.
 `codex-acp` stays a sibling, as `claude-code-acp` does under `D95`, offered only behind its settings
 switch. Three choices ride on it:
 
@@ -5317,11 +5317,11 @@ token-field overlap (cached and cache-written inside input, reasoning inside out
 Codex's source, not yet from an authenticated capture. A free-text `requestUserInput` cannot be put
 to a person through a permission prompt and is answered empty.
 
-### D210 — `ubiq-ask` has one tool, `ask_user_question`, and it arms and fires
+### D210 — `kubiq-ask` has one tool, `ask_user_question`, and it arms and fires
 
 `D175` added arm-and-fire beside the parked tool and `D191` kept both alive by bounding the park. The
 parked tool still cost a thread, a timeout race and an SSE path for a pause no agent we run needs
-mid-sequence, and two tools asked the model to choose between them. `ubiq-ask` advertises **one**
+mid-sequence, and two tools asked the model to choose between them. `kubiq-ask` advertises **one**
 tool, named `ask_user_question` (the name harness prompts know): it validates, arms the dialog
 against the calling conversation, returns `{"registered": …}` at once, and the dialog is raised when
 the turn ends — its answer is the next prompt. Its description keeps the hard requirement to end the
@@ -5332,12 +5332,12 @@ with its SSE stream and `crate::ask::Asks` stay in the source for a future mid-t
 reaches them (`PARKED_ASK` in `mcp/server.rs` is `false`), and the tests drive `ask` directly. This
 supersedes the two-tool choice of `D175` and the bounded park of `D191`; `G360` is moot.
 
-### D211 — Ubiq updates itself from a self-hosted signed feed, installs on quit, and never downgrades
+### D211 — Kubiq updates itself from a self-hosted signed feed, installs on quit, and never downgrades
 
-A release build checks a feed it was compiled with (`UBIQ_UPDATE_FEED`, default the `channels`
+A release build checks a feed it was compiled with (`KUBIQ_UPDATE_FEED`, default the `channels`
 release of the project's GitHub repository): one `<channel>.json` manifest per channel — `stable`,
 `beta`, `nightly` — each beside a minisign `.minisig`. **The manifest is verified against the key
-baked in at build time (`UBIQ_UPDATE_PUBKEY`) before it is parsed**, a missing signature is a
+baked in at build time (`KUBIQ_UPDATE_PUBKEY`) before it is parsed**, a missing signature is a
 failure rather than an empty channel, and a URL that is not `https` is refused. Following a channel
 follows every channel below it (nightly ⊇ beta ⊇ stable); the host picks the highest semver among
 them that has this platform's build and is strictly greater than the running version, so **it never
@@ -5345,7 +5345,7 @@ downgrades**. Semver orders prerelease text alphabetically, so `1.5.0-beta.1` < 
 `1.5.0`; the rule is not adjusted. A download is kept only if its size and SHA-256 match the signed
 manifest.
 
-Applying is a detached helper that waits for Ubiq's PID to exit — a macOS bundle swap after
+Applying is a detached helper that waits for Kubiq's PID to exit — a macOS bundle swap after
 `codesign --verify`, or the Windows installer run silently — so **installing on quit is the default
 and a restart is the option** (`ApplyUpdate { relaunch }`). An install that cannot swap itself
 safely (a zip, a translocated or unwritable app, a development build) is `ApplyMode::Manual`: the
@@ -5357,10 +5357,10 @@ hand. The message family is in [`transport-contract.md`](./transport-contract.md
 ### D212 — Feedback's compiled destination is a default the user may override, the key in the keychain
 
 `D143` compiled the destination in with no way to change it. A release build takes its default from
-CI (`vars.UBIQ_FEEDBACK_URL`, `secrets.UBIQ_FEEDBACK_API_KEY`), and Settings → Feedback overrides
+CI (`vars.KUBIQ_FEEDBACK_URL`, `secrets.KUBIQ_FEEDBACK_API_KEY`), and Settings → Feedback overrides
 either half: the URL in `host-settings.toml` as `HostSettings::feedback_url`, host-mutated so a
 `SetSettings` blob never moves it, and the key in the OS keychain through the `keyring` crate the
-interface already links (`dev.ubiq.feedback` / `intake-key`). An override wins per field; clearing
+interface already links (`dev.kubiq.feedback` / `intake-key`). An override wins per field; clearing
 one returns that field to the default. The key never crosses to the interface — it gets a source and
 a twelve-character prefix — and every change re-broadcasts `FeedbackOffered`.
 
@@ -5429,7 +5429,7 @@ setting that is on by default for everyone with an ACP harness.
 ### D217 — A mission has no coordinator: it is a task tree worked by a deterministic runner
 
 A mission is a parent task, its subtasks linked by prerequisites, a plan and its documents. The
-phase is the parent's status (`Phase::of`). `mission/runner.rs` is Ubiq code that starts ready tasks
+phase is the parent's status (`Phase::of`). `mission/runner.rs` is Kubiq code that starts ready tasks
 up to `parallel`, waits for **Confirm** on a task with `approve` set, and shows **Retry** for a worker
 that is gone. Human tasks and reviewer tasks are subtasks assigned to a person or a reviewer agent,
 and the planner exits at **Start mission**. The mission record, journal, roster, agent kinds, spawn
@@ -5444,7 +5444,7 @@ when the app closes.
 through Replan, guidance and the task board. A restart loses the live workers, and the runner starts
 nothing on its own afterwards.
 
-### D218 — A registry agent's binary is downloaded into Ubiq's own directory; an unverified one only over https, and only confirmed
+### D218 — A registry agent's binary is downloaded into Kubiq's own directory; an unverified one only over https, and only confirmed
 
 An agent whose registry entry is a binary archive is `Downloadable`; `InstallAcpAdapter` runs
 `acp_registry::install_binary` on a worker thread, into `<config root>/acp-agents/<id>/<version>/`.
@@ -5457,7 +5457,7 @@ path inside the directory and must be the agent's own executable, never a shell 
 every unverified one would hide agents the user asked for, and accepting them silently would run
 unchecked code.
 
-**Cost:** an unverified download rests on TLS and the registry alone. A directory Ubiq owns means
+**Cost:** an unverified download rests on TLS and the registry alone. A directory Kubiq owns means
 removing an agent is deleting a folder (no uninstall action yet).
 
 ### D219 — A pinned `npx` / `uvx` package runs without an install
@@ -5488,7 +5488,7 @@ a stale snapshot ships with each build.
 
 ### D221 — Nothing is upgraded on its own
 
-An agent installed by Ubiq whose registry version is newer reports it in `AcpRegistryAgent::update`;
+An agent installed by Kubiq whose registry version is newer reports it in `AcpRegistryAgent::update`;
 the UI shows it, and only the user's `InstallAcpAdapter` installs it, beside the old version.
 
 **Why:** an agent is code with the user's credentials and file access, and a registry bump is not the
@@ -5499,10 +5499,10 @@ user choosing it.
 ### D222 — Drawings are one model, painted by one native painter
 
 Excalidraw and draw.io files are converted onto one format-agnostic model in the leaf crate
-`crates/ubiq-draw` (`model.rs`: a `Group` tree that is the paint order, `Shape`s with a `Geometry`
+`crates/kubiq-draw` (`model.rs`: a `Group` tree that is the paint order, `Shape`s with a `Geometry`
 — rect, rounded rect, ellipse, diamond, polyline, connector with heads and bindings, freehand,
 text, image, placeholder — plus `Style`, an optional `TextBox`, rotation, and the drawing's
-bounds), and `crates/ubiq/src/ui/viewer/scene.rs` paints only that model. Excalidraw stacks by
+bounds), and `crates/kubiq/src/ui/viewer/scene.rs` paints only that model. Excalidraw stacks by
 its own rule (the array is the stack, a group or frame is one run at its first member, as
 Excalidraw's `defragmentGroups` in `packages/element/src/sortElements.ts` places it, a bound
 label follows its container). Both converters bound what a file can make them do: a compressed
@@ -5519,10 +5519,10 @@ router — so a native Preview can differ from what the draw.io editor shows.
 
 ### D223 — Onboarding flows are compiled in, and completion is a preference
 
-The first-run wizard's flows are Rust values built in `crates/ubiq/src/ui/onboarding/flows.rs`,
+The first-run wizard's flows are Rust values built in `crates/kubiq/src/ui/onboarding/flows.rs`,
 a registry whose markdown bodies are `include_str!`'d beside it. Which flows are done is a set of
 flow ids in `InterfacePrefs.onboarding_done`, inside the interface preferences blob the host
-stores, so no message is added to `crates/ubiq-proto/src/messages.rs`. Only the first
+stores, so no message is added to `crates/kubiq-proto/src/messages.rs`. Only the first
 window of a process auto-starts a launch flow (`AUTO_STARTED` in `app/onboarding.rs`); a mode flow
 is per window, guarded by the done set alone.
 
@@ -5537,14 +5537,14 @@ a launch flow its first window skipped.
 
 ### D224 — A browser command goes to one window the host picks, and the browser is a raw webview
 
-An agent's `ubiq-browser` call is carried out by a window, because only a window holds a web view.
+An agent's `kubiq-browser` call is carried out by a window, because only a window holds a web view.
 The host addresses the command to exactly one: the window that owns the calling agent's conversation
 or pane, else one that has the project open, else the call fails with `no browser window`. The
 window answers with `BrowserReply`, or the host gives up after 30 seconds. The browser tab itself is
 a raw `wry` webview over a dock editor (`ui/web_view.rs`'s `open_browser`), not a `web_export`
 tenant: it loads arbitrary sites, so it has no loopback origin, no bridge and no CSP of ours, and it
-is reached by the one message family in `crates/ubiq-proto/src/browser.rs`. The server is in no
-default MCP set; an agent definition names it, as with `ubiq-archify`.
+is reached by the one message family in `crates/kubiq-proto/src/browser.rs`. The server is in no
+default MCP set; an agent definition names it, as with `kubiq-archify`.
 
 **Why:** a broadcast would run `browser_navigate` in every window that has the project, and a
 window-agnostic host cannot know which webview the agent meant; the owning window is the one the
@@ -5572,7 +5572,7 @@ on the family has to join by hand.
 
 ### D226 — Remote tools are relayed by the window, not reached by the host
 
-An agent's `ubiq-remote` tool call leaves the host's MCP listener as `RemoteToolCall`, goes to one
+An agent's `kubiq-remote` tool call leaves the host's MCP listener as `RemoteToolCall`, goes to one
 window, and the window forwards it unchanged to the drone `remote` names, and the drone's
 `RemoteToolResult` back the same way. The window interprets neither. The pair carries its own
 `RemoteOp`, capability-gated as `tools`, in place of `D138`'s host-side client of the file family
@@ -5594,12 +5594,12 @@ has a second vocabulary to translate into its handlers beside the file family's.
 ### D227 — Tunnels run on a parallel channel per carrier, not on the bus
 
 A forwarded port's TCP streams never become `Message` variants. Each carrier opens a second,
-dedicated channel beside the bus's — over RDP a second dynamic virtual channel, `ubiq::tunnel::v1`,
+dedicated channel beside the bus's — over RDP a second dynamic virtual channel, `kubiq::tunnel::v1`,
 bridged by the `--rdp` child to a Unix socket of its own; over `ssh` a second exec; to a served
-host (`ubiq --serve`) a second TCP/TLS connection upgraded on `/tunnel` with the attach's token and
+host (`kubiq --serve`) a second TCP/TLS connection upgraded on `/tunnel` with the attach's token and
 trust — carrying `tunnel::TunnelFrame` in the bus's own length-prefixed MessagePack framing,
 credit-limited per stream and per channel. A drone that can serve it advertises `tunnel` in its
-hello; a served host, in its attach `101`'s `Ubiq-Capabilities` header.
+hello; a served host, in its attach `101`'s `Kubiq-Capabilities` header.
 
 **Why:** it keeps terminal traffic unaffected. The bus is one ordered, unbounded stream per link
 that the panes share, so a download on it would queue in front of every keystroke and every redraw,
@@ -5609,8 +5609,8 @@ carrier's own multiplexing does that, and tunnel bytes pass no hub, no tape and 
 **Cost:** every carrier needs a second channel, set up, torn down and bridged on its own, and a
 carrier that cannot open one — a Unix-socket drone today — has no tunnels; the framing is shared
 but the channel's lifecycle is a second thing to get right per carrier. What every carrier shares
-is the window's registry (`ubiq_tunnel::global`), so a carrier contributes only its dial: over
-`ssh` the second exec is `ubiq-drone --tunnel`, over RDP Studio's bridged socket, to a served host
+is the window's registry (`kubiq_tunnel::global`), so a carrier contributes only its dial: over
+`ssh` the second exec is `kubiq-drone --tunnel`, over RDP Studio's bridged socket, to a served host
 the `/tunnel` upgrade. A served host is a whole workbench on the network, so its tunnels dial only
 its own loopback unless `--tunnel-allow` widens it (`none` turns them off), and the second TLS
 connection never takes a key on first use — it needs the pin or the CA chain the bus dial settled.
@@ -5621,7 +5621,7 @@ A saved socket host with "trust certificate" ticked accepts any key on its first
 records it as `SavedRemoteHost::tls_pin` — SHA-256 of the leaf's DER `SubjectPublicKeyInfo`. From
 then on only that key passes, whatever the chain says; another key is a hard refusal that shows
 both fingerprints and offers "Trust new key". A host that validates against the platform's roots is
-never pinned. Every mode checks the handshake signature (`ubiq_tunnel::pin`).
+never pinned. Every mode checks the handshake signature (`kubiq_tunnel::pin`).
 
 **Why:** without a pin a trust-any host could never auto-reconnect — the loop would accept whatever
 answered — and a manual reconnect accepted a man in the middle as readily as the host. Pinning

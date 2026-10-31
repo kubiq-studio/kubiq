@@ -3,7 +3,7 @@ id: workbench-outline
 title: The outline
 summary: The Outline panel — the functions, types or headings of the open file, and jumping to one.
 keywords: [outline, symbols, headings, table of contents, functions, definitions, navigate]
-context: [panel.ubiq.outline]
+context: [panel.kubiq.outline]
 order: 70
 status: current
 related: [workbench-editor, workbench-panels, workbench-bookmarks]

@@ -1,0 +1,112 @@
+[package]
+name = "kubiq-app"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+description = "Kubiq: the application — the one place the interface and the host are named together"
+publish = false
+
+# The only crate that names both halves, and it names the host once: to start it and hand the
+# interface the other end of the bus.
+[lib]
+name = "kubiq_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kubiq"
+path = "src/main.rs"
+
+[features]
+# `assist-apple` is deliberately *not* here, and it is the only shipped feature that is not.
+# Compiling it means compiling a Swift bridge, which means a Swift toolchain and the macOS 26 SDK
+# on the machine and a minute of `swiftc` in the build — a cost `just check`, `just clippy` and
+# `just test` pay on every run for a backend none of them exercises, and a hard failure on a
+# machine that has neither. So the recipes that produce a *running* Kubiq — `dev`, `verbose`,
+# `build`, `bundle`, `bundle-win` — name it, `just assist` type-checks it, and the developer loop
+# builds the same application with the host's stub backend, which reports assistance unavailable
+# and which every call site already reads correctly against.
+default = ["ui", "quickjs"]
+
+# The GPUI interface itself. On by default because the window *is* the application; it is a feature
+# so that `--no-default-features` builds a console-only Kubiq — the same host, the same coordinator,
+# the same `--serve` listener, with no window, no GPUI and no interface crate in the graph. That
+# build is what a headless machine runs, and `just headless` is the check that keeps it linking.
+#
+# Everything this gates lives in this crate: the `kubiq` dependency, the four GPUI crates, the asset
+# source, the key bindings and the window. Without it, `run` starts the host and parks — a served
+# run behaves exactly as it does with the feature on, and a bare run says once that there is no
+# interface compiled in.
+ui = [
+    "dep:kubiq",
+    "dep:gpui",
+    "dep:gpui_platform",
+    "dep:gpui-component",
+    "dep:gpui-kit-assets",
+]
+
+# Forwarded to the host, which owns the backend; the interface never names one. `kubiq-host` does
+# not default it, so switching it off here is enough to switch it off everywhere.
+#
+# **Asked for everywhere and effective only on macOS**, which is deliberate and not an oversight.
+# The recipes that name it name it on every platform, and on each one that is not macOS it
+# resolves to nothing: the host declares `foundation-models` under
+# `[target.'cfg(target_os = "macos")'.dependencies]`, and gates the backend module on
+# `all(target_os = "macos", feature = "assist-apple")`. So a Linux or Windows build carries the
+# name and not the crate, and never asks for a Swift toolchain. `just apple` is what holds that
+# true, by resolving the tree for three triples.
+#
+# The alternative — enabling it per-target, with
+# `[target.'cfg(target_os = "macos")'.dependencies] kubiq-host = { features = [...] }` — would say
+# the same thing without a recipe having to name it, and cost the escape hatch. Cargo features
+# are additive: a feature a target dependency turns on cannot be turned off again, so there would
+# be no way left to build a Kubiq that runs on a Mac without the Swift toolchain and the macOS 26
+# SDK. That build is what the whole developer loop now runs on, and it is worth more than the
+# tidier manifest.
+assist-apple = ["kubiq-host/assist-apple"]
+
+# Forwarded to the interface, which owns the facade; the host never names an interpreter. On by
+# default because the sink's script page is part of the application, not an extra. It is a feature
+# rather than a plain dependency so that `--no-default-features` builds a complete Kubiq without the
+# C interpreter compiled into the process — the facade then reports itself unavailable, and the
+# page reads correctly against that. `kubiq` does not default it, so switching it off here is enough
+# to switch it off everywhere.
+#
+# Weak (`kubiq?/quickjs`): naming the facade's feature must not drag the interface back in, so a
+# `--no-default-features --features quickjs` build stays headless and the flag resolves to nothing.
+quickjs = ["kubiq?/quickjs"]
+
+[dependencies]
+kubiq = { path = "../kubiq", optional = true }
+kubiq-host = { path = "../kubiq-host" }
+kubiq-proto = { path = "../kubiq-proto" }
+
+# Named here for one call: `isolate::confine_entrypoint`, which decides whether this
+# run of the binary is the interface or a confined pane's harness. Windows confinement
+# re-invokes this same executable rather than shipping a second one, so the decision
+# belongs at the process entry — the one place that is already this crate's business.
+agent-manager = { path = "../agent-manager", default-features = false }
+
+anyhow = "1.0"
+tracing = "0.1"
+flume = "0.12"
+percent-encoding = "2"
+
+# All four are the `ui` feature's, and nothing outside it names them.
+gpui = { package = "gpui-pre", version = "=0.3.8", optional = true }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", optional = true, features = [
+    "font-kit",
+    "wayland",
+    "x11",
+    "runtime_shaders",
+] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "0bbd9870ce420af9feacbf948b21d3824d82dc0b", optional = true }
+gpui-kit-assets = { git = "https://github.com/longbridge/gpui-component", rev = "0bbd9870ce420af9feacbf948b21d3824d82dc0b", optional = true }
+
+[dev-dependencies]
+# `handoff`'s tests claim a lock in a throwaway root rather than the real config dir.
+tempfile = "3"
+
+[target.'cfg(windows)'.build-dependencies]
+# Embeds res/AppIcon.ico into the Windows executable. macOS builds it never enables,
+# so the reference platform carries no icon-compilation dependency.
+embed-resource = "3"

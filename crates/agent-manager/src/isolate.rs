@@ -1079,7 +1079,7 @@ pub fn confine_entrypoint() -> Option<i32> {
     match confine_run(Path::new(&payload)) {
         Ok(code) => Some(code),
         Err(error) => {
-            eprintln!("ubiq: {error:#}");
+            eprintln!("kubiq: {error:#}");
             Some(1)
         }
     }

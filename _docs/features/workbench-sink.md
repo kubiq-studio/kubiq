@@ -7,7 +7,7 @@ summary: The rail's Sink mode — the application's own test bench, twelve pages
 read_when: you are changing the kitchen sink's pages or fixtures, the A2UI renderer, the script scratchpad, the teamsim testbed, or looking for a surface to try a primitive on
 updated: 2026-10-25
 verified: 2026-10-27
-code_anchors: [crates/ubiq/src/state/sink.rs, crates/ubiq/src/app/sink.rs, crates/ubiq/src/ui/sink/mod.rs, crates/ubiq/src/ui/sink/ext_demo.rs, crates/ubiq/src/ui/sink/docs.rs, crates/ubiq/src/ui/sink/style.rs, crates/ubiq/src/ui/sink/files.rs, crates/ubiq/src/ui/sink/settings.rs, crates/ubiq/src/ui/sink/script.rs, crates/ubiq/src/ui/sink/teamsim.rs, crates/ubiq/src/ui/sink/a2ui.rs, crates/ubiq/src/ui/sink/project.rs, crates/ubiq/src/state/script.rs, crates/ubiq/src/state/teamsim.rs, crates/ubiq/src/state/a2ui.rs, crates/ubiq/src/state/a2ui/value.rs, crates/ubiq/src/state/a2ui/eval.rs, crates/ubiq/src/state/a2ui/action.rs, crates/ubiq/src/state/a2ui/live.rs, crates/ubiq/src/state/a2ui/svg.rs, crates/ubiq/src/state/a2ui/path.rs, crates/ubiq/src/state/a2ui/ubiq-catalog.json, crates/ubiq/src/ui/a2ui.rs, crates/ubiq/src/ui/a2ui/registry.rs, crates/ubiq/src/ui/a2ui/svg.rs, crates/ubiq/src/ui/a2ui/path.rs, crates/ubiq/src/ui/kit/blocks.rs, crates/ubiq/src/ui/kit/menu.rs, _tools/teamsim/FORMAT.md, crates/ubiq/tests/a2ui.rs, crates/ubiq/tests/script.rs, crates/ubiq/tests/sink.rs]
+code_anchors: [crates/kubiq/src/state/sink.rs, crates/kubiq/src/app/sink.rs, crates/kubiq/src/ui/sink/mod.rs, crates/kubiq/src/ui/sink/ext_demo.rs, crates/kubiq/src/ui/sink/docs.rs, crates/kubiq/src/ui/sink/style.rs, crates/kubiq/src/ui/sink/files.rs, crates/kubiq/src/ui/sink/settings.rs, crates/kubiq/src/ui/sink/script.rs, crates/kubiq/src/ui/sink/teamsim.rs, crates/kubiq/src/ui/sink/a2ui.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq/src/state/script.rs, crates/kubiq/src/state/teamsim.rs, crates/kubiq/src/state/a2ui.rs, crates/kubiq/src/state/a2ui/value.rs, crates/kubiq/src/state/a2ui/eval.rs, crates/kubiq/src/state/a2ui/action.rs, crates/kubiq/src/state/a2ui/live.rs, crates/kubiq/src/state/a2ui/svg.rs, crates/kubiq/src/state/a2ui/path.rs, crates/kubiq/src/state/a2ui/kubiq-catalog.json, crates/kubiq/src/ui/a2ui.rs, crates/kubiq/src/ui/a2ui/registry.rs, crates/kubiq/src/ui/a2ui/svg.rs, crates/kubiq/src/ui/a2ui/path.rs, crates/kubiq/src/ui/kit/blocks.rs, crates/kubiq/src/ui/kit/menu.rs, _tools/teamsim/FORMAT.md, crates/kubiq/tests/a2ui.rs, crates/kubiq/tests/script.rs, crates/kubiq/tests/sink.rs]
 depends_on: [feat-workbench, tech-ui]
 review_cycle: monthly
 ---
@@ -26,7 +26,7 @@ can be looked at and judged without arranging a project to produce one.
 **The kitchen sink is the application's own test bench, and the one screen with nothing behind it.**
 It is on the rail only while Settings › Experimental › *Enable dev settings* is on (`Tier::Dev`,
 `Availability::When`; off by default — see the workbench's settings overlay). It is under `APP`
-because it is about Ubiq rather than about a folder: it opens on a first run with an
+because it is about Kubiq rather than about a folder: it opens on a first run with an
 empty catalogue, it asks the host for nothing, and it looks the same in every window. Twelve pages,
 selected by a strip along the top — the plain buffer, one per special viewer, the style reference,
 the file picker, the two settings layouts composed from the kit, one live conversation beside the
@@ -62,7 +62,7 @@ A fourth trigger, **A locked walk**, is the one exception to "nothing behind the
 real onboarding wizard (`AppState::open_onboarding`), the only caller of `kit::modal_locked`.
 
 **The A2UI page draws a surface an agent could send, from the JSON beside it.** A2UI is a protocol
-Ubiq does not own — `_docs/references/a2ui-protocol.md` is its wire and
+Kubiq does not own — `_docs/references/a2ui-protocol.md` is its wire and
 `_docs/references/a2ui-catalog.md` its component set — and this page is where the renderer for it is
 looked at before any agent drives one. A picker of seven example payloads sits over an editor on the
 right; the left is what `state::a2ui::parse` made of whatever that editor holds, re-read when the
@@ -103,11 +103,11 @@ the optional `userMessage`, with the whole data model as a top-level sibling whe
 for one. An action carrying a `functionCall` is reported and never carried out: `openUrl` opens
 nothing, which is `D115`.
 
-**The component set is a registry rather than a closed enum, and Ubiq ships a catalog of its own.**
+**The component set is a registry rather than a closed enum, and Kubiq ships a catalog of its own.**
 `ui/a2ui/registry.rs` is a table of name against drawing function; a component in neither the basic
 catalog nor that table keeps its props and draws a placeholder. What the table is held to is
-`crates/ubiq/src/state/a2ui/ubiq-catalog.json`, embedded in the binary, which extends the basic
-catalog with exactly one component — `Svg` — and which `crates/ubiq/tests/a2ui.rs` checks the
+`crates/kubiq/src/state/a2ui/kubiq-catalog.json`, embedded in the binary, which extends the basic
+catalog with exactly one component — `Svg` — and which `crates/kubiq/tests/a2ui.rs` checks the
 registry against name for name. `D114` is why there are two sources of truth and one test between
 them.
 
@@ -117,7 +117,7 @@ refusing script, foreign objects, references out of the document, any event attr
 `url()`, data URIs, doctypes and entities, anything over the size or element ceiling, and anything
 with no usable `viewBox` — and what survives is handed to GPUI as an image sized from that
 `viewBox`, with `currentColor` taking the text token. A refusal is **drawn**, never blank, and the
-Ubiq-catalog example carries one on purpose so a reader sees what a refusal looks like. The basic
+Kubiq-catalog example carries one on purpose so a reader sees what a refusal looks like. The basic
 catalog's `Icon` takes the other route: `state/a2ui/path.rs` parses its `svgPath` and
 `ui/a2ui/path.rs` paints it on a canvas. That route needs no scanner at all, which is the reason
 both exist — a path string can express geometry and nothing else.
@@ -137,31 +137,31 @@ trigger, because a scratchpad evaluated while it is typed evaluates half-typed p
 comes back is the console lines in the order the script wrote them, coloured by level, then every
 intent the script recorded (in the warning colour), then the completion value or the exception,
 then a footer with the milliseconds the run took and whether a panel was declared. Clear empties
-the console. `console.log`, `.info`, `.warn` and `.error` are captured; a `ubiq` global carries five
+the console. `console.log`, `.info`, `.warn` and `.error` are captured; a `kubiq` global carries five
 core instructions — `version()`, `platform()`, `now()`, `log(...args)` and `echo(value)` — plus five
-namespaces documented in `script::API_DOC`, rendered as Markdown under the console: `ubiq.project`
-(`info`/`root`/`list`), `ubiq.tasks` (`list`/`get`/`create`/`cancel`), `ubiq.ai`
-(`available`/`models`/`ask`), `ubiq.search` (`last`/`files`/`text`), and `ubiq.sink`
+namespaces documented in `script::API_DOC`, rendered as Markdown under the console: `kubiq.project`
+(`info`/`root`/`list`), `kubiq.tasks` (`list`/`get`/`create`/`cancel`), `kubiq.ai`
+(`available`/`models`/`ask`), `kubiq.search` (`last`/`files`/`text`), and `kubiq.sink`
 (`ui`/`event`/`clear`).
 
 **A read answers from a snapshot; a write is an intent, recorded and never performed.**
 `AppState::script_facts` serialises everything a script may read — the front project, the project
 catalogue, the tasks in flight, the reachable models, the last search — as JSON, on the window's own
-thread, before the interpreter exists. `ubiq.project`, `ubiq.tasks.list`/`get`, `ubiq.ai.models`/
-`available` and `ubiq.search.last`/`files` answer from that snapshot and nothing else; the
+thread, before the interpreter exists. `kubiq.project`, `kubiq.tasks.list`/`get`, `kubiq.ai.models`/
+`available` and `kubiq.search.last`/`files` answer from that snapshot and nothing else; the
 interpreter cannot re-enter the interface and the interface cannot be blocked by a script.
-`ubiq.tasks.create`, `ubiq.tasks.cancel`, `ubiq.ai.ask` and `ubiq.search.text` are **intents**: the
+`kubiq.tasks.create`, `kubiq.tasks.cancel`, `kubiq.ai.ask` and `kubiq.search.text` are **intents**: the
 call is recorded, with its arguments, and nothing it names is carried out — the same rule `D115`
 puts on an A2UI local call. The console draws every intent in the warning colour, as an account of
 what was asked for and refused.
 
-**`ubiq.sink.ui(payload, handler)` declares a panel, and a click on it replays the script from the
+**`kubiq.sink.ui(payload, handler)` declares a panel, and a click on it replays the script from the
 top.** The payload is exactly what the A2UI page's own editor takes, and the page draws it in its
 right half when the switch there is set to *Panel* rather than *Docs* — a Panel pill carries a dot
 whenever the last run declared one. Because nothing survives a run, there is no closure left to call
 on a click: `fire_script_a2ui_action` does the A2UI page's own envelope-and-blocking-check work and
 then re-runs the whole script with a `ScriptEvent` in hand, and the handler the second declaration
-registers is called once the script has finished evaluating. `ubiq.sink.event()` answers that event,
+registers is called once the script has finished evaluating. `kubiq.sink.event()` answers that event,
 or `null` on a plain Run, which is what lets a script branch on whether it is being replayed and stay
 idempotent. A declaration made with no handler leaves a note in the panel's log instead of
 replaying.
@@ -206,7 +206,7 @@ a declared panel replayed rather than resumed.
 
 **The teamsim page is where the graph's arrangements are judged, against a scenario a reader can
 edit.** It is the one sink page whose fixture is a file format: `_tools/teamsim/scenarios/*.json`,
-`ubiq.teamsim/1`, embedded with `include_str!` and described by `_tools/teamsim/FORMAT.md`. A
+`kubiq.teamsim/1`, embedded with `include_str!` and described by `_tools/teamsim/FORMAT.md`. A
 scenario is a whole graph — sessions, the tasks in them, the agents on those tasks, the delegates
 inside an agent's fence, and the extra links between agents — and `state/teamsim.rs` projects one
 into the very records the Teams canvas is drawn from, `WorkAgent`, `TaskRecord` and the ring count
@@ -311,7 +311,7 @@ HSV the picker is holding — and `ScriptDemo`, which carries the dialect, the p
 `SyntaxReport`, which of the two `ScriptPane`s is forward, and the `Live` a declared panel is drawn
 into, and `ext_demo_on` — the one switch the extensions demo section and the extensions demo rail
 mode both read, on only in memory (`X11`, `D186`). Nothing in it draws and nothing in it holds a
-buffer, which is what lets `crates/ubiq/tests/sink.rs` hand every fixture to the parser or the
+buffer, which is what lets `crates/kubiq/tests/sink.rs` hand every fixture to the parser or the
 renderer that will draw it with no frame — so a fixture that stopped parsing fails the build instead
 of drawing an error nobody looks at.
 
@@ -333,7 +333,7 @@ the first items on either that are a real contribution rather than a conversion 
 base's own screens, registered through `ext::settings::register`/`ext::rail::register` exactly the
 way a second edition registers its own, with neither container's own module touched to add them.
 The interpreter sits behind one facade,
-`crates/ubiq/src/state/script.rs` — `available()`, `engine_name()`, and `eval(run: Run)` /
+`crates/kubiq/src/state/script.rs` — `available()`, `engine_name()`, and `eval(run: Run)` /
 `eval_timed(run, block_ms, total_ms)` returning a `ScriptOutcome`, where `Run` carries the prelude,
 the source, the `Dialect`, the `OxcOptions`, the `HostFacts` snapshot and the `ScriptEvent` being
 replayed, if any — plus `validate(prelude, source, dialect, &OxcOptions)` returning a `SyntaxReport`
@@ -346,7 +346,7 @@ the window's `search`), `run_sink_script` and `replay_sink_script` (both funnel 
 `ScriptDemo::seq`), `land_sink_script_panel` (parses a declared payload into `ScriptDemo::a2ui`),
 `validate_sink_script`, `fire_script_a2ui_action` (the panel's own envelope-and-blocking-check work,
 then a replay), and the option setters in `app/sink.rs` — and nothing else reaches it.
-`crates/ubiq/tests/script.rs` drives that facade directly and is a target of the `quickjs` feature,
+`crates/kubiq/tests/script.rs` drives that facade directly and is a target of the `quickjs` feature,
 so a build without the interpreter compiles no test that needs one.
 The modal is raised from `mod.rs` rather than from `style.rs`, because exactly one may be up and
 where it is asked for is not where it is painted; the primitive is `kit::modal`, whose shape and

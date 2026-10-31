@@ -11,7 +11,7 @@ depends_on: [inbox-panels, feat-workbench, tech-architecture]
 
 # Proposal — file viewers and the editor
 
-Ubiq opens a file into one shared editor and draws it as text, whatever it is. This proposes two
+Kubiq opens a file into one shared editor and draws it as text, whatever it is. This proposes two
 changes: **one panel per open file, each with its own buffer**, and **a viewer per kind of file that
 is not plain text** — Markdown with a live preview, Mermaid, Excalidraw and diffs.
 
@@ -114,7 +114,7 @@ this. The palette is in the key because Mermaid bakes its colours in at render t
 diagram, and the theme toggle chooses between them.
 
 **What it costs, and it is not free.** A webview is a heavy dependency — the system one on macOS,
-WebKitGTK on Linux, which is a real install burden. `D7` removed a web view from Ubiq, but its
+WebKitGTK on Linux, which is a real install burden. `D7` removed a web view from Kubiq, but its
 objection was a serialisation boundary in the per-frame render path under a stream of escape
 sequences; a once-per-diagram render off the frame path and behind a cache is a different trade, and
 this proposal reads `D7` as not covering it. The bundle is vendored and never fetched. A cold render
@@ -140,7 +140,7 @@ vector SVG for the wireframes under `_docs/design/`, and
 reproduce. The in-app viewer draws that subset and inherits the same stated limit — **the hand-drawn
 `roughness` style renders as clean vector**, and hachure and cross-hatch fills render solid. Embedded
 images arrive as data URIs in the file's own `files` map and go through GPUI's image element. This
-makes `_docs/design/` readable inside Ubiq, which is a second reason to build it and a free corpus to
+makes `_docs/design/` readable inside Kubiq, which is a second reason to build it and a free corpus to
 test against.
 
 Sending this through the webview instead would be heavier and worse: it costs a browser to produce a

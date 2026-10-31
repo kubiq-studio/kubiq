@@ -1,6 +1,6 @@
 ---
 id: inbox-plugin-system
-title: Proposal — a plugin system for Ubiq
+title: Proposal — a plugin system for Kubiq
 kind: proposal
 status: proposal
 summary: The closing sections of a plugin-system proposal — a plugin as a bus client whose messages a grant filters, embedded QuickJS as the interpreter, credential references brokered rather than held, and declarative UI contributions plus A2UI in place of HTML or native drawing; a five-phase build order from the grant model to out-of-process plugins; the decisions those choices would add to the register (D97–D100); and the open questions on grant scope, activation, project visibility, the audit trail, where a plugin's definition lives, and whether `exec` belongs in an early phase.
@@ -16,8 +16,8 @@ the containment is only as good as the grant the plugin asked for.
 
 | Phase | What lands | Rough cost |
 |---|---|---|
-| 0 | `Message::capability()` and its exhaustive match; `crates/ubiq-plugin` with the grant model and the broker; a plugin client on the hub; one in-tree test plugin driven by fixtures, no interpreter | 1 week |
-| 1 | `rquickjs`, the `ubiq.*` shim, the manifest, the install and consent screens, commands, `store`, `net`, notifications, budgets and the audit view | 2–3 weeks |
+| 0 | `Message::capability()` and its exhaustive match; `crates/kubiq-plugin` with the grant model and the broker; a plugin client on the hub; one in-tree test plugin driven by fixtures, no interpreter | 1 week |
+| 1 | `rquickjs`, the `kubiq.*` shim, the manifest, the install and consent screens, commands, `store`, `net`, notifications, budgets and the audit view | 2–3 weeks |
 | 2 | The settings schema and its renderer; `exec`; `ask` grants prompting through the permission machinery | 1 week |
 | 3 | The host as `McpService`; `tools.define`; skill and instruction contributions; the privilege rule in the transcript | 1–2 weeks |
 | 4 | A2UI surfaces: the data model, the id-to-entity map, action dispatch, surface lifetime, `PanelKind::Plugin` | 2–3 weeks |
@@ -38,10 +38,10 @@ is its precondition.
   on any platform.
 - **D99** — A plugin holds credential references and never credential material; the broker attaches
   the token. **Cost:** every capability that authenticates has to be brokered, so a plugin can never
-  reach a service Ubiq has no connector for.
+  reach a service Kubiq has no connector for.
 - **D100** — Plugin UI is declarative contributions plus A2UI, and never HTML or native drawing.
   **Cost:** a class of plugin — anything wanting a canvas, a graph or a large table — cannot be
-  written, and Ubiq owns the A2UI data model it had been deferring.
+  written, and Kubiq owns the A2UI data model it had been deferring.
 
 ## 12. Open questions
 
@@ -56,7 +56,7 @@ is its precondition.
 - Where a plugin's *definition* lives, given
   [`config-persistence-proposal.md`](./config-persistence-proposal.md) reserves definitions for
   agent-manager and names plugins in that list — the answer is probably that the library's plugin is
-  a harness-facing thing and Ubiq's is not, and that two words are colliding the way "session" does.
+  a harness-facing thing and Kubiq's is not, and that two words are colliding the way "session" does.
 - Whether `exec` earns its place in phase 2 at all, given that it is the one capability with no
   ceiling and its OS confinement works on one platform.
 - Whether a plugin may raise a permission prompt against a *pane*, or only against a conversation.

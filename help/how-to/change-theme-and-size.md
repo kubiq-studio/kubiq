@@ -16,6 +16,6 @@ Use this when the window is hard to read or you want a different look.
 5. To keep the sizes you chose, press **Save preset…**.
 6. To go back, press **Reset**.
 
-The window redraws at once, and Ubiq remembers the choice.
+The window redraws at once, and Kubiq remembers the choice.
 
 The same controls are in **Settings**, then **Size**, with **Preset**, **Interface size** and **Text size**. **Reset** leaves the nudges for chrome, conversation and content text alone. [Appearance and size](settings-appearance) lists every setting.

@@ -11,7 +11,7 @@
 //!
 //! **An event carries no session identity, deliberately.** Whoever holds the
 //! table of live bridges supplies it: an embedder keys events by its own id
-//! (Ubiq attaches an agent id and puts them on its bus), and an ACP server
+//! (Kubiq attaches an agent id and puts them on its bus), and an ACP server
 //! built on top of this would attach a `sessionId` to the very same event.
 //! Identity belongs to the multiplexer, never to the event — which is what
 //! makes one bridge usable by several fronts without a second mapping.

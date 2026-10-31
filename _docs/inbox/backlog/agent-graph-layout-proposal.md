@@ -12,7 +12,7 @@ depends_on: [feat-workbench, tech-ui, inbox-agent-graph-final]
 # Proposal — the graph's automatic arrangement
 
 The agents screen arranges itself: nothing on the canvas is authored, and
-`crates/ubiq/src/state/layout.rs` decides where every card goes. It does it in one pass from the
+`crates/kubiq/src/state/layout.rs` decides where every card goes. It does it in one pass from the
 outside in — workspaces in the order their first agent happens to appear, each one's loose cards
 stacked above its containers, containers flowing left to right until a constant says wrap — and the
 pass produces a canvas the project's own fixture does not survive. The coordinator every root
@@ -42,25 +42,25 @@ opinion about any of this.
 
 ## 1. Where it stands
 
-The pass is `Layout::auto` (`crates/ubiq/src/state/layout.rs:56`) over `arrange` (`:129`) over
+The pass is `Layout::auto` (`crates/kubiq/src/state/layout.rs:56`) over `arrange` (`:129`) over
 `stack` (`:222`), and it runs over three different populations in this order: **placement over every
 record**, then **geometry over the visible ones** (`GraphView::bounds_excluding`,
-`crates/ubiq/src/state/agents.rs:379-406`), then **the canvas extent over whatever came out of the
-second** (`crates/ubiq/src/ui/agents/graph.rs:119-131`). The population narrows at each step and
+`crates/kubiq/src/state/agents.rs:379-406`), then **the canvas extent over whatever came out of the
+second** (`crates/kubiq/src/ui/agents/graph.rs:119-131`). The population narrows at each step and
 nothing feeds back. That is the root of most of what follows.
 
 **The coordinator is drawn inside whichever workspace it belongs to.** `arrange:142-152` takes the
 agents of *this workspace* with no task, stacks them, and puts the stack above *this workspace's*
 containers. In the fixture the coordinator is a member of the fifth workspace
-(`crates/ubiq-host/src/work/mock.rs:378-391`) and parents every other workspace's master, so the one
+(`crates/kubiq-host/src/work/mock.rs:378-391`) and parents every other workspace's master, so the one
 card everything answers to is drawn under four workspaces of work.
-`crates/ubiq/src/ui/kit/canvas.rs:73-74` draws a link as a cubic whose control points are pulled
+`crates/kubiq/src/ui/kit/canvas.rs:73-74` draws a link as a cubic whose control points are pulled
 *down* out of the parent and *up* into the child, so every one of those connectors is an S-bend
 through its own endpoints. Nothing constrains a parent's workspace to be placed above its children's;
 the graph reads correctly today only when the coordinator happens to be `agents[0]`.
 
 It can also be pulled *into* a container: the host gives every mock agent the task its workspace has
-in flight (`crates/ubiq-host/src/work/mod.rs:614-624`), the coordinator included, so whenever the
+in flight (`crates/kubiq-host/src/work/mod.rs:614-624`), the coordinator included, so whenever the
 fifth workspace has work in progress the project manager is drawn as a worker inside that outline.
 
 **Containers share origins.** A task with no cards is given an origin and `continue`s without
@@ -171,7 +171,7 @@ no window, no zoom, no theme, no colour.
 The cards in one container are a forest: edges are `parent` links landing inside the same container,
 and a card whose parent is outside it is a root here — the rule
 `an_orchestrator_parents_each_sessions_master_without_sinking_it`
-(`crates/ubiq/tests/agents.rs:443`) already pins.
+(`crates/kubiq/tests/agents.rs:443`) already pins.
 
 Lay each root out as a **tidy tree**: children in a row under their parent, sibling subtrees packed
 left to right with `CARD_GAP_X` between them, the parent centred over the span of its own children,
@@ -295,7 +295,7 @@ rows with gaps, alignment and a target width is what a flexbox engine is; it is 
 `Layout` hands it sizes and reads back positions, with no window and no styling in the way. The tree
 is the other half and for this graph it is small — the edges are single-parent `parent` links and the
 forests are shallow, so a tidy tree over them is on the order of 120 lines.
-`crates/ubiq/src/state/scene.rs` sets the precedent for that trade, writing thirty lines of base64
+`crates/kubiq/src/state/scene.rs` sets the precedent for that trade, writing thirty lines of base64
 rather than taking a dependency for it.
 
 **When that stops being right, `dagre` is the exit, and taking it must not mean rewriting the
@@ -357,7 +357,7 @@ itself**, and a hand-placed card a filter has hidden was not on screen to be att
 
 ## 10. What it costs
 
-The pass is linear in cards plus the packing, so size is not the question at any scale Ubiq will
+The pass is linear in cards plus the packing, so size is not the question at any scale Kubiq will
 see — and the scoped relayout makes the common case cheaper than today's, which runs everything for
 one key.
 

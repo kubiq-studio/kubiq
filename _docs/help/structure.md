@@ -20,7 +20,7 @@ This document owns the information architecture of the manual: the sections and 
 The words on a page belong to [`style`](./style.md), its pictures to [`images`](./images.md), and
 the record of which area has which page to [`coverage`](./coverage.md).
 
-The manual is organised around what the reader wants to do, not around how Ubiq is built: the
+The manual is organised around what the reader wants to do, not around how Kubiq is built: the
 reader is a user, not a contributor ([`style`](./style.md) §1). A `features/` document is a source
 of facts, never a template — a help page keeps the facts the user meets on screen and drops the
 mechanism. Where a section's shape and a user's task disagree, the task wins: a guide or a how-to
@@ -34,7 +34,7 @@ stops anywhere has learnt the most useful thing first.
 | # | Section | Folder | Page type | What belongs here | Facts come from |
 |---|---|---|---|---|---|
 | 1 | Start | `index`, `getting-started` | — | The landing page (§7) and the first run: open a project, start one agent, see it work | `inbox/onboarding-proposal.md`, everything below |
-| 2 | Philosophy | `philosophy/` | concept | What Ubiq believes and refuses, written for a user: many agents in one window; a real terminal per agent, and why the chat panel exists anyway; any harness, no model chosen for you; your machine, credentials referenced and never held; what Ubiq is not | `product/overview.md`, the root `AGENTS` domain rules |
+| 2 | Philosophy | `philosophy/` | concept | What Kubiq believes and refuses, written for a user: many agents in one window; a real terminal per agent, and why the chat panel exists anyway; any harness, no model chosen for you; your machine, credentials referenced and never held; what Kubiq is not | `product/overview.md`, the root `AGENTS` domain rules |
 | 3 | Concepts | `concepts/` | concept | The nouns: projects, panes and panels, workspace sessions, conversations, accounts and agent definitions, harnesses, and the glossary | `product/glossary.md`, `features/panes-and-terminals.md`, `features/sessions-and-workspaces.md`, `features/workbench.md` |
 | 4 | Guides | `guides/` | guide | One real task end to end, done in a running build before it is written: first project and agent; two agents on one task; reviewing and committing an agent's work; the knowledge base; accounts and agent definitions for several clients; the Tasks board; a remote machine; querying a database | the reference pages of every area the guide crosses |
 | 5 | How-to | `how-to/` | how-to | One task per page, named for the verb, harvested from the reference pages' "What you can do here" and then from the FAQ | the reference page the task lives on |
@@ -110,7 +110,7 @@ as YAML exactly as `wip/help.md` §2.1 shows; `status` is omitted because each i
 | `title` | Panes and panels | The Changes panel | Review and commit what an agent changed | Hide or close a tab | Workbench questions |
 | `summary` | What a panel is, what a pane is, and why every agent gets a real terminal. | The conflicted, staged and unstaged lists in Git mode, and the commit box under them. | Read each file an agent touched, stage what you keep, and commit it. | Choose whether a tab goes away with its harness still running, or ends it. | What people ask about tabs, panels and the window. |
 | `keywords` | `[terminal, tab, focus, dock, split]` | `[stage, unstage, discard, commit, amend]` | `[review, diff, stage, commit]` | `[close, hide, detach]` | `[tab, panel, chat, closed]` |
-| `context` | — | `[panel.ubiq.git.changes]` | — | — | — |
+| `context` | — | `[panel.kubiq.git.changes]` | — | — | — |
 | `order` | `10` | `20` | `30` | `40` | `20` |
 | `related` | `[workbench-panels, glossary]` | `[git-overview, git-history]` | `[git-changes]` | `[panes]` | `[how-to-hide-or-close-a-tab]` |
 | source | `features/panes-and-terminals.md`, the glossary | `features/workbench-git.md` | `features/workbench-git.md` | `features/workbench.md`, Editor settings | `features/workbench.md`, Editor settings |
@@ -181,7 +181,7 @@ A hidden pane is listed in the new-pane menu's **Detached** group. [Panes](panes
 ```markdown
 ## Why does closing a chat tab not end the conversation?
 
-A chat tab's **×** hides it, because the conversation belongs to Ubiq, not to the tab. To end it,
+A chat tab's **×** hides it, because the conversation belongs to Kubiq, not to the tab. To end it,
 pick **Close** from the tab's right-click menu — see [Hide or close a tab](how-to-hide-or-close-a-tab).
 ```
 
@@ -270,7 +270,7 @@ Three pages sit outside every folder, and each has a job no folder page shares.
 `index` is the landing page and the last rung of the ladder, so F1 always opens something. It has
 one job: a map of the manual.
 
-- Two sentences on what Ubiq is, linking to the philosophy section for the rest.
+- Two sentences on what Kubiq is, linking to the philosophy section for the rest.
 - One line per section in §1's order: a link to the section's first page and half a sentence on
   what the reader finds there.
 - One full-window screenshot, the only one outside a guide's first step.

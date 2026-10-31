@@ -3,7 +3,7 @@ id: workbench-explorer
 title: The file explorer
 summary: The project's file tree in IDE mode's left region — open, filter, create, rename, move and delete files from it.
 keywords: [explorer, file tree, sidebar, rename, delete, move, copy, duplicate, filter, hidden files, follow]
-context: [panel.ubiq.explorer]
+context: [panel.kubiq.explorer]
 order: 30
 status: current
 related: [workbench-editor, workbench-search, workbench-bookmarks, workbench-file-dialogs, workbench-panels]
@@ -11,7 +11,7 @@ related: [workbench-editor, workbench-search, workbench-bookmarks, workbench-fil
 
 The explorer draws the project's folder as a tree in the left region of IDE mode, and it is open the
 moment you enter the mode. Click a file to open it in the [editor](workbench-editor). A file or
-folder created or removed outside Ubiq, by an agent in a pane or a command in another terminal,
+folder created or removed outside Kubiq, by an agent in a pane or a command in another terminal,
 appears or disappears in the tree on its own.
 
 ## The parts
@@ -29,7 +29,7 @@ appears or disappears in the tree on its own.
 | Branch mark on a folder | The folder is its own repository or submodule; hover for its branch |
 
 Click a file once to open a preview tab that the next click replaces; double-click it to keep the tab.
-Drag a row onto a folder to move it; Ubiq asks first, and the question has a box to stop asking for
+Drag a row onto a folder to move it; Kubiq asks first, and the question has a box to stop asking for
 ten minutes. A `…` after a folder means it is still loading, and a `+` means its listing was cut short.
 
 Right-click a row for **Open**, **Open with**, **Open diff vs HEAD**, **New file** and its siblings,
