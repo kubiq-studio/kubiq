@@ -9,7 +9,7 @@ authors = ["Leonard Seibold <git[@]zrtx.de"]
 publish = false
 
 [dependencies]
-# The same source Ubiq builds against, so the two share one gpui.
+# The same source Kubiq builds against, so the two share one gpui.
 gpui = { package = "gpui-pre", version = "=0.3.8" }
 alacritty_terminal = "0.26"
 anyhow = "1"

@@ -151,7 +151,7 @@ pub fn install_key_bindings(cx: &mut App) {
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("ctrl-shift-v", gpui::NoAction, Some(KEY_CONTEXT)),
         // Windows pastes on Ctrl+V, so the window's own Ctrl+V — an image paste,
-        // in Ubiq's case — must not take it first when a terminal has focus.
+        // in Kubiq's case — must not take it first when a terminal has focus.
         #[cfg(windows)]
         KeyBinding::new("ctrl-v", gpui::NoAction, Some(KEY_CONTEXT)),
     ]);

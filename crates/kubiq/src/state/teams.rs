@@ -976,10 +976,12 @@ mod tests {
             tasks: Vec::new(),
             loaded: true,
         };
-        let tabs = vec![
-            a_delegate("done", Some(ToolStatus::Completed)),
-            a_delegate("working", Some(ToolStatus::InProgress)),
-        ];
+        // Enough finished delegates that the radial ring opens a second ring around the card:
+        // a ring of one or two only grows the fence sideways, which moves no row.
+        let mut tabs: Vec<SubagentTab> = (0..12)
+            .map(|n| a_delegate(&format!("done{n}"), Some(ToolStatus::Completed)))
+            .collect();
+        tabs.push(a_delegate("working", Some(ToolStatus::InProgress)));
 
         let mut view = TeamsView::default();
         let ring = |view: &TeamsView| -> Vec<String> {

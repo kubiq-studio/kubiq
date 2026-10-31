@@ -1684,6 +1684,8 @@ fn menu_actions_write_what_they_name(cx: &mut TestAppContext) {
                 .update(cx, |state, cx| state.select_git_commit(Some(0), cx));
         })
         .expect("the window is open");
+    // Selecting a commit asks the host for its files; that is not what is being checked here.
+    let _ = fixture.said();
     open_menu(change(), cx);
     pick(5, cx);
     assert!(

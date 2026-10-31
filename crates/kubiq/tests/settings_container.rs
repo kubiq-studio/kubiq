@@ -24,6 +24,7 @@ fn the_overlay_draws_the_same_rows_in_the_same_order() {
         "File explorer",
         "Editor",
         "Search",
+        "Browser",
         "Harnesses",
         "Agent definitions",
         "Skills",
@@ -70,6 +71,7 @@ fn the_project_dialog_draws_the_same_rows_in_the_same_order() {
             "Databases",
             "Documentation",
             "Integrations",
+            "Browser",
         ]
     );
 }
