@@ -1,10 +1,10 @@
 //! The annotated-document surface: an `MdView` with its annotation layer on, and the thread rail
 //! beside it.
 //!
-//! **One surface, two frames.** `crate::ui::plan` hosts it in the plan dialog and
-//! `crate::ui::viewer` hosts it as a markdown tab's fourth layout (`ViewLayout::Annotation`), and
-//! nothing below knows which — it reads a `DocumentEditor`, whose `md` is the dialog's own view or
-//! the tab's, and whose `presentation` is the only other thing that differs.
+//! **One surface, one frame.** `crate::ui::viewer` hosts it as a markdown tab's fourth layout
+//! (`ViewLayout::Annotation`) — a file's tab, or the tab of a plan or mission document the host
+//! holds — and nothing below knows which: it reads a `DocumentEditor`, whose `md` is the tab's own
+//! view.
 //!
 //! **The page is the view's; the threads are the rail's.** The view draws each row's margin — the
 //! count marker, the `⚑ ✓ + ● ✎` stack under the selected row, the highlight dot — from the decor
@@ -123,7 +123,7 @@ pub fn surface(app: &AppState, doc: &DocumentEditor, cx: &mut Context<AppState>)
             cx.notify();
         }))
         .children(doc.notice.as_ref().map(banner))
-        .children(state_banner(doc, cx))
+        .children(state_banner(doc))
         .child(
             div()
                 .flex()
@@ -138,15 +138,10 @@ pub fn surface(app: &AppState, doc: &DocumentEditor, cx: &mut Context<AppState>)
 }
 
 /// The page: the document's view, with the window's diagram cache published for its fences. The
-/// dialog waits for the host's body; a tab's view is over the tab's own buffer and is drawn as
-/// soon as the tab has one.
+/// view is over the tab's own buffer, so it is drawn as soon as the tab has one.
 fn page(app: &AppState, doc: &DocumentEditor, cx: &App) -> AnyElement {
-    if doc.is_modal() {
-        match &doc.body {
-            DocumentBody::Loading => return note("Reading\u{2026}", theme::text_faint()),
-            DocumentBody::Failed(reason) => return note(reason.clone(), theme::danger()),
-            DocumentBody::Loaded(_) => {}
-        }
+    if let DocumentBody::Failed(reason) = &doc.body {
+        return note(reason.clone(), theme::danger());
     }
     doc.md.read(cx).publish_fences(app);
     doc.md.clone().into_any_element()
@@ -1058,9 +1053,8 @@ fn excerpt(text: &str) -> String {
 }
 
 /// What the surface has to say about itself before anything else: the host's copy moved under an
-/// unsaved edit, or Escape was pressed over one. Both are questions, and both keep the edit.
-fn state_banner(doc: &DocumentEditor, cx: &mut Context<AppState>) -> Option<AnyElement> {
-    let key = doc.surface_key();
+/// unsaved edit. It is a question, and it keeps the edit.
+fn state_banner(doc: &DocumentEditor) -> Option<AnyElement> {
     if doc.stale {
         let who = match doc.stale_origin {
             Some(kubiq_proto::plan::SaveOrigin::Agent) => "An agent",
@@ -1078,30 +1072,14 @@ fn state_banner(doc: &DocumentEditor, cx: &mut Context<AppState>) -> Option<AnyE
                 doc.host_revision, doc.revision,
             )
         };
-        return Some(warning_row(&key, text, None, cx));
-    }
-    if doc.confirm_close {
-        return Some(warning_row(
-            &key,
-            "Unsaved changes. Save, or close again to discard.".to_string(),
-            Some("Discard"),
-            cx,
-        ));
+        return Some(warning_row(text));
     }
     None
 }
 
 /// A sentence the surface has to put in front of the reader, in the warning colour — the stale
-/// banner, the close question, and the viewer's own "editing the source can orphan a thread".
-///
-/// `discard` names the one button it may carry; `None` is a statement rather than a question.
-/// `key` scopes the discard button's id to whichever surface raised it (T-125).
-pub fn warning_row(
-    key: &str,
-    text: String,
-    discard: Option<&'static str>,
-    cx: &mut Context<AppState>,
-) -> AnyElement {
+/// banner, and the viewer's own "editing the source can orphan a thread".
+pub fn warning_row(text: String) -> AnyElement {
     div()
         .px_2()
         .py_1()
@@ -1125,14 +1103,6 @@ pub fn warning_row(
                 .text_color(theme::text())
                 .child(SharedString::from(text)),
         )
-        .children(discard.map(|label| {
-            ghost_button(
-                eid("plan-discard", key),
-                None,
-                label,
-                cx.listener(|this, _, _, cx| this.discard_plan_edits(cx)),
-            )
-        }))
         .into_any_element()
 }
 

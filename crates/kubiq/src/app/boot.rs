@@ -149,27 +149,6 @@ impl AppState {
                 .submit_on_enter(true)
         });
 
-        // The annotated document's buffer: the file editor's own `EditorState`, built once for
-        // the window and re-seeded each time a document is opened in it. `/` is a completion
-        // trigger here and nowhere else in the tree — `ui::editor::SlashCommands` is the only
-        // `CompletionProvider` Kubiq implements.
-        let plan_editor = cx.new(|cx| {
-            let mut state = EditorState::new(window, cx)
-                .language(ui::editor::highlighter_language(
-                    crate::state::editor::FileLanguage::Markdown,
-                ))
-                .line_number(true)
-                .folding(true)
-                .show_whitespaces(false)
-                .soft_wrap(true)
-                .tab_size(TabSize {
-                    tab_size: 2,
-                    ..Default::default()
-                });
-            state.lsp_mut().completion_provider = Some(std::rc::Rc::new(ui::editor::SlashCommands));
-            state
-        });
-
         let command_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Search files, or run a command\u{2026}")
         });
@@ -1367,20 +1346,6 @@ impl AppState {
             },
         ));
 
-        // The document's own buffer: what was typed is compared against what the host last
-        // stated, which is what makes the Save affordance and the close question mean anything.
-        subscriptions.push(cx.subscribe_in(
-            &plan_editor,
-            window,
-            |this, buffer, event: &InputEvent, _window, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let typed = buffer.read(cx).value().to_string();
-                this.plan_editor_changed(&typed, cx);
-            },
-        ));
-
         subscriptions.push(cx.subscribe_in(
             &annotation_composer_input,
             window,
@@ -1922,6 +1887,9 @@ impl AppState {
             create_storage: kubiq_proto::projects::StorageMode::default(),
             adding_select: None,
             pending_files: Vec::new(),
+            doc_notices: HashMap::new(),
+            owned_missions: HashSet::new(),
+            opened_plans: HashMap::new(),
             pending_kb_docs: Vec::new(),
             pasted_writes: Vec::new(),
             pasted_ignored: HashSet::new(),
@@ -1965,7 +1933,6 @@ impl AppState {
             task_reference_query,
             task_prerequisite_query,
             annotation_composer_input,
-            plan_editor,
             command_input,
             project_search,
             all_projects_search,

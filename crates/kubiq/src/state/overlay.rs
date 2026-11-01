@@ -109,8 +109,6 @@ pub enum Layer {
     Mission,
     /// The note dialog a mission asks words of the user with: reject, fail, replan, redo.
     MissionNote,
-    /// A task's plan, read as rendered markdown — raised from the task panel.
-    Plan,
     /// The image/diagram zoom modal (T-185) — raised from a corner button on a scaled-down
     /// picture in a markdown preview, wherever one is drawn, so it sits above both the standard
     /// viewer's tab and the plan surface's own rendered markdown.

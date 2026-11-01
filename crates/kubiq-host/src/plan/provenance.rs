@@ -73,8 +73,8 @@ pub struct RevisionEntry {
     /// same string the run directory is named with. `None` for every human save: the interface
     /// does not identify *which* person, and there is only ever the one at the keyboard.
     ///
-    /// This is what lets `plan_changes` default its watermark to the calling agent's own last
-    /// `write_plan` rather than to some other agent's.
+    /// This is what lets `doc_changes` default its watermark to the calling agent's own last
+    /// `write_doc` rather than to some other agent's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     pub at: DateTime<Utc>,

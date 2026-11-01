@@ -113,7 +113,7 @@ fn header(app: &AppState, file: &OpenFile, cx: &mut Context<AppState>) -> impl I
         })
         .children(slot(app, file, |spec| spec.header_right, cx))
         .child(div().flex().items_center().h_full().children(
-            file.viewer.layouts().iter().copied().map(|layout| {
+            file.viewer.layouts().iter().copied().filter(|layout| file.doc.is_none() || layout.is_annotation()).map(|layout| {
                 let key = key.clone();
                 let pill = choice_pill(
                     eid2("view-layout", &key, layout.label()),
@@ -452,11 +452,8 @@ fn warned(
         .min_w(px(0.))
         .min_h(px(0.))
         .child(crate::ui::document::warning_row(
-            &file.key(),
             "This file carries annotations \u{2014} editing the source here can orphan a thread."
                 .to_string(),
-            None,
-            cx,
         ))
         .child(view)
         .into_any_element()

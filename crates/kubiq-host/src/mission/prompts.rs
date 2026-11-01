@@ -2,7 +2,8 @@
 //!
 //! Workers get what they need inline — the task, the plan and the guidance — because they have no
 //! mission server to read it through (Q2). The planner and the mission reviewer carry
-//! `kubiq-mission` and `kubiq-plan`, so their prompts point at the tools instead of pasting.
+//! `kubiq-mission` and `kubiq-doc` (the plan, by `task_id`), so their prompts point at the tools
+//! instead of pasting.
 
 use kubiq_proto::mission::RunEvent;
 use kubiq_proto::work::TaskRecord;
@@ -29,10 +30,11 @@ fn section(title: &str, body: &str) -> String {
 pub fn planner(parent: &TaskRecord, included: &[&TaskRecord], has_plan: bool) -> String {
     let mut out = format!(
         "You are the planner of the mission {} — \"{}\" (task id {}).\n\n\
-         Work with the user to settle what the mission is, and write the plan with kubiq-plan's \
-         write_plan (task_id {}). Ask what only the user can decide with kubiq-ask's \
-         ask_user_question. Put longer detail in mission documents (kubiq-mission's \
-         write_document). Answer the annotation threads the user leaves on the plan.\n\n\
+         Work with the user to settle what the mission is, and write the plan with kubiq-doc's \
+         write_doc (task_id {}); read it back with read_doc and answer its annotations with \
+         list_annotations, reply_annotation and resolve_annotation (always by task_id). Ask what \
+         only the user can decide with kubiq-ask's ask_user_question. Put longer detail in mission documents (kubiq-mission's \
+         write_document).\n\n\
          When the plan is ready, call kubiq-mission's request_phase with phase 'breakdown' and a \
          summary; the user approves it. After the approval, draft the subtasks with \
          create_mission_tasks — titles, descriptions, prerequisites, `approve` where the user \
@@ -68,7 +70,7 @@ pub fn planner(parent: &TaskRecord, included: &[&TaskRecord], has_plan: bool) ->
     if has_plan {
         out.push_str(
             "\n\nA starting plan is already saved as the plan's first revision. Read it with \
-             read_plan and refine it — do not write one from scratch.",
+             kubiq-doc's read_doc and refine it — do not write one from scratch.",
         );
     }
     out
@@ -162,12 +164,13 @@ pub fn reviewer(
 pub fn mission_reviewer(parent: &TaskRecord) -> String {
     format!(
         "You are the final reviewer of the mission {} — \"{}\" (task id {}). Read the brief and \
-         the documents with kubiq-mission, the plan with read_plan, and check the work against \
-         them. Create a task with create_mission_tasks for each thing that must be fixed. Then \
+         the documents with kubiq-mission, the plan with kubiq-doc's read_doc (task_id {}), and \
+         check the work against them. Create a task with create_mission_tasks for each thing that must be fixed. Then \
          call use-task's submit_review on the mission ({}) with verdict 'pass' or 'fail' and \
          your findings, and stop.",
         name(parent),
         parent.title,
+        parent.id,
         parent.id,
         parent.id,
     )

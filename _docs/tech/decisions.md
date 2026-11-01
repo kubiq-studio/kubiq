@@ -5634,6 +5634,35 @@ is otherwise last-writer-wins, the pin carries a revision the host merges on (`t
 more field, but no message. Studio's RDP pin hashes the `subjectPublicKey` bits
 rather than the whole SPKI, so the two are separate verifiers with different pin strings.
 
+### D229 — The plan is a `kubiq-doc` document; the `kubiq-plan` server and the `test` server are removed
+
+`kubiq-plan` ran the annotation handlers `kubiq-doc` runs, on the plan instead of a file, under
+different tool names (`read_plan`/`write_plan`/`plan_changes`/`annotate_plan`). It is gone. Every
+`kubiq-doc` document tool — `read_doc`, `write_doc`, `doc_changes`, `list_annotations`,
+`annotate_doc`, `reply_annotation`, `resolve_annotation` — names its document by **exactly one** of
+`path` (a project file, `DocumentHandle::File`) or `task_id` (that task's plan,
+`DocumentHandle::Plan`); both is refused. A `task_id` passes the same gates `kubiq-plan` applied:
+`Plans` refuses a task with no `Level`, and every write goes through the `D207` ownership check.
+`kubiq-doc` takes `kubiq-plan`'s place in `PLANNER_MCPS`, `LAUNCH_PLANNER_MCPS` and
+`LAUNCH_MISSION_REVIEWER_MCPS`, and the planner's and mission reviewer's prompts name its tools.
+A definition still naming `kubiq-plan` (or the pre-rename `ubiq-plan`) resolves to `kubiq-doc`
+through the legacy-id table, so it keeps its document access. The plan store, the `Plan*` message
+family, the `ApprovePlan` gate and the plan inlined into worker and reviewer prompts are unchanged.
+
+The `test` server (`send_notification`, `write_log`) — the wiring proof from `D102`'s first slice —
+is removed in the same change; the listener's own tests run against `project-info` and `kubiq-doc`.
+
+**Why:** two servers over one set of handlers were two tool vocabularies for one operation, and a
+planner that also edits a spec had to carry both. `planning-system.md`'s decision 7 kept the plan
+off `manage-kubiq-tasks` so that server still described itself; `kubiq-doc`'s name describes
+annotated documents, of which the plan is one.
+
+**Cost:** a saved `kubiq-plan` is silently read as `kubiq-doc`, so the old slug lives on in the
+legacy-id table. `kubiq-doc`'s schemas mark neither field required — the "exactly one" rule is
+checked at call time and said in the descriptions — so a malformed call fails in band instead of
+at the harness. A `MissionDoc` thread is still pointed at `kubiq-doc` by `task_id`, which answers
+the plan, not the mission document: no MCP tool answers a mission document's threads.
+
 ## Related docs
 
 - [`architecture.md`](./architecture.md) — the rules D3 to D6 produce

@@ -1,5 +1,5 @@
-//! The plan modal's app-level wiring: opening a task's plan asks the host for its body and its
-//! annotations together, `Message::Plan` and `Message::PlanAnnotations` fill them in, and
+//! The plan tab's app-level wiring: opening a task's plan opens a tab in annotation mode that asks
+//! the host for its body, and the surface over it then asks for the body and the annotations together, `Message::Plan` and `Message::PlanAnnotations` fill them in, and
 //! `Message::PlanChanged` / `Message::PlanAnnotationsChanged` re-ask rather than being trusted to
 //! carry content.
 //!
@@ -16,7 +16,7 @@ use std::time::Duration;
 use chrono::Utc;
 use gpui::{AppContext as _, Entity, TestAppContext, WindowHandle};
 use gpui_component::Root;
-use gpui_component::input::CompletionProvider as _;
+use gpui_component::input::{CompletionProvider as _, EditorState};
 use kubiq::app::{AppState, BusHub};
 use kubiq::state::WindowRegistry;
 use kubiq::state::document::{
@@ -146,6 +146,40 @@ impl Fixture {
     }
 }
 
+/// The buffer of the tab the open document is the surface of.
+fn plan_buffer(state: &AppState, cx: &gpui::App) -> Entity<EditorState> {
+    let doc = state.workbench.plan.as_ref().expect("a document is open");
+    let key = format!("{}.md", doc.doc.key());
+    state
+        .file(&key, cx)
+        .and_then(|file| file.buffer().cloned())
+        .expect("the tab holds a buffer")
+}
+
+/// Open a task's plan as a tab and let the host answer with a first body, so the tab has a buffer
+/// and the surface is open over it; the reads that took are drained.
+fn open_plan_tab(fixture: &Fixture, task: TaskId, cx: &mut TestAppContext) {
+    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
+    fixture.deliver(
+        Message::Plan {
+            doc: doc_of(fixture.project, task),
+            body: "# The plan\n".to_string(),
+            revision: 1,
+        },
+        cx,
+    );
+    fixture.said();
+}
+
+/// Bring another tab forward, which puts the open document away: the plan's tab is still there,
+/// holding its buffer, but nothing is its surface.
+fn put_plan_away(fixture: &Fixture, cx: &mut TestAppContext) {
+    fixture.with(cx, |state, _, cx| {
+        state.select_file("elsewhere.txt".to_string(), cx)
+    });
+    fixture.said();
+}
+
 fn a_project() -> ProjectSnapshot {
     ProjectSnapshot {
         record: ProjectRecord {
@@ -221,54 +255,183 @@ fn a_region(first: u32, last: u32, origin: SaveOrigin) -> PlanChangedRegion {
     }
 }
 
-/// Opening a levelled task's plan asks the host for the body and for its annotation panel in the
-/// same breath, and shows the modal as loading both — what the affordance in `ui::board::detail`
-/// relies on to decide whether it has anything to draw, and what the annotation panel relies on
-/// to show its own "reading" state until `PlanAnnotations` lands.
+/// Opening a levelled task's plan opens a tab in annotation mode and asks the host for the body —
+/// the one read the tab needs to have a buffer. The surface over that buffer then asks for the
+/// body and for its annotation panel in the same breath, and shows both as loading — what the
+/// affordance in `ui::board::detail` relies on to decide whether it has anything to draw, and what
+/// the annotation panel relies on to show its own "reading" state until `PlanAnnotations` lands.
 #[gpui::test]
 fn open_plan_asks_and_loads(cx: &mut TestAppContext) {
+    use kubiq::state::editor::ViewLayout;
+
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said(); // drain the `WorkList` fixture noise
 
     fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
 
-    let said = fixture.said();
-    assert_eq!(said.len(), 2);
-    assert!(said.iter().any(|message| matches!(
-        message,
-        Message::LoadPlan { doc }
-            if *doc == doc_of(fixture.project, task)
-    )));
-    assert!(said.iter().any(|message| matches!(
-        message,
-        Message::ListPlanAnnotations { doc, .. }
-            if *doc == doc_of(fixture.project, task)
-    )));
-    fixture.state.read_with(cx, |state, _| {
-        let plan = state.workbench.plan.as_ref().expect("the modal is open");
-        assert_eq!(plan.task_id(), Some(task));
-        assert!(matches!(plan.body, DocumentBody::Loading));
-        assert!(matches!(plan.annotations, AnnotationsBody::Loading));
+    let handle = doc_of(fixture.project, task);
+    // Taking the IDE rail mode may ask for other things (a tree); only the plan family counts.
+    let said: Vec<_> = fixture
+        .said()
+        .into_iter()
+        .filter(|message| matches!(message, Message::LoadPlan { .. } | Message::ListPlanAnnotations { .. }))
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(matches!(&said[0], Message::LoadPlan { doc } if *doc == handle));
+    let key = format!("{}.md", handle.key());
+    fixture.state.read_with(cx, |state, cx| {
+        let file = state.file(&key, cx).expect("the plan has a tab");
+        assert_eq!(file.doc.as_ref(), Some(&handle));
+        assert_eq!(file.layout, ViewLayout::Annotation);
+        assert!(file.is_loading());
+        assert!(
+            state.workbench.plan.is_none(),
+            "no surface until the tab has a buffer"
+        );
     });
 
     fixture.deliver(
         Message::Plan {
-            doc: doc_of(fixture.project, task),
+            doc: handle.clone(),
             body: "# The plan".to_string(),
             revision: 1,
         },
         cx,
     );
-    fixture.state.read_with(cx, |state, _| {
-        let plan = state.workbench.plan.as_ref().expect("still open");
+    let said = fixture.said();
+    assert!(
+        said.iter()
+            .any(|message| matches!(message, Message::LoadPlan { doc } if *doc == handle))
+    );
+    assert!(said.iter().any(
+        |message| matches!(message, Message::ListPlanAnnotations { doc, open: true } if *doc == handle)
+    ));
+    fixture.state.read_with(cx, |state, cx| {
+        let plan = state.workbench.plan.as_ref().expect("the surface is open");
+        assert_eq!(plan.task_id(), Some(task));
         assert!(matches!(plan.body, DocumentBody::Loaded(ref body) if body == "# The plan"));
+        assert!(matches!(plan.annotations, AnnotationsBody::Loading));
+        assert_eq!(
+            plan_buffer(state, cx).read(cx).value().to_string(),
+            "# The plan"
+        );
+    });
+
+    // A plan already open is brought forward, not opened twice or asked for again.
+    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
+    assert!(
+        !fixture
+            .said()
+            .iter()
+            .any(|message| matches!(message, Message::LoadPlan { .. })),
+        "a plan already open is not asked for again"
+    );
+    fixture.state.read_with(cx, |state, cx| {
+        let open = state.editor(cx).expect("an editor").open.len();
+        assert_eq!(open, 1);
     });
 }
 
-/// Opening a mission document asks the host for its body and its annotations exactly the way
-/// opening a plan does — `open_mission_doc`'s whole job is naming a different `DocumentHandle`,
-/// on the wire the plan already rides (M8).
+/// A plan's tab is bound to the mission's planner when one is live, through `SetDocAgent` — and
+/// opens unbound when there is none.
+#[gpui::test]
+fn open_plan_binds_the_planner(cx: &mut TestAppContext) {
+    use kubiq_proto::mission::{MissionSettings, MissionSnapshot, Phase};
+
+    let fixture = Fixture::open(cx);
+    let task = fixture.seed_task(Some(Level::Mission), cx);
+    fixture.said();
+
+    // No planner known: nothing to bind.
+    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
+    let said = fixture.said();
+    assert!(
+        !said
+            .iter()
+            .any(|message| matches!(message, Message::SetDocAgent { .. })),
+        "{said:?}"
+    );
+
+    // A second plan whose mission names a planner this window knows as a live agent.
+    let second = TaskId::generate();
+    let planner = AgentId::generate();
+    let session = kubiq_proto::ids::SessionId::generate();
+    fixture.deliver(
+        Message::WorkList {
+            project_id: fixture.project,
+            sessions: vec![WorkSession {
+                id: session,
+                name: "the project".to_string(),
+                branch: String::new(),
+                worktree: false,
+            }],
+            agents: vec![WorkAgent {
+                id: planner,
+                session,
+                task: None,
+                parent: None,
+                name: "claude".to_string(),
+                summary: None,
+                title: None,
+                definition: None,
+                activity: Activity::Thinking,
+                branch: "main".to_string(),
+                tokens: 0.0,
+                harness: "Claude Code".to_string(),
+                account: "work".to_string(),
+                model: String::new(),
+                context_pct: 0,
+                persistent: true,
+                accept_all: false,
+                restorable: false,
+                debug_dump: None,
+                run_dir: None,
+                config_dir: None,
+                thread: Vec::new(),
+            }],
+            tasks: vec![a_task(second, Some(Level::Mission))],
+        },
+        cx,
+    );
+    fixture.deliver(
+        Message::MissionChanged {
+            project_id: fixture.project,
+            mission: Box::new(MissionSnapshot {
+                project_id: fixture.project,
+                task_id: second,
+                phase: Phase::Planning,
+                settings: MissionSettings {
+                    planner_agent: Some(planner),
+                    ..MissionSettings::default()
+                },
+                documents: Vec::new(),
+                open_threads: 0,
+                needs_you: Vec::new(),
+                running: Vec::new(),
+                next: Vec::new(),
+                agents: vec![planner],
+                replan_at: None,
+            }),
+        },
+        cx,
+    );
+    fixture.said();
+    fixture.with(cx, |state, _, cx| state.open_plan(second, cx));
+    let said = fixture.said();
+    assert!(
+        said.iter().any(|message| matches!(
+            message,
+            Message::SetDocAgent { doc, agent_id: Some(agent) }
+                if *doc == doc_of(fixture.project, second) && *agent == planner
+        )),
+        "{said:?}"
+    );
+}
+
+/// Opening a mission document opens a tab on it exactly the way opening a plan does —
+/// `open_mission_doc`'s whole job is naming a different `DocumentHandle`, on the wire the plan
+/// already rides (M8).
 #[gpui::test]
 fn open_mission_doc_asks_and_loads(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
@@ -277,21 +440,14 @@ fn open_mission_doc_asks_and_loads(cx: &mut TestAppContext) {
 
     fixture.with(cx, |state, _, cx| state.open_mission_doc(task, "notes", cx));
 
-    let said = fixture.said();
-    assert_eq!(said.len(), 2);
     let handle = mission_doc_of(fixture.project, task, "notes");
-    assert!(
-        said.iter()
-            .any(|message| matches!(message, Message::LoadPlan { doc } if *doc == handle))
-    );
-    assert!(said.iter().any(
-        |message| matches!(message, Message::ListPlanAnnotations { doc, .. } if *doc == handle)
-    ));
-    fixture.state.read_with(cx, |state, _| {
-        let doc = state.workbench.plan.as_ref().expect("the modal is open");
-        assert_eq!(doc.doc, handle);
-        assert!(doc.is_modal(), "opened on the plan dialog's own footing");
-    });
+    let said: Vec<_> = fixture
+        .said()
+        .into_iter()
+        .filter(|message| matches!(message, Message::LoadPlan { .. } | Message::ListPlanAnnotations { .. }))
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(matches!(&said[0], Message::LoadPlan { doc } if *doc == handle));
 
     fixture.deliver(
         Message::Plan {
@@ -302,7 +458,9 @@ fn open_mission_doc_asks_and_loads(cx: &mut TestAppContext) {
         cx,
     );
     fixture.state.read_with(cx, |state, _| {
-        let doc = state.workbench.plan.as_ref().expect("still open");
+        let doc = state.workbench.plan.as_ref().expect("the surface is open");
+        assert_eq!(doc.doc, handle);
+        assert!(doc.hosted());
         assert!(matches!(doc.body, DocumentBody::Loaded(ref body) if body == "# Notes"));
     });
 }
@@ -314,8 +472,7 @@ fn plan_changed_reasks(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     fixture.deliver(
         Message::PlanChanged {
@@ -336,7 +493,7 @@ fn plan_changed_reasks(cx: &mut TestAppContext) {
 
     // A `PlanChanged` for a task whose plan is not open asks for nothing: nobody is waiting on
     // it.
-    fixture.with(cx, |state, _, cx| state.close_plan(cx));
+    put_plan_away(&fixture, cx);
     fixture.deliver(
         Message::PlanChanged {
             doc: doc_of(fixture.project, task),
@@ -377,9 +534,9 @@ fn plan_deleted_clears_the_body(cx: &mut TestAppContext) {
     });
 }
 
-/// A failure while the modal is still waiting on its first load is the load's own failure; the
-/// same message arriving once a body is already showing is an export's, because nothing else in
-/// this slice can fail once the plan and its annotations are both on screen.
+/// A failure while the tab is still waiting on its first load is the load's own failure, and the
+/// tab says so; the same message arriving once a body is already showing is an export's, because
+/// nothing else in this slice can fail once the plan and its annotations are both on screen.
 #[gpui::test]
 fn plan_error_lands_on_load_then_on_export(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
@@ -395,25 +552,33 @@ fn plan_error_lands_on_load_then_on_export(cx: &mut TestAppContext) {
         },
         cx,
     );
-    fixture.state.read_with(cx, |state, _| {
-        let plan = state.workbench.plan.as_ref().expect("still open");
-        assert!(matches!(plan.body, DocumentBody::Failed(ref reason) if reason == "no such task"));
+    let key = format!("{}.md", doc_of(fixture.project, task).key());
+    fixture.state.read_with(cx, |state, cx| {
+        let file = state.file(&key, cx).expect("the plan has a tab");
+        assert!(matches!(
+            file.body,
+            kubiq::state::editor::FileBody::Failed(ref reason) if reason == "no such task"
+        ));
+        assert!(state.workbench.plan.is_none());
     });
 
+    // Another plan, loaded: the annotation panel has to have a body of its own — `Loaded` or
+    // `Failed` — before a `PlanError` can be read as the export's: while either half is still
+    // `Loading`, the error is claimed by that half first.
+    let second = TaskId::generate();
     fixture.deliver(
-        Message::Plan {
-            doc: doc_of(fixture.project, task),
-            body: "# The plan".to_string(),
-            revision: 1,
+        Message::WorkList {
+            project_id: fixture.project,
+            sessions: Vec::new(),
+            agents: Vec::new(),
+            tasks: vec![a_task(second, Some(Level::Mission))],
         },
         cx,
     );
-    // The annotation panel has to have a body of its own — `Loaded` or `Failed` — before a third
-    // `PlanError` can be read as the export's: while either half is still `Loading`, the error is
-    // claimed by that half first.
+    open_plan_tab(&fixture, second, cx);
     fixture.deliver(
         Message::PlanAnnotations {
-            doc: doc_of(fixture.project, task),
+            doc: doc_of(fixture.project, second),
             blocks: Vec::new(),
             annotations: Vec::new(),
             highlights: Vec::new(),
@@ -424,7 +589,7 @@ fn plan_error_lands_on_load_then_on_export(cx: &mut TestAppContext) {
     fixture.deliver(
         Message::PlanError {
             project_id: fixture.project,
-            doc: Some(doc_of(fixture.project, task)),
+            doc: Some(doc_of(fixture.project, second)),
             error: "the path is outside the project".to_string(),
         },
         cx,
@@ -438,17 +603,24 @@ fn plan_error_lands_on_load_then_on_export(cx: &mut TestAppContext) {
     });
 }
 
-/// `close_plan` is the whole of what the modal's own Close and Escape do.
+/// Putting the document away — another tab taking the surface — is what Escape and the old
+/// modal's Close used to do: nothing holds a surface nobody is looking at, and the plan's tab
+/// keeps its buffer.
 #[gpui::test]
-fn close_plan_clears_the_modal(cx: &mut TestAppContext) {
+fn another_tab_puts_the_plan_away(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.with(cx, |state, _, cx| state.close_plan(cx));
+    open_plan_tab(&fixture, task, cx);
     fixture
         .state
-        .read_with(cx, |state, _| assert!(state.workbench.plan.is_none()));
+        .read_with(cx, |state, _| assert!(state.workbench.plan.is_some()));
+    put_plan_away(&fixture, cx);
+    let key = format!("{}.md", doc_of(fixture.project, task).key());
+    fixture.state.read_with(cx, |state, cx| {
+        assert!(state.workbench.plan.is_none());
+        assert!(state.file(&key, cx).is_some_and(|file| file.buffer().is_some()));
+    });
 }
 
 // ── The annotation panel (slice 4) ──────────────────────────────────────────
@@ -460,8 +632,7 @@ fn plan_annotations_land_on_the_open_viewer(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     let block = PlanBlock {
         id: BlockId::generate(),
@@ -512,8 +683,7 @@ fn plan_annotations_changed_reasks(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     fixture.deliver(
         Message::PlanAnnotationsChanged {
@@ -533,7 +703,7 @@ fn plan_annotations_changed_reasks(cx: &mut TestAppContext) {
         assert!(matches!(plan.annotations, AnnotationsBody::Loading));
     });
 
-    fixture.with(cx, |state, _, cx| state.close_plan(cx));
+    put_plan_away(&fixture, cx);
     fixture.deliver(
         Message::PlanAnnotationsChanged {
             doc: doc_of(fixture.project, task),
@@ -551,8 +721,7 @@ fn compose_annotation_sends_and_clears(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     let block_id = BlockId::generate();
     fixture.with(cx, |state, window, cx| {
@@ -593,8 +762,7 @@ fn compose_reply_sends_and_clears(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     let annotation_id = AnnotationId::generate();
     fixture.with(cx, |state, window, cx| {
@@ -633,8 +801,7 @@ fn cancel_annotation_composer_sends_nothing(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     let block_id = BlockId::generate();
     fixture.with(cx, |state, window, cx| {
@@ -694,8 +861,7 @@ fn resolve_and_reopen_send_resolve_annotation(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     let annotation_id = AnnotationId::generate();
     fixture.with(cx, |state, _, cx| {
@@ -731,8 +897,7 @@ fn orphaned_and_resolved_are_independent_facts(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     let vanished_block = BlockId::generate();
     let mut annotation = Annotation::new(
@@ -780,8 +945,7 @@ fn edit_and_save_sends_save_plan(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     fixture.deliver(
         Message::Plan {
@@ -796,7 +960,7 @@ fn edit_and_save_sends_save_plan(cx: &mut TestAppContext) {
     fixture.with(cx, |state, window, cx| state.settle_plan_editor(window, cx));
     fixture.state.read_with(cx, |state, cx| {
         assert_eq!(
-            state.plan_editor.read(cx).value().to_string(),
+            plan_buffer(state, cx).read(cx).value().to_string(),
             "# The plan\n"
         );
         let plan = state.workbench.plan.as_ref().expect("still open");
@@ -811,7 +975,7 @@ fn edit_and_save_sends_save_plan(cx: &mut TestAppContext) {
     assert!(fixture.said().is_empty());
 
     fixture.with(cx, |state, window, cx| {
-        let editor = state.plan_editor.clone();
+        let editor = plan_buffer(state, cx);
         editor.update(cx, |buffer, cx| {
             buffer.set_value("# The plan\n\nFirst step.\n", window, cx)
         });
@@ -872,7 +1036,7 @@ fn a_remote_change_never_eats_an_unsaved_edit(cx: &mut TestAppContext) {
     );
     fixture.with(cx, |state, window, cx| state.settle_plan_editor(window, cx));
     fixture.with(cx, |state, window, cx| {
-        let editor = state.plan_editor.clone();
+        let editor = plan_buffer(state, cx);
         editor.update(cx, |buffer, cx| buffer.set_value("mine\n", window, cx));
         state.settle_plan_editor(window, cx);
     });
@@ -889,7 +1053,7 @@ fn a_remote_change_never_eats_an_unsaved_edit(cx: &mut TestAppContext) {
     );
     fixture.with(cx, |state, window, cx| state.settle_plan_editor(window, cx));
     fixture.state.read_with(cx, |state, cx| {
-        assert_eq!(state.plan_editor.read(cx).value().to_string(), "mine\n");
+        assert_eq!(plan_buffer(state, cx).read(cx).value().to_string(), "mine\n");
         let plan = state.workbench.plan.as_ref().expect("still open");
         assert!(plan.stale, "the surface says the other copy moved");
         assert!(plan.dirty);
@@ -1169,8 +1333,7 @@ fn the_agent_toggle_addresses_the_comment(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     let block_id = BlockId::generate();
     fixture.with(cx, |state, window, cx| {
@@ -1215,8 +1378,7 @@ fn open_bound(
 ) -> DocumentHandle {
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
     let doc = doc_of(fixture.project, task);
     fixture.deliver(
         Message::PlanAnnotations {
@@ -1413,8 +1575,7 @@ fn changed_lines_are_decorated_by_who_wrote_them(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
     let task = fixture.seed_task(Some(Level::Mission), cx);
     fixture.said();
-    fixture.with(cx, |state, _, cx| state.open_plan(task, cx));
-    fixture.said();
+    open_plan_tab(&fixture, task, cx);
 
     let body = "# The plan\n\nShip the thing.\nThen tell everyone.\n\nA human tightened this.\n";
     fixture.deliver(
@@ -1509,7 +1670,7 @@ fn a_stale_buffer_asks_before_it_overwrites(cx: &mut TestAppContext) {
     );
     fixture.with(cx, |state, window, cx| state.settle_plan_editor(window, cx));
     fixture.with(cx, |state, window, cx| {
-        let editor = state.plan_editor.clone();
+        let editor = plan_buffer(state, cx);
         editor.update(cx, |buffer, cx| buffer.set_value("mine\n", window, cx));
         state.settle_plan_editor(window, cx);
     });
@@ -1557,7 +1718,7 @@ fn a_stale_buffer_asks_before_it_overwrites(cx: &mut TestAppContext) {
         "a stale save is a question before it is a write"
     );
     fixture.state.read_with(cx, |state, cx| {
-        assert_eq!(state.plan_editor.read(cx).value().to_string(), "mine\n");
+        assert_eq!(plan_buffer(state, cx).read(cx).value().to_string(), "mine\n");
         let plan = state.workbench.plan.as_ref().expect("still open");
         assert!(plan.confirm_overwrite);
     });
@@ -1635,7 +1796,7 @@ fn a_refused_save_keeps_the_edit_and_asks_again(cx: &mut TestAppContext) {
     );
     fixture.with(cx, |state, window, cx| state.settle_plan_editor(window, cx));
     fixture.with(cx, |state, window, cx| {
-        let editor = state.plan_editor.clone();
+        let editor = plan_buffer(state, cx);
         editor.update(cx, |buffer, cx| buffer.set_value("mine\n", window, cx));
         state.settle_plan_editor(window, cx);
     });
@@ -1661,7 +1822,7 @@ fn a_refused_save_keeps_the_edit_and_asks_again(cx: &mut TestAppContext) {
     );
     fixture.state.read_with(cx, |state, cx| {
         assert_eq!(
-            state.plan_editor.read(cx).value().to_string(),
+            plan_buffer(state, cx).read(cx).value().to_string(),
             "mine\n",
             "a refusal is the one failure that leaves the buffer exactly as it is",
         );
@@ -1832,7 +1993,6 @@ fn annotation_mode_opens_the_files_document(cx: &mut TestAppContext) {
     fixture.state.read_with(cx, |state, _| {
         let doc = state.workbench.plan.as_ref().expect("a document is open");
         assert_eq!(doc.doc, handle);
-        assert!(!doc.is_modal(), "a tab's document is not the dialog");
         assert!(doc.md == tab_md, "the surface is the tab's own view");
     });
     tab_md.read_with(cx, |view, _| assert!(view.annotating()));

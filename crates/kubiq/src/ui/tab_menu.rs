@@ -59,8 +59,43 @@ pub fn rows(
     restartable: bool,
     formattable: bool,
 ) -> Vec<&'static str> {
+    rows_for(kind, pinned, restartable, formattable, None)
+}
+
+/// The row a plan's tab adds: an explicit one-shot export into the project's working tree.
+pub const EXPORT_PLAN: &str = "Export\u{2026}";
+
+/// [`rows`], for a tab that may hold a document: `held` is `Some(exportable)` for a plan or a
+/// mission document's tab, which is a file tab in every way but one — it has no path, so none of
+/// the path rows mean anything.
+pub fn rows_for(
+    kind: &PanelKind,
+    pinned: bool,
+    restartable: bool,
+    formattable: bool,
+    held: Option<bool>,
+) -> Vec<&'static str> {
     let pin_row = if pinned { "Unpin" } else { "Pin" };
     match kind {
+        PanelKind::File(_) if held.is_some() => {
+            let mut rows = Vec::new();
+            if !pinned {
+                rows.push("Close");
+            }
+            rows.extend([
+                "Close Others",
+                "Close Left",
+                "Close Right",
+                "Close All",
+                SEPARATOR,
+            ]);
+            if held == Some(true) {
+                rows.push(EXPORT_PLAN);
+            }
+            rows.push("Save");
+            rows.push(pin_row);
+            rows
+        }
         PanelKind::File(_) => {
             let mut rows = Vec::new();
             if !pinned {
@@ -130,7 +165,8 @@ pub fn overlay(
     let pinned = app.tab_pinned(&kind, cx);
     let restartable = app.tab_restartable(&kind, cx);
     let formattable = app.tab_formattable(&kind, cx);
-    let items: Vec<_> = rows(&kind, pinned, restartable, formattable)
+    let held = app.tab_held_document(&kind, cx);
+    let items: Vec<_> = rows_for(&kind, pinned, restartable, formattable, held)
         .iter()
         .map(|label| {
             if *label == SEPARATOR {

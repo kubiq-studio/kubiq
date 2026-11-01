@@ -51,7 +51,6 @@ pub mod notifications;
 pub mod onboarding;
 pub mod outline;
 pub mod overflow_menu;
-pub mod plan;
 pub mod project_face;
 pub mod project_menu;
 pub mod rail;

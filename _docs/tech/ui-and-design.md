@@ -88,7 +88,7 @@ a palette swap changes every surface consistently.
 | Border | `border`, `border_focus` | Ordinary separation, and the focused pane's edge |
 | Status | `danger`, `success`, `warning`, `info`, each with a `_soft` variant | Agent and process states, and the fills behind them — a diff line, a status chip, a state dot's ring |
 | Agent edit | `agent_edit_flash()` | The tint a markdown row takes when another writer changed it under the reader, faded out over ~1.8 s with `fade` (`D208`) — derived from `agent_controlled`, so it has a value in every palette |
-| Provenance | `edit_human`, `edit_agent`, `edit_origin(is_human)` | Who last rewrote a line of an annotated document — the underline under a changed run in the plan editor, and the legend for it in that editor's footer. Two hues nothing else on that surface uses, because the annotated passages under the same text take `info_soft` and `success_soft` |
+| Provenance | `edit_human`, `edit_agent`, `edit_origin(is_human)` | Who last rewrote a line of an annotated document — the underline under a changed run in a plan or mission document's tab. Two hues nothing else on that surface uses, because the annotated passages under the same text take `info_soft` and `success_soft` |
 | Ribbon | `ribbon_alpha`, `ribbon_beta`, `ribbon_ink`, `ribbon_experimental`, `ribbon_experimental_ink` | The build-channel ribbon in the window's bottom-left corner (the experimental pair is unused since Git lost its ribbon) — the same values in every palette, because they mark the build or the screen rather than the mood |
 | Highlight | `highlight(colour)`, `highlight_ink(colour)` | A block highlight on an annotated document (`HighlightColour`): the soft fill, and the full-strength ink of the margin dot and the `●` chip. Derived from the status group — yellow `warning`, green `success`, blue `info`, red `danger` — with purple mixed halfway between red and blue, so every palette has all five without a written value |
 | Database | `db_row_edited`, `db_row_inserted`, `db_row_deleted`, `db_statement_active`, `db_read_only`, `db_read_only_soft`, `db_plan_hot`, `agent_controlled`, `agent_controlled_soft` | DB mode: the three fills a pending edit tints its grid row with (solid, because the grid paints them under the cells), the ground behind the statement the cursor is in, the ink and soft ground of anything that cannot write, the plan node that cost the most, and the edge, tab mark and chip of a query panel an agent controls (with its soft ground) — the same pair an annotated document's rail draws an agent's comment, the Agent mark and the `@agent` toggle in |
@@ -324,7 +324,7 @@ restyling the shell should be one file to visit.
 | `A2UI_IMAGE_ICON`, `A2UI_IMAGE_AVATAR`, `A2UI_IMAGE_SMALL`, `A2UI_IMAGE_MEDIUM`, `A2UI_IMAGE_LARGE`, `A2UI_IMAGE_HEADER_H` | The six sizes an A2UI `Image` variant maps onto. The catalog names the variant and this file decides how big it is, because a payload Kubiq did not write must not be able to state a size |
 | `A2UI_SVG_MAX` | The box an agent-authored picture is fitted into, aspect preserved — the ceiling on how much of a surface one drawing may take |
 | `MdWidth`, `MdDensity`, `MD_AVG_CHAR_WIDTH_EM`, `MD_CODE_LINE_HEIGHT`, `MD_INLINE_CODE_SIZE_EM` and the `md_*` functions | The Markdown preview's typography — `_docs/inbox/markdown-improvement-proposal.md` §3–§7, read by `ui/viewer/markdown.rs`. Unlike the rest of the table these are ratios over the body font size (`em`/`rem`), not `ui_scale`-scaled pixels, so a font-size change scales the preview without a second accessor |
-| `MdMinimapSide` | Which edge the markdown minimap docks to (proposal §12, T-118), `Left` by default — a plain two-value enum, not a size, so it takes no `scaled()` accessor; read by both `ui/plan.rs` and `ui/viewer/mod.rs` off the one `UiSettings::md_minimap_side` |
+| `MdMinimapSide` | Which edge the markdown minimap docks to (proposal §12, T-118), `Left` by default — a plain two-value enum, not a size, so it takes no `scaled()` accessor; read by `ui/viewer/mod.rs` off the one `UiSettings::md_minimap_side` |
 
 **Every pixel constant in the table is a `pub const` base with a `scaled()` accessor beside it**,
 and a call site reads the accessor: `theme::accent_edge()`, `theme::titlebar_height()`,
@@ -628,8 +628,8 @@ included (`D203`): `ui/mdview/minimap.rs` is the structural strip — heading ba
 code and table shapes, placed by the list's measured row heights, painted as one canvas in
 `md_minimap_*` tokens — and `ui/mdview/outline.rs`'s jump popover is the heading navigator, a
 `deferred` occluding layer over the view, keys bound under `MdJump > Input`. A header opens it
-through `ui/document.rs::heading_control()`, which the plan dialog's chrome and a markdown tab's
-header share with `::edit_chip()`. **The annotation layer is the view's margins, never its text**:
+through `ui/document.rs::heading_control()`, which a markdown tab's header
+draws with `::edit_chip()`. **The annotation layer is the view's margins, never its text**:
 `ui/mdview/annotation.rs` draws the count marker and the action stack absolutely in the far margin,
 which `theme::MD_ACTION_MARGIN` floors while the view is annotating, and `ui/mdview/highlight.rs`
 the left-margin dot, so no decorator changes a row's measured height. The strip answers to the one `UiSettings` pair — `md_minimap` (generalised from the plan-only `plan_minimap`) and

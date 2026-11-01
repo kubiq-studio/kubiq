@@ -10,8 +10,8 @@
 //! **`Message::SavePlan` is sent from one place**, [`AppState::save_document`]: the body is
 //! replaced whole, the host re-indexes the blocks, and the annotations that survive come back
 //! through `PlanAnnotationsChanged` — which is why a save never touches a thread here. A block
-//! committed in the dialog's view is such a save; a block committed in a markdown tab's view is an
-//! edit to the tab, which saves the way every tab does.
+//! committed in a plan or mission document's tab is such a save; a block committed in a markdown
+//! file's tab is an edit to the tab, which saves the way every tab does.
 //!
 //! **Nothing in this file names a task except the plan's own entry points.** Everything between
 //! opening and saving reads a [`DocumentHandle`], and the handle is what turns into a message.
@@ -21,10 +21,10 @@ use super::*;
 use std::ops::Range;
 
 use crate::state::document::{
-    AnnotationsBody, ComposerTarget, DocumentEditor, DocumentHandle, Notice, Presentation,
+    AnnotationsBody, ComposerTarget, DocumentEditor, DocumentHandle, Notice,
     addressed, change_ranges, follow_target, mark_target, resolve_target, target_block,
 };
-use crate::state::plan::{file_document, mission_doc_document, plan_document};
+use crate::state::plan::{mission_doc_document, plan_document};
 use crate::state::workbench::FileDialog;
 use crate::ui::mdview::events::MdViewEvent;
 use crate::ui::mdview::view::MdView;
@@ -145,54 +145,299 @@ impl DocumentWire for DocumentHandle {
 }
 
 impl AppState {
-    /// Open a task's plan as an editable document. The affordance that calls this is only ever
-    /// drawn for a task carrying a `level` — the host refuses the whole family for one with none.
+    /// Open a task's plan as a tab on the active project — in annotation mode, bound to the
+    /// mission's planner when one is running. A plan already open is brought forward instead.
+    /// The affordance that calls this is only ever drawn for a task carrying a `level` — the host
+    /// refuses the whole family for one with none.
     pub fn open_plan(&mut self, task_id: TaskId, cx: &mut Context<Self>) {
         let Some(project_id) = self.project(cx) else {
             return;
         };
-        self.open_document(plan_document(project_id, task_id), cx);
+        let planner = self.mission_planner(project_id, task_id);
+        self.open_plan_in(project_id, task_id, planner, cx);
     }
 
-    /// Open one of a mission's own documents (M8), on the plan dialog's own footing.
+    /// The agent bound to a mission's plan: the planner conversation its settings name, when this
+    /// window knows it as a live agent.
+    pub(crate) fn mission_planner(&self, project_id: ProjectId, task_id: TaskId) -> Option<AgentId> {
+        let open = self.projects.get(&project_id)?;
+        let planner = open.missions.get(&task_id)?.settings.planner_agent?;
+        open.work.agent(planner).map(|_| planner)
+    }
+
+    /// [`Self::open_plan`] for a named project and planner.
+    pub(crate) fn open_plan_in(
+        &mut self,
+        project_id: ProjectId,
+        task_id: TaskId,
+        planner: Option<AgentId>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let title = self
+            .projects
+            .get(&project_id)
+            .and_then(|open| open.work.task(task_id))
+            .map(|task| format!("Plan \u{2014} {}", task.title))
+            .unwrap_or_else(|| "Plan".to_string());
+        let doc = plan_document(project_id, task_id);
+        self.open_document_tab(doc.clone(), &title, cx);
+        self.bind_doc_agent(doc, planner)
+    }
+
+    /// Bind a document to `agent` unless some agent already holds it, without it being the open
+    /// one. Answers whether the binding was sent.
+    pub(crate) fn bind_doc_agent(&mut self, doc: DocumentHandle, agent_id: Option<AgentId>) -> bool {
+        let held = self.workbench.doc_binds.values().any(|bound| *bound == doc)
+            || self
+                .workbench
+                .plan
+                .as_ref()
+                .is_some_and(|open| open.doc == doc && open.binding.agent.is_some());
+        if agent_id.is_none() || held {
+            return false;
+        }
+        self.bus.send(Message::SetDocAgent { doc, agent_id });
+        true
+    }
+
+    /// Open one of a mission's own documents (M8), on the plan's own footing.
     pub fn open_mission_doc(&mut self, task_id: TaskId, name: &str, cx: &mut Context<Self>) {
         let Some(project_id) = self.project(cx) else {
             return;
         };
-        self.open_document(mission_doc_document(project_id, task_id, name), cx);
+        let title = format!("{name}.md");
+        self.open_document_tab(mission_doc_document(project_id, task_id, name), &title, cx);
     }
 
-    /// Open any annotated document in the dialog: ask for its body and its threads in the same
-    /// breath, over a view built for it on the dialog's buffer.
-    pub fn open_document(&mut self, doc: DocumentHandle, cx: &mut Context<Self>) {
-        let config = self.md_view_config();
-        let buffer = self.plan_editor.clone();
-        let md = cx.new(|cx| {
-            let mut view = MdView::new(buffer, config, cx);
-            view.set_annotating(true, cx);
-            view
+    /// Open a document the host holds as a tab on the active project, in annotation mode, and ask
+    /// for its body; the buffer is built when the answer arrives. A tab already open for it is
+    /// brought forward and nothing is asked. Answers whether a tab was opened.
+    fn open_document_tab(
+        &mut self,
+        doc: DocumentHandle,
+        title: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let project = doc.project_id();
+        // The tab opens in the editor, so the editor is what is brought up: a mission's full-view
+        // modal is put down and the IDE rail mode is taken, wherever the click came from.
+        self.workbench.mission = None;
+        self.set_rail_mode(RailMode::IDE, cx);
+        let Some(open) = self.projects.get_mut(&project) else {
+            return false;
+        };
+        let path = OpenFile::hosted_path(&doc);
+        let key = tab_key(&path, Subject::File);
+        let fresh = open.editor.index_of(&path).is_none();
+        if fresh {
+            open.editor.open.push(OpenFile::hosted(doc.clone(), title));
+        }
+        open.editor.active = open.editor.index_of(&path).unwrap_or(open.editor.active);
+        self.pending_editor_focus = Some(key.clone());
+        if fresh {
+            self.pending_panels
+                .push(PanelEdit::Open(PanelKind::File(key)));
+            self.bus.send(doc.load());
+        } else {
+            self.pending_panels
+                .push(PanelEdit::Reveal(PanelKind::File(key)));
+        }
+        self.follow_active_file(cx);
+        cx.notify();
+        fresh
+    }
+
+    /// The host stated a held document's body while no surface is open on it — the first answer
+    /// of a freshly opened tab. Queued as the tab's bytes, which build its buffer in `render`.
+    /// Answers whether a tab took it.
+    pub(crate) fn hosted_body_arrived(
+        &mut self,
+        doc: &DocumentHandle,
+        body: &str,
+        revision: PlanRevision,
+    ) -> bool {
+        let project = doc.project_id();
+        let path = OpenFile::hosted_path(doc);
+        let Some(file) = self
+            .projects
+            .get_mut(&project)
+            .and_then(|open| open.editor.find_mut(&path))
+            .filter(|file| file.doc.as_ref() == Some(doc) && file.is_loading())
+        else {
+            return false;
+        };
+        file.doc_revision = revision;
+        let bytes = body.as_bytes().to_vec();
+        self.pending_files.push(FileArrival {
+            project,
+            path,
+            contents: FileContents {
+                len: bytes.len() as u64,
+                bytes,
+                truncated: false,
+                is_binary: false,
+                version: None,
+            },
         });
-        let events = cx.subscribe(&md, |this, md, event: &MdViewEvent, cx| {
-            this.document_md_event(&md, event, cx)
-        });
-        self.open_with(doc, Presentation::Modal, md, Some(events), cx);
+        true
+    }
+
+    /// The host refused something about a held document while no surface was open on it: a read
+    /// the tab was waiting on makes the tab say why; anything else (a refused save or export) is a
+    /// notice for the next surface.
+    pub(crate) fn hosted_load_failed(&mut self, doc: &DocumentHandle, error: &str) {
+        let path = OpenFile::hosted_path(doc);
+        let Some(file) = self
+            .projects
+            .get_mut(&doc.project_id())
+            .and_then(|open| open.editor.find_mut(&path))
+        else {
+            return;
+        };
+        if file.is_loading() {
+            file.set_failed(error.to_string());
+        } else {
+            file.save_refused();
+            self.hosted_notice(doc, Notice::Err(error.to_string()));
+        }
+    }
+
+    /// Keep a result for a document with no surface, and bring its tab forward so it is seen.
+    pub(crate) fn hosted_notice(&mut self, doc: &DocumentHandle, notice: Notice) {
+        let path = OpenFile::hosted_path(doc);
+        let exists = self
+            .projects
+            .get(&doc.project_id())
+            .is_some_and(|open| open.editor.index_of(&path).is_some());
+        if !exists {
+            return;
+        }
+        self.doc_notices.insert(doc.clone(), notice);
+        self.pending_panels.push(PanelEdit::Reveal(PanelKind::File(tab_key(
+            &path,
+            Subject::File,
+        ))));
+    }
+
+    /// The host's answer to a save made from a tab with no surface open: the tab's baseline moves
+    /// to what was written.
+    pub(crate) fn hosted_saved(
+        &mut self,
+        doc: &DocumentHandle,
+        body: &str,
+        revision: PlanRevision,
+        cx: &App,
+    ) {
+        let path = OpenFile::hosted_path(doc);
+        if let Some(file) = self
+            .projects
+            .get_mut(&doc.project_id())
+            .and_then(|open| open.editor.find_mut(&path))
+            .filter(|file| file.is_saving())
+        {
+            let current = file
+                .buffer()
+                .map(|buffer| buffer.read(cx).value().to_string())
+                .unwrap_or_default();
+            file.rebase_doc(body.to_string(), revision, &current);
+        }
+    }
+
+    /// The host refused a save made from a tab with no surface open: someone else's save landed
+    /// first. Nothing was written and the edit stays; the tab is brought forward to resolve it.
+    pub(crate) fn hosted_save_refused(&mut self, doc: &DocumentHandle) {
+        let path = OpenFile::hosted_path(doc);
+        if let Some(file) = self
+            .projects
+            .get_mut(&doc.project_id())
+            .and_then(|open| open.editor.find_mut(&path))
+        {
+            file.save_refused();
+        }
+        self.hosted_notice(
+            doc,
+            Notice::Err("Saved elsewhere while you were editing \u{2014} save again to review it.".to_string()),
+        );
+    }
+
+    /// Save one tab's own document. With its surface open that is `save_document`'s two-step
+    /// guard; with none, the buffer is written against the revision it was last rebased onto, and
+    /// a refusal brings the tab forward.
+    pub(crate) fn save_hosted_tab(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.project(cx) else {
+            return;
+        };
+        let Some(handle) = self
+            .file(key, cx)
+            .and_then(|file| file.doc.clone())
+        else {
+            return;
+        };
+        if self.workbench.plan.as_ref().is_some_and(|open| open.doc == handle) {
+            self.save_document(window, cx);
+            return;
+        }
+        let Some(file) = self
+            .projects
+            .get_mut(&project)
+            .and_then(|open| open.editor.find_key_mut(key))
+        else {
+            return;
+        };
+        if !file.dirty() || file.is_saving() {
+            return;
+        }
+        let Some(body) = file.buffer().map(|buffer| buffer.read(cx).value().to_string()) else {
+            return;
+        };
+        let expected = file.doc_revision;
+        file.mark_saving(body.clone());
+        self.bus.send(handle.save(body, expected));
+        cx.notify();
+    }
+
+    /// The tab whose view is the open document's: where the document's buffer, and its tab-level
+    /// state (dirty, baseline), live.
+    fn document_file(&self) -> Option<&OpenFile> {
+        let doc = self.workbench.plan.as_ref()?;
+        self.projects
+            .get(&doc.project_id())?
+            .editor
+            .open
+            .iter()
+            .find(|file| file.md.as_ref() == Some(&doc.md))
+    }
+
+    fn document_file_mut(&mut self) -> Option<&mut OpenFile> {
+        let doc = self.workbench.plan.as_ref()?;
+        let md = doc.md.clone();
+        self.projects
+            .get_mut(&doc.project_id())?
+            .editor
+            .open
+            .iter_mut()
+            .find(|file| file.md.as_ref() == Some(&md))
+    }
+
+    /// What the open document's buffer holds.
+    fn document_text(&self, cx: &App) -> Option<String> {
+        let buffer = self.document_file()?.buffer()?;
+        Some(buffer.read(cx).value().to_string())
     }
 
     /// Open a project markdown file as an annotated document over the tab's own view, for a tab
-    /// put into `ViewLayout::Annotation` — [`crate::state::plan::file_document`]'s one caller.
+    /// put into `ViewLayout::Annotation` — and the same for a tab holding a plan or a mission
+    /// document, whose handle is the one it holds ([`OpenFile::document`]).
     ///
     /// Idempotent: a tab redrawn, or the layout pressed twice, must not re-ask for a document that
     /// is already open.
-    pub fn open_file_document(
+    pub fn open_tab_document(
         &mut self,
-        rel_path: &str,
+        doc: DocumentHandle,
+        held: Option<(String, PlanRevision)>,
         md: Entity<MdView>,
         cx: &mut Context<Self>,
     ) {
-        let Some(project_id) = self.project(cx) else {
-            return;
-        };
-        let doc = file_document(project_id, rel_path);
         if self
             .workbench
             .plan
@@ -204,39 +449,28 @@ impl AppState {
         // A different tab's view goes back to reading before this one takes the surface.
         self.release_file_view(cx);
         md.update(cx, |view, cx| view.set_annotating(true, cx));
-        self.open_with(doc, Presentation::Viewer, md, None, cx);
-    }
-
-    fn open_with(
-        &mut self,
-        doc: DocumentHandle,
-        presentation: Presentation,
-        md: Entity<MdView>,
-        events: Option<Subscription>,
-        cx: &mut Context<Self>,
-    ) {
         self.bus.send(doc.load());
         // Opening, not refreshing: the host mints the document's lineage codes afresh (`D208`).
         self.bus.send(Message::ListPlanAnnotations {
             doc: doc.clone(),
             open: true,
         });
-        self.workbench.plan = Some(DocumentEditor::loading(doc, presentation, md, events));
+        let mut editor = DocumentEditor::loading(doc.clone(), md);
+        editor.notice = self.doc_notices.remove(&doc);
+        // A held document starts from what its tab's buffer holds, unsaved edits included.
+        if let Some((baseline, revision)) = held {
+            editor.hold(baseline, revision);
+        }
+        self.workbench.plan = Some(editor);
         // A different document's rail starts at its own top.
         self.plan_thread_list.reset(0);
         cx.notify();
     }
 
-    /// Hand a tab's view back to reading — no annotation layer, no margin decor — when the open
-    /// document is a tab's. Reports whether it was.
+    /// Hand the open document's view back to reading — no annotation layer, no margin decor.
+    /// Reports whether there was one.
     fn release_file_view(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(md) = self
-            .workbench
-            .plan
-            .as_ref()
-            .filter(|doc| !doc.is_modal())
-            .map(|doc| doc.md.clone())
-        else {
+        let Some(md) = self.workbench.plan.as_ref().map(|doc| doc.md.clone()) else {
             return false;
         };
         md.update(cx, |view, cx| {
@@ -334,8 +568,8 @@ impl AppState {
         cx.notify();
     }
 
-    /// Put away a document a tab opened, when the tab leaves annotation mode. The dialog's own
-    /// document is never touched by this: closing the plan editor is [`Self::close_plan`]'s.
+    /// Put the open document away, when its tab leaves annotation mode or another tab takes the
+    /// surface. A held document's tab keeps its buffer, unsaved edits included.
     pub fn close_file_document(&mut self, cx: &mut Context<Self>) {
         if self.release_file_view(cx) {
             self.workbench.plan = None;
@@ -343,32 +577,7 @@ impl AppState {
         }
     }
 
-    /// Escape, and the modal's own close. **An unsaved edit is not discarded on the first ask** —
-    /// the surface says what it is holding and the second Escape means it.
-    pub fn close_plan(&mut self, cx: &mut Context<Self>) {
-        let Some(doc) = self.workbench.plan.as_mut() else {
-            return;
-        };
-        if doc.dirty && !doc.confirm_close {
-            doc.confirm_close = true;
-            cx.notify();
-            return;
-        }
-        self.release_file_view(cx);
-        self.workbench.plan = None;
-        cx.notify();
-    }
-
-    /// Discard the edit and go, for the button that says so.
-    pub fn discard_plan_edits(&mut self, cx: &mut Context<Self>) {
-        if let Some(doc) = self.workbench.plan.as_mut() {
-            doc.dirty = false;
-            doc.confirm_close = true;
-        }
-        self.close_plan(cx);
-    }
-
-    /// Write the dialog's buffer back, whole. The host answers with the document's own body, which
+    /// Write the open document's buffer back, whole. The host answers with the document's own body, which
     /// is what clears `saving` and re-seeds the buffer; the block re-index arrives separately.
     ///
     /// **A stale buffer does not save on the first ask.** The buffer was seeded at `revision` and
@@ -381,7 +590,13 @@ impl AppState {
     }
 
     fn save_open_document(&mut self, cx: &mut Context<Self>) {
-        let body = self.plan_editor.read(cx).value().to_string();
+        // A file's tab saves as a file; only a document the host holds is written back here.
+        if !self.workbench.plan.as_ref().is_some_and(|doc| doc.hosted()) {
+            return;
+        }
+        let Some(body) = self.document_text(cx) else {
+            return;
+        };
         let Some(doc) = self.workbench.plan.as_mut() else {
             return;
         };
@@ -393,7 +608,6 @@ impl AppState {
         }
         if doc.stale && !doc.confirm_overwrite {
             doc.confirm_overwrite = true;
-            doc.confirm_close = false;
             cx.notify();
             return;
         }
@@ -404,7 +618,6 @@ impl AppState {
         };
         doc.confirm_overwrite = false;
         doc.saving = true;
-        doc.confirm_close = false;
         doc.notice = None;
         let handle = doc.doc.clone();
         self.bus.send(handle.save(body, expected));
@@ -427,19 +640,25 @@ impl AppState {
         revision: PlanRevision,
         cx: &Context<Self>,
     ) {
+        let hosted = self.workbench.plan.as_ref().is_some_and(|doc| doc.hosted());
+        // A markdown file's tab follows the file itself and merges whatever moved it (`D208`) — so
+        // its body is taken as stated. A held document's buffer is read against it: an unsaved
+        // edit is kept and reported, never lost to a race.
+        let typed = match hosted {
+            true => self.document_text(cx).unwrap_or_else(|| body.clone()),
+            false => body.clone(),
+        };
         let Some(doc) = self.workbench.plan.as_mut() else {
             return;
         };
-        // A markdown tab's document is over the tab's own buffer, which follows the file itself
-        // and merges whatever moved it (`D208`) — so the body is taken as stated, and the dialog's
-        // buffer (which is not this document's) is never read against it. Reading it was what
-        // put a stale banner over every agent write in annotation mode.
-        let typed = if doc.is_modal() {
-            self.plan_editor.read(cx).value().to_string()
-        } else {
-            body.clone()
-        };
+        let text = body.clone();
         doc.set_loaded(body, &typed, revision);
+        // The body was taken: the tab's baseline moves with it, so its dirty mark means the
+        // buffer against the host's last word.
+        let took = hosted && !doc.stale;
+        if took && let Some(file) = self.document_file_mut() {
+            file.rebase_doc(text.clone(), revision, &text);
+        }
     }
 
     /// Ask where the document has been edited, for the body that just arrived. **Nothing is asked
@@ -465,12 +684,12 @@ impl AppState {
         }
     }
 
-    /// Where each changed run sits in the dialog's buffer, paired with who left it.
+    /// Where each changed run sits in the open document's buffer, paired with who left it.
     pub fn change_ranges(&self, cx: &App) -> Vec<(SaveOrigin, Range<usize>)> {
         let Some(doc) = self.workbench.plan.as_ref() else {
             return Vec::new();
         };
-        let body = self.plan_editor.read(cx).value().to_string();
+        let body = self.document_text(cx).unwrap_or_default();
         change_ranges(&body, &doc.changes)
     }
 
@@ -478,25 +697,25 @@ impl AppState {
     /// (T-124). In `render`, because entering the layout, leaving it, switching tab and closing
     /// the tab are four routes to the same fact, and the tab's own layout is the fact.
     ///
-    /// **The dialog wins while it is up.** A plan raised over a tab in annotation mode replaces
-    /// the document; the tab's own is asked for again on the frame after the dialog goes. A tab
-    /// whose bytes have not arrived has no view yet, and waits for it.
+    /// A tab whose bytes have not arrived has no view yet, and waits for it.
     pub(crate) fn settle_annotation_document(&mut self, cx: &mut Context<Self>) {
-        if self
-            .workbench
-            .plan
-            .as_ref()
-            .is_some_and(|doc| doc.is_modal())
-        {
+        let Some(project) = self.project(cx) else {
             return;
-        }
+        };
         let wanted = self
             .editor(cx)
             .and_then(|editor| editor.active_file())
             .filter(|file| file.layout.is_annotation() && file.annotatable())
-            .and_then(|file| Some((file.path.clone(), file.md.clone()?)));
+            .and_then(|file| {
+                let held = file
+                    .doc
+                    .as_ref()
+                    .and(file.baseline())
+                    .map(|text| (text.to_string(), file.doc_revision));
+                Some((file.document(project), held, file.md.clone()?))
+            });
         match wanted {
-            Some((path, md)) => self.open_file_document(&path, md, cx),
+            Some((doc, held, md)) => self.open_tab_document(doc, held, md, cx),
             None => self.close_file_document(cx),
         }
     }
@@ -506,18 +725,12 @@ impl AppState {
     pub fn settle_plan_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Dirtiness is the buffer against the host's last word, refreshed here as well as on the
         // buffer's own change event: a value written by anything but a keystroke raises no event.
-        if self
-            .workbench
-            .plan
-            .as_ref()
-            .is_some_and(|doc| doc.is_modal())
+        if self.workbench.plan.as_ref().is_some_and(|doc| doc.hosted())
+            && let Some(typed) = self.document_text(cx)
+            && let Some(doc) = self.workbench.plan.as_mut()
+            && !doc.needs_seed
         {
-            let typed = self.plan_editor.read(cx).value().to_string();
-            if let Some(doc) = self.workbench.plan.as_mut()
-                && !doc.needs_seed
-            {
-                doc.refresh_dirty(&typed);
-            }
+            doc.refresh_dirty(&typed);
         }
         let Some(doc) = self.workbench.plan.as_mut() else {
             return;
@@ -525,20 +738,21 @@ impl AppState {
         let seed = doc.needs_seed.then(|| doc.saved.clone());
         doc.needs_seed = false;
         let focus = std::mem::take(&mut doc.composer_needs_focus);
-        let modal = doc.is_modal();
+        let hosted = doc.hosted();
         let md = doc.md.clone();
-        // A tab's view is over the tab's own buffer; only the dialog's buffer is seeded from the
-        // host's body.
+        // A file tab's buffer follows the file; a held document's is seeded from the host's body.
         if let Some(text) = seed
-            && modal
+            && hosted
         {
-            let editor = self.plan_editor.clone();
-            editor.update(cx, |state, cx| state.set_value(&text, window, cx));
-            if let Some(doc) = self.workbench.plan.as_mut() {
-                doc.dirty = false;
+            let buffer = self.document_file().and_then(|file| file.buffer().cloned());
+            if let Some(buffer) = buffer {
+                buffer.update(cx, |state, cx| state.set_value(&text, window, cx));
+                if let Some(doc) = self.workbench.plan.as_mut() {
+                    doc.dirty = false;
+                }
+                // `set_value` raises no change event, so the view is told to follow at once.
+                md.update(cx, |view, cx| view.resync(cx));
             }
-            // `set_value` raises no change event, so the view is told to follow at once.
-            md.update(cx, |view, cx| view.resync(cx));
         }
         if focus {
             let input = self.annotation_composer_input.clone();
@@ -567,16 +781,6 @@ impl AppState {
         doc.remap(md.read(cx).doc());
         let decor = doc.decor();
         md.update(cx, |view, cx| view.set_decor(decor, cx));
-    }
-
-    /// The dialog's buffer changed: dirty, or clean again.
-    pub(crate) fn plan_editor_changed(&mut self, typed: &str, cx: &mut Context<Self>) {
-        let Some(doc) = self.workbench.plan.as_mut().filter(|doc| doc.is_modal()) else {
-            return;
-        };
-        doc.refresh_dirty(typed);
-        doc.confirm_close = false;
-        cx.notify();
     }
 
     /// What the open document's view said. A view that is not the open document's — a tab whose
@@ -632,9 +836,9 @@ impl AppState {
                     Act::Highlight(blocks, *colour)
                 }
             }
-            // The dialog's commit is a save; a tab's commit is an edit to the tab, saved the way
-            // every tab is.
-            MdViewEvent::BlockEdited { .. } if doc.is_modal() => Act::Save,
+            // A held document's commit is a save; a file tab's commit is an edit to the tab, saved
+            // the way every tab is.
+            MdViewEvent::BlockEdited { .. } if doc.hosted() => Act::Save,
             MdViewEvent::DocumentChanged { .. } => Act::Remap,
             MdViewEvent::Scrolled { rows: visible } => {
                 match follow_target(rows, annotations, visible.clone(), focused) {
@@ -979,10 +1183,13 @@ impl AppState {
         self.bus.send(handle.list_annotations());
     }
 
-    /// Raise the Export question over the document — an explicit, one-shot write into the
+    /// Raise the Export question for a plan's tab — an explicit, one-shot write into the
     /// project's working tree, never a continuous mirror.
-    pub fn open_export_plan_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(task_id) = self.workbench.plan.as_ref().and_then(|doc| doc.task_id()) else {
+    pub fn open_export_plan_dialog(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(task_id) = self.file(key, cx).and_then(|file| match file.doc {
+            Some(DocumentHandle::Plan { task_id, .. }) => Some(task_id),
+            _ => None,
+        }) else {
             return;
         };
         self.open_file_dialog(FileDialog::ExportPlan { task_id }, "", window, cx);

@@ -509,7 +509,7 @@ beside a linked buffer in Split. The plan surface draws the same view, so the sa
 headings" opens `MdView`'s jump popover over the parsed outline (`ui/mdview/outline.rs`'s `Jump`,
 over `structure.rs`'s `Outline`): a filter field, the headings indented by level with the section
 on screen marked, ↑/↓/Enter to pick and Escape to close; a pick scrolls that heading's block to the top of the viewport
-(`ui::document::heading_control`, which the plan dialog's chrome draws too). In `Annotation` the
+(`ui::document::heading_control`, which the tab header draws for every markdown layout). In `Annotation` the
 view is the annotated-document surface's page, with its annotation layer on
 (`_docs/features/workbench-tasks.md`). `Source` draws no document and offers none. The explorer's
 right-click on a `.md` file offers **Open in annotation mode** after Open (and Open with), which

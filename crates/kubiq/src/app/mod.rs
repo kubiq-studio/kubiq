@@ -908,6 +908,15 @@ pub struct AppState {
     adding_select: Option<String>,
     /// Contents the host sent that still need a window to become buffers. Drained in `render`.
     pending_files: Vec<FileArrival>,
+    /// What a document's save, export or refusal said while no surface was open on it — shown on
+    /// the surface the next time one opens (the tab is brought forward to do so).
+    doc_notices: HashMap<kubiq_proto::plan::DocumentHandle, crate::state::document::Notice>,
+    /// The missions whose planner this window launched — the ones it owns. Only these open their
+    /// plan on entering `Phase::Planning`.
+    owned_missions: HashSet<TaskId>,
+    /// The plans this window opened for an owned mission, and whether each was bound to the
+    /// planner yet. Keeps the opening to once per mission rather than once per update.
+    opened_plans: HashMap<TaskId, bool>,
     /// Knowledge-base documents the host answered that still need a window to become a buffer.
     /// Drained in `render`, beside `pending_files`.
     pending_kb_docs: Vec<KbArrival>,
@@ -1060,11 +1069,6 @@ pub struct AppState {
     /// `DocumentEditor::composer` says it is answering. One at a time, `new_comment_input`'s own
     /// arrangement.
     pub annotation_composer_input: Entity<TextareaState>,
-    /// The plan dialog's buffer — one per window, because one document is open at a time. It is
-    /// the same `EditorState` a file tab holds, seeded from the host's body and written back by
-    /// `save_document`; the dialog's `MdView` (`DocumentEditor::md`) is drawn over it, and its
-    /// block editor commits into it.
-    pub plan_editor: Entity<EditorState>,
     /// The titlebar's command field: shortcuts and search, in the middle of the window.
     pub command_input: Entity<InputState>,
     /// The project menu's own search field.

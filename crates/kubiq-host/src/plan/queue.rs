@@ -216,7 +216,7 @@ fn tools(doc: &DocumentHandle) -> &'static str {
     match doc {
         DocumentHandle::File { .. } => "the kubiq-doc MCP (by `path`)",
         DocumentHandle::Plan { .. } | DocumentHandle::MissionDoc { .. } => {
-            "the kubiq-plan MCP (by `task_id`)"
+            "the kubiq-doc MCP (by `task_id`)"
         }
     }
 }
@@ -298,14 +298,13 @@ pub fn compose(threads: &[ThreadView], last_doc: Option<&DocumentHandle>) -> Str
             }
         }
         text.push_str(
-            "\nRead them with `list_annotations` (and `read_doc` or `read_plan` for the text).\n",
+            "\nRead them with `list_annotations` (and `read_doc` for the text).\n",
         );
     }
 
     let hint = match single {
         Some(doc) => tools(doc).to_string(),
-        None => "the kubiq-doc MCP (files, by `path`) or the kubiq-plan MCP (plans, by `task_id`)"
-            .to_string(),
+        None => "the kubiq-doc MCP (files by `path`, plans by `task_id`)".to_string(),
     };
     text.push_str(&format!(
         "\nAnswer each thread with `reply_annotation` of {hint}, and call `resolve_annotation` once \

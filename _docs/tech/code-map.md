@@ -1130,7 +1130,6 @@ the documents in its row.
 | `crates/kubiq/src/ui/onboarding/mod.rs` | [`features/onboarding.md`](../features/onboarding.md), [`ui-and-design.md`](./ui-and-design.md) |
 | `crates/kubiq/src/ui/outline.rs` | [`features/workbench.md`](../features/workbench.md), [`ui-and-design.md`](./ui-and-design.md) |
 | `crates/kubiq/src/ui/overflow_menu.rs` | [`features/workbench.md`](../features/workbench.md) |
-| `crates/kubiq/src/ui/plan.rs` | [`features/workbench-tasks.md`](../features/workbench-tasks.md) |
 | `crates/kubiq/src/ui/project_face.rs` | [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/ui/project_menu.rs` | [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/ui/rail.rs` | [`features/workbench.md`](../features/workbench.md), [`wip/db-explorer.md`](../wip/db-explorer.md), [`wip/in-place-help.md`](../wip/in-place-help.md) |

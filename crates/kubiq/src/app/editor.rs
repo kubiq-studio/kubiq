@@ -66,11 +66,10 @@ impl AppState {
         file: &OpenFile,
     ) -> Option<&crate::state::document::DocumentEditor> {
         let doc = self.workbench.plan.as_ref()?;
-        if doc.is_modal() || !file.annotatable() {
+        if !file.annotatable() {
             return None;
         }
-        (doc.doc == crate::state::plan::file_document(doc.project_id(), file.path.clone()))
-            .then_some(doc)
+        (doc.doc == file.document(doc.project_id())).then_some(doc)
     }
 
     /// Whether a markdown tab's file is annotated — what the header's annotation badge and the
@@ -535,16 +534,12 @@ impl AppState {
             .projects
             .values()
             .flat_map(|open| open.editor.open.iter().chain(open.kb.docs.iter()));
-        let mut views: Vec<_> = files
+        let views: Vec<_> = files
             .filter_map(|file| {
                 let reading = file.md_reading;
                 file.md.clone().map(|md| (md, reading))
             })
             .collect();
-        // The plan dialog's own view, which no tab holds.
-        if let Some(doc) = self.workbench.plan.as_ref().filter(|doc| doc.is_modal()) {
-            views.push((doc.md.clone(), crate::state::editor::MdReading::default()));
-        }
         for (md, reading) in views {
             md.update(cx, |md, cx| {
                 md.set_config(MdViewConfig { reading, ..config }, cx)
@@ -819,7 +814,12 @@ impl AppState {
             return;
         };
         open.editor.active = at;
-        if let Some(path) = open.editor.active_file().map(|file| file.path.clone()) {
+        if let Some(path) = open
+            .editor
+            .active_file()
+            .filter(|file| file.doc.is_none())
+            .map(|file| file.path.clone())
+        {
             open.explorer.selected = Some(path);
         }
         self.follow_active_file(cx);
@@ -988,6 +988,12 @@ impl AppState {
         let Some(file) = open.editor.open.get(at) else {
             return;
         };
+        // A plan or a mission document is the host's, saved through the open surface.
+        if file.doc.is_some() {
+            let key = file.key();
+            self.save_hosted_tab(&key, window, cx);
+            return;
+        }
         // An untitled buffer names nothing on disk, so the save is a question first.
         if file.untitled {
             let key = file.key();
@@ -1049,7 +1055,9 @@ impl AppState {
         let pinned = self.tab_pinned(&kind, cx);
         let restartable = self.tab_restartable(&kind, cx);
         let formattable = self.tab_formattable(&kind, cx);
-        let Some(&row) = ui::tab_menu::rows(&kind, pinned, restartable, formattable).get(index)
+        let held = self.tab_held_document(&kind, cx);
+        let Some(&row) =
+            ui::tab_menu::rows_for(&kind, pinned, restartable, formattable, held).get(index)
         else {
             return;
         };
@@ -1073,6 +1081,7 @@ impl AppState {
                     "Reveal in Explorer" => self.reveal_tab_in_explorer(&key, cx),
                     "Refresh" => self.refresh_editor_tab(&key, cx),
                     "Save" => self.save_file(&key, window, cx),
+                    ui::tab_menu::EXPORT_PLAN => self.open_export_plan_dialog(&key, window, cx),
                     "Format" => self.format_editor_tab(&key, window, cx),
                     "Word Wrap" => self.toggle_editor_wrap(window, cx),
                     "Pin" | "Unpin" => self.toggle_tab_pin(kind, cx),
@@ -1205,6 +1214,16 @@ impl AppState {
     }
 
     /// Whether a file tab's menu offers Format: a text buffer in JSON, YAML or XML.
+    /// Whether a file tab holds a plan or a mission document, and if so whether it can be exported
+    /// — a plan can. `None` for every other tab.
+    pub fn tab_held_document(&self, kind: &PanelKind, cx: &App) -> Option<bool> {
+        let PanelKind::File(key) = kind else {
+            return None;
+        };
+        let doc = self.file(key, cx)?.doc.as_ref()?;
+        Some(matches!(doc, crate::state::document::DocumentHandle::Plan { .. }))
+    }
+
     pub fn tab_formattable(&self, kind: &PanelKind, cx: &App) -> bool {
         let PanelKind::File(key) = kind else {
             return false;
@@ -1817,20 +1836,16 @@ impl AppState {
     /// bytes that never arrived, a read the host cut short, a guest file — says so in a modal
     /// instead, because a ⌘S that quietly does nothing is indistinguishable from a save.
     pub fn save_active_file(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
-        // The plan dialog is raised over the window and holds the focus while it is up, so ⌘S
-        // means *that* document rather than whatever tab is behind it. One key, one meaning: the
-        // surface is the editor, not a dialog with a Save button.
-        //
-        // **A document open inside a markdown tab is not that case**: the key is over a file tab,
-        // and it means the file — the surface draws the tab's own view over the tab's own buffer,
-        // so a block committed there is an edit to the tab, saved here like any other.
-        if self
-            .workbench
-            .plan
-            .as_ref()
-            .is_some_and(|doc| doc.is_modal())
+        // A tab holding a plan or a mission document saves through the document's own path
+        // (`SavePlan`, with its revision guard), not as a file.
+        if let Some(key) = self
+            .project(cx)
+            .and_then(|project| self.projects.get(&project))
+            .and_then(|open| open.editor.active_file())
+            .filter(|file| file.doc.is_some())
+            .map(|file| file.key())
         {
-            self.save_document(window, cx);
+            self.save_hosted_tab(&key, window, cx);
             return;
         }
         let Some(project) = self.project(cx) else {
@@ -2335,8 +2350,15 @@ impl AppState {
             .get(&project)
             .and_then(|open| open.prefs.editor_wrap)
             .unwrap_or(true);
+        // A plan or mission document's buffer is written in with `/` commands, which are a
+        // completion trigger here and nowhere else in the tree.
+        let held = self
+            .projects
+            .get(&project)
+            .and_then(|open| open.editor.open.iter().find(|file| file.path == path))
+            .is_some_and(|file| file.doc.is_some());
         let buffer = cx.new(|cx| {
-            EditorState::new(window, cx)
+            let mut state = EditorState::new(window, cx)
                 .language(ui::editor::highlighter_language(language))
                 .line_number(true)
                 .folding(true)
@@ -2346,7 +2368,12 @@ impl AppState {
                     tab_size: 2,
                     ..Default::default()
                 })
-                .default_value(text.clone())
+                .default_value(text.clone());
+            if held {
+                state.lsp_mut().completion_provider =
+                    Some(std::rc::Rc::new(ui::editor::SlashCommands));
+            }
+            state
         });
 
         // Dirty is kept current by the buffer's own change event, because comparing every frame

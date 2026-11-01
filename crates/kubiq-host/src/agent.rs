@@ -1223,8 +1223,8 @@ impl Agents {
                 "Coordinator",
                 "Plans a mission: writes the plan with the user, then drafts the mission's \
                  tasks for the runner to work. Carries kubiq-mission (the mission's brief, \
-                 documents and tasks), kubiq-plan (the plan document), manage-kubiq-tasks (create \
-                 and update tasks) and kubiq-kb (the shared knowledge base).",
+                 documents and tasks), kubiq-doc (the plan document, by task id), manage-kubiq-tasks \
+                 (create and update tasks) and kubiq-kb (the shared knowledge base).",
                 vec![TAG_COORDINATOR, TAG_PLANNER],
                 Vec::new(),
             ),
@@ -2723,12 +2723,12 @@ mod tests {
             .save_definition(info(&["manage-kubiq-tasks"], None))
             .unwrap();
         agents
-            .save_definition(info(&["kubiq-plan"], Some(project)))
+            .save_definition(info(&["kubiq-doc"], Some(project)))
             .unwrap();
 
         assert_eq!(
             agents.definition_mcps("review", Some(project)),
-            Some(vec!["kubiq-plan".to_string()]),
+            Some(vec!["kubiq-doc".to_string()]),
             "inside the project, the project's definition answers"
         );
         assert_eq!(

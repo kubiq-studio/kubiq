@@ -585,6 +585,12 @@ impl AppState {
             Ok(agent) => LaunchOutcome::Launched(agent),
             Err(reason) => LaunchOutcome::Failed(reason),
         };
+        // The window that launches a mission's planner owns the mission, and its plan opens in
+        // this window once the mission is planning.
+        if request.role == LaunchRole::Planner && matches!(outcome, LaunchOutcome::Launched(_)) {
+            self.owned_missions.insert(task_id);
+            self.settle_mission_plan(project_id, task_id, cx);
+        }
         self.bus.send(Message::MissionLaunched {
             project_id,
             task_id,
@@ -592,6 +598,47 @@ impl AppState {
             outcome,
         });
         cx.notify();
+    }
+
+    /// Open an owned mission's plan the first time it is seen planning, bound to its planner, and
+    /// bind it once the planner is known if it was not when the tab opened. Called on every
+    /// mission update and on the planner's launch; it does nothing for a mission this window does
+    /// not own, one that is not planning, or one already handled.
+    pub(super) fn settle_mission_plan(
+        &mut self,
+        project_id: ProjectId,
+        task_id: TaskId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.owned_missions.contains(&task_id) {
+            return;
+        }
+        let planning = self
+            .projects
+            .get(&project_id)
+            .and_then(|open| open.missions.get(&task_id))
+            .is_some_and(|mission| mission.phase == kubiq_proto::mission::Phase::Planning);
+        if !planning {
+            return;
+        }
+        let planner = self.mission_planner(project_id, task_id);
+        match self.opened_plans.get(&task_id).copied() {
+            None => {
+                // The tab opens on the project on screen; another project's waits for it.
+                if self.project(cx) != Some(project_id) {
+                    return;
+                }
+                let bound = self.open_plan_in(project_id, task_id, planner, cx);
+                self.opened_plans.insert(task_id, bound);
+            }
+            Some(false) if planner.is_some() => {
+                let doc = crate::state::plan::plan_document(project_id, task_id);
+                if self.bind_doc_agent(doc, planner) {
+                    self.opened_plans.insert(task_id, true);
+                }
+            }
+            Some(_) => {}
+        }
     }
 
     /// Start (or revive) the conversation one request asks for, assign it to its task, mark it

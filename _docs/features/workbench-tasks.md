@@ -3,11 +3,11 @@ id: feat-workbench-tasks
 title: Tasks mode — the board
 kind: feature
 status: draft
-summary: The rail's Tasks mode — a column per status, a card per task, what a drag means, the labels and the filter that narrow it, missions — a parent task worked by a deterministic runner — and the children they spawn, the task panel that reports one task whole and edits it a field at a time, and the plan surface a mission raises over the window.
+summary: The rail's Tasks mode — a column per status, a card per task, what a drag means, the labels and the filter that narrow it, missions — a parent task worked by a deterministic runner — and the children they spawn, the task panel that reports one task whole and edits it a field at a time, and the plan a mission opens as a tab.
 read_when: you are changing the tasks board — its columns, its cards, what a drag means, the task panel, a task's attachments or labels, a mission, or the plan surface and its annotations
-updated: 2026-10-12
-verified: 2026-10-12
-code_anchors: [crates/kubiq/src/state/board.rs, crates/kubiq/src/app/board.rs, crates/kubiq/src/ui/board/mod.rs, crates/kubiq/src/state/tasksrc.rs, crates/kubiq/src/app/tasksrc.rs, crates/kubiq/src/ui/tasksrc.rs, crates/kubiq/tests/tasksrc.rs, crates/kubiq/src/ui/board/detail.rs, crates/kubiq/src/ui/board/form.rs, crates/kubiq/tests/board.rs, crates/kubiq/src/state/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/plan/service.rs, crates/kubiq-host/src/plan/queue.rs, crates/kubiq-host/src/plan/blocks.rs, crates/kubiq-proto/src/blocks.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq/src/app/plan.rs, crates/kubiq/src/app/editor.rs, crates/kubiq/src/state/plan.rs, crates/kubiq/src/state/document.rs, crates/kubiq/src/ui/plan.rs, crates/kubiq/src/ui/document.rs, crates/kubiq/src/ui/mdview/annotation.rs, crates/kubiq/tests/plan.rs, crates/kubiq/src/state/new_mission.rs, crates/kubiq/src/app/new_mission.rs, crates/kubiq/src/ui/new_mission.rs, crates/kubiq/src/state/mission.rs, crates/kubiq/src/app/mission.rs, crates/kubiq/src/ui/mission/mod.rs, crates/kubiq/src/ui/mission/panel.rs, crates/kubiq/src/ui/mission/full.rs, crates/kubiq/src/ui/mission/wbs.rs, crates/kubiq/src/ui/mission/settings.rs, crates/kubiq/src/ui/mission/menu.rs, crates/kubiq/src/ui/mission/note.rs, crates/kubiq/src/state/wbs.rs, crates/kubiq/src/app/wire.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mission/prompts.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/coordinator.rs]
+updated: 2026-11-01
+verified: 2026-11-01
+code_anchors: [crates/kubiq/src/state/board.rs, crates/kubiq/src/app/board.rs, crates/kubiq/src/ui/board/mod.rs, crates/kubiq/src/state/tasksrc.rs, crates/kubiq/src/app/tasksrc.rs, crates/kubiq/src/ui/tasksrc.rs, crates/kubiq/tests/tasksrc.rs, crates/kubiq/src/ui/board/detail.rs, crates/kubiq/src/ui/board/form.rs, crates/kubiq/tests/board.rs, crates/kubiq/src/state/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/plan/service.rs, crates/kubiq-host/src/plan/queue.rs, crates/kubiq-host/src/plan/blocks.rs, crates/kubiq-proto/src/blocks.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq/src/app/plan.rs, crates/kubiq/src/app/editor.rs, crates/kubiq/src/state/plan.rs, crates/kubiq/src/state/document.rs, crates/kubiq/src/ui/document.rs, crates/kubiq/src/ui/mdview/annotation.rs, crates/kubiq/tests/plan.rs, crates/kubiq/src/state/new_mission.rs, crates/kubiq/src/app/new_mission.rs, crates/kubiq/src/ui/new_mission.rs, crates/kubiq/src/state/mission.rs, crates/kubiq/src/app/mission.rs, crates/kubiq/src/ui/mission/mod.rs, crates/kubiq/src/ui/mission/panel.rs, crates/kubiq/src/ui/mission/full.rs, crates/kubiq/src/ui/mission/wbs.rs, crates/kubiq/src/ui/mission/settings.rs, crates/kubiq/src/ui/mission/menu.rs, crates/kubiq/src/ui/mission/note.rs, crates/kubiq/src/state/wbs.rs, crates/kubiq/src/app/wire.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mission/prompts.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/coordinator.rs]
 depends_on: [feat-workbench, tech-ui]
 review_cycle: monthly
 ---
@@ -240,7 +240,7 @@ prerequisites, and its **phase is the parent's status**: *Planning* is `backlog`
 then exits, and Kubiq's own runner does the rest.
 
 1. **Planning.** The user chats with the planner, which writes the plan and any detail documents
-   through `kubiq-plan` and `kubiq-mission`. **Approve plan** moves to Breakdown. Open annotation
+   through `kubiq-doc` (the plan, by `task_id`) and `kubiq-mission`. **Approve plan** moves to Breakdown. Open annotation
    threads show as a warning on the approval and do not block it.
 2. **Breakdown.** The planner drafts the subtasks in `backlog`: prerequisites, an `approve` flag per
    task, human tasks (assigned to a person) and review tasks. The runner ignores the draft. The user
@@ -435,7 +435,7 @@ is. ⌘S and the
 Save button send `SavePlan` with the whole
 buffer; the host answers with the document it stored, which is what settles the surface clean. An
 edit is never thrown away to win a race: a plan that changed elsewhere — another window's save, an
-agent's `write_plan` — while the buffer held an unsaved edit keeps the edit and says the other copy
+agent's `write_doc` — while the buffer held an unsaved edit keeps the edit and says the other copy
 moved, and Escape over unsaved work asks once before discarding. **Nor does a stale buffer replace
 the newer copy without being told to.** The buffer holds the `revision` of the body it was seeded
 from; when the host has moved past it, the first Save writes nothing — it names who moved the copy
@@ -481,17 +481,17 @@ opened the thread.
 **A thread that has lost its block is marked, never dropped**: an orphan banner says so, and the
 thread keeps its replies and its state exactly as they were, because a passage rewritten out of
 existence is not the same fact as an answered question. An agent answers what the user opened
-through the `kubiq-plan` MCP server's `list_annotations`, `reply_annotation` and
-`resolve_annotation`, and opens one with `annotate_plan` (anchored by a unique quote or a block id,
-optional marks, author Agent).
-**Any markdown file in the project is the same collaboration** (T-348): the `kubiq-doc` MCP server
-answers the same tools with the document named by a project-relative `path` instead of a
-`task_id` — `list_annotated_docs` (the files carrying open threads), `read_doc`, `write_doc`,
+through the `kubiq-doc` MCP server's `list_annotations`, `reply_annotation` and
+`resolve_annotation` with the plan named by `task_id`, and opens one with `annotate_doc` (anchored by
+a unique quote or a block id, optional marks, author Agent).
+**Any markdown file in the project is the same collaboration** (T-348): the same `kubiq-doc` tools
+take a project-relative `path` instead of a `task_id` — exactly one of the two, never both
+(`D229`) — `list_annotated_docs` (the files carrying open threads), `read_doc`, `write_doc`,
 `doc_changes`, `list_annotations`, `annotate_doc`, `reply_annotation`, `resolve_annotation`. An
 agent edits an annotated file through `write_doc`, so the threads re-anchor; an edit made outside it
 leaves the block index as it was until the next save.
 **An agent's write never clobbers the user's newer text** (`D208`). The host remembers the body each
-agent last read (`read_doc`, `read_plan`) or wrote, and a `write_doc`/`write_plan` over a document
+agent last read (`read_doc`) or wrote, and a `write_doc` over a document
 that moved since is a three-way merge (`Handle::agent_save`, `kubiq_proto::merge`): disjoint edits all
 land; where both changed the same words the user's text is kept and the agent's version becomes a
 thread on that block, authored by the agent, and the tool result says so (`conflicts.threads`); a
@@ -505,7 +505,7 @@ in-memory **lineage code** minted by the host (`AAB`, and `AAB.AA`/`AAB.AB` once
 thread on a split block follows it into the part holding its quote, and `read_doc` and
 `list_annotations` show the codes. With nothing on record (a host restart), `expected_revision` guards
 the write as before. A markdown tab open in annotation mode follows the file live and saves itself
-([`workbench-ide.md`](./workbench-ide.md)); the stale banner is the plan dialog's alone.
+([`workbench-ide.md`](./workbench-ide.md)); the stale banner is a plan or mission document's alone.
 **Only the user resolves a thread** (`D208`). An agent's `resolve_annotation` proposes: the thread
 stays open with its `review` flag set ("awaiting your review" in the rail) and the agent's `note`
 as its comment, and is not queued for the agent again; the expanded thread offers **Accept**
@@ -518,8 +518,8 @@ harness and presses Start.
 **A document may be bound to one agent** (T-354, `D207`); an agent may own many. The binding and
 an `auto_send` switch live in the document's sidecar and ride on every annotation snapshot. An agent
 finds its own with `kubiq-doc`'s `list_my_docs`; another agent's `write_doc`, `annotate_doc`,
-`reply_annotation` or `resolve_annotation` on a bound document (and the `kubiq-plan` twins on a bound
-plan, and `kubiq-mission`'s `write_document`) is refused with the owner named and an instruction to
+`reply_annotation` or `resolve_annotation` on a bound document or plan (and `kubiq-mission`'s
+`write_document`) is refused with the owner named and an instruction to
 ask the user, and the windows are told so they can offer to reassign it. The check keeps
 cooperating agents apart; it is not a security boundary, since an agent's own file tools still
 reach the file. `list_annotations` shows each comment's `id` and `edited_at` — the
@@ -735,7 +735,7 @@ checkboxes drawn only on this path (`NewAgentForm::for_task`, `ask_for_feedback`
 an initial prompt (sent as the first user message, so the agent starts on its own) composed from the
 task's key and both checkboxes (`state::new_agent::task_assignment_prompt`). Ticking *Ask for
 feedback* tells the agent to ask when it needs to; unticked, to assume as much as it reasonably
-can instead. *Plan mode* is a sentence in the prompt only — no `kubiq-plan` server is ticked for it,
+can instead. *Plan mode* is a sentence in the prompt only — no `kubiq-doc` server is ticked for it,
 since this form attaches no plan tool yet. The prompt also tells the agent to keep the task's
 status and comments updated through `manage-kubiq-tasks`. A toggle recomposes the prompt; the
 feedback line of a *Feedback* assignment (`NewAgentForm::prompt_suffix`) is kept across it, other
@@ -856,8 +856,7 @@ other message does, though no window sends one.
 **The mission's two surfaces are two more panel kinds and one more overlay rung.**
 `PanelKind::Mission(TaskId)` is the side panel (`Free`-class, right region); `PanelKind::MissionView(TaskId)`
 is the full view's document-tab shape (centre region); `Layer::Mission` is the full view's modal
-shape, ranked below `Layer::Plan` in `state::overlay::Layer` because the full view's *Plan & docs*
-tab is itself one of the places that raises the plan surface over it. Both panel kinds and the
+shape. Both panel kinds and the
 layer are documented as instances of the panel and overlay conventions in
 [`../tech/ui-and-design.md`](../tech/ui-and-design.md).
 
@@ -993,7 +992,7 @@ refused a file whose `version` is above `TASKS_VERSION`/`CATALOGUE_VERSION` rath
 from before this change (`StoreError::UnknownVersion`); `D179`'s addition is the unknown-field bag,
 not the version refusal.
 `crate::work::Handle`'s own shape — an `Arc<Mutex<Plans>>` clone held by the coordinator and by the
-MCP listener's `kubiq-plan` server. The coordinator's `plan_job()` (`crates/kubiq-host/src/coordinator.rs`)
+MCP listener's `kubiq-doc` server. The coordinator's `plan_job()` (`crates/kubiq-host/src/coordinator.rs`)
 answers `LoadPlan`, `SavePlan` and `DeletePlan` on `work_job()`'s own footing; `export_plan()` reads
 the body through `Plans::body()` and writes a copy through `crate::store::plan::export_to()`
 wherever `ExportPlan::rel_path` resolves to, the same containment `WriteProjectFile`'s path already
@@ -1016,8 +1015,7 @@ text the host last stated, and the flags that make a save mean something (`dirty
 `state::document`, with a `Plan` and a `File` variant — native on the file viewer's own editor
 rather than a web-panel tenant (`D160`) — and `app/plan.rs`'s `DocumentWire` trait is the only
 place a handle becomes a message. `state::plan::plan_document()` and `::file_document()` mint the
-two; nothing in the interface opens a file document yet. `app/plan.rs::open_plan()`
-sends `LoadPlan` through it and `app/wire.rs` folds `Plan`, `PlanDeleted`, `PlanExported`,
+two. `app/plan.rs::open_plan()` sends `LoadPlan` through it and `app/wire.rs` folds `Plan`, `PlanDeleted`, `PlanExported`,
 `PlanChanged`, `PlanConflict` and `PlanError` back — a `PlanChanged` for the open plan re-sends
 `LoadPlan` rather than trusting a body it was not given, and `plan_body_arrived()` reads the answer
 against what the buffer holds so an unsaved edit is reported rather than overwritten. A
@@ -1025,41 +1023,53 @@ against what the buffer holds so an unsaved edit is reported rather than overwri
 is and puts the surface back where a third party's save would have put it: stale, naming who moved
 the copy, and asking the overwrite question again about the revision the host just stated.
 
-**The surface has two frames and one implementation** (T-124). `ui/document.rs::surface()` draws the
+**The surface has one frame and one implementation** (T-124). `ui/document.rs::surface()` draws the
 notices, the page — `DocumentEditor::md`, an `Entity<MdView>` with `set_annotating(true)` — and the
-thread rail, and knows nothing about which frame it is in; `DocumentEditor::presentation` is the only
-thing that differs. The dialog builds its view in `AppState::open_document()` over the window's
-`plan_editor` and subscribes to it; a tab lends its own `OpenFile::md`, whose subscription in
-`app/editor.rs::attach_md_view()` forwards every event but a link click to the same
-`AppState::document_md_event()`. `Presentation::Modal` is the plan
-editor, which **stays a dialog** — `ui/plan.rs` is now its title, its chrome strip, its footer and
-nothing else — and is the only one that takes `Layer::Plan`, so Escape and ⌘S still mean the dialog
-while it is up and mean the tab underneath otherwise. `Presentation::Viewer` is a markdown tab in
-`ViewLayout::Annotation`, drawn inside the panel with no scrim: the tab's file is the document, as
-`state::plan::file_document()`, and `AppState::settle_annotation_document()` keeps the window's one
-`DocumentEditor` pointed at whatever the editor's active tab asks for — opening it on the way in,
-putting it away on the way out, and standing aside while the dialog is up. A second markdown tab
-left in that layout says so rather than drawing another file's threads. Two things are warned about
-in the tab and nowhere else: a mode that shows the buffer for editing says that editing the source
-can orphan a thread — never for a file with no annotations to orphan (T-183). The surface is the
-tab's own view over the tab's own buffer, so it waits for the tab's bytes and shows its unsaved
-edits; a block committed there dirties the tab, which saves the way every tab does. The header's annotation button
-carries a dot when the file is annotated and the reader is elsewhere, on
-`AppState::has_annotations()`'s own answer — the real count this window last heard for the path,
-where it has heard one, rather than the sidecar's mere presence (T-183, see below). The heading
-navigator and the Edit chip are the tab's markdown view's own in `Preview`, `Split` and
-`Annotation` (`ui/document.rs::heading_control()`, `::edit_chip()`), and `Source` offers neither
+thread rail, and knows nothing about which tab it is in. **There is no plan modal**: the surface is
+always a markdown tab in `ViewLayout::Annotation`, drawn inside the panel with no scrim, over the
+tab's own `OpenFile::md`, whose subscription in `app/editor.rs::attach_md_view()` forwards every event
+but a link click to `AppState::document_md_event()`. A tab is the surface of a file
+(`state::plan::file_document()`) or of a document the host holds — a plan or a mission document —
+which it carries as `OpenFile::doc`. `AppState::settle_annotation_document()` keeps the window's one
+`DocumentEditor` pointed at whatever the editor's active tab asks for, opening it on the way in and
+putting it away on the way out; a second tab left in that layout says so rather than drawing another
+document's threads. Two things are warned about in the tab and nowhere else: a mode that shows the
+buffer for editing says that editing the source can orphan a thread — never for a file with no
+annotations to orphan (T-183). The surface is the tab's own view over the tab's own buffer, so it
+waits for the tab's bytes and shows its unsaved edits. The header's annotation button carries a dot
+when the file is annotated and the reader is elsewhere, on `AppState::has_annotations()`'s own
+answer — the real count this window last heard for the path, where it has heard one, rather than
+the sidecar's mere presence (T-183, see below). The heading navigator and the Edit chip are the
+tab's markdown view's own in `Preview`, `Split` and `Annotation`
+(`ui/document.rs::heading_control()`, `::edit_chip()`), and `Source` offers neither
 (`_docs/features/workbench-ide.md`).
 
-The buffer itself is the
-window's `plan_editor`, one `EditorState` built in `app/boot.rs` with `ui::editor::SlashCommands`
-installed as its completion provider; `settle_plan_editor()` seeds it in `render`, where there is
-a `Window`, then tells the dialog's view to reparse at once (`MdView::resync`, since `set_value`
-raises no change event), focuses a composer an event opened, and remaps a stale margin.
-`open_export_plan_dialog()` raises `FileDialog::ExportPlan`
-over it, `SaveAs`'s own route. The
-`kubiq-plan` MCP server (`crates/kubiq-host/src/mcp/plan.rs`, catalogued as `mcp::catalogue::KUBIQ_PLAN`)
-carries `read_plan` and `write_plan` over the same `Plans`, reached through `PlanReach`, which holds
+**A plan or mission document opens as a tab of its own** (`app/plan.rs::open_plan()`,
+`open_mission_doc()`; `OpenFile::hosted()`). The tab's path is the handle's key plus `.md` — it names
+nothing on disk, so it is never written into the saved arrangement (`app/projects.rs::remember`) and
+the layout toggle offers only `Annotation` for it. Opening sends `LoadPlan` alone: the answer is queued
+as the tab's bytes (`hosted_body_arrived()`, through `pending_files`), `render` builds the tab's buffer
+with `ui::editor::SlashCommands` as its completion provider, and only then does the surface open and
+ask for the body and the threads together; the surface starts from what the buffer holds
+(`DocumentEditor::hold()`), so unsaved edits survive another tab taking the surface. A plan already
+open is brought forward. **A plan's tab is bound to the mission's planner** when its settings name one
+this window knows as a live agent (`SetDocAgent`; unbound otherwise), and a mission this window owns —
+the one whose planner this window launched — opens its plan once on entering `Phase::Planning`
+(`app/mission.rs::settle_mission_plan()`, and binds it later if the planner was not yet known). Save is
+the standard tab save: ⌘S and the tab menu's *Save* reach `save_document()` for such a tab, which
+sends `SavePlan` naming the revision the buffer was seeded from; the tab's dirty mark is the buffer
+against the host's last body (`OpenFile::rebase_doc()`), and a `PlanConflict` raises the stale banner
+and the overwrite question above the page. A plan tab's context menu carries *Export…*
+(`FileDialog::ExportPlan`). The footer's change-summary line is gone with the dialog; the provenance
+underlines in the page remain.
+
+The buffer is the tab's own `EditorState`; `settle_plan_editor()` seeds it from the host's body in
+`render`, where there is a `Window`, then tells the view to reparse at once (`MdView::resync`, since
+`set_value` raises no change event), focuses a composer an event opened, and remaps a stale margin.
+`open_export_plan_dialog()` raises `FileDialog::ExportPlan` for the tab's plan, `SaveAs`'s own route.
+The
+`kubiq-doc` MCP server (`crates/kubiq-host/src/mcp/plan.rs`, catalogued as `mcp::catalogue::KUBIQ_DOC`)
+carries `read_doc` and `write_doc`, a plan named by `task_id`, over the same `Plans`, reached through `PlanReach`, which holds
 the plan handle and nothing else — not a `work::Handle` of its own, since `Plans` already carries
 one.
 
@@ -1110,14 +1120,14 @@ sends `MarkAnnotation` on `mark_target()` or opens the composer with the mark pr
 `follow_target()`. The rail is `ui/document.rs::rail()`: `thread_list()` over
 `DocumentEditor::rail_threads()` (`ordered()`, filtered by `show_resolved`), `collapsed()` and
 `expanded()` per row, and `foot()`'s composer, whose post goes through
-`submit_annotation_composer()` and `state::document::addressed()` for the `@agent` tag. The `kubiq-plan` MCP server adds
-`list_annotations` (with `marks`, per-comment `to` and a `mark` filter), `annotate_plan`,
+`submit_annotation_composer()` and `state::document::addressed()` for the `@agent` tag. The `kubiq-doc` MCP server adds
+`list_annotations` (with `marks`, per-comment `to` and a `mark` filter), `annotate_doc`,
 `reply_annotation` and `resolve_annotation` (`crates/kubiq-host/src/mcp/plan.rs`) over the same
-`Plans`; `annotate_plan` resolves its block through `Plans::block_for_quote` and refuses a quote
+`Plans`; `annotate_doc` resolves its block through `Plans::block_for_quote` and refuses a quote
 that matches no block or several. Every handler in `mcp/plan.rs` takes a resolved `plan::Target`:
-`call()` resolves `task_id` to `Target::Plan` for `kubiq-plan`, `doc_call()` resolves `path` through
-`Target::resolve` on a `DocumentHandle::File` against `AgentFacts::project.path` for `kubiq-doc`
-(`mcp::catalogue::KUBIQ_DOC`, in no default set), and each answer echoes `task_id` or `path`
+`doc_call()` resolves a `task_id` to `Target::Plan`, or a `path` through `Target::resolve` on a
+`DocumentHandle::File` against `AgentFacts::project.path`, refusing a call that names both
+(`mcp::catalogue::KUBIQ_DOC`, in `PLANNER_MCPS`, `DOC_MCPS` and the mission launch sets), and each answer echoes `task_id` or `path`
 accordingly. `list_annotated_docs` walks the project with `ignore::WalkBuilder` for
 `*.md.annotation.json` sidecars, capped at 500; `list_my_docs` filters the same walk on
 `Plans::binding()`, and `mcp::plan::owned()` is the refusal in front of every write. The doc queue
@@ -1336,7 +1346,7 @@ coordinator wakes it (`Coordinator::wake_runner`) on a task change, an agent's e
 change, `MissionLaunched` and `MissionSchedule`; it keeps no thread and no timer. `AUTO_FAIL_CAP` is
 two. `mission/prompts.rs` composes what the runner says to the agents it launches: a worker gets the
 task, the plan and the guidance inline, because it has no mission server; the planner and the mission
-reviewer carry `kubiq-mission` and `kubiq-plan` and are pointed at the tools. Everything held only in
+reviewer carry `kubiq-mission` and `kubiq-doc` and are pointed at the tools. Everything held only in
 memory — launches in flight, the window to address, failed launches, feedback waiting on a busy
 worker — is lost on a restart, and the first pass afterwards marks tasks with no live worker as gone.
 
@@ -1364,9 +1374,9 @@ the mission's own.
 | The host refuses a change to the work | The panel says what it would not do, puts the open field away, takes the waiting mark off, gives up on a `New task` that never arrived and withdraws a pending delete. The next thing the host confirms clears the sentence |
 | The selected task is absent from a fresh listing | The panel closes rather than reporting a task nobody holds. The selection is left as it was, so the panel returns if a later listing carries the task again |
 | A project's tasks cannot be written | The change holds for the session and one refusal says once that it is not durable. The card moves, so the board and the store disagree until a write succeeds |
-| A plan is asked for or saved against a task with no `level` | The host refuses with `PlanError`; the modal is never offered for such a task in the first place |
-| A mission has never had a plan written | The modal reports no plan rather than an error, the same posture an untasked mission's sub-task list takes |
-| Exporting a plan fails, or the destination cannot be written | The modal's banner names the reason, in the same place a successful export reports its path |
+| A plan is asked for or saved against a task with no `level` | The host refuses with `PlanError`; the plan tab is never offered for such a task in the first place |
+| A mission has never had a plan written | The plan tab reports no plan rather than an error, the same posture an untasked mission's sub-task list takes |
+| Exporting a plan fails, or the destination cannot be written | The tab's banner names the reason, in the same place a successful export reports its path |
 | A block a save's matching could not carry forward | Its annotations are flagged `orphaned` rather than deleted, and the thread panel shows the banner instead of silently losing the comment |
 | An annotation names a block the index no longer has | The host refuses with `PlanError` rather than creating one already orphaned |
 | A mission panel or full view is open in a window that does not hold the project it was opened for | Both surfaces draw an empty page saying so, rather than nothing or a stale record |

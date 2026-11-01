@@ -5,8 +5,8 @@ kind: wip
 status: draft
 summary: What is still undecided about the planning flow — missions, plans and their annotations — after all seven staged slices (T-56 through T-62) and the follow-on provenance work (T-94) shipped. The built design lives in `features/workbench-tasks.md`, `tech/transport-contract.md` and `tech/decisions.md` (`D157` through `D161`); this file is only the remainder.
 read_when: you are picking up T-85, or deciding whether a mission should inherit anything from its parent, or whether `require plan` should gate anything
-updated: 2026-09-25
-verified: 2026-09-25
+updated: 2026-11-01
+verified: 2026-11-01
 code_anchors: [crates/kubiq/src/state/document.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/plan/service.rs, crates/kubiq-proto/src/plan.rs]
 depends_on: [feat-workbench, tech-transport, tech-decisions, wip-kb]
 ---
@@ -15,7 +15,7 @@ depends_on: [feat-workbench, tech-transport, tech-decisions, wip-kb]
 
 The planning flow this file once proposed — a mission task type, parent/child and task-to-task
 references, task attachments, a plan document with human-and-agent annotations, the plan editor,
-the `kubiq-plan` MCP surface, the new-mission dialog and a `mission assistant` agent definition flag, and
+the plan's MCP surface (now `kubiq-doc` by `task_id`, `D229`), the new-mission dialog and a `mission assistant` agent definition flag, and
 project-scoped agent definitions — is built, across all seven staged slices plus the edit-provenance and
 `PlanConflict` work that followed. What each piece is and how it works now lives in
 [`features/workbench-tasks.md`](../features/workbench-tasks.md) (behaviour and implementation),
@@ -43,8 +43,8 @@ What remains is one blocked card and two open questions.
   `crate::state::plan::file_document` is called from `AppState::open_file_document`, and the
   surface a tab draws there is the plan editor's own — `ui/document.rs`, with `ui/plan.rs` reduced
   to the dialog frame around it. Agent integration for a file document's annotations is still an
-  explicitly later card: in plan mode they feed the agents through `kubiq-plan`, for a file they
-  only sit there.
+  explicitly later card: in plan mode they feed the agents through `kubiq-doc` by `task_id`; a file's
+  reach them through `kubiq-doc` by `path`.
 - **T-85 — what a knowledge-base attachment becomes in a chat prompt.** Three candidates: a
   resolved temp file the prompt names by path, an inlined excerpt of the document's text folded
   into the prompt directly, or a reference the `kubiq-kb` MCP server resolves when the agent asks

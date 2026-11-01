@@ -15,7 +15,7 @@
 //! tree** — [`file_document`]. It is the same family on the wire, the same block matcher and the
 //! same orphaning rule host-side; what differs is only where the body and its sidecar sit, and the
 //! host answers that from the handle. A plan's annotations also reach the agents through
-//! `kubiq-plan`; a file's simply sit there, until a later card gives them a reader.
+//! `kubiq-doc`; a file's simply sit there, until a later card gives them a reader.
 //!
 //! **The third kind is a mission document beyond the plan** (M8) — [`mission_doc_document`]. Same
 //! family again, same reason: the host resolves one more path, under the mission's own `docs/`

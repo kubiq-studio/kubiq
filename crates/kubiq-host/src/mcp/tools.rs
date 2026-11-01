@@ -6,12 +6,6 @@
 //! resulting work-family messages to every window. They still never ask the coordinator a
 //! question — the handle is the board, not a round trip through the run loop.
 //!
-//! **Filing a notification is fire-and-forget.** `send_notification` says
-//! [`Message::RaiseNotification`] through a [`Voice`] and answers immediately — the notification
-//! centre decides the mute rules and the broadcast on the coordinator's thread, exactly as it
-//! does for a window, and a harness waiting on a round trip through that thread would be a
-//! harness a busy coordinator can stall.
-//!
 //! **`kubiq-ask` waits for nothing.** `ask_user_question` arms a dialog for the end of the turn and
 //! returns (`D175`, `D210`); the retired parked mode that needed a thread of its own (`D138`) is
 //! kept in [`super::server`] for reference only.
@@ -21,12 +15,10 @@
 
 use serde_json::{Value, json};
 use kubiq_proto::bus::Voice;
-use kubiq_proto::messages::Message;
-use kubiq_proto::notifications::{Family, Level, NotificationRequest};
 
 use super::catalogue::{
-    MANAGE_KUBIQ_TASKS, PROJECT_INFO, TEST, KUBIQ_ARCHIFY, KUBIQ_ASK, KUBIQ_BROWSER, KUBIQ_DOC,
-    KUBIQ_HELP, KUBIQ_KB, KUBIQ_MISSION, KUBIQ_PLAN, KUBIQ_REMOTE, KUBIQ_SQL_READ, KUBIQ_SQL_WRITE,
+    MANAGE_KUBIQ_TASKS, PROJECT_INFO, KUBIQ_ARCHIFY, KUBIQ_ASK, KUBIQ_BROWSER, KUBIQ_DOC,
+    KUBIQ_HELP, KUBIQ_KB, KUBIQ_MISSION, KUBIQ_REMOTE, KUBIQ_SQL_READ, KUBIQ_SQL_WRITE,
     USE_TASK,
 };
 use super::registry::AgentFacts;
@@ -53,8 +45,6 @@ pub fn call(
     archify: Option<&ArchifyReach>,
 ) -> Result<Value, String> {
     match (server, tool) {
-        (TEST, "send_notification") => send_notification(arguments, facts, voice),
-        (TEST, "write_log") => write_log(arguments, facts),
         (PROJECT_INFO, "project_info") => Ok(project_info(facts)),
         (PROJECT_INFO, "whoami") => Ok(whoami(facts)),
         (MANAGE_KUBIQ_TASKS, _) => {
@@ -67,12 +57,8 @@ pub fn call(
                 work.ok_or_else(|| "this host has no task board for agents to use".to_string())?;
             super::tasks::use_call(tool, arguments, facts, access)
         }
-        (KUBIQ_PLAN, _) => {
-            let reach =
-                plan.ok_or_else(|| "this host has no plan store for agents to reach".to_string())?;
-            super::plan::call(tool, arguments, facts, reach)
-        }
-        // The same handlers, the document named by a path in the agent's project (`D161`).
+        // An annotated document: a file in the agent's project by `path` (`D161`), or a task's
+        // plan by `task_id` (`D229`).
         (KUBIQ_DOC, _) => {
             let reach = plan
                 .ok_or_else(|| "this host has no document store for agents to reach".to_string())?;
@@ -140,71 +126,6 @@ fn sql_call(
     _sql: Option<&SqlReach>,
 ) -> Result<Value, String> {
     Err("this host has no databases for agents to reach".to_string())
-}
-
-/// Raise a real Kubiq notification, attributed to the agent that asked for it.
-///
-/// The actor is the agent's own name and the category its harness, so the bell reads as the
-/// conversation talking and a mute rule can silence one agent — or one harness — without silencing
-/// the family. The family is [`Family::Agents`] because that is what this is: a harness said
-/// something.
-fn send_notification(
-    arguments: &Value,
-    facts: &AgentFacts,
-    voice: &Voice,
-) -> Result<Value, String> {
-    let text = arguments
-        .get("text")
-        .and_then(Value::as_str)
-        .filter(|text| !text.trim().is_empty())
-        .ok_or_else(|| "send_notification needs a non-empty 'text' argument".to_string())?;
-
-    let level = match arguments.get("level").and_then(Value::as_str) {
-        None | Some("info") => Level::Info,
-        Some("warning") => Level::Warning,
-        Some("error") => Level::Error,
-        Some(other) => {
-            return Err(format!(
-                "unknown level '{other}': use one of info, warning, error"
-            ));
-        }
-    };
-
-    let request = NotificationRequest::new(level, Family::Agents, text)
-        .with_actor(facts.name.clone())
-        .with_category(facts.harness.clone());
-    voice.say(Message::RaiseNotification { request });
-
-    Ok(json!({"raised": true, "level": level.as_str(), "text": text}))
-}
-
-/// Write one line into Kubiq's own log ring.
-///
-/// Through `tracing::` from inside this module on purpose: the sink classifies by target, so a
-/// line written here lands under `Subsystem::Mcp` and shows up in the log viewer's own filter
-/// without anything being told about it (`crates/kubiq-proto/src/log.rs`). The agent's id is a
-/// field rather than part of the text so a search for one agent finds every line it wrote.
-fn write_log(arguments: &Value, facts: &AgentFacts) -> Result<Value, String> {
-    let message = arguments
-        .get("message")
-        .and_then(Value::as_str)
-        .filter(|message| !message.trim().is_empty())
-        .ok_or_else(|| "write_log needs a non-empty 'message' argument".to_string())?;
-
-    let agent = facts.key.as_str();
-    match arguments.get("level").and_then(Value::as_str) {
-        Some("debug") => tracing::debug!(agent, "{message}"),
-        None | Some("info") => tracing::info!(agent, "{message}"),
-        Some("warn") => tracing::warn!(agent, "{message}"),
-        Some("error") => tracing::error!(agent, "{message}"),
-        Some(other) => {
-            return Err(format!(
-                "unknown level '{other}': use one of debug, info, warn, error"
-            ));
-        }
-    }
-
-    Ok(json!({"logged": true, "message": message}))
 }
 
 /// The project this agent was started in. No description field: the record has none.

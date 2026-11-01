@@ -5,8 +5,8 @@ kind: wip
 status: current
 summary: The working note for the drone's tenth phase — the drone as a fifth MCP server, with `drone_*` tools over the bus, capability-gated, a new `shell` message pair and a per-root read-only mode. Designed, and none of it written. Carries the gaps the nine built phases left open too, chief among them that nothing has been run against a real `ssh`, `scp` or `sshd`.
 read_when: you are picking up the drone work — building phase 10, or closing one of the gaps the built phases left
-updated: 2026-10-29
-verified: 2026-10-29
+updated: 2026-11-01
+verified: 2026-11-01
 code_anchors: [crates/kubiq-host/src/mcp/server.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/tools.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-proto/src/carrier.rs, crates/kubiq-drone/src/lib.rs, crates/kubiq-proto/src/messages.rs]
 depends_on: [feat-drone, tech-transport, tech-architecture, inbox-drone-runtime]
 ---
@@ -51,7 +51,7 @@ and is not designed here.
 leave off. One process-wide loopback listener in `mcp/server.rs`, a static table of servers and JSON
 schemas in `mcp/catalogue.rs`'s `SERVERS`, dispatch in `mcp/tools.rs`'s `call`, injected per agent
 as a plain `McpRef::Inline` HTTP server at `/mcps/<key>/<name>`, and offered per profile through the
-settings checklist `Message::Mcps` feeds. A drone server is one more `ServerSpec` beside `test`,
+settings checklist `Message::Mcps` feeds. A drone server is one more `ServerSpec` beside
 `project-info`, `manage-kubiq-tasks`, `use-task` and `kubiq-kb`, and one more arm in `tools::call`'s
 match.
 

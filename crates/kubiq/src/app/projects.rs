@@ -1519,6 +1519,10 @@ impl AppState {
                     }
                     continue;
                 }
+                // A plan or mission document's tab names nothing a reread could find.
+                if file.doc.is_some() {
+                    continue;
+                }
                 if file.pinned {
                     pinned_files.push(file.key());
                 }

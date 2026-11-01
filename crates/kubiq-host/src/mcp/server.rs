@@ -862,7 +862,7 @@ mod tests {
         }
     }
 
-    /// A listener with one agent registered, and the host end the notification tool speaks into.
+    /// A listener with one agent registered, and the host end its voice speaks into.
     ///
     /// The `Hub` comes back with it and is held for the test's life on purpose: a [`bus::Voice`]
     /// holds a weak sender, so a dropped hub is a bus that has closed and a notification that goes
@@ -1035,54 +1035,22 @@ mod tests {
     }
 
     #[test]
-    fn the_test_server_initializes_lists_and_calls() {
-        let (serving, _hub, host) = running();
-        let url = url(&serving, KEY, "test");
+    fn a_server_initializes_with_its_own_name_and_lists_object_schemas() {
+        let (serving, _hub, _host) = running();
+        let url = url(&serving, KEY, "project-info");
 
         let init = post(
             &url,
             json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
         );
-        assert_eq!(init["result"]["serverInfo"]["name"], "kubiq-test");
+        assert_eq!(init["result"]["serverInfo"]["name"], "kubiq-project-info");
         assert_eq!(init["result"]["protocolVersion"], PROTOCOL_VERSION);
 
         let list = post(
             &url,
             json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
         );
-        let tools = list["result"]["tools"].as_array().unwrap();
-        let names: Vec<&str> = tools
-            .iter()
-            .map(|tool| tool["name"].as_str().unwrap())
-            .collect();
-        assert_eq!(names, ["send_notification", "write_log"]);
-        assert_eq!(tools[0]["inputSchema"]["type"], "object");
-
-        let logged = call(
-            &url,
-            "write_log",
-            json!({"message": "hello", "level": "warn"}),
-        );
-        assert_eq!(logged["result"]["isError"], false);
-        assert_eq!(answered(&logged)["logged"], true);
-
-        let raised = call(&url, "send_notification", json!({"text": "wired up"}));
-        assert_eq!(raised["result"]["isError"], false);
-        assert_eq!(answered(&raised)["level"], "info");
-
-        // The notification is a real one: it reaches the host's inbox as the message a window
-        // would have sent, so the same centre answers it.
-        match host.recv_timeout(TIMEOUT) {
-            Ok(bus::FromClient::Said {
-                message: Message::RaiseNotification { request },
-                ..
-            }) => {
-                assert_eq!(request.text, "wired up");
-                assert_eq!(request.actor.as_deref(), Some("claude 1"));
-                assert_eq!(request.category.as_deref(), Some("Claude Code"));
-            }
-            other => panic!("expected a raised notification, got {other:?}"),
-        }
+        assert_eq!(list["result"]["tools"][0]["inputSchema"]["type"], "object");
     }
 
     #[test]
@@ -1117,7 +1085,7 @@ mod tests {
     #[test]
     fn an_unknown_agent_is_a_404() {
         let (serving, _hub, _host) = running();
-        let response = ureq::post(&url(&serving, "01JNOBODY0000000000000000", "test"))
+        let response = ureq::post(&url(&serving, "01JNOBODY0000000000000000", "project-info"))
             .timeout(TIMEOUT)
             .send_string(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize"}).to_string());
         assert_eq!(status(response), 404);
@@ -1148,7 +1116,7 @@ mod tests {
     #[test]
     fn an_unknown_tool_is_an_in_band_error_not_a_json_rpc_error() {
         let (serving, _hub, _host) = running();
-        let response = call(&url(&serving, KEY, "test"), "nope", json!({}));
+        let response = call(&url(&serving, KEY, "project-info"), "nope", json!({}));
         assert!(response.get("error").is_none());
         assert_eq!(response["result"]["isError"], true);
         assert!(
@@ -1161,15 +1129,15 @@ mod tests {
 
     #[test]
     fn a_tool_called_without_its_argument_fails_in_band() {
-        let (serving, _hub, _host) = running();
-        let response = call(&url(&serving, KEY, "test"), "write_log", json!({}));
+        let (serving, _hub, _host, _task, _plans, _dir) = running_with_plan();
+        let response = call(&url(&serving, KEY, "kubiq-doc"), "read_doc", json!({}));
         assert_eq!(response["result"]["isError"], true);
     }
 
     #[test]
     fn an_unknown_method_is_a_json_rpc_error_and_a_notification_is_a_bare_202() {
         let (serving, _hub, _host) = running();
-        let url = url(&serving, KEY, "test");
+        let url = url(&serving, KEY, "project-info");
 
         let response = post(
             &url,
@@ -1453,9 +1421,9 @@ mod tests {
     }
 
     #[test]
-    fn the_plan_server_reads_writes_lists_replies_and_resolves_annotations() {
+    fn the_doc_server_reads_writes_lists_replies_and_resolves_a_plan_by_task_id() {
         let (serving, _hub, _host, task_id, plans, _dir) = running_with_plan();
-        let url = url(&serving, KEY, "kubiq-plan");
+        let url = url(&serving, KEY, "kubiq-doc");
 
         let list = post(
             &url,
@@ -1470,11 +1438,13 @@ mod tests {
         assert_eq!(
             names,
             [
-                "read_plan",
-                "write_plan",
-                "plan_changes",
+                "list_annotated_docs",
+                "list_my_docs",
+                "read_doc",
+                "write_doc",
+                "doc_changes",
                 "list_annotations",
-                "annotate_plan",
+                "annotate_doc",
                 "reply_annotation",
                 "resolve_annotation",
             ]
@@ -1482,7 +1452,7 @@ mod tests {
 
         let task_id = task_id.to_string();
 
-        let empty = answered(&call(&url, "read_plan", json!({"task_id": task_id})));
+        let empty = answered(&call(&url, "read_doc", json!({"task_id": task_id})));
         assert_eq!(empty["body"], "");
         assert_eq!(
             empty["revision"], 0,
@@ -1491,7 +1461,7 @@ mod tests {
 
         let written = answered(&call(
             &url,
-            "write_plan",
+            "write_doc",
             json!({"task_id": task_id, "body": "# Plan\n\nStep one.\n\nStep two."}),
         ));
         assert_eq!(written["body"], "# Plan\n\nStep one.\n\nStep two.");
@@ -1637,7 +1607,7 @@ mod tests {
         };
         answered(&call(
             &url,
-            "write_plan",
+            "write_doc",
             json!({"task_id": task_id, "body": "# Plan\n\nStep one."}),
         ));
         let after_edit = answered(&call(
@@ -1876,20 +1846,20 @@ mod tests {
         assert_eq!(written["body"], "# Spec\n\nRewritten.\n");
     }
 
-    /// `annotate_plan` anchors by a unique quote or a block id, stamps the agent, takes marks, and
+    /// `annotate_doc` anchors by a unique quote or a block id, stamps the agent, takes marks, and
     /// `list_annotations` filters on them.
     #[test]
-    fn annotate_plan_anchors_by_quote_or_block_and_lists_by_mark() {
+    fn annotate_doc_anchors_by_quote_or_block_and_lists_by_mark() {
         let (serving, _hub, _host, task_id, _plans, _dir) = running_with_plan();
-        let url = url(&serving, KEY, "kubiq-plan");
+        let url = url(&serving, KEY, "kubiq-doc");
         let task_id = task_id.to_string();
         answered(&call(
             &url,
-            "write_plan",
+            "write_doc",
             json!({"task_id": task_id, "body": "# Plan\n\nStep one is here.\n\nStep two is here."}),
         ));
         let refused = |arguments: Value| {
-            let response = call(&url, "annotate_plan", arguments);
+            let response = call(&url, "annotate_doc", arguments);
             assert_eq!(response["result"]["isError"], true, "{response}");
         };
         refused(json!({"task_id": task_id, "text": "x"}));
@@ -1898,7 +1868,7 @@ mod tests {
 
         let made = answered(&call(
             &url,
-            "annotate_plan",
+            "annotate_doc",
             json!({"task_id": task_id, "text": "why?", "quote": "Step  two", "marks": ["question"]}),
         ));
         assert_eq!(made["block_text"], "Step two is here.");
@@ -1908,7 +1878,7 @@ mod tests {
 
         let by_block = answered(&call(
             &url,
-            "annotate_plan",
+            "annotate_doc",
             json!({"task_id": task_id, "text": "do it", "block_id": made["block_id"], "marks": ["todo"]}),
         ));
         assert_eq!(by_block["block_id"], made["block_id"]);
@@ -1924,24 +1894,24 @@ mod tests {
     }
 
     /// The edit-provenance half of the same server: the agent writes, a person edits two places
-    /// through the interface's own path, and `plan_changes` names exactly those two — defaulting
+    /// through the interface's own path, and `doc_changes` names exactly those two — defaulting
     /// its watermark to the agent's own last write, with no revision passed in.
     #[test]
-    fn plan_changes_reports_where_a_human_edited_what_this_agent_wrote() {
+    fn doc_changes_reports_where_a_human_edited_what_this_agent_wrote_on_a_plan() {
         let (serving, _hub, _host, task_id, plans, _dir) = running_with_plan();
-        let url = url(&serving, KEY, "kubiq-plan");
+        let url = url(&serving, KEY, "kubiq-doc");
         let task_id = task_id.to_string();
         let project: kubiq_proto::ids::ProjectId = facts().project.id.parse().unwrap();
 
         let written = answered(&call(
             &url,
-            "write_plan",
+            "write_doc",
             json!({"task_id": task_id, "body": "# Plan\n\nStep one.\n\nStep two."}),
         ));
         assert_eq!(written["revision"], 1);
 
         // Nothing has happened since: the ordinary answer is an empty one, not an error.
-        let quiet = answered(&call(&url, "plan_changes", json!({"task_id": task_id})));
+        let quiet = answered(&call(&url, "doc_changes", json!({"task_id": task_id})));
         assert_eq!(quiet["regions"].as_array().unwrap().len(), 0);
         assert_eq!(quiet["stats"]["human_revisions"], 0);
 
@@ -1953,7 +1923,7 @@ mod tests {
             None,
         );
 
-        let changed = answered(&call(&url, "plan_changes", json!({"task_id": task_id})));
+        let changed = answered(&call(&url, "doc_changes", json!({"task_id": task_id})));
         assert_eq!(
             changed["since_revision"], 1,
             "defaulted to this agent's own last write",
@@ -1983,7 +1953,7 @@ mod tests {
         // An explicit watermark of 0 takes in the agent's own opening write as well.
         let everything = answered(&call(
             &url,
-            "plan_changes",
+            "doc_changes",
             json!({"task_id": task_id, "since_revision": 0}),
         ));
         assert_eq!(everything["stats"]["agent_revisions"], 1);
@@ -1995,22 +1965,40 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_tool_without_a_plan_store_fails_in_band() {
+    fn a_doc_tool_without_a_plan_store_fails_in_band() {
         let (serving, _hub, _host) = running();
-        let response = call(&url(&serving, KEY, "kubiq-plan"), "read_plan", json!({}));
+        let response = call(&url(&serving, KEY, "kubiq-doc"), "read_doc", json!({}));
         assert_eq!(response["result"]["isError"], true);
         assert!(
             response["result"]["content"][0]["text"]
                 .as_str()
                 .unwrap()
-                .contains("no plan store")
+                .contains("no document store")
+        );
+    }
+
+    /// A `kubiq-doc` call names its document by `path` or by `task_id`, never both.
+    #[test]
+    fn a_doc_tool_given_both_a_path_and_a_task_id_is_refused() {
+        let (serving, _hub, _host, task_id, _plans, _dir) = running_with_plan();
+        let response = call(
+            &url(&serving, KEY, "kubiq-doc"),
+            "read_doc",
+            json!({"path": "spec.md", "task_id": task_id.to_string()}),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("not both")
         );
     }
 
     #[test]
     fn a_body_that_will_not_parse_is_a_parse_error() {
         let (serving, _hub, _host) = running();
-        let response = ureq::post(&url(&serving, KEY, "test"))
+        let response = ureq::post(&url(&serving, KEY, "project-info"))
             .timeout(TIMEOUT)
             .send_string("not json")
             .expect("the request is answered");

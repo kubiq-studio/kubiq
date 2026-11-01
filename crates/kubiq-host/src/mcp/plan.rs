@@ -1,17 +1,17 @@
-//! The `kubiq-plan` and `kubiq-doc` servers: read and write an annotated markdown document, and
-//! answer its annotations, as tools a hosted agent can call.
+//! The `kubiq-doc` server: read and write an annotated markdown document, and answer its
+//! annotations, as tools a hosted agent can call.
 //!
 //! **One set of handlers, two ways of naming the document.** Every handler below takes a resolved
-//! [`Target`] and never asks which kind it is: `kubiq-plan` resolves one from a `task_id` (a task's
-//! plan), `kubiq-doc` from a `path` (any markdown file in the agent's project — `D161`'s
-//! `DocumentHandle::File`). The block matcher, the orphaning rule, the conflict check and the
-//! provenance layer are [`crate::plan::Plans`]'s and serve both, so a collaboration on a spec and
+//! [`Target`] and never asks which kind it is: a call names either a `task_id` (that task's plan)
+//! or a `path` (any markdown file in the agent's project — `D161`'s `DocumentHandle::File`), never
+//! both. The separate `kubiq-plan` server that once served the plan is gone (`D229`). The block
+//! matcher, the orphaning rule, the conflict check and the provenance layer are [`crate::plan::Plans`]'s and serve both, so a collaboration on a spec and
 //! a collaboration on a plan cannot drift apart. What differs is only the field each answer echoes
 //! back to say which document it is about: `task_id` for a plan, `path` for a file.
 //!
-//! `read_plan` and `write_plan` are staging slice 3. `list_annotations`, `reply_annotation` and
+//! `read_doc` and `write_doc` are staging slice 3. `list_annotations`, `reply_annotation` and
 //! `resolve_annotation` are slice 4 — see `_docs/wip/planning-system.md`'s "The annotation MCP
-//! surface"; `annotate_plan` opens a thread as the agent, anchored by quote or block id.
+//! surface"; `annotate_doc` opens a thread as the agent, anchored by quote or block id.
 //! **Not built here**: the `kubiq-ask` parking trick that would let an agent post an annotation
 //! and wait for the reply inside one turn. Every call talks to [`crate::plan::Plans`] through
 //! the shared [`super::PlanReach`], which is where the level check lives: a plan belongs to any
@@ -37,37 +37,13 @@ use crate::reply::Reply;
 /// with more than this many annotated files is not one an agent reads a list of.
 const MAX_ANNOTATED_DOCS: usize = 500;
 
-/// The `kubiq-plan` server: the document is a task's plan, named by `task_id`.
-pub fn call(
-    tool: &str,
-    arguments: &Value,
-    facts: &AgentFacts,
-    reach: &PlanReach,
-) -> Result<Value, String> {
-    let project = project_id(facts)?;
-    let plan = || -> Result<Target, String> {
-        let task = required_str(arguments, "task_id")?
-            .parse()
-            .map_err(|_| "not a task id".to_string())?;
-        Ok(Target::plan(project, task))
-    };
-    match tool {
-        "read_plan" => read(&plan()?, facts, reach),
-        "write_plan" => write(arguments, facts, &owned(plan()?, facts, reach)?, reach),
-        "plan_changes" => changes(arguments, facts, &plan()?, reach),
-        "list_annotations" => list_annotations(arguments, &plan()?, reach),
-        "annotate_plan" => annotate(arguments, &owned(plan()?, facts, reach)?, reach),
-        "reply_annotation" => reply_annotation(arguments, &owned(plan()?, facts, reach)?, reach),
-        "resolve_annotation" => {
-            resolve_annotation(arguments, &owned(plan()?, facts, reach)?, reach)
-        }
-        _ => Err(format!("unknown tool: kubiq-plan/{tool}")),
-    }
-}
-
-/// The `kubiq-doc` server: the document is a markdown file in the agent's project, named by a
-/// project-relative `path` and resolved against the project's own root — the same containment and
-/// markdown check a window's [`DocumentHandle::File`] goes through in `Coordinator::plan_job`.
+/// The `kubiq-doc` server. The document is named by exactly one of two fields:
+///
+/// - `path`: a markdown file in the agent's project, project-relative and resolved against the
+///   project's own root — the same containment and markdown check a window's
+///   [`DocumentHandle::File`] goes through in `Coordinator::plan_job`;
+/// - `task_id`: that task's plan ([`DocumentHandle::Plan`]), refused by [`crate::plan::Plans`]
+///   for a task that carries no [`kubiq_proto::work::Level`].
 pub fn doc_call(
     tool: &str,
     arguments: &Value,
@@ -83,8 +59,16 @@ pub fn doc_call(
         return list_my_docs(facts, project, root, reach);
     }
     let file = || -> Result<Target, String> {
-        let rel_path = required_str(arguments, "path")?;
-        file_target(project, root, rel_path)
+        match (arguments.get("path"), arguments.get("task_id")) {
+            (Some(_), Some(_)) => Err("give either path or task_id, not both".to_string()),
+            (None, Some(_)) => {
+                let task = required_str(arguments, "task_id")?
+                    .parse()
+                    .map_err(|_| "not a task id".to_string())?;
+                Ok(Target::plan(project, task))
+            }
+            (_, None) => file_target(project, root, required_str(arguments, "path")?),
+        }
     };
     match tool {
         "read_doc" => read(&file()?, facts, reach),
@@ -233,8 +217,8 @@ fn list_my_docs(
 
 /// The target, if this agent may change it: refused when the document is bound to another agent
 /// (`D207`), and every window is told so it can offer to reassign it. An unbound document, or one
-/// bound to the caller, passes. Every agent write to an annotated document — `kubiq-doc`,
-/// `kubiq-plan` and `kubiq-mission`'s `write_document` — comes through here.
+/// bound to the caller, passes. Every agent write to an annotated document — `kubiq-doc` and
+/// `kubiq-mission`'s `write_document` — comes through here.
 ///
 /// **Advisory, not a security boundary.** It keeps a cooperating agent off a document the user
 /// gave to another; an agent's own file tools can still edit the markdown underneath.
@@ -350,7 +334,7 @@ fn read(target: &Target, facts: &AgentFacts, reach: &PlanReach) -> Result<Value,
 
 /// Replace the document's body, stamped as **this agent's** save.
 ///
-/// [`crate::plan::Saver::agent`] is handed the agent's own key, which is what later lets its `plan_changes`
+/// [`crate::plan::Saver::agent`] is handed the agent's own key, which is what later lets its `doc_changes`
 /// default to "since I last wrote this" rather than to some other agent's write. This is the only
 /// path to [`kubiq_proto::plan::SaveOrigin::Agent`]; the interface's [`Message::SavePlan`] is the
 /// only path to the other, and neither can reach the other's stamp.

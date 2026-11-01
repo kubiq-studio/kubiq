@@ -2636,7 +2636,7 @@ pub enum Message {
     /// **This message is what makes a save a human's.** It carries no origin field and must never
     /// grow one: only the interface sends it, so the host stamps
     /// [`crate::plan::SaveOrigin::Human`] on arrival and an agent has no way to ask for the other
-    /// stamp. The agent's path is `kubiq-plan`'s `write_plan`, which never becomes this message.
+    /// stamp. The agent's path is `kubiq-doc`'s `write_doc`, which never becomes this message.
     ///
     /// **`expected` is mandatory and there is no force flag** — [`Message::WriteHostFile`]'s
     /// discipline, for the same reason: the host is the arbiter of a race, not the window. It is
@@ -2749,7 +2749,7 @@ pub enum Message {
     ///
     /// The one message in the family that reads the edit-provenance layer. It exists so the
     /// editor can decorate the lines a human changed since the agent last wrote — the same
-    /// question `kubiq-plan`'s `plan_changes` tool answers for an agent, over the same records, so
+    /// question `kubiq-doc`'s `doc_changes` tool answers for an agent, over the same records, so
     /// the two can never disagree about what changed.
     ///
     /// `since_revision` absent means "since the beginning", which for a plan with any history is
@@ -2819,7 +2819,7 @@ pub enum Message {
         rel_path: String,
     },
     /// A task's plan changed by some route other than the window's own request — another window's
-    /// save, or an agent's `write_plan` call through `kubiq-plan`. Broadcast, carrying no body: a
+    /// save, or an agent's `write_doc` call through `kubiq-doc`. Broadcast, carrying no body: a
     /// window showing that plan re-asks with [`Message::LoadPlan`] rather than being sent content
     /// it may not even have open, the same economy [`Message::KbChanged`] already banks.
     ///
@@ -2853,7 +2853,7 @@ pub enum Message {
         binding: DocBinding,
     },
     /// A task's annotations changed by some route other than this window's own request — another
-    /// window's comment, an agent's reply through `kubiq-plan`, or a [`Message::SavePlan`] whose
+    /// window's comment, an agent's reply through `kubiq-doc`, or a [`Message::SavePlan`] whose
     /// block matching orphaned or re-anchored a thread. Broadcast, carrying nothing, on
     /// [`Message::PlanChanged`]'s economy: a window showing that plan re-asks with
     /// [`Message::ListPlanAnnotations`] if it still cares.

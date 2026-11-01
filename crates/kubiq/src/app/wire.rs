@@ -1204,6 +1204,8 @@ impl AppState {
                     open.editor
                         .open
                         .iter()
+                        // A plan or mission document's tab names nothing on disk.
+                        .filter(|file| file.doc.is_none())
                         .map(|file| file.path.clone())
                         .collect()
                 } else {
@@ -1974,6 +1976,8 @@ impl AppState {
                 let open = self.projects.get_mut(&project_id)?;
                 let task_id = mission.task_id;
                 open.missions.insert(task_id, *mission);
+                self.settle_mission_plan(project_id, task_id, cx);
+                let open = self.projects.get_mut(&project_id)?;
                 let showing = open.mission_view.tab == crate::state::mission::MissionTab::History
                     && open.mission_history.contains_key(&task_id);
                 if showing {
@@ -2048,9 +2052,9 @@ impl AppState {
             }
 
             // ── Plan family ────────────────────────────────────────────
-            // Answers to `LoadPlan`/`SavePlan`, sent only to whoever asked — the plan modal is
-            // the one place in the tree that holds one, so the reply either lands there or is
-            // stale and dropped.
+            // Answers to `LoadPlan`/`SavePlan`, sent only to whoever asked — the open document's
+            // surface, or the plan tab still waiting on its first body (or on a save made while
+            // no surface was open), so the reply lands there or is stale and dropped.
             Message::Plan {
                 doc,
                 body,
@@ -2069,6 +2073,12 @@ impl AppState {
                     // save guard asks about. See `DocumentEditor::set_loaded`.
                     self.plan_body_arrived(body, revision, cx);
                     self.ask_for_plan_changes();
+                } else {
+                    // The first answer of a tab that has no buffer yet — and so no surface — or the
+                    // echo of a save made from a tab with no surface open.
+                    if !self.hosted_body_arrived(&doc, &body, revision) {
+                        self.hosted_saved(&doc, &body, revision, cx);
+                    }
                 }
                 cx.notify();
             }
@@ -2106,17 +2116,18 @@ impl AppState {
             }
 
             Message::PlanExported { doc, rel_path } => {
+                let notice = crate::state::document::Notice::Ok(format!("Exported to {rel_path}."));
                 if let Some(plan) = self.workbench.plan.as_mut()
                     && plan.doc == doc
                 {
-                    plan.notice = Some(crate::state::document::Notice::Ok(format!(
-                        "Exported to {rel_path}."
-                    )));
+                    plan.notice = Some(notice);
+                } else {
+                    self.hosted_notice(&doc, notice);
                 }
                 cx.notify();
             }
 
-            // Another window's save, or an agent's `write_plan` through `kubiq-plan` — no body
+            // Another window's save, or an agent's `write_doc` through `kubiq-doc` — no body
             // travels with it, so a window showing that plan re-asks with `LoadPlan` rather than
             // being handed content it may not even have open, `KbChanged`'s own economy.
             // `revision` and `origin` ride along as two scalars, and the surface reads both before
@@ -2245,7 +2256,7 @@ impl AppState {
                 cx.notify();
             }
 
-            // Another window's comment, an agent's reply through `kubiq-plan`, or a `SavePlan`
+            // Another window's comment, an agent's reply through `kubiq-doc`, or a `SavePlan`
             // whose block matching orphaned or re-anchored a thread — no body travels with it, so
             // a window showing that plan's annotations re-asks, `Message::PlanChanged`'s own
             // economy. This is the seam an agent's MCP reply refreshes an open panel through.
@@ -2271,6 +2282,8 @@ impl AppState {
                     .is_some_and(|plan| plan.doc == doc)
                 {
                     self.plan_save_refused(revision, origin);
+                } else {
+                    self.hosted_save_refused(&doc);
                 }
                 cx.notify();
             }
@@ -2285,7 +2298,15 @@ impl AppState {
                 doc,
                 error,
             } => {
-                if let Some(plan) = self.workbench.plan.as_mut()
+                if let Some(doc) = &doc
+                    && self
+                        .workbench
+                        .plan
+                        .as_ref()
+                        .is_none_or(|plan| plan.doc != *doc)
+                {
+                    self.hosted_load_failed(doc, &error);
+                } else if let Some(plan) = self.workbench.plan.as_mut()
                     && plan.project_id() == project_id
                     && doc.as_ref().map(|doc| *doc == plan.doc).unwrap_or(true)
                 {
@@ -3685,7 +3706,7 @@ impl AppState {
                             open.editor
                                 .open
                                 .iter()
-                                .filter(|file| !file.guest && under(&file.path))
+                                .filter(|file| !file.guest && file.doc.is_none() && under(&file.path))
                                 .map(|file| {
                                     (file.key(), format!("{to}{}", &file.path[rel_path.len()..]))
                                 })
@@ -3706,7 +3727,10 @@ impl AppState {
                         .get(&project_id)
                         .map(|open| {
                             (0..open.editor.open.len())
-                                .filter(|&ix| under(&open.editor.open[ix].path))
+                                .filter(|&ix| {
+                                    open.editor.open[ix].doc.is_none()
+                                        && under(&open.editor.open[ix].path)
+                                })
                                 .collect()
                         })
                         .unwrap_or_default();

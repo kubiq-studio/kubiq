@@ -5,8 +5,8 @@ kind: tech
 status: draft
 summary: The complete message set the UI and the coordinator exchange — the pane, session, project, file, git, work, conversation, search, account, quota, agent definition (with its skills and MCP catalog), command-line, host browse, database, browser, remote-tool, connector, repository, task-source, assist, notification, web asset and carrier families, the tunnel channel beside the bus, the framing rules, and the procedure for adding a variant.
 read_when: you are adding, changing or removing a message, or wiring either half to the bus
-updated: 2026-10-29
-verified: 2026-10-29
+updated: 2026-11-01
+verified: 2026-11-01
 code_anchors: [crates/kubiq-proto/src/messages.rs, crates/kubiq-proto/src/ask.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/armed.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/quota.rs, crates/kubiq-host/src/quota.rs, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/ids.rs, crates/kubiq-proto/src/browser.rs, crates/kubiq-proto/src/remote_tools.rs, crates/kubiq-proto/src/tunnel.rs, crates/kubiq-tunnel/src/mux.rs, crates/kubiq-tunnel/src/registry.rs, crates/kubiq-tunnel/src/pin.rs, crates/kubiq-tunnel/src/tls.rs, crates/kubiq-tunnel/src/duplex.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/src/mcp/remote.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/feedback.rs, crates/kubiq-host/src/feedback/mod.rs, crates/kubiq-host/src/feedback/api.rs, crates/kubiq-host/src/feedback/issues.rs, crates/kubiq-host/src/feedback/keychain.rs, crates/kubiq-proto/src/update.rs, crates/kubiq-host/src/updates/mod.rs, crates/kubiq-host/src/updates/feed.rs, crates/kubiq-host/src/updates/apply.rs, crates/kubiq-proto/src/files.rs, crates/kubiq-proto/src/git.rs, crates/kubiq-proto/src/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-proto/src/conversation.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-proto/src/tasksrc.rs, crates/kubiq-proto/src/stats.rs, crates/kubiq-proto/src/assist.rs, crates/kubiq-proto/src/notifications.rs, crates/kubiq-proto/src/tools.rs, crates/kubiq-host/src/notifications/mod.rs, crates/kubiq-host/src/assist/mod.rs, crates/kubiq-host/src/assist/api.rs, crates/kubiq-host/src/assist/providers.rs, crates/kubiq-host/src/assist/subject.rs, crates/kubiq-host/src/assist/stub.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-proto/src/mcp.rs, crates/kubiq-proto/src/catalog.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-proto/src/mission.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs]
 depends_on: [tech-architecture]
 review_cycle: monthly
@@ -1336,7 +1336,7 @@ A determined user still gets there, one honest expectation at a time.
 `PlanConflict` is its own variant rather than a `PlanError` sentence because it is the one failure
 the interface does something other than report: it says where the plan stands and who moved it,
 which is exactly what the surface needs to ask its question again and what the next save has to
-name. `write_plan`'s `expected_revision` is **optional**, which is the one place the two write paths
+name. `kubiq-doc`'s `write_doc` `expected_revision` is **optional**, which is the one place the two write paths
 differ: a window always holds a watermark, while an agent writing a plan for a mission nobody has
 planned legitimately has none, and refusing that for want of a number it was never given would be
 the worse failure. An agent that read the plan first passes the revision it read and gets the same
@@ -1390,8 +1390,8 @@ turn ends) or `NotRunning` (no live conversation that takes input, or a refused 
 the host delivers once it can). An `AskDocAgent` with nothing waiting sends nothing. The prompt is
 composed at delivery from the sidecars, so it carries comments as edited and skips threads resolved
 since. The queue is the host's memory and does not survive a restart. An agent writing,
-annotating, replying on or resolving a document bound to *another* agent through `kubiq-doc`,
-`kubiq-plan` or `kubiq-mission`'s `write_document` is refused, and every window hears `DocOwnershipConflict`
+annotating, replying on or resolving a document bound to *another* agent through `kubiq-doc`
+or `kubiq-mission`'s `write_document` is refused, and every window hears `DocOwnershipConflict`
 — `requester` and its display `requester_name`, and the `owner` — so it can offer to reassign with
 `SetDocAgent`. It is sent only when the requester's key is an `AgentId` (a conversation, not a pane).
 
@@ -1399,7 +1399,7 @@ annotating, replying on or resolving a document bound to *another* agent through
 a monotonic `revision` bumped on every save of its body, and every save records whether it was a
 person's or an agent's — the `SaveOrigin` record, `Human` or `Agent`. **The origin is settled at
 the entry point and never inferred**: `SavePlan` is the interface's message and nobody else sends
-one, so the host stamps `Human` on arrival; `kubiq-plan`'s `write_plan` is the only route to
+one, so the host stamps `Human` on arrival; `kubiq-doc`'s `write_doc` is the only route to
 `Agent`. `SavePlan` therefore carries no origin field and must never grow one, or an agent could
 ask for the other stamp. The block layer cannot answer "where has a human been", because a block
 whose wording was tightened is the same block with the same id — which is exactly what the matcher
@@ -2609,7 +2609,7 @@ tags, and are never written back.
 
 **The `coordinator` and `worker` tags re-assert their MCP servers on save.** `coordinator` (the
 tag a mission's planner carries; a mission has no coordinator agent) implies `kubiq-mission`,
-`kubiq-plan`, `manage-kubiq-tasks` and `kubiq-kb`; `worker` implies `use-task`, `project-info` and
+`kubiq-doc`, `manage-kubiq-tasks` and `kubiq-kb`; `worker` implies `use-task`, `project-info` and
 `kubiq-kb`. The host merges the implied set back into `mcps` on every save, whatever arrived,
 because a planner without its servers cannot plan. `planner` implies nothing. `disabled` is the one remaining flag and the simplest:
 a disabled definition is listed and editable, and offered nowhere a run is started from.
@@ -2640,7 +2640,8 @@ a form opened on, and every field the user then changed is the user saying other
 
 **The MCP catalogue rides here** because an agent definition is where a pick is saved. `Mcps` answers with an
 `McpInfo` per server this *build* offers — a slug, a title, a paragraph, and an `McpToolInfo` per
-tool — `test`, `project-info`, `manage-kubiq-tasks`, `use-task` and `kubiq-kb` in this build — and
+tool — `project-info`, `manage-kubiq-tasks`, `use-task`, `kubiq-kb`, `kubiq-doc` and the rest of
+`mcp::catalogue::SERVERS` — and
 `AgentDefinition.mcps` and
 `StartConversation.mcps` both name one of those slugs. Nothing on
 the wire says how a server is reached: the host binds one loopback port and hands each run a URL

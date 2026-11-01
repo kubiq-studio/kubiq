@@ -262,7 +262,7 @@ pub const TASK_ASSIGN_MCPS: [&str; 2] = ["manage-kubiq-tasks", "kubiq-ask"];
 /// draws these servers as ticked and takes no click on them: a checklist that let one be unticked
 /// would be describing a save that is not going to happen.
 pub const COORDINATOR_MCPS: [&str; 4] =
-    ["kubiq-mission", "kubiq-plan", "manage-kubiq-tasks", "kubiq-kb"];
+    ["kubiq-mission", "kubiq-doc", "manage-kubiq-tasks", "kubiq-kb"];
 
 /// What the **worker** flag implies — mirrors `catalogue::WORKER_MCPS`, on the same terms as
 /// [`COORDINATOR_MCPS`]. Workers have no mission server: the runner puts the task, the plan and
@@ -283,10 +283,9 @@ pub const DOC_MCPS: [&str; 2] = ["kubiq-doc", "kubiq-archify"];
 /// before the prose usually is.
 ///
 /// **`plan_mode` is a sentence, not a tool.** No MCP server is ticked for it — `TASK_ASSIGN_MCPS`
-/// carries only the board and the feedback tool — so an agent told to "work in plan mode" today
-/// has no `kubiq-plan` server to write one into. TODO: once T-64's plan-mode follow-up wires the
-/// plan tool into this form, tick `kubiq-plan` here too instead of leaving the instruction as
-/// words alone.
+/// carries only the board and the feedback tool. A plan is a document now, and an agent writes one
+/// through `kubiq-doc` (which the coordinator role ticks), so there is nothing for this form to
+/// add: the instruction stays words, for an agent that has no plan to write.
 pub fn task_assignment_prompt(task_label: &str, ask_for_feedback: bool, plan_mode: bool) -> String {
     let mut prompt = format!("Start working on task {task_label}.");
     if ask_for_feedback {
@@ -923,19 +922,19 @@ mod tests {
     fn a_role_ticks_its_servers_and_the_checklist_cannot_untick_them() {
         let mut form = NewAgentForm::new(Purpose::AgentDefinition);
         form.toggle_mcp("test");
-        assert!(!form.wants_mcp("kubiq-plan"), "no role, no implied server");
+        assert!(!form.wants_mcp("kubiq-doc"), "no role, no implied server");
 
         form.toggle_tag("planner");
         assert!(
-            !form.implies_mcp("kubiq-plan"),
+            !form.implies_mcp("kubiq-doc"),
             "a plain tag implies nothing"
         );
         form.toggle_tag("coordinator");
-        assert!(form.implies_mcp("kubiq-plan"));
-        assert!(form.wants_mcp("kubiq-plan"));
-        form.toggle_mcp("kubiq-plan");
+        assert!(form.implies_mcp("kubiq-doc"));
+        assert!(form.wants_mcp("kubiq-doc"));
+        form.toggle_mcp("kubiq-doc");
         assert!(
-            form.wants_mcp("kubiq-plan") && !form.mcps.iter().any(|it| it == "kubiq-plan"),
+            form.wants_mcp("kubiq-doc") && !form.mcps.iter().any(|it| it == "kubiq-doc"),
             "unticking an implied server does nothing, and it is not written onto the list either"
         );
         assert_eq!(form.mcp_count(), 1 + COORDINATOR_MCPS.len());
@@ -953,8 +952,8 @@ mod tests {
     }
 
     /// The MCPs a task assignment preselects are the board and the one tool that waits for a
-    /// person — not the plan tool, which `task_assignment_prompt`'s doc comment leaves as a TODO
-    /// until a follow-up wires it in.
+    /// person — not a plan tool: a plan is a document, written through `kubiq-doc`, which the
+    /// coordinator role carries.
     #[test]
     fn task_assign_mcps_are_the_board_and_the_feedback_tool() {
         assert_eq!(TASK_ASSIGN_MCPS, ["manage-kubiq-tasks", "kubiq-ask"]);

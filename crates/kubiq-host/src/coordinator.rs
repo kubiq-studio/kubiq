@@ -185,7 +185,7 @@ struct Coordinator {
     /// Shared with the MCP listener as [`crate::work::Handle`].
     work: crate::work::Handle,
     /// A task's plan, one markdown document per mission. Shared with the MCP listener's
-    /// `kubiq-plan` server as [`crate::plan::Handle`], on [`Self::work`]'s own footing.
+    /// `kubiq-doc` server as [`crate::plan::Handle`], on [`Self::work`]'s own footing.
     plans: crate::plan::Handle,
     /// A mission's own record, one directory per mission beside its plan. Shared on
     /// [`Self::plans`]'s footing, because the stage that adds `kubiq-mission` hands the same
@@ -3303,7 +3303,7 @@ impl Coordinator {
             } => {
                 // `SavePlan` is the interface's message and nothing else sends it, so the origin
                 // is settled here and never looked at again. An agent's save arrives through
-                // `kubiq-plan`'s `write_plan` and never becomes this message.
+                // `kubiq-doc`'s `write_doc` and never becomes this message.
                 //
                 // `expected` is mandatory on the wire and is passed straight through: the window
                 // never gets to skip the check, so a save made against a watermark somebody has

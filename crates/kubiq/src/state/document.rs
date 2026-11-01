@@ -33,7 +33,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 
-use gpui::{Entity, Subscription};
+use gpui::Entity;
 use kubiq_proto::ids::{AnnotationId, BlockId, CommentId, ProjectId, TaskId};
 use kubiq_proto::plan::{
     Annotation, AnnotationMark, AnnotationState, BlockHighlight, DocBinding, HighlightColour,
@@ -112,19 +112,6 @@ pub enum ComposerTarget {
     Edit(AnnotationId, CommentId),
 }
 
-/// Which frame the one annotated-document surface is drawn in.
-///
-/// **One document is open at a time per window**, so this is a property of that document rather
-/// than two states: a markdown tab put into `ViewLayout::Annotation` opens the file's document
-/// here, and raising the plan dialog over it replaces it, exactly as opening a second plan does.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Presentation {
-    /// `ui/plan.rs`'s dialog — the plan editor, settled as a modal.
-    Modal,
-    /// Inside a markdown tab's viewer, as its fourth layout.
-    Viewer,
-}
-
 /// Whether a freshly opened document of this kind asks the host where it was edited (T-183).
 ///
 /// A file document is markdown in the user's own repository, most often prose nobody but its one
@@ -139,18 +126,10 @@ pub fn tracks_updates_by_default(doc: &DocumentHandle) -> bool {
 /// replaces it, the way the rest of the window's overlays behave.
 pub struct DocumentEditor {
     pub doc: DocumentHandle,
-    /// Where the surface is drawn. **The surface itself is the same either way** — the view, the
-    /// rail and every action on them are `crate::ui::document`'s. What this decides is who frames
-    /// it, and whose buffer [`Self::md`] is over: [`Presentation::Modal`] is the plan dialog over
-    /// `AppState::plan_editor`, [`Presentation::Viewer`] is a markdown tab's own view over the
-    /// tab's own buffer.
-    pub presentation: Presentation,
-    /// The markdown view the document is drawn in, its annotation layer on. A dialog's is built
-    /// for the document and dropped with it; a tab's is the tab's `OpenFile::md`, borrowed.
+    /// The markdown view the document is drawn in, its annotation layer on: the tab's own
+    /// `OpenFile::md`, borrowed, over the tab's own buffer. The tab already subscribes to its
+    /// events (`app::editor::attach_md_view`).
     pub md: Entity<MdView>,
-    /// The view's events, for a view built for this document — `None` for a tab's view, which
-    /// the tab already subscribes to (`app::editor::attach_md_view`).
-    pub md_events: Option<Subscription>,
     /// The host blocks placed in the view's rows, as of the last remap — rebuilt whenever either
     /// side moves: a reparse, or a fresh block index.
     pub rows: RowMap,
@@ -184,8 +163,6 @@ pub struct DocumentEditor {
     pub confirm_overwrite: bool,
     /// A save is in flight: the surface waits for the host's answer before calling itself clean.
     pub saving: bool,
-    /// Escape was pressed over an unsaved edit once. The second one means it.
-    pub confirm_close: bool,
     /// The margin decor no longer matches the threads — remapped in the frame that notices.
     pub decor_stale: bool,
     /// Where the document was edited since the beginning, and by whom — the host's answer to
@@ -227,18 +204,11 @@ pub struct DocumentEditor {
 
 impl DocumentEditor {
     /// A freshly opened surface over `md`, waiting on the host's two answers.
-    pub fn loading(
-        doc: DocumentHandle,
-        presentation: Presentation,
-        md: Entity<MdView>,
-        md_events: Option<Subscription>,
-    ) -> Self {
+    pub fn loading(doc: DocumentHandle, md: Entity<MdView>) -> Self {
         let track_updates = tracks_updates_by_default(&doc);
         Self {
             doc,
-            presentation,
             md,
-            md_events,
             rows: RowMap::default(),
             body: DocumentBody::Loading,
             saved: String::new(),
@@ -250,7 +220,6 @@ impl DocumentEditor {
             stale_origin: None,
             confirm_overwrite: false,
             saving: false,
-            confirm_close: false,
             decor_stale: false,
             changes: Vec::new(),
             change_stats: PlanChangeStats::default(),
@@ -283,9 +252,21 @@ impl DocumentEditor {
         self.doc.key()
     }
 
-    /// Whether this document is the plan dialog's rather than a markdown tab's.
-    pub fn is_modal(&self) -> bool {
-        self.presentation == Presentation::Modal
+    /// Whether the host holds this document's body — a plan or a mission document — rather than
+    /// the project's file system. Its tab's buffer is seeded from the host's body and a save is
+    /// `SavePlan`; a file's tab follows the file itself.
+    pub fn hosted(&self) -> bool {
+        !matches!(self.doc, DocumentHandle::File { .. })
+    }
+
+    /// Start from what the tab's buffer already holds — `text`, last rebased at `revision` — so a
+    /// document reopened over a tab with unsaved edits reads them against it as an edit rather
+    /// than throwing them away for the host's first answer.
+    pub fn hold(&mut self, text: String, revision: PlanRevision) {
+        self.saved = text.clone();
+        self.body = DocumentBody::Loaded(text);
+        self.revision = revision;
+        self.host_revision = revision;
     }
 
     /// The host stated the document's body, and `typed` is what the buffer holds as it arrives.
@@ -308,6 +289,12 @@ impl DocumentEditor {
         // into a document that has not loaded yet, so this body is taken unconditionally.
         let edited = !matches!(self.body, DocumentBody::Loading) && typed != self.saved;
         if edited && typed != body {
+            // The same revision the buffer was seeded from, restated: nothing moved, the edit is
+            // simply still unsaved (a tab returned to) — not a stale copy.
+            if revision == self.revision && body == self.saved {
+                self.dirty = true;
+                return;
+            }
             // A *newer* third-party save is a new question: what was confirmed was confirmed
             // about the revision before this one. The same revision restated is not.
             if moved {
@@ -328,7 +315,6 @@ impl DocumentEditor {
         self.body = DocumentBody::Loaded(body);
         self.dirty = false;
         self.stale = false;
-        self.confirm_close = false;
         self.decor_stale = true;
     }
 

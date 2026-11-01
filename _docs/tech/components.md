@@ -173,7 +173,7 @@ one more control on top of the layout toggle — `ui/viewer/md_options.rs`'s rea
 `MdView` entity (`OpenFile::md`, `crates/kubiq/src/ui/mdview/view.rs`), which owns its scroll,
 minimap, navigator popover and block editor, all documented in `_docs/features/workbench-ide.md`.
 Its Annotation layout draws the same entity with its annotation layer on, inside the annotated-
-document surface (`crates/kubiq/src/ui/document.rs`) the plan dialog frames too — the surface is
+document surface (`crates/kubiq/src/ui/document.rs`) a plan's tab draws too — the surface is
 `_docs/features/workbench-tasks.md`'s. **Two hosts ask for it**:
 the IDE's
 file tabs (`crates/kubiq/src/ui/editor.rs`) and a knowledge-base document tab

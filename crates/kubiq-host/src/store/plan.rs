@@ -135,7 +135,7 @@ impl PlanSidecar {
         }
     }
 
-    /// The revision an agent last wrote this plan at, for `plan_changes` defaulting its watermark
+    /// The revision an agent last wrote this plan at, for `doc_changes` defaulting its watermark
     /// to "since I last wrote it". `None` for an agent that has never written this plan — the
     /// caller then has to decide what a watermark means, rather than being handed a zero that
     /// would silently report the whole document.

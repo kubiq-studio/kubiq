@@ -28,9 +28,9 @@
 //! - `mission`: the `kubiq-mission` server the planner (and the final reviewer) works through,
 //!   reaching a mission's brief, documents and tasks through [`crate::mission::Missions`] — the
 //!   mission is resolved from who is calling rather than from an argument
-//! - `plan`: the `kubiq-plan` server, reading and writing a task's plan through
-//!   [`crate::plan::Plans`] on the same shape — its own server rather than more tools on
-//!   `manage-kubiq-tasks`, so that one keeps a name that still describes it
+//! - `plan`: the `kubiq-doc` server, reading and writing an annotated document — a project file by
+//!   `path`, or a task's plan by `task_id` (`D229`) — through [`crate::plan::Plans`] on the same
+//!   shape
 //! - `kb`: the `kubiq-kb` server, reaching the project's knowledge base through [`crate::kb`] and
 //!   its `ops` on the same shape
 //! - `help`: the `kubiq-help` server, reaching Kubiq's own documentation through [`crate::help`] —
@@ -110,7 +110,7 @@ pub struct WorkAccess {
     pub wake: kubiq_proto::bus::Voice,
 }
 
-/// How the `kubiq-plan` tools reach a task's plan, and how they tell every window what changed.
+/// How the `kubiq-doc` tools reach a task's plan or a project file, and how they tell every window what changed.
 ///
 /// **Just the plan store, deliberately.** The level check every plan operation needs — a plan
 /// belongs to any task carrying a [`kubiq_proto::work::Level`], not to an ordinary task — happens

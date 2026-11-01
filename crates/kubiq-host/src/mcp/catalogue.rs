@@ -18,10 +18,6 @@
 use serde_json::Value;
 use kubiq_proto::mcp::{McpInfo, McpToolInfo};
 
-/// The slug of the wiring proof. Named as a constant because the URL, the catalogue row and the
-/// dispatch in [`super::tools`] all have to agree on it.
-pub const TEST: &str = "test";
-
 /// The slug of the server that answers "what am I, and where am I working".
 pub const PROJECT_INFO: &str = "project-info";
 
@@ -31,15 +27,9 @@ pub const MANAGE_KUBIQ_TASKS: &str = "manage-kubiq-tasks";
 /// The slug of the thinner server an agent uses to look up a task, move it, and leave a comment.
 pub const USE_TASK: &str = "use-task";
 
-/// The slug of the server that reads and writes a task's plan. Its own server rather than more
-/// tools on [`MANAGE_KUBIQ_TASKS`], which already carries twelve and would stop describing itself
-/// with plan tools added — see `_docs/wip/planning-system.md` decision 7.
-pub const KUBIQ_PLAN: &str = "kubiq-plan";
-
-/// The slug of the server that collaborates on **any** markdown file in the project: the same
-/// annotation handlers `kubiq-plan` runs, with the document named by a project-relative path
-/// instead of a task (`D161`'s `DocumentHandle::File`). Not in a default set — a definition names
-/// it.
+/// The slug of the server that collaborates on an annotated markdown document: any file in the
+/// project, named by a project-relative `path` (`D161`'s `DocumentHandle::File`), or a task's plan,
+/// named by `task_id` — the planner's tool for the mission plan (`D229`).
 pub const KUBIQ_DOC: &str = "kubiq-doc";
 
 /// The slug of the server a mission's **planner** (and its final reviewer) works the mission
@@ -83,20 +73,20 @@ pub const KUBIQ_SQL_WRITE: &str = "kubiq-sql-write";
 /// tasks, and the knowledge base. The `manage` side of every split pair.
 ///
 /// Held here rather than beside the definitions, so the set and the slugs it names cannot drift.
-pub const PLANNER_MCPS: &[&str] = &[KUBIQ_MISSION, KUBIQ_PLAN, MANAGE_KUBIQ_TASKS, KUBIQ_KB];
+pub const PLANNER_MCPS: &[&str] = &[KUBIQ_MISSION, KUBIQ_DOC, MANAGE_KUBIQ_TASKS, KUBIQ_KB];
 
 /// What a **worker** agent definition runs with: the `use` side of the task servers, what project
 /// it is working in, and the knowledge base.
 pub const WORKER_MCPS: &[&str] = &[USE_TASK, PROJECT_INFO, KUBIQ_KB];
 
 /// The servers the mission runner attaches to the planner it launches.
-pub const LAUNCH_PLANNER_MCPS: &[&str] = &[KUBIQ_MISSION, KUBIQ_PLAN, MANAGE_KUBIQ_TASKS, KUBIQ_ASK];
+pub const LAUNCH_PLANNER_MCPS: &[&str] = &[KUBIQ_MISSION, KUBIQ_DOC, MANAGE_KUBIQ_TASKS, KUBIQ_ASK];
 
 /// The servers the mission runner attaches to a worker or a task reviewer it launches.
 pub const LAUNCH_WORKER_MCPS: &[&str] = &[USE_TASK, KUBIQ_ASK, PROJECT_INFO];
 
 /// The servers the mission runner attaches to the mission's final reviewer.
-pub const LAUNCH_MISSION_REVIEWER_MCPS: &[&str] = &[KUBIQ_MISSION, KUBIQ_PLAN, USE_TASK, KUBIQ_ASK];
+pub const LAUNCH_MISSION_REVIEWER_MCPS: &[&str] = &[KUBIQ_MISSION, KUBIQ_DOC, USE_TASK, KUBIQ_ASK];
 
 /// What a **document** agent definition runs with: the annotated-document server and the
 /// architecture-diagram one, for working on markdown together with the user.
@@ -266,7 +256,7 @@ const READ_BRIEF: ToolSpec = ToolSpec {
 };
 const LIST_DOCUMENTS: ToolSpec = ToolSpec {
     name: "list_documents",
-    description: "The names of the mission's documents. The plan is not one of them — read that with kubiq-plan's read_plan.",
+    description: "The names of the mission's documents. The plan is not one of them — read that with kubiq-doc's read_doc and the mission's task_id.",
     schema: r#"{"type": "object", "properties": {}}"#,
 };
 /// The reference one attachment carries — the same two forms a task attachment takes, because an
@@ -485,45 +475,6 @@ const SQL_RUN_EDITOR: ToolSpec = ToolSpec {
 
 /// Every server this build can inject, in the order a panel lists them.
 pub const SERVERS: &[ServerSpec] = &[
-    ServerSpec {
-        name: TEST,
-        title: "Test",
-        description: "Proves an agent's MCP wiring reaches Kubiq.",
-        tools: &[
-            ToolSpec {
-                name: "send_notification",
-                description: "Raise a Kubiq notification, as this agent.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "text": {"type": "string", "description": "The line to show."},
-                        "level": {
-                            "type": "string",
-                            "enum": ["info", "warning", "error"],
-                            "description": "How loudly. Defaults to info."
-                        }
-                    },
-                    "required": ["text"]
-                }"#,
-            },
-            ToolSpec {
-                name: "write_log",
-                description: "Write a line into Kubiq's own log, tagged with this agent.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "message": {"type": "string", "description": "The line to write."},
-                        "level": {
-                            "type": "string",
-                            "enum": ["debug", "info", "warn", "error"],
-                            "description": "Which level to write it at. Defaults to info."
-                        }
-                    },
-                    "required": ["message"]
-                }"#,
-            },
-        ],
-    },
     ServerSpec {
         name: PROJECT_INFO,
         title: "Project info",
@@ -912,125 +863,9 @@ pub const SERVERS: &[ServerSpec] = &[
         ],
     },
     ServerSpec {
-        name: KUBIQ_PLAN,
-        title: "Plan",
-        description: "Read and write the plan document for a mission — a task carrying a level — and answer the annotations left on it.",
-        tools: &[
-            ToolSpec {
-                name: "read_plan",
-                description: "A task's plan, as markdown, with the revision it stands at. Empty for a mission that has not been planned yet. Refused for a task with no level: only a task carrying a level can have a plan. Keep the revision if you intend to come back: plan_changes uses it to tell you what changed while you were away.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string"}
-                    },
-                    "required": ["task_id"]
-                }"#,
-            },
-            ToolSpec {
-                name: "write_plan",
-                description: "Replace a task's plan, whole, with the markdown given. There is no partial edit: send the full document every time. Refused for a task with no level. Read the plan with read_plan first: if the user edits it while you work, your write is merged with theirs instead of replacing it — where you both changed the same words the user's text is kept and your version is posted as a thread on that block (the result then carries conflicts.threads). Always continue from the body the result returns.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string"},
-                        "body": {"type": "string", "description": "The plan's full markdown body."},
-                        "expected_revision": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "description": "The revision you read the plan at. The write is refused if the plan has moved past it, so your edit never silently replaces somebody else's save. Omit only when you are writing a plan you did not read."
-                        }
-                    },
-                    "required": ["task_id", "body"]
-                }"#,
-            },
-            ToolSpec {
-                name: "plan_changes",
-                description: "Where the plan has been edited since you last wrote it, and by how much. Call this before rewriting a plan you wrote earlier: it returns each changed run of lines with its line numbers, the text now standing there, who changed it (human or agent) and the block it falls in, plus counts of lines added, removed and modified, blocks touched, and how many saves each side made. Defaults to your own last write_plan; pass since_revision to ask from a different point. Returns no regions when nothing has changed, which is the ordinary answer and not an error.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string"},
-                        "since_revision": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "description": "Report changes made after this revision. Defaults to the revision of your own last write_plan; 0 means everything that is known."
-                        }
-                    },
-                    "required": ["task_id"]
-                }"#,
-            },
-            ToolSpec {
-                name: "list_annotations",
-                description: "The plan's annotations, open ones by default, each with the text of the block it is about so you do not have to guess what the comment refers to. An annotation whose block has vanished from the plan comes back with orphaned true and block_text null: do not try to answer that one, the passage it named is gone. review true means you proposed it resolved and the user has not ruled yet: leave it be.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string"},
-                        "include_resolved": {
-                            "type": "boolean",
-                            "description": "Also return annotations already resolved. Defaults to false."
-                        },
-                        "mark": {
-                            "type": "string",
-                            "enum": ["agent", "todo", "question"],
-                            "description": "Only annotations carrying this mark."
-                        }
-                    },
-                    "required": ["task_id"]
-                }"#,
-            },
-            ToolSpec {
-                name: "annotate_plan",
-                description: "Open a new annotation thread on the plan, as this agent. Say where with quote (a passage that appears in exactly one block; refused if none or several) or block_id (from list_annotations or read), which wins over quote.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string"},
-                        "text": {"type": "string"},
-                        "quote": {"type": "string"},
-                        "block_id": {"type": "string"},
-                        "marks": {
-                            "type": "array",
-                            "items": {"type": "string", "enum": ["agent", "todo", "question"]}
-                        }
-                    },
-                    "required": ["task_id", "text"]
-                }"#,
-            },
-            ToolSpec {
-                name: "reply_annotation",
-                description: "Append a reply to an annotation's thread, as this agent.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string"},
-                        "annotation_id": {"type": "string"},
-                        "text": {"type": "string"}
-                    },
-                    "required": ["task_id", "annotation_id", "text"]
-                }"#,
-            },
-            ToolSpec {
-                name: "resolve_annotation",
-                description: "Propose an annotation resolved, or reopen one. You cannot close a thread: resolved (default true) marks it awaiting the user's review — it stays open with the review mark, and only the user's Accept resolves it (their Reopen sends it back to you). Pass note to say what you did; it is added to the thread as your comment. resolved false reopens it.",
-                schema: r#"{
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string"},
-                        "annotation_id": {"type": "string"},
-                        "resolved": {"type": "boolean"},
-                        "note": {"type": "string", "description": "What you did about it — added to the thread as your comment."}
-                    },
-                    "required": ["task_id", "annotation_id"]
-                }"#,
-            },
-        ],
-    },
-    ServerSpec {
         name: KUBIQ_DOC,
         title: "Annotated documents",
-        description: "Work on any markdown file in this project together with the user: read and write it, and answer the annotations the user left on it in annotation mode.",
+        description: "Work on an annotated markdown document together with the user — any file in this project, named by path, or a mission's plan, named by task_id: read and write it, and answer the annotations left on it.",
         tools: &[
             ToolSpec {
                 name: "list_annotated_docs",
@@ -1055,22 +890,23 @@ pub const SERVERS: &[ServerSpec] = &[
             },
             ToolSpec {
                 name: "read_doc",
-                description: "A markdown file of this project, whole, with the revision it stands at. Empty for a file that does not exist yet. Keep the revision: write_doc and doc_changes use it. An annotated file also lists its blocks, each with a lineage code (AAA, AAB…; a block split in two becomes AAB.AA and AAB.AB) that says where a block came from — informative only: anchor threads by block id or quote.",
+                description: "A markdown file of this project (path) or a mission's plan (task_id), whole, with the revision it stands at. Empty for a file that does not exist yet or a mission not yet planned; refused for a task with no level. Keep the revision: write_doc and doc_changes use it. An annotated file also lists its blocks, each with a lineage code (AAA, AAB…; a block split in two becomes AAB.AA and AAB.AB) that says where a block came from — informative only: anchor threads by block id or quote.",
                 schema: r#"{
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Project-relative path of a .md file."}
-                    },
-                    "required": ["path"]
+                        "path": {"type": "string", "description": "Project-relative path of a .md file. Give this or task_id, not both."},
+                        "task_id": {"type": "string", "description": "A mission task: the document is its plan. Give this or path, not both."}
+                    }
                 }"#,
             },
             ToolSpec {
                 name: "write_doc",
-                description: "Replace a markdown file of this project, whole, with the markdown given. Edit annotated files through this tool rather than your own file editing: it re-anchors the annotations to the new text, and a thread whose passage is gone is marked orphaned rather than lost. Read the file with read_doc first: if the user edits it while you work, your write is merged with theirs instead of replacing it — edits to different lines or words both land, and where you both changed the same words the user's text is kept and your version is posted as a thread on that block (the result then carries conflicts.threads). Always continue from the body the result returns, not from what you sent.",
+                description: "Replace a markdown file of this project (path) or a mission's plan (task_id), whole, with the markdown given. There is no partial edit: send the full document every time. Edit annotated files through this tool rather than your own file editing: it re-anchors the annotations to the new text, and a thread whose passage is gone is marked orphaned rather than lost. Read the file with read_doc first: if the user edits it while you work, your write is merged with theirs instead of replacing it — edits to different lines or words both land, and where you both changed the same words the user's text is kept and your version is posted as a thread on that block (the result then carries conflicts.threads). Always continue from the body the result returns, not from what you sent.",
                 schema: r#"{
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "Project-relative path of a .md file."},
+                        "path": {"type": "string", "description": "Project-relative path of a .md file. Give this or task_id, not both."},
+                        "task_id": {"type": "string", "description": "A mission task: the document is its plan. Give this or path, not both."},
                         "body": {"type": "string", "description": "The file's full markdown body."},
                         "expected_revision": {
                             "type": "integer",
@@ -1078,7 +914,7 @@ pub const SERVERS: &[ServerSpec] = &[
                             "description": "The revision you read the file at. Omit only when you are writing a file you did not read."
                         }
                     },
-                    "required": ["path", "body"]
+                    "required": ["body"]
                 }"#,
             },
             ToolSpec {
@@ -1087,14 +923,14 @@ pub const SERVERS: &[ServerSpec] = &[
                 schema: r#"{
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string"},
+                        "path": {"type": "string", "description": "Project-relative path of a .md file. Give this or task_id, not both."},
+                        "task_id": {"type": "string", "description": "A mission task: the document is its plan. Give this or path, not both."},
                         "since_revision": {
                             "type": "integer",
                             "minimum": 0,
                             "description": "Report changes made after this revision. Defaults to the revision of your own last write_doc; 0 means everything that is known."
                         }
-                    },
-                    "required": ["path"]
+                    }
                 }"#,
             },
             ToolSpec {
@@ -1103,7 +939,8 @@ pub const SERVERS: &[ServerSpec] = &[
                 schema: r#"{
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string"},
+                        "path": {"type": "string", "description": "Project-relative path of a .md file. Give this or task_id, not both."},
+                        "task_id": {"type": "string", "description": "A mission task: the document is its plan. Give this or path, not both."},
                         "include_resolved": {
                             "type": "boolean",
                             "description": "Also return annotations already resolved. Defaults to false."
@@ -1113,8 +950,7 @@ pub const SERVERS: &[ServerSpec] = &[
                             "enum": ["agent", "todo", "question"],
                             "description": "Only annotations carrying this mark."
                         }
-                    },
-                    "required": ["path"]
+                    }
                 }"#,
             },
             ToolSpec {
@@ -1123,7 +959,8 @@ pub const SERVERS: &[ServerSpec] = &[
                 schema: r#"{
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string"},
+                        "path": {"type": "string", "description": "Project-relative path of a .md file. Give this or task_id, not both."},
+                        "task_id": {"type": "string", "description": "A mission task: the document is its plan. Give this or path, not both."},
                         "text": {"type": "string"},
                         "quote": {"type": "string"},
                         "block_id": {"type": "string"},
@@ -1132,7 +969,7 @@ pub const SERVERS: &[ServerSpec] = &[
                             "items": {"type": "string", "enum": ["agent", "todo", "question"]}
                         }
                     },
-                    "required": ["path", "text"]
+                    "required": ["text"]
                 }"#,
             },
             ToolSpec {
@@ -1141,11 +978,12 @@ pub const SERVERS: &[ServerSpec] = &[
                 schema: r#"{
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string"},
+                        "path": {"type": "string", "description": "Project-relative path of a .md file. Give this or task_id, not both."},
+                        "task_id": {"type": "string", "description": "A mission task: the document is its plan. Give this or path, not both."},
                         "annotation_id": {"type": "string"},
                         "text": {"type": "string"}
                     },
-                    "required": ["path", "annotation_id", "text"]
+                    "required": ["annotation_id", "text"]
                 }"#,
             },
             ToolSpec {
@@ -1154,12 +992,13 @@ pub const SERVERS: &[ServerSpec] = &[
                 schema: r#"{
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string"},
+                        "path": {"type": "string", "description": "Project-relative path of a .md file. Give this or task_id, not both."},
+                        "task_id": {"type": "string", "description": "A mission task: the document is its plan. Give this or path, not both."},
                         "annotation_id": {"type": "string"},
                         "resolved": {"type": "boolean"},
                         "note": {"type": "string", "description": "What you did about it — added to the thread as your comment."}
                     },
-                    "required": ["path", "annotation_id"]
+                    "required": ["annotation_id"]
                 }"#,
             },
         ],
@@ -1940,7 +1779,10 @@ pub const SERVERS: &[ServerSpec] = &[
 /// Persisted files are never rewritten; the old id is mapped to the current one as it is read.
 const LEGACY_IDS: &[(&str, &str)] = &[
     ("manage-ubiq-tasks", MANAGE_KUBIQ_TASKS),
-    ("ubiq-plan", KUBIQ_PLAN),
+    // The retired plan server, under both spellings: its plan tools live on `kubiq-doc` by
+    // `task_id` now (`D229`), so a definition that saved it keeps document access.
+    ("ubiq-plan", KUBIQ_DOC),
+    ("kubiq-plan", KUBIQ_DOC),
     ("ubiq-doc", KUBIQ_DOC),
     ("ubiq-mission", KUBIQ_MISSION),
     ("ubiq-kb", KUBIQ_KB),
@@ -2031,6 +1873,15 @@ mod tests {
         assert_eq!(canonical("ubiq-help"), KUBIQ_HELP);
         assert_eq!(canonical("kubiq-help"), KUBIQ_HELP);
         assert_eq!(canonical("some-catalog-id"), "some-catalog-id");
+    }
+
+    /// `D229`: a definition saved with the retired plan server reaches the plan through
+    /// `kubiq-doc` instead of losing it.
+    #[test]
+    fn the_retired_plan_server_resolves_to_the_doc_server() {
+        assert_eq!(canonical("ubiq-plan"), KUBIQ_DOC);
+        assert_eq!(canonical("kubiq-plan"), KUBIQ_DOC);
+        assert!(server("kubiq-plan").is_none(), "no server answers the old slug itself");
     }
 
     #[test]

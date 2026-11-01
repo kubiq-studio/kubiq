@@ -300,7 +300,7 @@ fn list_documents(project: ProjectId, mission: TaskId, reach: &MissionReach) -> 
     json!({
         "in_mission": true,
         "documents": names,
-        "note": "The plan is not listed here — read it with kubiq-plan's read_plan.",
+        "note": "The plan is not listed here — read it with kubiq-doc's read_doc and the mission's task_id.",
     })
 }
 
@@ -319,7 +319,7 @@ fn read_document(
 
 // ── writing ─────────────────────────────────────────────────────────
 
-/// Replace a mission document, stamped as **this agent's** save — `write_plan`'s own discipline,
+/// Replace a mission document, stamped as **this agent's** save — `kubiq-doc`'s `write_doc`'s own discipline,
 /// including its `expected_revision` posture: optional here because a first write has nothing to
 /// have read, and checked exactly like a window's once a revision is named.
 fn write_document(

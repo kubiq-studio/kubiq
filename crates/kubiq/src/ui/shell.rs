@@ -471,17 +471,6 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
                 .mission_note
                 .map(|note| crate::ui::mission::note::render(app, note, window, cx)),
         )
-        // A task's plan, read as rendered markdown — raised from the task panel, over whatever
-        // else is up, on the same terms the modals above it are.
-        .children(
-            app.workbench
-                .plan
-                .as_ref()
-                // A document open in a markdown tab's annotation layout draws in the panel, not
-                // here: same surface, no modal around it.
-                .filter(|doc| doc.is_modal())
-                .map(|_| crate::ui::plan::render(app, window, cx)),
-        )
         // The image/diagram zoom modal (T-185), over the plan on the same terms it can be raised
         // from either the standard viewer's tab or the plan surface's own rendered markdown.
         .children(

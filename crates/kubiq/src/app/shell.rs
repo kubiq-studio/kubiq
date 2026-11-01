@@ -1108,12 +1108,6 @@ impl AppState {
             // full view open as a document tab is not an overlay.
             (Layer::Mission, w.mission.is_some()),
             (Layer::MissionNote, w.mission_note.is_some()),
-            // Only the dialog takes a rung: a document open inside a markdown tab's annotation
-            // layout is not an overlay, and Escape over it belongs to whatever is.
-            (
-                Layer::Plan,
-                w.plan.as_ref().is_some_and(|doc| doc.is_modal()),
-            ),
             (Layer::ImageZoom, w.image_zoom.is_some()),
             (Layer::Capabilities, w.capabilities.is_some()),
             (
@@ -1292,22 +1286,9 @@ impl AppState {
             // Above the plan in paint order — it can be raised from a diagram inside the plan
             // surface's own rendered markdown as much as from the standard viewer's tab.
             self.close_image_zoom(cx);
-        } else if self
-            .workbench
-            .plan
-            .as_ref()
-            .is_some_and(|doc| doc.is_modal())
-        {
-            // Below the file question in paint order: the plan modal's own Export raises one
-            // over it, so Escape takes that first and leaves the plan open underneath. Only the
-            // dialog: a document open inside a markdown tab is not an overlay and Escape there
-            // belongs to whatever is.
-            self.close_plan(cx);
         } else if self.workbench.mission_note.is_some() {
             self.close_mission_note(cx);
         } else if self.workbench.mission.is_some() {
-            // Below the plan in paint order: the full view's *Plan & docs* tab raises the plan
-            // surface over it, so Escape takes the plan first and leaves the mission open.
             self.close_mission_full(cx);
         } else if self.workbench.ask.is_some() {
             // Escape puts an agent's question away and sends nothing — what was filled in stays on

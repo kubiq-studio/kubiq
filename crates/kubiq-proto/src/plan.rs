@@ -135,8 +135,8 @@ pub type PlanRevision = u64;
 /// Who saved a plan's body.
 ///
 /// **Established at the entry point, never inferred.** A `SavePlan` off the bus is
-/// [`SaveOrigin::Human`] because only the interface sends one; a `write_plan` through the
-/// `kubiq-plan` MCP server is [`SaveOrigin::Agent`] because only a hosted agent can call it. There
+/// [`SaveOrigin::Human`] because only the interface sends one; a `write_doc` through the
+/// `kubiq-doc` MCP server is [`SaveOrigin::Agent`] because only a hosted agent can call it. There
 /// is no third path to a plan's body and no downstream code that guesses — the distinction is the
 /// entire point of the layer, and a guess would be worse than no answer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -147,7 +147,7 @@ pub enum SaveOrigin {
     /// reading that never tells an agent "you wrote this" about something it did not.
     #[default]
     Human,
-    /// An agent, through `kubiq-plan`'s `write_plan`.
+    /// An agent, through `kubiq-doc`'s `write_doc`.
     Agent,
 }
 

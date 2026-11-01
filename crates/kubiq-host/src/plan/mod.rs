@@ -17,7 +17,7 @@
 //! [`Handle`] mirrors [`crate::work::Handle`] on purpose: one project's plans are cheap enough that
 //! no in-memory cache sits in front of [`crate::store::plan::FilePlanStore`] the way `Work` caches
 //! tasks — a plan is read or written on request, never on every keystroke — but the sharing shape
-//! (an `Arc<Mutex<_>>` clone held by the coordinator and by the MCP listener's `kubiq-plan` server)
+//! (an `Arc<Mutex<_>>` clone held by the coordinator and by the MCP listener's `kubiq-doc` server)
 //! is the same, for the same reason: an agent and a window must never disagree about what the file
 //! holds.
 //!

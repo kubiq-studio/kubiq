@@ -14,7 +14,8 @@ use std::ops::Range;
 use gpui::{Entity, Pixels, Point, Subscription};
 use gpui_component::input::EditorState;
 use kubiq_proto::files::{DiffBase, FileDiff, FileVersion};
-use kubiq_proto::ids::KbSourceId;
+use kubiq_proto::ids::{KbSourceId, ProjectId};
+use kubiq_proto::plan::{DocumentHandle, PlanRevision};
 
 use super::image_edit::ImageEdit;
 
@@ -712,6 +713,14 @@ pub struct OpenFile {
     /// project id and a relative one) — `savable`, not this, is what actually decides whether the
     /// write can go out at all.
     pub guest: bool,
+    /// The annotated document this tab holds, for a plan or a mission document: a tab whose body
+    /// is the host's (`LoadPlan`) and whose save is `SavePlan`, with a pseudo-path that names
+    /// nothing on disk. `None` for every file, whose document handle is minted from its path
+    /// ([`Self::document`]).
+    pub doc: Option<DocumentHandle>,
+    /// The revision of the last host body the buffer was rebased onto — a held document's
+    /// watermark, which the open surface seeds its own from.
+    pub doc_revision: PlanRevision,
     /// A buffer that has never been written anywhere: the tab a new-file keystroke opens. Beside
     /// `guest` and for the same reason — the tab draws differently — and a save on one asks where
     /// to put it rather than sending anything, because the path it carries names nothing on disk.
@@ -805,6 +814,8 @@ impl OpenFile {
             temporary: false,
             pinned: false,
             guest: false,
+            doc: None,
+            doc_revision: 0,
             untitled: false,
             md: None,
             md_reading: MdReading::default(),
@@ -829,6 +840,48 @@ impl OpenFile {
             kb_source: Some(source),
             ..Self::opening(path, Subject::File, markdown_open)
         }
+    }
+
+    /// A tab for an annotated document the host holds — a plan or a mission document — opened in
+    /// [`ViewLayout::Annotation`] and kept there. Its path is the handle's key with `.md`, so the
+    /// viewer is markdown and the tab key is its own; it names nothing on disk.
+    pub fn hosted(doc: DocumentHandle, name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            doc: Some(doc.clone()),
+            layout: ViewLayout::Annotation,
+            ..Self::opening(&Self::hosted_path(&doc), Subject::File, ViewLayout::Annotation)
+        }
+    }
+
+    /// The pseudo-path a held document's tab carries.
+    pub fn hosted_path(doc: &DocumentHandle) -> String {
+        format!("{}.md", doc.key())
+    }
+
+    /// The document this tab is the surface of: the one it holds, or its file's.
+    pub fn document(&self, project: ProjectId) -> DocumentHandle {
+        match &self.doc {
+            Some(doc) => doc.clone(),
+            None => crate::state::plan::file_document(project, self.path.clone()),
+        }
+    }
+
+    /// The host's body was taken into the buffer: `text` is the new baseline at `revision`, and
+    /// nothing is unsaved.
+    /// `current` is what the buffer holds now, which is what dirty is measured against.
+    pub fn rebase_doc(&mut self, text: String, revision: PlanRevision, current: &str) {
+        self.doc_revision = revision;
+        self.save = SaveState::Idle;
+        if let FileBody::Text { baseline, .. } = &mut self.body {
+            *baseline = text;
+            self.dirty = current != baseline;
+        }
+    }
+
+    /// The host did not take a write of this tab's: the edit stays, and nothing is in flight.
+    pub fn save_refused(&mut self) {
+        self.save = SaveState::Idle;
     }
 
     /// A temporary preview tab with no bytes yet.
@@ -885,6 +938,10 @@ impl OpenFile {
     /// stored — a viewer with no preview has only its source, and an arrangement saved by a build
     /// whose toggle held different positions must not reopen a tab in one of them.
     pub fn set_layout(&mut self, layout: ViewLayout) {
+        // A held document is only ever read through its annotation surface.
+        if self.doc.is_some() && !layout.is_annotation() {
+            return;
+        }
         if self.viewer.offers(layout) {
             self.layout = layout;
         }
@@ -1302,6 +1359,7 @@ impl OpenFile {
             && self.kb_source.is_none()
             && !self.guest
             && !self.untitled
+            && self.doc.is_none()
             && matches!(
                 self.body,
                 FileBody::Text {

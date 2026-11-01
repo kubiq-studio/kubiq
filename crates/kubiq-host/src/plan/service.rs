@@ -30,7 +30,7 @@ use crate::work;
 ///
 /// **This type exists so the origin cannot be guessed downstream.** Its only constructors are
 /// [`Saver::human`] and [`Saver::agent`], and there are exactly two call sites: the coordinator's
-/// [`Message::SavePlan`] arm, which only the interface sends, and `kubiq-plan`'s `write_plan`,
+/// [`Message::SavePlan`] arm, which only the interface sends, and `kubiq-doc`'s `write_doc`,
 /// which only a hosted agent can call. Nothing between those points and the sidecar has to decide
 /// anything, and nothing below has the information to decide it correctly.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,7 +49,7 @@ impl Saver {
         }
     }
 
-    /// An agent, by the key its MCP calls arrive under — so `plan_changes` can later default its
+    /// An agent, by the key its MCP calls arrive under — so `doc_changes` can later default its
     /// watermark to *this* agent's last write rather than some other agent's.
     pub fn agent(key: impl Into<String>) -> Self {
         Self {
@@ -67,7 +67,7 @@ impl Saver {
 /// those regions point into.
 ///
 /// The block index rides along for the same reason it rides on [`Message::PlanAnnotations`] — a
-/// [`BlockId`] means nothing without it, and `kubiq-plan` folds the block's text into its answer
+/// [`BlockId`] means nothing without it, and `kubiq-doc` folds the block's text into its answer
 /// rather than handing an agent a bare id to guess at. The [`Message::PlanChanges`] path drops it,
 /// because a window annotating a plan already holds the index.
 pub struct ChangeReport {
@@ -105,7 +105,7 @@ pub enum Target {
 }
 
 impl Target {
-    /// A task's plan — what every `kubiq-plan` MCP call resolves to, and what nothing has to
+    /// A task's plan — what every `kubiq-doc` MCP call by `task_id` resolves to, and what nothing has to
     /// contain.
     pub fn plan(project: ProjectId, task: TaskId) -> Self {
         Target::Plan { project, task }
@@ -358,7 +358,7 @@ pub struct Plans {
 }
 
 /// A cloneable handle to [`Plans`], on [`crate::work::Handle`]'s own footing: the coordinator
-/// holds one clone, the MCP listener's `kubiq-plan` server holds another, and the lock covers one
+/// holds one clone, the MCP listener's `kubiq-doc` server holds another, and the lock covers one
 /// call and is released before anything reaches the bus.
 #[derive(Clone)]
 pub struct Handle(Arc<Mutex<Plans>>);
@@ -565,7 +565,7 @@ impl Plans {
     /// rather than the window because two windows cannot see each other, and because the gap
     /// between a window asking its user "overwrite?" and the user answering is exactly long enough
     /// for a third save to land. `None` skips the check, for a caller that has no watermark to
-    /// name — see `crate::mcp::plan::write_plan`.
+    /// name — see `crate::mcp::plan::write`.
     ///
     /// **The previous body is read before the new one is written**, because both the block
     /// matching and the line diff compare against it. That read is the one ordering constraint in
@@ -937,7 +937,7 @@ impl Plans {
     }
 
     /// The regions and the stats themselves, for a caller that wants the records rather than a
-    /// `Message` — `kubiq-plan`'s `plan_changes`, on [`Self::annotation_list`]'s own footing. Both
+    /// `Message` — `kubiq-doc`'s `doc_changes`, on [`Self::annotation_list`]'s own footing. Both
     /// paths come through here, so a window's decoration and an agent's report can never disagree
     /// about what changed.
     pub fn change_report(
@@ -965,7 +965,7 @@ impl Plans {
         })
     }
 
-    /// The revision an agent last wrote this plan at — `plan_changes`'s default watermark.
+    /// The revision an agent last wrote this plan at — `doc_changes`'s default watermark.
     pub fn last_written_by(&mut self, target: &Target, author: &str) -> Option<PlanRevision> {
         self.read_sidecar(target)
             .ok()
@@ -1163,7 +1163,7 @@ impl Plans {
     }
 
     /// The blocks and the annotations themselves, for a caller that wants the records rather than
-    /// a `Message` — `kubiq-plan`'s MCP tools, on [`Self::body`]'s own footing.
+    /// a `Message` — `kubiq-doc`'s MCP tools, on [`Self::body`]'s own footing.
     #[allow(clippy::type_complexity)]
     pub fn annotation_list(
         &mut self,
@@ -1545,7 +1545,7 @@ impl Plans {
     }
 
     /// A task's plan body, or the reason it may not be read — for a caller that wants the string
-    /// itself rather than a `Message`: the MCP `read_plan` tool, and the coordinator's export
+    /// itself rather than a `Message`: the MCP `read_doc` tool, and the coordinator's export
     /// handler.
     pub fn body(&mut self, target: &Target) -> Result<String, String> {
         if let Some(refusal) = self.refusal(target) {
@@ -2573,7 +2573,7 @@ mod tests {
         );
     }
 
-    /// An agent's `write_plan` is the other racer, and the refusal names it as one — the banner
+    /// An agent's `write_doc` is the other racer, and the refusal names it as one — the banner
     /// the window draws says "an agent" or "somebody else", and it reads that from here.
     #[test]
     fn a_refusal_names_an_agent_that_moved_the_copy() {
