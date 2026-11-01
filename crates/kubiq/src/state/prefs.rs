@@ -806,3 +806,21 @@ mod tests {
         assert_eq!(back, prefs);
     }
 }
+
+#[cfg(test)]
+mod ubiq_prefix_tests {
+    use super::*;
+
+    /// A blob written before the `ubiq` → `kubiq` rename still opens on the IDE, and its
+    /// arrangement is keyed by the new id.
+    #[test]
+    fn a_pre_rename_ubiq_rail_id_decodes_to_the_ide_mode() {
+        let blob = format!(
+            r#"{{"schema":{SCHEMA},"rail_mode":"ubiq.rail.ide","modes":{{"ubiq.rail.ide":
+            {{"show_left":true,"show_bottom":false,"show_right":false}}}}}}"#
+        );
+        let view = decode::<ViewPrefs>(&blob).expect("decodes");
+        assert_eq!(view.rail_mode, RailMode::IDE);
+        assert!(view.modes.contains_key(&RailMode::IDE));
+    }
+}

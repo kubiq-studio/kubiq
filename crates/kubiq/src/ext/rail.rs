@@ -278,6 +278,7 @@ const RETIRED_IDS: &[(&str, SlotId)] = &[("kubiq.rail.teams-old", ids::RAIL_TEAM
 /// successor so `rail_mode` lands somewhere, but a per-mode arrangement keyed by it described a
 /// different screen and must never stand in for the successor's own.
 pub fn is_retired(text: &str) -> bool {
+    let text = &*super::id::current_prefix(text);
     text == "TeamsOld" || RETIRED_IDS.iter().any(|(name, _)| *name == text)
 }
 
@@ -287,6 +288,7 @@ pub fn is_retired(text: &str) -> bool {
 /// found, so a build without a second edition's registrations still writes that edition's saved
 /// arrangements back out untouched (`D184`). The one transformation is the two tables above.
 pub fn decode_id(text: &str) -> SlotId {
+    let text = &*super::id::current_prefix(text);
     LEGACY_NAMES
         .iter()
         .chain(RETIRED_IDS)
@@ -328,5 +330,12 @@ mod tests {
         assert_eq!(decode_id("TeamsOld"), ids::RAIL_TEAMS);
         assert_eq!(decode_id("kubiq.rail.teams-old"), ids::RAIL_TEAMS);
         assert_eq!(decode_id("Ide"), ids::RAIL_IDE);
+    }
+
+    #[test]
+    fn a_pre_rename_ubiq_id_decodes_to_its_kubiq_successor() {
+        assert_eq!(decode_id("ubiq.rail.ide"), ids::RAIL_IDE);
+        assert_eq!(decode_id("ubiq.rail.teams-old"), ids::RAIL_TEAMS);
+        assert!(is_retired("ubiq.rail.teams-old"));
     }
 }

@@ -17,5 +17,5 @@ pub mod runner;
 pub mod settings;
 pub mod viewer;
 
-pub use id::SlotId;
+pub use id::{SlotId, current_prefix};
 pub use registry::{Registry, Slotted};

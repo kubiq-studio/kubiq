@@ -1503,28 +1503,30 @@ fn rebuild(
 /// the tab was left in is not in the payload and never rides a saved arrangement, because a
 /// per-document view mode is memory-only (T-202). See [`file_payload`].
 fn leaf(state: &PanelState) -> Option<PanelKind> {
-    if state.panel_name == PanelKind::TERMINAL {
+    // A layout written before the `ubiq` → `kubiq` rename names its panels `ubiq.*`.
+    let name = crate::ext::current_prefix(&state.panel_name);
+    if name == PanelKind::TERMINAL {
         let PanelInfo::Panel(payload) = &state.info else {
             // A terminal panel from a build that wrote no payload names no pane.
             return None;
         };
         return pane_from_payload(payload);
     }
-    if state.panel_name == PanelKind::CHAT {
+    if name == PanelKind::CHAT {
         let PanelInfo::Panel(payload) = &state.info else {
             // A chat panel from a build that wrote no payload names no tab.
             return None;
         };
         return chat_from_payload(payload);
     }
-    if state.panel_name == PanelKind::MISSION {
+    if name == PanelKind::MISSION {
         let PanelInfo::Panel(payload) = &state.info else {
             // A mission panel from a build that wrote no payload names no mission.
             return None;
         };
         return mission_from_payload(payload);
     }
-    if state.panel_name == PanelKind::MISSION_VIEW {
+    if name == PanelKind::MISSION_VIEW {
         let PanelInfo::Panel(payload) = &state.info else {
             return None;
         };
@@ -1532,16 +1534,16 @@ fn leaf(state: &PanelState) -> Option<PanelKind> {
         return mission_from_payload(payload)
             .and_then(|kind| kind.mission_id().map(PanelKind::MissionView));
     }
-    let is_file = state.panel_name == PanelKind::File(String::new()).name();
-    let is_doc = state.panel_name == PanelKind::Kb(String::new()).name();
+    let is_file = name == PanelKind::File(String::new()).name();
+    let is_doc = name == PanelKind::Kb(String::new()).name();
     // The two database tabs write the same payload under names of their own, and rebuild from the
     // key alone: a restored table re-queries its first page, a restored SQL tab gets its text back
     // from `ViewPrefs::db_sql_drafts`.
-    let is_table = state.panel_name == PanelKind::DB_TABLE;
-    let is_sql = state.panel_name == PanelKind::DB_SQL;
-    let is_board = state.panel_name == PanelKind::BOARD;
+    let is_table = name == PanelKind::DB_TABLE;
+    let is_sql = name == PanelKind::DB_SQL;
+    let is_board = name == PanelKind::BOARD;
     if !is_file && !is_doc && !is_table && !is_sql && !is_board {
-        return PanelKind::from_name(&state.panel_name);
+        return PanelKind::from_name(&name);
     }
     let PanelInfo::Panel(payload) = &state.info else {
         // A file or document panel with no payload names no tab, so there is nothing to rebuild
@@ -1624,4 +1626,26 @@ pub fn mission_from_payload(payload: &serde_json::Value) -> Option<PanelKind> {
 pub fn file_from_payload(payload: &serde_json::Value) -> Option<PanelKind> {
     let key = payload.get("key")?.as_str()?.to_string();
     Some(PanelKind::File(key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn saved(name: &str, info: serde_json::Value) -> PanelState {
+        serde_json::from_value(serde_json::json!({
+            "panel_name": name, "children": [], "info": info
+        }))
+        .expect("a panel state")
+    }
+
+    /// A layout written before the `ubiq` → `kubiq` rename restores under the new names.
+    #[test]
+    fn a_pre_rename_ubiq_panel_name_restores() {
+        let none = serde_json::json!({ "panel": null });
+        assert_eq!(leaf(&saved("ubiq.explorer", none.clone())), Some(PanelKind::Explorer));
+        assert_eq!(leaf(&saved("ubiq.centre", none)), Some(PanelKind::Centre));
+        let file = saved("ubiq.file", serde_json::json!({ "panel": { "key": "a.rs" } }));
+        assert_eq!(leaf(&file), Some(PanelKind::File("a.rs".to_string())));
+    }
 }

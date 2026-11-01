@@ -43,6 +43,18 @@ impl SlotId {
     }
 }
 
+/// A persisted id spelled with the pre-rename `ubiq.` prefix, read as its `kubiq.` successor.
+///
+/// Every place an id string is decoded back from disk — the rail-mode keys and the dock layout's
+/// panel names — goes through this first, so state written before the rename still resolves. The
+/// next save writes the new spelling.
+pub fn current_prefix(text: &str) -> std::borrow::Cow<'_, str> {
+    match text.strip_prefix("ubiq.") {
+        Some(rest) => std::borrow::Cow::Owned(format!("kubiq.{rest}")),
+        None => std::borrow::Cow::Borrowed(text),
+    }
+}
+
 impl fmt::Display for SlotId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.0)

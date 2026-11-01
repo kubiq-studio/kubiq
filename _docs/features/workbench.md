@@ -1625,7 +1625,7 @@ inherits that one's edges and has them written down as its own. A blob it cannot
 (`D184`). The ten names it used to be written under are read by the decoder, so nothing was
 discarded at the `5 → 6` schema step — and **an id this build has no registration for is kept, not
 dropped**: a mode a second edition contributes keeps its saved arrangement across a base launch,
-which is the whole reason the serialization step exists. Which
+which is the whole reason the serialization step exists. A leading `ubiq.` (state written before the rename) is read as `kubiq.` — rail-mode keys and dock panel names alike, through `ext::current_prefix` — and the next save writes the new spelling. Which
 mode the window is in is written down when the mode is chosen rather than when the arrangement next
 changes, so two modes that arrange nothing between them still reopen in the right one.
 
