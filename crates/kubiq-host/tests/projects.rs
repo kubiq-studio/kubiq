@@ -947,14 +947,13 @@ fn seed(data: &project_dir::ProjectData) {
     fs::write(data.view(), "where the splitter sat").unwrap();
 }
 
-/// The shared half follows the project into its own folder; the derived half stays where this
-/// machine put it, and so does everything a store still resolves under the config root (`G355`).
+/// The shared half follows the project into its own folder — plans included, since every shared
+/// store resolves through the pointer — and the derived half stays where this machine put it.
 #[test]
 fn moving_into_the_project_takes_the_shared_half_and_leaves_the_derived_one() {
     let (mut projects, id, config, folder) = added(StorageMode::KubiqManaged);
     let under_config = project_dir::ProjectData::under_config(config.path(), id);
     seed(&under_config);
-    // A store that still composes its own path under the config root (`G355`).
     fs::create_dir_all(under_config.plans()).unwrap();
     fs::write(under_config.plans().join("T-1.md"), "a plan").unwrap();
 
@@ -992,9 +991,17 @@ fn moving_into_the_project_takes_the_shared_half_and_leaves_the_derived_one() {
         "where the splitter sat",
         "view state is under the config root in either mode, so the move keeps it"
     );
+    assert_eq!(
+        fs::read_to_string(in_project.plans().join("T-1.md")).expect("the plans followed"),
+        "a plan"
+    );
     assert!(
-        under_config.plans().join("T-1.md").is_file(),
-        "a store that still composes its own path keeps its data where it reads it (G355)"
+        !under_config.plans().exists(),
+        "and are read only from where they went"
+    );
+    assert_eq!(
+        project_dir::ProjectData::resolved(config.path(), id).plans(),
+        in_project.plans()
     );
 
     // The pointer is the commit, and it is the whole of how a store finds the data.

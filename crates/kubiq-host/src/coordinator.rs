@@ -2032,10 +2032,14 @@ impl Coordinator {
                     .clone()
                     .filter(|old| *old != definition.id)
                     .map(|old| (old, definition.id.clone(), definition.project));
-                match self
-                    .agents
-                    .save_definition_replacing(definition, replaces.as_deref())
-                {
+                let root = definition
+                    .project
+                    .and_then(|project| self.project_root(project));
+                match self.agents.save_definition_replacing(
+                    definition,
+                    replaces.as_deref(),
+                    root.as_deref(),
+                ) {
                     Ok(()) => {
                         if let Some((old, new, scope)) = renamed {
                             self.retarget_definition(client, &old, &new, scope);
@@ -4556,6 +4560,7 @@ impl Coordinator {
                 // Which definitions this run can even see: the project's own, over the global
                 // ones. A conversation always belongs to a project, so this is never absent.
                 project: Some(pending.project_id),
+                project_root: self.project_root(pending.project_id),
                 prompt: first_prompt,
                 resume: pending.resume.clone(),
                 fork: pending.fork,
@@ -6567,15 +6572,20 @@ impl Coordinator {
         });
     }
 
-    /// A project's own folder, for the one knowledge-base origin that reads or writes inside it —
-    /// `KbOrigin::Git { store: KbStore::Project, .. }` today. A project id with no catalogue
-    /// record has no such source configured either, so the empty path this falls back to is never
-    /// actually resolved against.
-    fn kb_project_path(&self, project_id: ProjectId) -> PathBuf {
+    /// A project's own folder, which a per-project setting's in-project paths are stored relative
+    /// to. `None` for a project the catalogue does not hold.
+    fn project_root(&self, project_id: ProjectId) -> Option<PathBuf> {
         self.projects
             .record(project_id)
             .map(|record| PathBuf::from(&record.path))
-            .unwrap_or_default()
+    }
+
+    /// A project's own folder, for the knowledge base: a folder source saved relative to it is
+    /// resolved against it, and `KbOrigin::Git { store: KbStore::Project, .. }` clones inside it.
+    /// A project id with no catalogue record has no sources either, so the empty path this falls
+    /// back to resolves nothing — `project_dir::resolve_in` leaves a path as written against it.
+    fn kb_project_path(&self, project_id: ProjectId) -> PathBuf {
+        self.project_root(project_id).unwrap_or_default()
     }
 
     /// Hand one knowledge-base request to the worker.
@@ -7452,6 +7462,7 @@ impl Coordinator {
             // A terminal pane runs in a project's folder, so a definition scoped to that project
             // resolves here exactly as it does for a conversation.
             project: Some(project_id),
+            project_root: self.project_root(project_id),
             mcps: picks.mcps,
             skills: picks.skills,
             extra_rw: rw_paths(picks.grants),
@@ -8016,7 +8027,10 @@ impl Coordinator {
             Ok(mut definitions) => {
                 let ids: Vec<ProjectId> = self.projects.records().iter().map(|it| it.id).collect();
                 for project in ids {
-                    match self.agents.project_definitions(project) {
+                    match self
+                        .agents
+                        .project_definitions(project, self.project_root(project).as_deref())
+                    {
                         Ok(scoped) => definitions.extend(scoped),
                         Err(error) => {
                             tracing::warn!(

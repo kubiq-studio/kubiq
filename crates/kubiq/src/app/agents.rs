@@ -1948,7 +1948,23 @@ impl AppState {
                         let name = column
                             .active_agent()
                             .and_then(|id| self.work(cx).and_then(|work| work.agent(id)))
-                            .map(|agent| self.agent_label(agent).title.to_string())
+                            .map(|agent| {
+                                let definition = agent
+                                    .definition
+                                    .as_deref()
+                                    .map(str::trim)
+                                    .filter(|name| !name.is_empty());
+                                match definition {
+                                    Some(name) => name.to_string(),
+                                    None => self
+                                        .workbench
+                                        .agent_types
+                                        .iter()
+                                        .find(|kind| kind.id == agent.harness)
+                                        .map(|kind| kind.label.clone())
+                                        .unwrap_or_else(|| agent.harness.clone()),
+                                }
+                            })
                             .unwrap_or_else(|| "this agent".to_string());
                         (
                             column.slot,

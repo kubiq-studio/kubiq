@@ -80,7 +80,7 @@ pub const GITIGNORE: &str = "\
 # Kubiq keeps this project's own data here.
 #
 # Committed, and meant to be: everything not listed below — project.toml,
-# tasks/, kb.toml, db.toml, plans/, missions/, wiki/, agent-definitions/, catalog/,
+# tasks/, kb.toml, db.toml, plans/, missions/, wiki/, wikis/, agent-definitions/, catalog/,
 # studio.toml and tasksrc.toml. The project's settings, tasks and configuration, shared with
 # whoever clones it. An edition's own sidecar file (studio.toml) and a sync
 # provider's binding (tasksrc.toml) pass the same test as everything else here —
@@ -100,17 +100,18 @@ local/
 /// What actually follows a project between the two trees when its storage mode changes
 /// (`T-204`), named here rather than read off the source directory's listing.
 ///
-/// The *shared half* is everything at the top of a data directory. Only these entries of it are
-/// resolved through [`ProjectDirs`] today: the plan, mission, knowledge-base and agent-definition
-/// stores still compose `<config root>/projects/<ulid>/…` themselves (`G355`), so moving their
-/// directories would take them away from the only code that reads them. `studio.toml` is named
-/// for the same reason [`GITIGNORE`] names it — the edition writes it through [`ProjectDirs`],
-/// and a list that left it out would move a project and not its sidecar.
+/// The *shared half* is everything at the top of a data directory, and every store that writes
+/// one of these entries resolves its directory through the pointer — [`ProjectDirs`], or
+/// [`ProjectData::resolved`] for a store that holds only the config root — so moving an entry
+/// moves it to where its reader already looks. `studio.toml` is named for the same reason
+/// [`GITIGNORE`] names it — the edition writes it through [`ProjectDirs`], and a list that left it
+/// out would move a project and not its sidecar. The agent-definition and catalog directories are
+/// spelled out rather than taken from `crate::agent` / `crate::catalog`, which a build without the
+/// `harness` feature does not have; [`tests`] pins the two spellings together.
 ///
 /// An allow-list is the side that fails safely: an entry nobody named is left exactly where it
-/// is, in plain sight, rather than moved out from under whatever still reads it. When `G355`
-/// lands and every store resolves through [`ProjectDirs`], this becomes the whole shared half and
-/// this constant is the one place that changes.
+/// is, in plain sight, rather than moved out from under whatever still reads it. A new shared
+/// entry is a line here and a [`ProjectData`] method that resolves through the pointer.
 ///
 /// Nothing under [`LOCAL`] is here, and nothing under it ever will be: it is what one machine
 /// derived and can derive again, and copying an index into a directory a team shares is wrong
@@ -121,7 +122,87 @@ pub const FOLLOWS: &[&str] = &[
     crate::tasksrc::store::TASKSRC_FILE,
     "studio.toml",
     DB_CONNECTIONS,
+    KB_SOURCES,
+    PLANS,
+    MISSIONS,
+    WIKI,
+    PROTECTED_WIKIS,
+    DEFINITIONS,
+    "catalog",
 ];
+
+/// The knowledge base's source list.
+pub const KB_SOURCES: &str = "kb.toml";
+
+/// The plans, one markdown file per task.
+pub const PLANS: &str = "plans";
+
+/// The missions, one directory each.
+pub const MISSIONS: &str = "missions";
+
+/// The internal wiki.
+pub const WIKI: &str = "wiki";
+
+/// The password-protected wikis, one directory per source.
+pub const PROTECTED_WIKIS: &str = "wikis";
+
+/// The project's agent definitions. Spelled here as well as in `crate::agent`, which a build
+/// without the `harness` feature does not have.
+const DEFINITIONS: &str = "agent-definitions";
+
+/// Under [`LOCAL`]: the agent definitions' config-overlay bases, kept apart from their records.
+pub const DEFINITION_LOGINS: &str = "definition-logins";
+
+/// The name the library gives a definition's config-overlay directory, beside its record.
+const OVERLAY: &str = "base";
+
+/// `path` as a per-project setting stores it: relative to `project_root`, with `/` so a clone on
+/// another platform reads it, when it lies inside the project; untouched otherwise.
+///
+/// What makes a setting under the data directory travel with a clone (`D173`): an absolute path
+/// into the project names one person's checkout. Home-relative (`~`, `~/…`) and already-relative
+/// paths are left as they are; the project root itself is `.`, and an in-project path that would
+/// read as home-relative is written `./~…`, so [`resolve_in`] never mistakes it for one.
+pub fn relative_in(project_root: &Path, path: &str) -> String {
+    let as_path = Path::new(path);
+    if !as_path.is_absolute() || project_root.as_os_str().is_empty() {
+        return path.to_string();
+    }
+    match as_path.strip_prefix(project_root) {
+        Ok(inside) if inside.as_os_str().is_empty() => ".".to_string(),
+        Ok(inside) => {
+            let relative = inside.to_string_lossy().replace('\\', "/");
+            if is_home_relative(&relative) {
+                format!("./{relative}")
+            } else {
+                relative
+            }
+        }
+        Err(_) => path.to_string(),
+    }
+}
+
+/// [`relative_in`]'s inverse: a relative setting resolved against `project_root`, so every
+/// consumer still sees an absolute path. Home-relative and absolute paths are left as they are.
+pub fn resolve_in(project_root: &Path, path: &str) -> String {
+    if path.is_empty()
+        || is_home_relative(path)
+        || Path::new(path).is_absolute()
+        || project_root.as_os_str().is_empty()
+    {
+        return path.to_string();
+    }
+    if path == "." {
+        return project_root.to_string_lossy().into_owned();
+    }
+    let inside = path.strip_prefix("./").unwrap_or(path);
+    project_root.join(inside).to_string_lossy().into_owned()
+}
+
+/// `~` or `~/…` — the home directory, as a person types it. `~scratch` is a folder name.
+fn is_home_relative(path: &str) -> bool {
+    path == "~" || path.starts_with("~/")
+}
 
 /// Move a project's data between the two trees, and leave the pointer telling the truth
 /// (`T-204`, `D173`).
@@ -161,6 +242,9 @@ pub fn change_mode(
     // flat, or a config-root directory nothing has opened yet in this process.
     migrate(&source);
     migrate(&destination);
+    // The definitions' captured logins never go into `.kubiq/`: they are this machine's
+    // credential state, and stay under the config root's `local/` whichever way this moves.
+    separate_overlays(&under_config(root, record.id));
 
     for name in FOLLOWS {
         if destination.join(name).exists() {
@@ -364,6 +448,14 @@ impl ProjectData {
         Self::new(under_config(root, id))
     }
 
+    /// The `D173` answer from the config root alone — `.kubiq/` when the pointer says so, the
+    /// config root's own directory otherwise — for a store that holds a root and no
+    /// [`ProjectDirs`]. Reads the pointer on every call and remembers nothing, so a storage-mode
+    /// change is seen by the next lookup.
+    pub fn resolved(root: &Path, id: ProjectId) -> Self {
+        Self::new(read_pointer(root, id).unwrap_or_else(|| under_config(root, id)))
+    }
+
     /// A project-managed project's `.kubiq/`, from the project's own path.
     pub fn in_project(project_path: &Path) -> Self {
         Self::new(in_project_dir_of(project_path))
@@ -409,7 +501,7 @@ impl ProjectData {
 
     /// The knowledge base's roots — the user's list, not the clones it names.
     pub fn kb_sources(&self) -> PathBuf {
-        self.dir.join("kb.toml")
+        self.dir.join(KB_SOURCES)
     }
 
     /// The saved database connections — definitions only; the passwords are sealed under
@@ -420,12 +512,12 @@ impl ProjectData {
 
     /// One markdown plan per task that carries a level, and its sidecar.
     pub fn plans(&self) -> PathBuf {
-        self.dir.join("plans")
+        self.dir.join(PLANS)
     }
 
     /// One directory per mission.
     pub fn missions(&self) -> PathBuf {
-        self.dir.join("missions")
+        self.dir.join(MISSIONS)
     }
 
     /// One mission's documents beyond the plan — `missions/<TaskId>/docs/`, `guidance.md`
@@ -436,14 +528,14 @@ impl ProjectData {
 
     /// The internal wiki — pages the user wrote, which nothing can derive again.
     pub fn wiki(&self) -> PathBuf {
-        self.dir.join("wiki")
+        self.dir.join(WIKI)
     }
 
     /// One password-protected wiki: its header and its sealed pages, in a directory of its own
     /// keyed on the source's id (`D206`). Ciphertext only, so it is on the shared side like
     /// [`Self::wiki`].
     pub fn protected_wiki(&self, source: kubiq_proto::ids::KbSourceId) -> PathBuf {
-        self.dir.join("wikis").join(source.to_string())
+        self.dir.join(PROTECTED_WIKIS).join(source.to_string())
     }
 
     /// This project's own agent definitions (`D174`).
@@ -489,6 +581,14 @@ impl ProjectData {
     /// Cloned knowledge-base repositories, one directory per root. Re-fetchable.
     pub fn kb_clones(&self) -> PathBuf {
         self.local().join("kb")
+    }
+
+    /// The config-overlay bases of this project's agent definitions — a captured login under
+    /// `<definition id>/base/<harness>/`, the library's own shape. Credential state, so it is on
+    /// this side whichever tree the definitions' records are in; callers compose it from
+    /// [`ProjectData::under_config`] so it never lands in `.kubiq/`.
+    pub fn definition_logins(&self) -> PathBuf {
+        self.local().join(DEFINITION_LOGINS)
     }
 
     /// The scratch folders of agents bound to a remote, one per remote, for a project with no
@@ -574,8 +674,119 @@ pub fn migrate(dir: &Path) -> usize {
 /// a knowledge base the user asked to keep in the project writes there ([`ProjectData::kb_clones`]).
 /// [`migrate`] is a no-op on a directory that is not there.
 pub fn migrate_project(root: &Path, record: &ProjectRecord) {
-    migrate(&under_config(root, record.id));
+    let config_dir = under_config(root, record.id);
+    migrate(&config_dir);
     migrate(&in_project_dir(&record.path));
+    separate_overlays(&config_dir);
+    if let Some(pointed) = read_pointer(root, record.id) {
+        follow_pointer(&config_dir, &pointed);
+    }
+}
+
+/// Move every agent definition's config-overlay bases (`agent-definitions/<id>/base/`, a captured
+/// login) out from beside its record into [`ProjectData::definition_logins`], so the records can
+/// follow the project into `.kubiq/` without taking credential state with them.
+///
+/// Only the config root's tree is visited: a `.kubiq/` is the user's, and Kubiq does not move
+/// things out of it (`D173`). A destination that is already there is left alone, and logged.
+fn separate_overlays(config_dir: &Path) {
+    let definitions = config_dir.join(DEFINITIONS);
+    let Ok(entries) = std::fs::read_dir(&definitions) else {
+        return;
+    };
+    let logins = ProjectData::new(config_dir.to_path_buf()).definition_logins();
+    for entry in entries.filter_map(Result::ok) {
+        let source = entry.path().join(OVERLAY);
+        if !source.is_dir() {
+            continue;
+        }
+        let destination = logins.join(entry.file_name()).join(OVERLAY);
+        if destination.exists() {
+            tracing::warn!(
+                "leaving {} alone: {} is already there",
+                source.display(),
+                destination.display()
+            );
+            continue;
+        }
+        if let Err(error) = move_entry(&source, &destination) {
+            tracing::warn!(
+                "could not move {} to {}: {error} — it is still where it was",
+                source.display(),
+                destination.display()
+            );
+        }
+    }
+}
+
+/// Finish a move into `.kubiq/` that an older build made only in part: it moved the
+/// pointer and the entries its stores resolved through it, and left the rest of [`FOLLOWS`] under
+/// the config root, where the stores that now read through the pointer no longer look.
+///
+/// Idempotent and refusing, like [`migrate`]: an entry moves only when the pointed directory is
+/// there (an unmounted volume is not made) and holds nothing non-empty under that name. A clash
+/// is logged and both copies stay on disk — whose wins is not a thing to decide quietly.
+fn follow_pointer(config_dir: &Path, pointed: &Path) {
+    if pointed == config_dir || !pointed.is_dir() {
+        return;
+    }
+    for name in FOLLOWS {
+        let source = config_dir.join(name);
+        if !source.exists() {
+            continue;
+        }
+        let destination = pointed.join(name);
+        if destination.exists() {
+            if !is_empty_entry(&destination) {
+                tracing::warn!(
+                    "leaving {} where it is: {} already holds data",
+                    source.display(),
+                    destination.display()
+                );
+                continue;
+            }
+            if let Err(error) = remove_any(&destination) {
+                tracing::warn!(
+                    "could not clear the empty {}: {error}",
+                    destination.display()
+                );
+                continue;
+            }
+        }
+        match move_entry(&source, &destination) {
+            Ok(()) => tracing::info!("moved {} to {}", source.display(), destination.display()),
+            Err(error) => tracing::warn!(
+                "could not move {} to {}: {error} — it is still where it was",
+                source.display(),
+                destination.display()
+            ),
+        }
+    }
+}
+
+/// An empty file or a directory with nothing in it.
+fn is_empty_entry(path: &Path) -> bool {
+    if path.is_dir() {
+        std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none())
+    } else {
+        std::fs::metadata(path).is_ok_and(|meta| meta.len() == 0)
+    }
+}
+
+/// A rename, or — across volumes, where a rename cannot go — a copy and then a removal of the
+/// source, so a failure part-way leaves the source whole.
+fn move_entry(from: &Path, to: &Path) -> std::io::Result<()> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    if let Err(error) = copy_tree(from, to) {
+        let _ = remove_any(to);
+        return Err(error);
+    }
+    remove_any(from)
 }
 
 /// Make a project-managed project's `.kubiq/`, and leave behind everything that makes it one: the
@@ -714,27 +925,31 @@ impl ProjectDirs {
     }
 
     fn resolve(&self, id: ProjectId) -> Option<PathBuf> {
-        let under_config = under_config(&self.root, id);
-        let raw = std::fs::read_to_string(under_config.join(POINTER)).ok()?;
-        match toml::from_str::<Pointer>(&raw) {
-            Ok(pointer) if pointer.version <= PROJECT_DIR_VERSION => {
-                Some(PathBuf::from(pointer.dir))
-            }
-            Ok(pointer) => {
-                tracing::warn!(
-                    "{}/{POINTER} is version {}, and this Kubiq understands {PROJECT_DIR_VERSION}",
-                    under_config.display(),
-                    pointer.version
-                );
-                None
-            }
-            Err(error) => {
-                tracing::warn!(
-                    "ignoring unreadable {}/{POINTER}: {error}",
-                    under_config.display()
-                );
-                None
-            }
+        read_pointer(&self.root, id)
+    }
+}
+
+/// Where [`POINTER`] says this project's data went, or `None` for a project with no readable
+/// pointer — the Kubiq-managed answer.
+fn read_pointer(root: &Path, id: ProjectId) -> Option<PathBuf> {
+    let under_config = under_config(root, id);
+    let raw = std::fs::read_to_string(under_config.join(POINTER)).ok()?;
+    match toml::from_str::<Pointer>(&raw) {
+        Ok(pointer) if pointer.version <= PROJECT_DIR_VERSION => Some(PathBuf::from(pointer.dir)),
+        Ok(pointer) => {
+            tracing::warn!(
+                "{}/{POINTER} is version {}, and this Kubiq understands {PROJECT_DIR_VERSION}",
+                under_config.display(),
+                pointer.version
+            );
+            None
+        }
+        Err(error) => {
+            tracing::warn!(
+                "ignoring unreadable {}/{POINTER}: {error}",
+                under_config.display()
+            );
+            None
         }
     }
 }
@@ -926,6 +1141,162 @@ mod tests {
 
         let other = ProjectId::generate();
         assert_eq!(dirs.dir(other), under_config(config.path(), other));
+    }
+
+    /// Every shared entry a store writes follows a storage-mode change, and a store holding only
+    /// the config root finds it on the side the pointer names — both directions.
+    #[test]
+    fn every_shared_entry_follows_a_mode_change_and_is_found_there() {
+        let config = tempfile::tempdir().expect("a config root");
+        let project = tempfile::tempdir().expect("a project folder");
+        let mut record = record(&project.path().to_string_lossy());
+        record.storage = StorageMode::KubiqManaged;
+        let source = ProjectData::resolved(config.path(), record.id);
+        assert_eq!(source.dir(), under_config(config.path(), record.id));
+
+        for name in FOLLOWS {
+            if name.contains('.') {
+                std::fs::create_dir_all(source.dir()).expect("the data directory");
+                std::fs::write(source.dir().join(name), *name).expect("a file");
+            } else {
+                std::fs::create_dir_all(source.dir().join(name)).expect("a directory");
+                std::fs::write(source.dir().join(name).join("x"), *name).expect("inside it");
+            }
+        }
+
+        let moved =
+            change_mode(config.path(), &record, StorageMode::ProjectManaged).expect("moved in");
+        let there = ProjectData::resolved(config.path(), record.id);
+        assert_eq!(there.dir(), moved);
+        for path in [
+            there.kb_sources(),
+            there.plans(),
+            there.missions(),
+            there.wiki(),
+            there.dir().join(PROTECTED_WIKIS),
+        ] {
+            assert!(path.exists(), "{} followed", path.display());
+        }
+        for name in FOLLOWS {
+            assert!(!source.dir().join(name).exists(), "{name} left the source");
+        }
+
+        record.storage = StorageMode::ProjectManaged;
+        change_mode(config.path(), &record, StorageMode::KubiqManaged).expect("moved back");
+        let back = ProjectData::resolved(config.path(), record.id);
+        assert_eq!(back.dir(), under_config(config.path(), record.id));
+        assert!(back.wiki().join("x").is_file() && back.plans().join("x").is_file());
+    }
+
+    /// A project an older build moved in part: the pointer names `.kubiq/`, and the entries its
+    /// stores never resolved through it are still under the config root. The next load moves
+    /// them, takes the captured logins out of the definitions first, and leaves a clash alone.
+    #[test]
+    fn loading_finishes_a_partial_move_and_keeps_logins_on_this_machine() {
+        let config = tempfile::tempdir().expect("a config root");
+        let project = tempfile::tempdir().expect("a project folder");
+        let record = record(&project.path().to_string_lossy());
+        let dir = provision(config.path(), &record).expect("the folder is made");
+        let left = under_config(config.path(), record.id);
+
+        std::fs::write(left.join(KB_SOURCES), "sources").expect("kb.toml");
+        std::fs::create_dir_all(left.join(WIKI)).expect("wiki/");
+        std::fs::write(left.join(WIKI).join("page.md"), "a page").expect("a page");
+        let definition = left.join(DEFINITIONS).join("reviewer");
+        std::fs::create_dir_all(definition.join(OVERLAY).join("claude-code")).expect("a login");
+        std::fs::write(definition.join("profile.toml"), "id = \"reviewer\"").expect("a record");
+        std::fs::write(
+            definition.join(OVERLAY).join("claude-code").join("token"),
+            "secret",
+        )
+        .expect("credential state");
+        // Somebody has been writing plans in the new place: theirs win, ours stay put.
+        std::fs::create_dir_all(left.join(PLANS)).expect("plans/");
+        std::fs::write(left.join(PLANS).join("T-1.md"), "old").expect("an old plan");
+        std::fs::create_dir_all(dir.join(PLANS)).expect("their plans/");
+        std::fs::write(dir.join(PLANS).join("T-1.md"), "new").expect("their plan");
+        // An empty leftover at the destination is no clash.
+        std::fs::create_dir_all(dir.join(MISSIONS)).expect("an empty missions/");
+        std::fs::create_dir_all(left.join(MISSIONS).join("T-2")).expect("a mission");
+
+        migrate_project(config.path(), &record);
+        migrate_project(config.path(), &record);
+
+        let there = ProjectData::resolved(config.path(), record.id);
+        assert_eq!(there.dir(), dir);
+        assert_eq!(
+            std::fs::read_to_string(there.kb_sources()).unwrap(),
+            "sources"
+        );
+        assert!(there.wiki().join("page.md").is_file());
+        assert!(there.missions().join("T-2").is_dir());
+        let followed = dir.join(DEFINITIONS).join("reviewer");
+        assert!(followed.join("profile.toml").is_file());
+        assert!(
+            !followed.join(OVERLAY).exists(),
+            "a captured login never reaches .kubiq/"
+        );
+        let logins = ProjectData::under_config(config.path(), record.id).definition_logins();
+        assert_eq!(
+            std::fs::read_to_string(logins.join("reviewer/base/claude-code/token")).unwrap(),
+            "secret"
+        );
+        assert_eq!(
+            std::fs::read_to_string(there.plans().join("T-1.md")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(left.join(PLANS).join("T-1.md")).unwrap(),
+            "old",
+            "a clash leaves both copies"
+        );
+        assert!(!left.join(KB_SOURCES).exists() && !left.join(WIKI).exists());
+    }
+
+    #[cfg(feature = "harness")]
+    #[test]
+    fn follows_spells_the_harness_directories_as_their_stores_do() {
+        assert!(FOLLOWS.contains(&crate::agent::DEFINITIONS_DIR));
+        assert!(FOLLOWS.contains(&crate::catalog::CATALOG_DIR));
+    }
+
+    #[test]
+    fn an_in_project_path_is_stored_relative_and_read_back_absolute() {
+        let root = Path::new("/work/demo");
+        assert_eq!(relative_in(root, "/work/demo/docs/kb"), "docs/kb");
+        assert_eq!(relative_in(root, "/work/demo"), ".");
+        assert_eq!(
+            relative_in(root, "/work/demo-other/x"),
+            "/work/demo-other/x"
+        );
+        assert_eq!(relative_in(root, "/elsewhere"), "/elsewhere");
+        assert_eq!(relative_in(root, "~/.cargo"), "~/.cargo");
+        assert_eq!(relative_in(root, "/work/demo/~scratch"), "~scratch");
+        assert_eq!(relative_in(root, "/work/demo/~/x"), "./~/x");
+        assert_eq!(resolve_in(root, "~scratch"), "/work/demo/~scratch");
+
+        for typed in [
+            "/work/demo/docs/kb",
+            "/work/demo",
+            "/elsewhere",
+            "~/.cargo",
+            "~",
+            "/work/demo/~scratch",
+            "/work/demo/~",
+            "/work/demo/~/x",
+        ] {
+            let stored = relative_in(root, typed);
+            assert_eq!(
+                Path::new(&resolve_in(root, &stored)),
+                Path::new(typed),
+                "{typed} round-trips through {stored}"
+            );
+        }
+        assert_eq!(
+            relative_in(Path::new(""), "/x/y"),
+            "/x/y",
+            "no root, no rewrite"
+        );
     }
 
     /// A user's hand edit is theirs to keep: provisioning again leaves the ignore file alone and

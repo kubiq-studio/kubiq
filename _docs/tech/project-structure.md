@@ -5,8 +5,8 @@ kind: tech
 status: current
 summary: Every folder in the workspace, what belongs in it, what must never go in it, and the two crates' division of labour.
 read_when: you are adding a file and are not certain where it goes, or you are new to the repository
-updated: 2026-10-29
-verified: 2026-10-29
+updated: 2026-11-01
+verified: 2026-11-01
 code_anchors: [crates/kubiq-proto/src/browser.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq/src/app/browser.rs, Cargo.toml, crates/kubiq-host/src/store/usage.rs, crates/kubiq-host/src/store/project_dir.rs, crates/kubiq-host/src/kb/mod.rs, crates/kubiq-host/src/lib.rs, crates/kubiq/Cargo.toml, crates/kubiq-proto/Cargo.toml, crates/kubiq-host/Cargo.toml, crates/kubiq-app/Cargo.toml, crates/kubiq-drone/Cargo.toml, crates/kubiq-tunnel/Cargo.toml, vendor/gpui-terminal/Cargo.toml, _tools/icns.py]
 depends_on: [tech-architecture]
 review_cycle: quarterly
@@ -176,8 +176,22 @@ local/
 ```
 
 and where a future entry belongs is a lookup rather than a judgement. It is written when the folder
-is made and never rewritten, so a user's own edit to it stands. How far the data itself has
-followed a project-managed project into `.kubiq/` is `G355`.
+is made and never rewritten, so a user's own edit to it stands. Every store that writes to the
+shared half resolves its directory through the pointer below, so all of it follows a
+project-managed project into `.kubiq/`. A project an older build moved in part — the pointer
+written, `kb.toml`, `wiki/`, `plans/` and the rest still under the config root — is finished on the
+next load by `project_dir::migrate_project`, which moves each such entry unless `.kubiq/` already
+holds a non-empty one of that name, in which case both stay and the clash is logged. An agent
+definition's captured login (the library's `<id>/base/<harness>/` overlay) is credential state and
+never goes into `.kubiq/`: it lives in `<config root>/projects/<ulid>/local/definition-logins/`,
+apart from the record, whichever mode the project is in.
+
+A path a shared setting holds — a knowledge-base folder in `kb.toml`, a SQLite file in `db.toml`, a
+project definition's write grant — is stored **relative to the project's folder** when it lies
+inside it, with `/` separators, and resolved back to absolute on read, so a teammate's clone points
+at its own checkout (`project_dir::relative_in` / `resolve_in`). A path outside the project, or a
+`~`-prefixed one, is stored as typed; an absolute in-project path written before this is rewritten
+relative on its next save.
 
 The project still gets its `<config root>/projects/<ulid>/` directory, holding one file the tree
 above does not show — `storage.toml`, the pointer naming where the data went — and whatever has
@@ -202,12 +216,12 @@ refused that row waits for an answer rather than drawing the new mode — see
 
 The order is the design:
 
-1. **Copy** every entry of `project_dir::FOLLOWS` to the destination. That is the shared half that
-   actually resolves through `ProjectDirs` today — `project.toml`, `tasks/`, `tasksrc.toml`,
-   `studio.toml`, `db.toml`. The rest of the shared half (`plans/`, `missions/`, `kb.toml`,
-   `agent-definitions/`) is still composed under the config root by its own store (`G355`), so
-   moving it would take it away from the only code that reads it. An allow-list is the side that
-   fails safely, and it is what `G355` shortens to nothing.
+1. **Copy** every entry of `project_dir::FOLLOWS` to the destination — the whole shared half:
+   `project.toml`, `tasks/`, `tasksrc.toml`, `studio.toml`, `db.toml`, `kb.toml`, `plans/`,
+   `missions/`, `wiki/`, `wikis/`, `agent-definitions/` and `catalog/`. Each of their stores
+   resolves its directory through the pointer (`ProjectDirs`, or `ProjectData::resolved` for a
+   store that holds only the config root), so a moved entry lands where its reader looks. An
+   allow-list is the side that fails safely: an entry nobody named stays where it is.
 2. **Rewrite or remove `storage.toml`.** This is the commit point, because the pointer is the only
    thing a store reads. A crash before it leaves the project working exactly where it was, with a
    destination nothing points at; a crash after leaves a copy at the source that is garbage, not

@@ -55,14 +55,13 @@ impl Catalog {
 
     /// One layer: the application's own for `None`, that project's for `Some`.
     ///
-    /// A project's layer lives under `<root>/projects/<id>/`, beside its definitions, so Forget
-    /// removes it without knowing it is there.
+    /// A project's layer lives in its data directory, beside its definitions — `.kubiq/` for a
+    /// project-managed project (`D173`), `<root>/projects/<id>/` otherwise, where Forget removes
+    /// it without knowing it is there.
     pub fn layer(&self, scope: Option<ProjectId>) -> FsRegistry {
         match scope {
             None => FsRegistry::new(self.root.join(CATALOG_DIR)),
-            Some(project) => {
-                FsRegistry::new(ProjectData::under_config(&self.root, project).catalog())
-            }
+            Some(project) => FsRegistry::new(ProjectData::resolved(&self.root, project).catalog()),
         }
     }
 

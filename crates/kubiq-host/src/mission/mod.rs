@@ -194,7 +194,7 @@ impl Missions {
 
     /// The names of a mission's documents, without the `.md`, sorted.
     pub fn documents(&self, project: ProjectId, task: TaskId) -> Vec<String> {
-        let dir = crate::store::project_dir::ProjectData::under_config(&self.root, project)
+        let dir = crate::store::project_dir::ProjectData::resolved(&self.root, project)
             .mission_docs(task);
         let Ok(entries) = std::fs::read_dir(dir) else {
             return Vec::new();
@@ -321,7 +321,7 @@ impl Missions {
     pub fn gone(&mut self, project: ProjectId, task: TaskId, deleted: bool) -> Vec<Reply> {
         let mut replies = Vec::new();
         if deleted {
-            let dir = crate::store::project_dir::ProjectData::under_config(&self.root, project)
+            let dir = crate::store::project_dir::ProjectData::resolved(&self.root, project)
                 .missions()
                 .join(task.to_string());
             let _ = std::fs::remove_dir_all(dir);

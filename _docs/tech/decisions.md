@@ -5,7 +5,7 @@ kind: tech
 status: current
 summary: One entry per structural decision — what was chosen, why, and what it costs — cited as `Dnn` across this library.
 read_when: you are about to argue with a rule, reverse a design choice, or make one a reasonable person might later reverse
-updated: 2026-10-29
+updated: 2026-11-01
 verified: 2026-10-08
 depends_on: [tech-architecture]
 review_cycle: quarterly
@@ -3977,9 +3977,8 @@ live conversation running in it is refused**, from the two tables the host keeps
 **Cost:** two places a project's data can be, which every future per-project store has to ask
 about rather than compose a path for. A project-managed project that is forgotten leaves its
 `.kubiq/` behind, by design — it is in the user's own tree — and adding the folder back gives it a
-new id. And the move carries only what resolves through `ProjectDirs`: until `G355`, the plans,
-missions, knowledge-base roots and agent definitions stay under the config root, which is where
-their stores still read them.
+new id. And the move carries only what `project_dir::FOLLOWS` names, so every store on the shared
+side has to resolve its directory through the pointer rather than compose a config-root path.
 
 ### D174 — A saved setup is an **agent definition**, and the type is `AgentDefinition`, never `Agent`
 
@@ -4921,9 +4920,8 @@ entry sit unreachable. A remote skill source is a shallow git clone under `<root
 where it came from, so a skill keeps working with the source gone.
 
 **Cost.** The catalog file format is the library's, so a change to it is a change the host inherits,
-and a hand-edited `catalog.toml` can hold what the form does not show. A project layer sits under the
-config root even for a project that keeps its data in `.kubiq/` (`G355`), so it does not travel with a
-clone. An install and a search shell out to `git` and, for the MCP registry, make an HTTP request, so
+and a hand-edited `catalog.toml` can hold what the form does not show. A project layer follows the
+project's data directory, so a project that keeps its data in `.kubiq/` commits it too. An install and a search shell out to `git` and, for the MCP registry, make an HTTP request, so
 they need `git` and a network on the host, and are answered late on a thread of their own. A linked
 skill is a path on the host's disk, which a clone of the project on another machine may not have.
 

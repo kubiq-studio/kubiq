@@ -75,6 +75,101 @@ fn definitions_dir(base: &Path) -> PathBuf {
     dir
 }
 
+/// One definition root as Kubiq uses it: the records where their scope keeps them, and the
+/// library's config-overlay bases (`<id>/base/<harness>/`, a captured login) where this machine
+/// keeps them.
+///
+/// The two are one directory for the global root. For a project they are split: the record is on
+/// the shared side of the project's data directory and follows it into `.kubiq/` (`D173`), while
+/// an overlay is per-machine credential state and stays under the config root's
+/// [`ProjectData::definition_logins`](crate::store::project_dir::ProjectData::definition_logins),
+/// never committed. The library's own `FsProfileStore` would put both under one root, so the split
+/// is made here, through the `ProfileStore` trait's two overlay methods.
+pub(crate) struct DefinitionStore {
+    records: FsProfileStore,
+    /// The overlays' own root, when it is not the records' one.
+    overlays: Option<FsProfileStore>,
+    overlays_root: Option<PathBuf>,
+}
+
+impl DefinitionStore {
+    fn single(root: PathBuf) -> Self {
+        Self {
+            records: FsProfileStore::new(root),
+            overlays: None,
+            overlays_root: None,
+        }
+    }
+
+    fn split(records: PathBuf, overlays: PathBuf) -> Self {
+        Self {
+            records: FsProfileStore::new(records),
+            overlays: Some(FsProfileStore::new(overlays.clone())),
+            overlays_root: Some(overlays),
+        }
+    }
+
+    fn save(&self, record: &DefinitionRecord) -> Result<PathBuf> {
+        self.records.save(record)
+    }
+
+    /// The record, and — when they live apart — the overlays saved for it.
+    fn delete(&self, id: &str) -> Result<()> {
+        self.records.delete(id)?;
+        if let Some(root) = &self.overlays_root {
+            let dir = root.join(id);
+            if dir.is_dir()
+                && let Err(error) = std::fs::remove_dir_all(&dir)
+            {
+                tracing::warn!("{} was left behind: {error}", dir.display());
+            }
+        }
+        Ok(())
+    }
+
+    /// The record, and — when they live apart — its overlays, which a rename must not orphan.
+    fn rename(&self, from: &str, to: &str) -> Result<()> {
+        self.records.rename(from, to)?;
+        if let Some(root) = &self.overlays_root {
+            let (src, dst) = (root.join(from), root.join(to));
+            if src.is_dir()
+                && !dst.exists()
+                && let Err(error) = std::fs::rename(&src, &dst)
+            {
+                tracing::warn!(
+                    "the overlays of '{from}' stay at {}: {error}",
+                    src.display()
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ProfileStore for DefinitionStore {
+    fn profiles(&self) -> Result<Vec<DefinitionRecord>> {
+        self.records.profiles()
+    }
+
+    fn profile(&self, id: &str) -> Result<Option<DefinitionRecord>> {
+        self.records.profile(id)
+    }
+
+    fn base_source(&self, id: &str, harness: &str) -> Option<agent_manager::source::Source> {
+        match &self.overlays {
+            Some(overlays) => overlays.base_source(id, harness),
+            None => self.records.base_source(id, harness),
+        }
+    }
+
+    fn put_base(&self, id: &str, harness: &str, from: &Path) -> Result<()> {
+        match &self.overlays {
+            Some(overlays) => overlays.put_base(id, harness, from),
+            None => self.records.put_base(id, harness, from),
+        }
+    }
+}
+
 /// Whether a save may go ahead: a **new** definition needs a harness to name, an existing one
 /// does not.
 ///
@@ -222,6 +317,9 @@ pub struct ConverseOptions {
     /// run outside any project) resolves against the global root alone, which is what every run
     /// did before project scoping.
     pub project: Option<ProjectId>,
+    /// That project's own folder, which a project definition's grants are saved relative to
+    /// ([`Agents::save_definition_replacing`]). `None` leaves a relative grant as written.
+    pub project_root: Option<PathBuf>,
     /// The first turn's text, for a **one-shot** harness whose prompt is argv rather than a frame
     /// on a pipe. Left `None` for a multi-turn harness, which is prompted over its bridge after
     /// it is running — putting a prompt here for one of those would run its first turn twice.
@@ -691,18 +789,22 @@ impl Agents {
 
     /// The global definition store, over Kubiq's own root. Built per call, for the same reason
     /// [`account_store`](Self::account_store) is.
-    fn definition_store(&self) -> FsProfileStore {
-        FsProfileStore::new(definitions_dir(&self.root))
+    fn definition_store(&self) -> DefinitionStore {
+        DefinitionStore::single(definitions_dir(&self.root))
     }
 
-    /// One project's own definition store, under the directory that project already owns.
+    /// One project's own definition store, under the directory that project already owns —
+    /// `.kubiq/` for a project-managed project (`D173`), so the definitions travel with it. Its
+    /// config-overlay bases stay under the config root's `local/` either way ([`DefinitionStore`]).
     ///
     /// A project definition **is** its location (decision 8): the scope cannot contradict the
     /// record, and `Projects::forget` removing `<root>/projects/<id>` takes these with it
     /// without knowing they are there — the same way it already takes the plans and the index.
-    fn project_definition_store(&self, project: ProjectId) -> FsProfileStore {
-        FsProfileStore::new(
-            crate::store::project_dir::ProjectData::under_config(&self.root, project).definitions(),
+    fn project_definition_store(&self, project: ProjectId) -> DefinitionStore {
+        use crate::store::project_dir::ProjectData;
+        DefinitionStore::split(
+            ProjectData::resolved(&self.root, project).definitions(),
+            ProjectData::under_config(&self.root, project).definition_logins(),
         )
     }
 
@@ -711,21 +813,32 @@ impl Agents {
     /// definitions per harness row, and one that names none belongs to no row.
     pub fn definitions(&self) -> Result<Vec<AgentDefinition>> {
         let store = self.definition_store();
-        Ok(Self::infos(&store, None).context("reading the definitions Kubiq knows")?)
+        Ok(Self::infos(&store, None, None).context("reading the definitions Kubiq knows")?)
     }
 
     /// One project's own definitions, each carrying the project it is scoped to. Empty for a
     /// project that has none, which is every project until one is written there.
-    pub fn project_definitions(&self, project: ProjectId) -> Result<Vec<AgentDefinition>> {
+    ///
+    /// `project_root` resolves a grant saved relative to the project's folder, so the interface
+    /// is told an absolute path; `None` leaves it as written.
+    pub fn project_definitions(
+        &self,
+        project: ProjectId,
+        project_root: Option<&Path>,
+    ) -> Result<Vec<AgentDefinition>> {
         let store = self.project_definition_store(project);
-        Self::infos(&store, Some(project))
+        Self::infos(&store, Some(project), project_root)
             .with_context(|| format!("reading the definitions of project {project}"))
     }
 
     /// One store's definitions as the interface is told them, stamped with the scope they were
     /// found in. The one place a library `Profile` record becomes an [`AgentDefinition`], so the
     /// two scopes cannot drift into two answers.
-    fn infos(store: &FsProfileStore, project: Option<ProjectId>) -> Result<Vec<AgentDefinition>> {
+    fn infos(
+        store: &DefinitionStore,
+        project: Option<ProjectId>,
+        project_root: Option<&Path>,
+    ) -> Result<Vec<AgentDefinition>> {
         Ok(store
             .profiles()?
             .into_iter()
@@ -751,7 +864,13 @@ impl Agents {
                     grants: record
                         .extra_rw
                         .into_iter()
-                        .map(|path| Grant { path, write: true })
+                        .map(|path| Grant {
+                            path: match project_root {
+                                Some(root) => crate::store::project_dir::resolve_in(root, &path),
+                                None => path,
+                            },
+                            write: true,
+                        })
                         .collect(),
                     project,
                 })
@@ -776,7 +895,7 @@ impl Agents {
         let global = FsProfileStore::new(definitions_dir(root));
         let scoped = project.map(|project| {
             FsProfileStore::new(
-                crate::store::project_dir::ProjectData::under_config(root, project).definitions(),
+                crate::store::project_dir::ProjectData::resolved(root, project).definitions(),
             )
         });
         ScopedProfileStore::new(&global, scoped.as_ref().map(|it| it as &dyn ProfileStore))
@@ -794,7 +913,7 @@ impl Agents {
         let stores = [
             FsProfileStore::new(definitions_dir(root)),
             FsProfileStore::new(
-                crate::store::project_dir::ProjectData::under_config(root, project).definitions(),
+                crate::store::project_dir::ProjectData::resolved(root, project).definitions(),
             ),
         ];
         for store in &stores {
@@ -824,14 +943,29 @@ impl Agents {
 
     /// The extra read-write folders a definition saved, with its `extends` chain folded in and
     /// resolved through the run's scope exactly as [`Self::definition_mcps`] is.
-    fn definition_extra_rw(&self, id: &str, project: Option<ProjectId>) -> Vec<String> {
+    ///
+    /// A grant a project definition saved relative to the project's folder is resolved against
+    /// `project_root`; the library is only ever handed absolute or `~`-prefixed paths.
+    fn definition_extra_rw(
+        &self,
+        id: &str,
+        project: Option<ProjectId>,
+        project_root: Option<&Path>,
+    ) -> Vec<String> {
         let global = self.definition_store();
         let scoped = project.map(|project| self.project_definition_store(project));
         let store =
             ScopedProfileStore::new(&global, scoped.as_ref().map(|it| it as &dyn ProfileStore));
-        agent_manager::profile::resolve_flattened(&store, id)
+        let saved = agent_manager::profile::resolve_flattened(&store, id)
             .map(|record| record.extra_rw)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        match project_root {
+            Some(root) => saved
+                .into_iter()
+                .map(|path| crate::store::project_dir::resolve_in(root, &path))
+                .collect(),
+            None => saved,
+        }
     }
 
     /// What a definition saved under `defaults.skills`, read exactly as [`Self::definition_mcps`]
@@ -878,18 +1012,24 @@ impl Agents {
     ///   button. Editing an existing one is not refused: a machine that lost its harness must
     ///   still be able to repair what it already wrote.
     pub fn save_definition(&self, definition: AgentDefinition) -> Result<()> {
-        self.save_definition_replacing(definition, None)
+        self.save_definition_replacing(definition, None, None)
     }
 
     /// [`Self::save_definition`], and when `replaces` names a different id, a **rename**: the
     /// definition's directory is moved to the new id first (so anything beside the record, such as
     /// a captured login, follows) and the record is rewritten there. Refused, and nothing
     /// touched, when `replaces` is not a definition in that scope or the new id is taken.
+    ///
+    /// `project_root` is the folder of the project a project definition belongs to: a grant
+    /// inside it is written relative to it, so the definition still grants the right folder in a
+    /// teammate's clone (`D173`). Ignored for a global definition.
     pub fn save_definition_replacing(
         &self,
         mut definition: AgentDefinition,
         replaces: Option<&str>,
+        project_root: Option<&Path>,
     ) -> Result<()> {
+        let project_root = project_root.filter(|_| definition.project.is_some());
         let store = match definition.project {
             Some(project) => self.project_definition_store(project),
             None => self.definition_store(),
@@ -932,7 +1072,10 @@ impl Agents {
                     .grants
                     .into_iter()
                     .filter(|grant| grant.write)
-                    .map(|grant| grant.path)
+                    .map(|grant| match project_root {
+                        Some(root) => crate::store::project_dir::relative_in(root, &grant.path),
+                        None => grant.path,
+                    })
                     .collect(),
                 extends: kept.extends,
                 isolate: kept.isolate,
@@ -973,7 +1116,7 @@ impl Agents {
     /// so the pick never meant it) or its own `new` (the pick would silently mean the project's
     /// definition instead, and a definition extending `new` could extend itself).
     pub fn retarget_global_rename(&self, project: ProjectId, old: &str, new: &str) -> bool {
-        let own = self.project_definitions(project).unwrap_or_default();
+        let own = self.project_definitions(project, None).unwrap_or_default();
         if own.iter().any(|it| it.id == old) {
             return false;
         }
@@ -987,7 +1130,7 @@ impl Agents {
         true
     }
 
-    fn retarget_extends(store: &FsProfileStore, old: &str, new: &str) {
+    fn retarget_extends(store: &DefinitionStore, old: &str, new: &str) {
         for mut record in store.profiles().unwrap_or_default() {
             if record.extends.as_deref() == Some(old) {
                 record.extends = Some(new.to_string());
@@ -1444,7 +1587,13 @@ impl Agents {
             let saved = options
                 .definition
                 .as_deref()
-                .map(|definition| self.definition_extra_rw(definition, options.project))
+                .map(|definition| {
+                    self.definition_extra_rw(
+                        definition,
+                        options.project,
+                        options.project_root.as_deref(),
+                    )
+                })
                 .unwrap_or_default();
             union(saved, std::mem::take(&mut options.extra_rw))
         } else {
@@ -2429,7 +2578,7 @@ mod tests {
         store.save(&child).unwrap();
 
         agents
-            .save_definition_replacing(a_definition("new"), Some("old"))
+            .save_definition_replacing(a_definition("new"), Some("old"), None)
             .unwrap();
         assert_eq!(
             ids(&agents),
@@ -2476,12 +2625,12 @@ mod tests {
         assert_eq!(ids(&agents), vec!["new".to_string(), "taken".to_string()]);
 
         agents
-            .save_definition_replacing(a_definition("taken"), Some("new"))
+            .save_definition_replacing(a_definition("taken"), Some("new"), None)
             .unwrap_err();
         assert_eq!(ids(&agents), vec!["new".to_string(), "taken".to_string()]);
 
         agents
-            .save_definition_replacing(a_definition("ghost"), Some("missing"))
+            .save_definition_replacing(a_definition("ghost"), Some("missing"), None)
             .unwrap_err();
         assert_eq!(ids(&agents), vec!["new".to_string(), "taken".to_string()]);
     }
@@ -2517,7 +2666,7 @@ mod tests {
             "global list is global"
         );
 
-        let scoped = agents.project_definitions(project).unwrap();
+        let scoped = agents.project_definitions(project, None).unwrap();
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].id, "reviewer");
         assert_eq!(
@@ -2526,7 +2675,7 @@ mod tests {
             "a project definition says which project it is in"
         );
         assert!(
-            agents.project_definitions(other).unwrap().is_empty(),
+            agents.project_definitions(other, None).unwrap().is_empty(),
             "another project sees none of it"
         );
 
@@ -2540,7 +2689,12 @@ mod tests {
             .join("reviewer");
         assert!(dir.join("profile.toml").is_file());
         std::fs::remove_dir_all(root.path().join("projects").join(project.to_string())).unwrap();
-        assert!(agents.project_definitions(project).unwrap().is_empty());
+        assert!(
+            agents
+                .project_definitions(project, None)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             agents.definitions().unwrap().len(),
             1,
@@ -2616,11 +2770,11 @@ mod tests {
             vec![grant("/data/a")]
         );
         assert_eq!(
-            agents.definition_extra_rw("review", Some(project)),
+            agents.definition_extra_rw("review", Some(project), None),
             vec!["~/b".to_string()]
         );
         assert_eq!(
-            agents.definition_extra_rw("review", None),
+            agents.definition_extra_rw("review", None, None),
             vec!["/data/a".to_string()]
         );
 
@@ -2633,6 +2787,82 @@ mod tests {
             options.extra_rw,
             vec![isolate::real_home().join("b"), PathBuf::from("/data/a")]
         );
+    }
+
+    /// A project definition's captured login is kept under the config root's `local/`, apart from
+    /// its record, and follows the record through a rename and a delete.
+    #[test]
+    fn a_project_definitions_overlay_stays_on_this_machine() {
+        let root = tempfile::TempDir::new().unwrap();
+        let agents = with_a_harness(root.path());
+        let project = ProjectId::generate();
+        agents
+            .save_definition(AgentDefinition {
+                project: Some(project),
+                ..a_definition("review")
+            })
+            .unwrap();
+        let login = root.path().join("login");
+        std::fs::create_dir_all(&login).unwrap();
+        std::fs::write(login.join("token"), "secret").unwrap();
+
+        let store = agents.project_definition_store(project);
+        store.put_base("review", "claude-code", &login).unwrap();
+        let logins = crate::store::project_dir::ProjectData::under_config(root.path(), project)
+            .definition_logins();
+        assert!(logins.join("review/base/claude-code/token").is_file());
+        assert!(
+            !crate::store::project_dir::ProjectData::resolved(root.path(), project)
+                .definitions()
+                .join("review/base")
+                .exists()
+        );
+        assert!(store.base_source("review", "claude-code").is_some());
+
+        store.rename("review", "audit").unwrap();
+        assert!(logins.join("audit/base/claude-code/token").is_file());
+        store.delete("audit").unwrap();
+        assert!(!logins.join("audit").exists());
+    }
+
+    /// A project definition's grant inside the project is written relative to it and read back
+    /// absolute; one outside stays absolute on disk.
+    #[test]
+    fn a_project_definitions_in_project_grant_is_stored_relative() {
+        let root = tempfile::TempDir::new().unwrap();
+        let agents = with_a_harness(root.path());
+        let project = ProjectId::generate();
+        let folder = Path::new("/work/demo");
+        let definition = AgentDefinition {
+            grants: ["/work/demo/target", "/data/a"]
+                .iter()
+                .map(|path| Grant {
+                    path: path.to_string(),
+                    write: true,
+                })
+                .collect(),
+            project: Some(project),
+            ..a_definition("review")
+        };
+        agents
+            .save_definition_replacing(definition, None, Some(folder))
+            .unwrap();
+
+        assert_eq!(
+            agents.definition_extra_rw("review", Some(project), None),
+            vec!["target".to_string(), "/data/a".to_string()],
+            "on disk"
+        );
+        assert_eq!(
+            agents.definition_extra_rw("review", Some(project), Some(folder)),
+            vec!["/work/demo/target".to_string(), "/data/a".to_string()]
+        );
+        let read: Vec<String> = agents.project_definitions(project, Some(folder)).unwrap()[0]
+            .grants
+            .iter()
+            .map(|grant| grant.path.clone())
+            .collect();
+        assert_eq!(read, vec!["/work/demo/target", "/data/a"]);
     }
 
     /// A definition's skills survive a save and a read, in either scope, and an empty list is
@@ -2669,7 +2899,7 @@ mod tests {
             "inside the project, its own definition answers"
         );
         assert_eq!(
-            agents.project_definitions(project).unwrap()[0].skills,
+            agents.project_definitions(project, None).unwrap()[0].skills,
             vec!["local"]
         );
     }
@@ -3131,7 +3361,7 @@ mod tests {
         agents
             .clone_definition("standard", "standard copy", Some(project))
             .unwrap();
-        let scoped = agents.project_definitions(project).unwrap();
+        let scoped = agents.project_definitions(project, None).unwrap();
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].id, "standard copy");
         assert_eq!(scoped[0].project, Some(project));
@@ -3143,7 +3373,7 @@ mod tests {
                 ..scoped[0].clone()
             })
             .unwrap();
-        assert!(agents.project_definitions(project).unwrap()[0].disabled);
+        assert!(agents.project_definitions(project, None).unwrap()[0].disabled);
 
         assert!(agents.delete_definition("standard", Some(project)).is_err());
         assert!(
@@ -3154,7 +3384,12 @@ mod tests {
         agents
             .delete_definition("standard copy", Some(project))
             .unwrap();
-        assert!(agents.project_definitions(project).unwrap().is_empty());
+        assert!(
+            agents
+                .project_definitions(project, None)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(agents.definitions().unwrap().len(), 1, "the global stands");
     }
 
@@ -3174,7 +3409,7 @@ mod tests {
             })
             .unwrap();
         assert!(agents.definitions().unwrap().is_empty(), "not global");
-        assert_eq!(agents.project_definitions(project).unwrap().len(), 1);
+        assert_eq!(agents.project_definitions(project, None).unwrap().len(), 1);
 
         let store = agents.project_definition_store(project);
         let mut record = store.profile("mine").unwrap().unwrap();

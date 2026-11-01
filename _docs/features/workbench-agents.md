@@ -437,8 +437,8 @@ than put in a column.
 built before the first frame and its subscription is held for the window's life. A column or a chat
 tab is given a **slot** from its own range when it opens and keeps it, so what was typed at one
 agent never moves into a field addressed at another, and a freed slot's draft is cleared because the
-slot is handed to the next column or chat tab that opens. The placeholder names the agent the column
-is showing. Enter sends, Shift-Enter inserts a newline, and cmd/ctrl+Enter sends too — the same
+slot is handed to the next column or chat tab that opens. The placeholder reads `Ask <name>…`, the name
+being the agent's definition, else its harness's label. Enter sends, Shift-Enter inserts a newline, and cmd/ctrl+Enter sends too — the same
 `secondary-enter` binding a multi-line `submit_on_enter` field already answers the same way as a
 bare Enter, so there is nothing extra to wire, only a hint to show for it. `AppState::agent_for_slot`
 is what "sends" resolves the agent through on every surface — a chat tab's own attachment for a slot

@@ -110,7 +110,7 @@ impl Kb {
 
     /// A project's sources, each with what the host knows about it now.
     pub fn sources(&self, project: ProjectId, project_path: &Path) -> Vec<KbSourceStatus> {
-        store::load(&self.list_path(project))
+        store::load(&self.list_path(project), Some(project_path))
             .into_iter()
             .map(|source| {
                 let state = self.state_of(project, &source, project_path);
@@ -133,10 +133,11 @@ impl Kb {
     ) -> Vec<KbSourceStatus> {
         // Protection is chosen at creation and never flipped: a source already saved keeps the
         // flag it was saved with, and only an internal one may carry it at all.
-        let before: HashMap<KbSourceId, KbSource> = store::load(&self.list_path(project))
-            .into_iter()
-            .map(|source| (source.id, source))
-            .collect();
+        let before: HashMap<KbSourceId, KbSource> =
+            store::load(&self.list_path(project), Some(project_path))
+                .into_iter()
+                .map(|source| (source.id, source))
+                .collect();
         let sources: Vec<KbSource> = sources
             .into_iter()
             .map(|mut source| {
@@ -159,7 +160,7 @@ impl Kb {
             }
         }
 
-        if let Err(error) = store::save(&self.list_path(project), &sources) {
+        if let Err(error) = store::save(&self.list_path(project), Some(project_path), &sources) {
             // The session carries on from memory; the list this call answers with is what the
             // window sees, whether or not it is durable — the same degradation
             // `FileProjectStore` reports for the catalogue, minus the flag, because a lost source
@@ -197,8 +198,11 @@ impl Kb {
     /// One source of a project's list, for the file family's job to resolve against. `None` is
     /// every refusal the file worker needs: no such project has ever written a list, or this id is
     /// not in the one it wrote.
+    ///
+    /// A folder's path is as `kb.toml` holds it — relative when it is inside the project —
+    /// because nothing here knows the project's folder; [`Self::base_path`] resolves it.
     pub fn find(&self, project: ProjectId, source_id: KbSourceId) -> Option<KbSource> {
-        store::load(&self.list_path(project))
+        store::load(&self.list_path(project), None)
             .into_iter()
             .find(|source| source.id == source_id)
     }
@@ -216,7 +220,9 @@ impl Kb {
     /// only ever looked at for `Project`, never conditionally fetched for it.
     pub fn base_path(&self, project: ProjectId, source: &KbSource, project_path: &Path) -> PathBuf {
         match &source.origin {
-            KbOrigin::Folder { path } => PathBuf::from(path),
+            KbOrigin::Folder { path } => {
+                PathBuf::from(crate::store::project_dir::resolve_in(project_path, path))
+            }
             KbOrigin::Git { store, .. } => match store {
                 KbStore::Cache => std::env::temp_dir()
                     .join("kubiq-kb")
@@ -237,7 +243,7 @@ impl Kb {
                 let wiki = if source.is_protected() {
                     self.vault_dir(project, source.id).join(vault::PAGES)
                 } else {
-                    crate::store::project_dir::ProjectData::under_config(&self.root, project).wiki()
+                    crate::store::project_dir::ProjectData::resolved(&self.root, project).wiki()
                 };
                 if let Err(error) = std::fs::create_dir_all(&wiki) {
                     tracing::warn!(
@@ -364,15 +370,14 @@ impl Kb {
 
     /// Where a protected wiki's header and pages live.
     fn vault_dir(&self, project: ProjectId, source: KbSourceId) -> PathBuf {
-        crate::store::project_dir::ProjectData::under_config(&self.root, project)
-            .protected_wiki(source)
+        crate::store::project_dir::ProjectData::resolved(&self.root, project).protected_wiki(source)
     }
 
     /// Open every protected wiki of a project whose password the keychain has filed, asking the
     /// keychain once per source per run. Called before a listing goes to a window — never from an
     /// agent's tools, which never reach a protected wiki at all.
     pub fn auto_unlock(&self, project: ProjectId) {
-        for source in store::load(&self.list_path(project)) {
+        for source in store::load(&self.list_path(project), None) {
             if source.is_protected() {
                 self.try_keychain(project, &source);
             }

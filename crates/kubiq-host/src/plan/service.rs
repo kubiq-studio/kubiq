@@ -284,7 +284,7 @@ fn follow_quotes(annotations: &mut [Annotation], blocks: &[PlanBlock]) -> bool {
 /// through its own [`FilePlanStore`], and a mission document is not otherwise this module's to
 /// store.
 pub fn mission_doc_path(root: &Path, project: ProjectId, task: TaskId, name: &str) -> PathBuf {
-    crate::store::project_dir::ProjectData::under_config(root, project)
+    crate::store::project_dir::ProjectData::resolved(root, project)
         .mission_docs(task)
         .join(format!("{name}.md"))
 }

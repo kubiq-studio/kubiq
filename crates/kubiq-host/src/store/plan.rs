@@ -306,11 +306,12 @@ impl FilePlanStore {
         &self.root
     }
 
-    /// Under the project's own directory, the way [`super::file::FileTaskStore::path`] is — so
+    /// Under the project's own data directory, resolved through its pointer the way
+    /// [`super::file::FileTaskStore::path`] is (`D173`) — so
     /// Forget and the orphan collector already cover it, and a plan never outlives the project it
     /// belongs to.
     pub fn path(&self, project: ProjectId, task: TaskId) -> PathBuf {
-        super::project_dir::ProjectData::under_config(&self.root, project)
+        super::project_dir::ProjectData::resolved(&self.root, project)
             .plans()
             .join(format!("{task}.md"))
     }
