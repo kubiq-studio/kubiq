@@ -592,6 +592,11 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
             (app.workbench.open_menu == Some(crate::state::MenuId::Overflow))
                 .then(|| crate::ui::overflow_menu::overlay(app, window, cx)),
         )
+        // The titlebar's remote-host chevron menu, painted here for the same reason.
+        .children(
+            (app.workbench.open_menu == Some(crate::state::MenuId::Remote))
+                .then(|| crate::ui::overflow_menu::remote_overlay(app, window, cx)),
+        )
         // The titlebar's new-project chevron menu, named a point by a click on the chevron beside
         // the `+`. Painted here for the same reason the overflow menu just above is.
         .children(

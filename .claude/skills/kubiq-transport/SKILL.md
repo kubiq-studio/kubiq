@@ -129,7 +129,8 @@ never reuse an existing kind because the shape matches.
 - **`Bus::client_for` has no fall back to the local client.** A message for a host that is gone is
   dropped and logged, because a dropped remote's pane ids mean nothing locally (`D85`).
 - **`HostInfo` from a remote is ignored.** Only the local host's is applied, so the config root and
-  the shells/agent-types/accounts/profiles menus stay the local machine's (`G188`).
+  the agent-types/accounts/profiles menus stay the local machine's (`G188`). The shells do not:
+  `AppState::ask_shells` asks the current project's host with `send_to` and keeps only its answer.
 
 ## Verifying
 

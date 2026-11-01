@@ -1340,9 +1340,25 @@ impl AppState {
         }
         self.workbench.open_menu = Some(MenuId::NewPane);
         self.workbench.new_pane_menu = Some(at);
-        self.bus.send(Message::ListShells);
+        self.ask_shells(cx);
         self.bus.send(Message::ListAgentTypes);
         cx.notify();
+    }
+
+    /// Ask for the shells of the host a new terminal would start on: the current project's —
+    /// a drone's, for a project one serves — else the active host. `ListShells` names no project,
+    /// so `send` alone would ask `active`, which need not be where `SpawnWorkspace` lands. A list
+    /// from a different host than the last ask is cleared first, never shown as this one's.
+    pub(crate) fn ask_shells(&mut self, cx: &App) {
+        let host = match self.project(cx) {
+            Some(project_id) => self.bus.host_of_project(project_id),
+            None => self.bus.active(),
+        };
+        if self.workbench.shells_from != Some(host) {
+            self.workbench.shells.clear();
+            self.workbench.shells_from = Some(host);
+        }
+        self.bus.send_to(host, Message::ListShells);
     }
 
     /// Open the titlebar's run picker, anchored where the chevron was clicked: a filter field with
@@ -1593,6 +1609,23 @@ impl AppState {
     pub fn dismiss_overflow_menu(&mut self, cx: &mut Context<Self>) {
         self.workbench.open_menu = None;
         self.workbench.overflow_menu = None;
+        cx.notify();
+    }
+
+    /// Open the titlebar's remote-host chevron menu, anchored where it was clicked.
+    pub fn open_remote_menu(&mut self, at: (f32, f32), cx: &mut Context<Self>) {
+        if self.workbench.open_menu.is_some() {
+            self.close_menu(cx);
+        }
+        self.workbench.open_menu = Some(MenuId::Remote);
+        self.workbench.remote_menu = Some(at);
+        cx.notify();
+    }
+
+    /// Dismiss the remote menu — an outside click, or a pick already taken it.
+    pub fn dismiss_remote_menu(&mut self, cx: &mut Context<Self>) {
+        self.workbench.open_menu = None;
+        self.workbench.remote_menu = None;
         cx.notify();
     }
 

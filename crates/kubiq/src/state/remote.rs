@@ -116,6 +116,10 @@ pub struct RemoteConnectState {
     /// linger, or detached for good. Kept regardless of mode, like the scheme and trust picks
     /// above — switching to `Ssh` and back loses nobody's choice.
     pub preset: DronePreset,
+    /// The idle timeout, in seconds, a detached drone outlives a dropped link for — the saved
+    /// carrier's `linger_secs`. `None` is the preset's own. Only meaningful for
+    /// [`DronePreset::Session`], the one preset whose linger is a finite wait.
+    pub linger_secs: Option<u64>,
     /// The socket path, in [`ConnectMode::Unix`]. Shown, never edited.
     pub unix_path: String,
     /// The last dial was refused because the host presented another key than the one it is
@@ -143,6 +147,7 @@ impl Default for RemoteConnectState {
             mode: ConnectMode::Socket,
             profile: None,
             preset: DronePreset::Attached,
+            linger_secs: None,
             unix_path: String::new(),
             pin_offer: None,
         }

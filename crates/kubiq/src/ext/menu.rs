@@ -9,7 +9,7 @@
 //! **A block, not a row, is the registered thing.** A menu's rows are not a fixed list — the
 //! shells are the machine's, the tools are the project's, the hidden agents are whatever is
 //! running — so a spec contributes an `fn` that builds rows rather than one row's fields. The
-//! base registers exactly four blocks, one per menu, each the flat list in `crate::ui::menus`
+//! base registers exactly five blocks, one per menu, each the flat list in `crate::ui::menus`
 //! that a reader reorders by moving a line.
 //!
 //! **The groups are the menus.** A bar menu has no internal groups: within one, the order is
@@ -36,6 +36,7 @@ pub const GROUPS: &[SlotId] = &[
     ids::MENU_NEW_PROJECT,
     ids::MENU_NEW_PANE,
     ids::MENU_OVERFLOW,
+    ids::MENU_REMOTE,
     ids::MENU_HIDDEN_AGENTS,
 ];
 

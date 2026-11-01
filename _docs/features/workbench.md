@@ -848,11 +848,13 @@ panes still in it. Then the notification bell, feedback, help, and **Point at so
 screen you are standing on, this one waits for you to point at a part of it, so they are neighbours.
 Then **Settings**, and the overflow chevron flush against it as the fifth split button in the row:
 settings is the one thing in that menu reached often enough to stand on the strip, and the chevron
-keeps the rest — Remote hosts and Connect to a remote host, Explore the project in browser (needing
+keeps the rest — Explore the project in browser (needing
 a project), Capture this window (needing a project and captures offered on this platform), and Help
 — each row left off whole rather than drawn disabled when its condition fails, in that order.
-**Remote hosts is a row rather than a button** for the reason settings is no longer one: the manager
-is consulted when a connection is in question, not every session, and the strip is the scarce thing.
+**Remote hosts** has its own pair between add-a-project and the back/forward arrows, a rule on each
+side (`Tier::Experimental`, so absent otherwise): a **Connect to a remote host** button
+(`KubiqIcon::HostRemote`) and a chevron whose menu (`ext::ids::MENU_REMOTE`) holds *Remote hosts*, the
+manager, and any block a second edition contributes — Studio's saved RDP targets, for one.
 Then the theme switch, and last of all **About** (`KubiqIcon::TitlebarAbout`, the Kubiq mark), the strip's right-most control. The overflow chevron lights while its own menu is open, the rule
 every menu-raising control in this strip follows; the bell lights while its list is up, carries a
 badge of what has not been read, and flashes when something arrives —
@@ -1127,8 +1129,8 @@ second edition. **Off hides the ways in, never what is running**: an attached ho
 keeps going.
 
 - *Enable experimental settings* (`Tier::Experimental`): **Connectors**, **Hosts** and **Drones**
-  here, **Remote** in the project dialog, the overflow menu's *Remote hosts* and *Connect to a
-  remote host*, the new-project menu's and project picker's *Open remote project…*, and
+  here, **Remote** in the project dialog, the remote menu's *Remote hosts* and the titlebar's *Connect to a
+  remote host* button, the new-project menu's and project picker's *Open remote project…*, and
   `open_remote_manager()` / `open_remote_connect()` / `open_remote_project_picker()` themselves.
   **SSH profiles** stays stable: a database connection's tunnel dials them too.
 - *Enable dev settings* (`Tier::Dev`): the **Sink** rail mode (`Availability::When`), the
@@ -2107,9 +2109,10 @@ drawn with, and `menus::flatten` is what an index means: invisible rows dropped,
 laid out under its parent. Reordering a menu is moving a line and removing a row is commenting one
 out; nothing reads a row list twice, so a row and the action behind it cannot drift apart.
 
-Each of the four — new-project, new-pane, overflow and hidden-agents — keeps the same
+Each of the five — new-project, new-pane, overflow, remote and hidden-agents — keeps the same
 three-verb shape (`AppState::open_*_menu`, `pick_*_menu`, `dismiss_*_menu`) and the same
-`MenuId` + anchor-point device: `WorkbenchState::overflow_menu`, `new_pane_menu`,
+`MenuId` + anchor-point device: `WorkbenchState::overflow_menu`, `remote_menu` (no `pick_remote_menu`: it has no
+indexed pick, its overlay is `ui::overflow_menu::remote_overlay`), `new_pane_menu`,
 `new_project_menu` and `hidden_agents_menu` each hold the point their chevron opened at. The run
 chevron shares the device (`WorkbenchState::run_tool_menu`, `MenuId::RunTool`) but is not one of the
 four: its overlay is the run picker above, a filter field and not a flat list. Every

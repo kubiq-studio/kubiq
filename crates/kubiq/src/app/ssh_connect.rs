@@ -439,6 +439,18 @@ fn remote_command(
     }
 }
 
+/// The idle timeouts the connect modal offers a [`DronePreset::Session`] drone, in seconds, beside
+/// the preset's own ten minutes.
+pub const SESSION_LINGERS: &[(u64, &str)] =
+    &[(3_600, "1 h"), (8 * 3_600, "8 h"), (86_400, "24 h")];
+
+/// A saved connection's idle timeout as the `--linger` a dial passes: only a
+/// [`DronePreset::Session`] drone's — `Attached` has no linger and `Managed` waits forever, so a
+/// timeout left over from an earlier Session pick never shortens a Managed drone's life.
+pub fn session_linger(preset: DronePreset, linger_secs: Option<u64>) -> Option<u64> {
+    (preset == DronePreset::Session).then_some(linger_secs).flatten()
+}
+
 /// The `--linger` value a preset launches with, or the override a project's `DroneOrigin` carries.
 /// `Attached` has no socket and so no linger at all; this is only ever asked of the other two.
 fn linger_arg(preset: DronePreset, linger_secs: Option<u64>) -> String {

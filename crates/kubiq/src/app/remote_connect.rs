@@ -724,6 +724,10 @@ impl AppState {
     ) {
         self.clear_remote_connect_inputs(window, cx);
         let mut unix_path = String::new();
+        let linger_secs = match &saved.carrier {
+            RemoteCarrier::Ssh { linger_secs, .. } => *linger_secs,
+            _ => None,
+        };
         let (mode, profile, preset) = match &saved.carrier {
             RemoteCarrier::Socket => (ConnectMode::Socket, None, DronePreset::default()),
             RemoteCarrier::Unix { path, preset } => {
@@ -773,6 +777,7 @@ impl AppState {
             mode,
             profile,
             preset,
+            linger_secs,
             unix_path,
             pin_offer: None,
         });
@@ -793,6 +798,15 @@ impl AppState {
     pub fn set_remote_preset(&mut self, preset: DronePreset, cx: &mut Context<Self>) {
         if let Some(state) = &mut self.workbench.remote_connect {
             state.preset = preset;
+        }
+        cx.notify();
+    }
+
+    /// Pick how long a [`DronePreset::Session`] drone outlives a dropped link before it exits —
+    /// `None` for the preset's own ten minutes. Kept regardless of preset, like the preset itself.
+    pub fn set_remote_linger(&mut self, linger_secs: Option<u64>, cx: &mut Context<Self>) {
+        if let Some(state) = &mut self.workbench.remote_connect {
+            state.linger_secs = linger_secs;
         }
         cx.notify();
     }
@@ -1414,6 +1428,7 @@ impl AppState {
                         root: origin.root,
                         preset: origin.preset,
                         drone_path,
+                        linger_secs: origin.linger_secs,
                     },
                     cx,
                 );
@@ -1484,7 +1499,9 @@ impl AppState {
             root: root.clone(),
             preset,
             root_id: pinned.map(|(project, _)| project),
-            linger_secs: pinned.and_then(|(_, linger)| linger),
+            linger_secs: pinned
+                .and_then(|(_, linger)| linger)
+                .or(ssh_connect::session_linger(preset, modal.linger_secs)),
             drone_path: self.saved_drone_path(picked, &root),
             config_root: self.workbench.config_root.clone(),
         };
@@ -1613,6 +1630,11 @@ impl AppState {
                 // The path this dial launched at, not the one it was handed: a hand-typed or
                 // previously saved path comes back unchanged, and a deploy's fresh one is filed
                 // here so the next connect to this machine skips the probe and the upload.
+                let linger_secs = self
+                    .workbench
+                    .remote_connect
+                    .as_ref()
+                    .and_then(|state| state.linger_secs);
                 let saved = self.save_remote_host(
                     save_id,
                     label.clone(),
@@ -1624,6 +1646,7 @@ impl AppState {
                         root,
                         preset,
                         drone_path,
+                        linger_secs,
                     },
                     cx,
                 );
@@ -2097,12 +2120,18 @@ impl AppState {
         // grow a duplicate — see `Bus::row_owner`.
         let pinned = self.project_pinned_to(profile_id, &root, cx);
         let drone_path = self.saved_drone_path(profile_id, &root);
+        let carrier_linger = match &saved.carrier {
+            RemoteCarrier::Ssh { linger_secs, .. } => {
+                ssh_connect::session_linger(preset, *linger_secs)
+            }
+            _ => None,
+        };
         let params = ssh_connect::SshDialParams {
             profile,
             root,
             preset,
             root_id: pinned.map(|(project, _)| project),
-            linger_secs: pinned.and_then(|(_, linger)| linger),
+            linger_secs: pinned.and_then(|(_, linger)| linger).or(carrier_linger),
             drone_path,
             config_root: self.workbench.config_root.clone(),
         };

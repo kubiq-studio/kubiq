@@ -189,6 +189,7 @@ fn an_ssh_carriers_preset_round_trips() {
             root: "/srv/proj".to_string(),
             preset,
             drone_path: None,
+            linger_secs: Some(3600),
         };
         let json = serde_json::to_string(&carrier).unwrap();
         let read_back: RemoteCarrier = serde_json::from_str(&json).unwrap();
@@ -205,6 +206,7 @@ fn an_ssh_carriers_drone_path_round_trips_and_defaults() {
         root: "/srv/proj".to_string(),
         preset: DronePreset::Attached,
         drone_path: Some("/opt/kubiq/kubiq-drone".to_string()),
+        linger_secs: None,
     };
     let json = serde_json::to_string(&carrier).unwrap();
     let read_back: RemoteCarrier = serde_json::from_str(&json).unwrap();
@@ -214,7 +216,15 @@ fn an_ssh_carriers_drone_path_round_trips_and_defaults() {
     let json = r#"{"kind":"ssh","profile":"01ARZ3NDEKTSV4RRFFQ69G5FAV","root":"/srv/proj","preset":"attached"}"#;
     let carrier: RemoteCarrier = serde_json::from_str(json).unwrap();
     match carrier {
-        RemoteCarrier::Ssh { drone_path, .. } => assert_eq!(drone_path, None),
+        RemoteCarrier::Ssh {
+            drone_path,
+            linger_secs,
+            ..
+        } => {
+            assert_eq!(drone_path, None);
+            // Nor, before twenty-six, `linger_secs`: the preset's own linger.
+            assert_eq!(linger_secs, None);
+        }
         other => panic!("expected an ssh carrier, got {other:?}"),
     }
 }

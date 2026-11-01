@@ -1573,6 +1573,20 @@ pub const SERVERS: &[ServerSpec] = &[
                 }"#,
             },
             ToolSpec {
+                name: "remote_read_files",
+                description: "Several text files in one call, each under a '==> path <==' header and numbered like cat -n, or followed by the error that file met. At most 32 files; each is cut at max_bytes (and never past remote_read's 128 KiB) — page a cut one on with remote_read.",
+                schema: r#"{
+                    "type": "object",
+                    "properties": {
+                        "paths": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 32, "description": "Root-relative files."},
+                        "max_bytes": {"type": "integer", "minimum": 1, "maximum": 131072, "description": "Most bytes kept per file. Omit for 128 KiB."},
+                        "root": {"type": "string", "description": "The remote root, by the name remote_info lists. Omit for the first."}
+                    },
+                    "required": ["paths"],
+                    "additionalProperties": false
+                }"#,
+            },
+            ToolSpec {
                 name: "remote_write",
                 description: "Write a whole file. An existing file is refused unless overwrite is true. A read-only root refuses every write.",
                 schema: r#"{
@@ -1948,19 +1962,27 @@ mod tests {
             assert!(!set.contains(&KUBIQ_REMOTE));
         }
         let spec = server(KUBIQ_REMOTE).unwrap();
-        assert_eq!(spec.tools.len(), 8);
+        assert_eq!(spec.tools.len(), 9);
         for tool in spec.tools {
             // Every tool's required arguments, filled with something, are enough to build its op.
             let schema: Value = serde_json::from_str(tool.schema).unwrap();
             let mut arguments = serde_json::Map::new();
             for field in schema["required"].as_array().into_iter().flatten() {
-                arguments.insert(field.as_str().unwrap().to_string(), "x".into());
+                let field = field.as_str().unwrap();
+                let filler: Value = if schema["properties"][field]["type"] == "array" {
+                    serde_json::json!(["x"])
+                } else {
+                    "x".into()
+                };
+                arguments.insert(field.to_string(), filler);
             }
-            assert!(
-                super::super::remote::op_for(tool.name, &Value::Object(arguments)).is_ok(),
-                "{}",
-                tool.name
-            );
+            let arguments = Value::Object(arguments);
+            let built = if tool.name == "remote_read_files" {
+                super::super::remote::reads_for(&arguments).map(|_| ())
+            } else {
+                super::super::remote::op_for(tool.name, &arguments).map(|_| ())
+            };
+            assert!(built.is_ok(), "{}", tool.name);
         }
     }
 

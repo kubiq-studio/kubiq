@@ -28,7 +28,9 @@ use kubiq_proto::bus::{ClientId, Voice};
 use kubiq_proto::files::EntryKind;
 use kubiq_proto::ids::{ProjectId, RemoteCallId};
 use kubiq_proto::messages::Message;
-use kubiq_proto::remote_tools::{RemoteInfo, RemoteOp, RemoteOutput, RemoteRun};
+use kubiq_proto::remote_tools::{
+    REMOTE_READ_CAP, RemoteInfo, RemoteOp, RemoteOutput, RemoteRun,
+};
 
 use super::RemoteReach;
 use super::registry::AgentFacts;
@@ -46,6 +48,9 @@ pub const RUN_MARGIN_SECS: u64 = 15;
 /// `remote_run`'s default and ceiling for `timeout_ms`.
 const RUN_DEFAULT_MS: u64 = 120_000;
 const RUN_MAX_MS: u64 = 600_000;
+
+/// The most files one `remote_read_files` asks for.
+pub const READ_FILES_MAX: usize = 32;
 
 /// `remote_grep`'s default and ceiling for `max_results`.
 const GREP_DEFAULT: u32 = 200;
@@ -96,8 +101,8 @@ pub fn sanitise(label: &str) -> String {
 pub fn instructions(label: &str) -> String {
     format!(
         "You are working on the remote machine \"{label}\", through the kubiq-remote tools \
-         (remote_info, remote_list, remote_read, remote_write, remote_edit, remote_glob, \
-         remote_grep, remote_run) only.\n\
+         (remote_info, remote_list, remote_read, remote_read_files, remote_write, remote_edit, \
+         remote_glob, remote_grep, remote_run) only.\n\
          - Call remote_info first: it names the machine, its shell and the roots you may work in.\n\
          - Every path is relative to a remote root (the first one unless you pass `root`); never \
          an absolute path, and never a local one.\n\
@@ -282,6 +287,12 @@ pub fn call(
         .id
         .parse()
         .map_err(|_| "this agent is not in a project".to_string())?;
+    if tool == "remote_read_files" {
+        let (root, paths, max_bytes) = reads_for(arguments)?;
+        return Ok(Value::String(read_files(
+            &paths, root, max_bytes, project_id, &remote, facts, voice, reach,
+        )));
+    }
     let (root, op) = op_for(tool, arguments)?;
     let bound = match &op {
         RemoteOp::Run { timeout_ms, .. } => {
@@ -377,6 +388,103 @@ pub fn op_for(tool: &str, arguments: &Value) -> Result<(Option<String>, RemoteOp
         _ => return Err(format!("unknown tool: kubiq-remote/{tool}")),
     };
     Ok((root, op))
+}
+
+/// `remote_read_files`'s arguments: the root, the paths (deduplicated, in order, at most
+/// [`READ_FILES_MAX`]) and the per-file byte cap, never past [`REMOTE_READ_CAP`].
+pub fn reads_for(arguments: &Value) -> Result<(Option<String>, Vec<String>, usize), String> {
+    let mut paths: Vec<String> = Vec::new();
+    for path in arguments
+        .get("paths")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "needs a 'paths' array".to_string())?
+    {
+        let path = path
+            .as_str()
+            .filter(|path| !path.trim().is_empty())
+            .ok_or_else(|| "every entry of 'paths' must be a non-empty string".to_string())?;
+        if !paths.iter().any(|seen| seen == path) {
+            paths.push(path.to_string());
+        }
+    }
+    if paths.is_empty() {
+        return Err("needs at least one path in 'paths'".to_string());
+    }
+    if paths.len() > READ_FILES_MAX {
+        return Err(format!(
+            "at most {READ_FILES_MAX} paths per call; split the rest into another"
+        ));
+    }
+    let max_bytes = number(arguments, "max_bytes")
+        .map(|max| (max as usize).clamp(1, REMOTE_READ_CAP))
+        .unwrap_or(REMOTE_READ_CAP);
+    Ok((optional(arguments, "root"), paths, max_bytes))
+}
+
+/// Several reads as one tool call: every [`RemoteOp::Read`] is raised at once — one round trip's
+/// latency, not one per file — and each answers under its own header, its content or its error.
+/// A read is the single tool's read, so path safety and refusals stay the drone's.
+#[allow(clippy::too_many_arguments)]
+fn read_files(
+    paths: &[String],
+    root: Option<String>,
+    max_bytes: usize,
+    project_id: ProjectId,
+    remote: &str,
+    facts: &AgentFacts,
+    voice: &Voice,
+    reach: &RemoteReach,
+) -> String {
+    let waits: Vec<_> = paths
+        .iter()
+        .map(|path| {
+            let (call_id, waiting) = reach.calls.raise(&facts.key);
+            voice.say(Message::RemoteToolCall {
+                call_id,
+                project_id,
+                remote: Some(remote.to_string()),
+                root: root.clone(),
+                op: RemoteOp::Read {
+                    path: path.clone(),
+                    offset: 0,
+                    limit: 0,
+                },
+            });
+            (call_id, waiting)
+        })
+        .collect();
+    tracing::debug!(agent = %facts.key, files = paths.len(), "remote read_files");
+    let deadline = std::time::Instant::now() + Duration::from_secs(TIMEOUT_SECS);
+    let mut out = String::new();
+    for (path, (call_id, waiting)) in paths.iter().zip(waits) {
+        let bound = deadline.saturating_duration_since(std::time::Instant::now());
+        let _ = writeln!(out, "==> {path} <==");
+        match reach.calls.wait(call_id, &waiting, bound) {
+            Ok(RemoteOutput::Read { content, truncated }) => {
+                let (content, cut) = cap_bytes(&content, max_bytes);
+                read_text(&mut out, content, 0, truncated || cut);
+            }
+            Ok(_) => out.push_str("error: the remote answered the read with something else\n"),
+            Err(error) => {
+                let _ = writeln!(out, "error: {error}");
+            }
+        }
+    }
+    out
+}
+
+/// `content` cut to at most `max` bytes at a line end — or a char boundary, for one line longer
+/// than the cap — and whether anything was cut.
+fn cap_bytes(content: &str, max: usize) -> (&str, bool) {
+    if content.len() <= max {
+        return (content, false);
+    }
+    let mut end = max;
+    while !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    let end = content[..end].rfind('\n').map_or(end, |newline| newline + 1);
+    (&content[..end], true)
 }
 
 // ── the answer ──────────────────────────────────────────────────────────────────────────────
@@ -661,6 +769,27 @@ mod tests {
         assert!(op_for("remote_edit", &json!({"path": "a", "old": "", "new": "b"})).is_err());
         assert!(op_for("remote_run", &json!({"cmd": "  "})).is_err());
         assert!(op_for("remote_nope", &json!({})).is_err());
+    }
+
+    #[test]
+    fn read_files_dedups_caps_and_refuses_an_empty_or_oversized_list() {
+        assert_eq!(
+            reads_for(&json!({"paths": ["a", "b", "a"], "max_bytes": 999_999_999, "root": "r"}))
+                .unwrap(),
+            (
+                Some("r".into()),
+                vec!["a".to_string(), "b".to_string()],
+                REMOTE_READ_CAP
+            )
+        );
+        assert!(reads_for(&json!({"paths": []})).is_err());
+        assert!(reads_for(&json!({"paths": [""]})).is_err());
+        assert!(reads_for(&json!({"paths": "a"})).is_err());
+        let many: Vec<String> = (0..=READ_FILES_MAX).map(|n| n.to_string()).collect();
+        assert!(reads_for(&json!({ "paths": many })).is_err());
+        assert_eq!(cap_bytes("one\ntwo\n", 6), ("one\n", true));
+        assert_eq!(cap_bytes("one\n", 6), ("one\n", false));
+        assert_eq!(cap_bytes("éé", 3), ("é", true));
     }
 
     #[test]

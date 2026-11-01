@@ -393,6 +393,9 @@ pub enum MenuId {
     /// for it — remote connect, web export, window capture and settings. Where it opened is
     /// `WorkbenchState::overflow_menu`.
     Overflow,
+    /// The titlebar's remote-host chevron, beside the connect button: the host manager and whatever
+    /// a second edition adds. Where it opened is `WorkbenchState::remote_menu`.
+    Remote,
     /// The titlebar's own new-project chevron, beside the `+` next to the project picker: the same
     /// three ways in the picker offers at its foot — add, clone, remote. Where it opened is
     /// `WorkbenchState::new_project_menu`.
@@ -936,6 +939,9 @@ pub struct WorkbenchState {
     /// Where the titlebar's overflow chevron was clicked, which is what anchors the menu over the
     /// window. `Some` exactly while `open_menu` is `MenuId::Overflow`.
     pub overflow_menu: Option<(f32, f32)>,
+    /// Where the titlebar's remote chevron was clicked. `Some` exactly while `open_menu` is
+    /// `MenuId::Remote`.
+    pub remote_menu: Option<(f32, f32)>,
     /// Where the titlebar's new-project chevron was clicked, which is what anchors the menu over
     /// the window. `Some` exactly while `open_menu` is `MenuId::NewProject`.
     pub new_project_menu: Option<(f32, f32)>,
@@ -996,6 +1002,11 @@ pub struct WorkbenchState {
     /// the host answers — a window asks as it attaches and again every time the menu opens, so a
     /// shell installed since is offered without a restart.
     pub shells: Vec<ShellInfo>,
+    /// Which host [`Self::shells`] was asked of — the one the current project's panes spawn on,
+    /// a drone's for a project it serves. An answer from any other host is stale and dropped, and
+    /// the list is cleared when the asked-of host changes, so a remote project never offers this
+    /// machine's shells.
+    pub shells_from: Option<crate::app::HostRef>,
     /// The agent harnesses the host says can be started here, in the order the menu offers them
     /// above the shells. Empty until the host answers — asked alongside [`Message::ListShells`]
     /// for the same reason: a harness installed since is offered without a restart.
@@ -1145,6 +1156,7 @@ impl Default for WorkbenchState {
             help_target: None,
             new_pane_menu: None,
             overflow_menu: None,
+            remote_menu: None,
             new_project_menu: None,
             hidden_agents_menu: None,
             mission_menu: None,
@@ -1163,6 +1175,7 @@ impl Default for WorkbenchState {
             confirm_close_pane: None,
             origin_confirm: None,
             shells: Vec::new(),
+            shells_from: None,
             agent_types: Vec::new(),
             mcps: Vec::new(),
             tools: Vec::new(),

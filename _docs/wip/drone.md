@@ -5,7 +5,7 @@ kind: wip
 status: current
 summary: The working note for the drone's tenth phase — the drone as a fifth MCP server, with `drone_*` tools over the bus, capability-gated, a new `shell` message pair and a per-root read-only mode. Designed, and none of it written. Carries the gaps the nine built phases left open too, chief among them that nothing has been run against a real `ssh`, `scp` or `sshd`.
 read_when: you are picking up the drone work — building phase 10, or closing one of the gaps the built phases left
-updated: 2026-11-01
+updated: 2026-11-02
 verified: 2026-11-01
 code_anchors: [crates/kubiq-host/src/mcp/server.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/tools.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-proto/src/carrier.rs, crates/kubiq-drone/src/lib.rs, crates/kubiq-proto/src/messages.rs]
 depends_on: [feat-drone, tech-transport, tech-architecture, inbox-drone-runtime]
@@ -31,7 +31,8 @@ remote-tool family the window relays — `RemoteToolCall`/`RemoteToolResult` ove
 capability `tools` — and `StartConversation.remote` binds an agent to a drone; a tunnel channel for
 forwarded ports runs beside the bus, not on it (`D227`). Both are in
 [`../tech/transport-contract.md`](../tech/transport-contract.md). The host's half is built too: the
-`kubiq-remote` server (`crates/kubiq-host/src/mcp/remote.rs`) and the coordinator's binding of
+`kubiq-remote` server (`crates/kubiq-host/src/mcp/remote.rs`, whose `remote_read_files` fans one
+`Read` per path out at once and answers them together — no op of its own) and the coordinator's binding of
 `StartConversation.remote`; the window's relay is too (`G461`, `G462`). A project a drone serves
 wholly, with no local folder, takes agents the same way: the window routes the start to the row's
 owner and binds it to the serving drone, and the host runs the harness in the project's
@@ -170,7 +171,7 @@ before chasing any of them:
   and the deployer refuses every triple with the sentence naming it. That refusal is the designed
   behaviour, and it means the deploy path has never produced a binary on a far machine. `G261`.
 - **A drone that lingers out is announced only as a link that dropped.** Phases 7 and 8 closed half
-  of this. Expiry itself says nothing — the panes go, and a `Session` host's reconnect loop silently
+  of this; a saved connection's own idle timeout (`D231`) makes it rarer without explaining it. Expiry itself says nothing — the panes go, and a `Session` host's reconnect loop silently
   starts a *new* drone, so a user whose laptop slept past the linger finds empty panes with no
   account of why. `G263`.
 - **Nothing verifies a `MESSAGE_SCHEMA` bump mechanically** (`G256`), and **the heartbeat breaks a

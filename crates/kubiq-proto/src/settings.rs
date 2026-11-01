@@ -649,6 +649,14 @@ pub enum RemoteCarrier {
         /// existed.
         #[serde(default)]
         drone_path: Option<String>,
+        /// How long, in seconds, a detached drone outlives a dropped link before it kills its
+        /// panes and exits — this connection's idle timeout, passed as `--linger` on every dial
+        /// and re-asserted on every reattach. `None` is the preset's own: ten minutes for
+        /// [`DronePreset::Session`], forever for [`DronePreset::Managed`]. Unread for
+        /// [`DronePreset::Attached`], which has nothing to outlive the link with. A project
+        /// origin's own `linger_secs` wins over it.
+        #[serde(default)]
+        linger_secs: Option<u64>,
     },
     /// A drone already listening on a Unix socket on this machine — `kubiq-drone --listen`, say.
     /// Kubiq connects the path and speaks the drone handshake on it; nothing is spawned. The
@@ -796,7 +804,11 @@ pub enum RemoteScheme {
 /// the host it pinned goes back to accepting any certificate on the next click — the direction
 /// that costs something, since the pin is the only thing standing between that host and a
 /// man in the middle.
-pub const HOST_SETTINGS_SCHEMA: u32 = 25;
+///
+/// Twenty-six adds `linger_secs` to [`RemoteCarrier::Ssh`]. An older build drops it on its next
+/// write and the drone goes back to its preset's own linger — eighteen's lighter footing: the
+/// choice is lost, never a fact, and what it reverts to is the shape that was always meant.
+pub const HOST_SETTINGS_SCHEMA: u32 = 26;
 
 fn isolate_agents_default() -> bool {
     true

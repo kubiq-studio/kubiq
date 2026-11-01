@@ -145,8 +145,48 @@ pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> im
                     }),
                 )),
         )
+        // Remote hosts: connect, and the chevron for the host manager and a second edition's
+        // remote targets. Experimental, like every way in to a remote.
+        .children(app.offers(crate::state::settings::Tier::Experimental).then(|| {
+            div()
+                .h_full()
+                .flex()
+                .flex_none()
+                .items_center()
+                .child(rule())
+                .child(
+                    split_pair()
+                        .child(
+                            icon_button(
+                                "remote-connect",
+                                KubiqIcon::HostRemote,
+                                false,
+                                cx.listener(|this, _, window, cx| {
+                                    this.open_remote_connect(window, cx)
+                                }),
+                            )
+                            .h_full()
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new("Connect to a remote host")
+                                    .build(window, cx)
+                            }),
+                        )
+                        .child(split_chevron(
+                            "remote-menu",
+                            None,
+                            app.workbench.open_menu == Some(MenuId::Remote),
+                            "Remote hosts",
+                            cx.listener(|this, event: &ClickEvent, _, cx| {
+                                let at =
+                                    (f32::from(event.position().x), f32::from(event.position().y));
+                                this.open_remote_menu(at, cx);
+                            }),
+                        )),
+                )
+        }))
         // Back and forward belong to the project they walk, so they sit beside it rather than
-        // beside the field: settings, web, tools, a rule, add project, a rule, then the two arrows.
+        // beside the field: settings, web, tools, a rule, add project, a rule, remote, a rule, then
+        // the two arrows.
         .child(rule())
         .child(nav_control(
             "nav-back",
@@ -372,7 +412,7 @@ pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> im
                 )
                 // Settings and the overflow chevron, one split button: settings is the thing in
                 // there that is reached often enough to stand on the strip, and the chevron holds
-                // the rest — remote hosts and connect, web export, window capture, help. See
+                // the rest — web export, window capture, help. See
                 // `ui::overflow_menu`.
                 .child(
                     split_pair()

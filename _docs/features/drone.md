@@ -109,8 +109,11 @@ A drone's lifetime is two axes over one knob, and three presets name the points 
 | Preset | What it does |
 |---|---|
 | **Attached** | The `ssh` session *is* the drone. No socket, no detach; it dies with the link |
-| **Session** | The drone detaches and outlives a dropped link for ten minutes |
+| **Session** | The drone detaches and outlives a dropped link for its idle timeout — ten minutes, or 1 h, 8 h or 24 h picked per saved connection (`D231`) |
 | **Managed** | The drone detaches and outlives a dropped link indefinitely |
+
+The panes and harnesses on the far machine keep running through that wait, and reconnecting to the
+same saved host within it reattaches to them.
 
 **Persistence is a unix socket at mode `0600`, never a terminal multiplexer.** Filesystem
 permissions are the whole of the access control, since no port is forwarded. A multiplexer only
@@ -267,7 +270,10 @@ tools answers a walk error naming what was tried.
 ### What a drone refuses
 
 A drone answers the pane family in full, the file family except diffing, host browse, project
-listing, shell listing and search. **Everything else is refused with a typed answer** through a
+listing, shell listing and search. Its shell listing is the far machine's own: the fixed probe plus
+every installed login shell `/etc/shells` names on Unix, and WSL on Windows — and the "+" menu asks
+the host a project's terminals start on, so a project the drone serves offers those, not this
+machine's. **Everything else is refused with a typed answer** through a
 catch-all arm, so a message added later is refused rather than dropped — the ACP registry requests
 `CheckAcpRegistry` and `InstallAcpAdapter` among them, because the registry is the controller's own
 (`relay.rs` lists both as refused). A few messages have no error

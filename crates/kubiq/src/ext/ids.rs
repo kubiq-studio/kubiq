@@ -133,6 +133,8 @@ pub const MENU_NEW_PROJECT: SlotId = SlotId::new("menu/new-project");
 pub const MENU_NEW_PANE: SlotId = SlotId::new("menu/new-pane");
 /// The titlebar's overflow chevron.
 pub const MENU_OVERFLOW: SlotId = SlotId::new("menu/overflow");
+/// The titlebar's remote-host chevron, beside the connect button.
+pub const MENU_REMOTE: SlotId = SlotId::new("menu/remote");
 /// The chevron beside New agent: the agent panes a tab's `Hide` took off the screen.
 pub const MENU_HIDDEN_AGENTS: SlotId = SlotId::new("menu/hidden-agents");
 
@@ -141,6 +143,7 @@ pub const MENU_HIDDEN_AGENTS: SlotId = SlotId::new("menu/hidden-agents");
 pub const MENU_NEW_PROJECT_BASE: SlotId = SlotId::new("kubiq.menu.new-project");
 pub const MENU_NEW_PANE_BASE: SlotId = SlotId::new("kubiq.menu.new-pane");
 pub const MENU_OVERFLOW_BASE: SlotId = SlotId::new("kubiq.menu.overflow");
+pub const MENU_REMOTE_BASE: SlotId = SlotId::new("kubiq.menu.remote");
 pub const MENU_HIDDEN_AGENTS_BASE: SlotId = SlotId::new("kubiq.menu.hidden-agents");
 
 // ── The runner-kind container ───────────────────────────────────────

@@ -250,7 +250,12 @@ not an interface that fails.
 **`ListShells` and `ListAgentTypes` are asked repeatedly and answered from a fresh probe.** Which
 programs are on the machine is another fact the interface cannot read, and unlike a config root it
 can change while a window is open, so both are requests rather than something stamped at attach —
-the new-pane menu asks every time it opens. A pane is then started with the `program` a `ShellInfo`
+the new-pane menu asks every time it opens. It asks **the host a new terminal would start on** —
+the current project's, a drone's for a project one serves, else the active host — with
+`Bus::send_to`, since `ListShells` names no project, and takes a `ShellList` only from that host
+(`AppState::ask_shells`), so a remote project never offers this machine's shells. A drone answers
+from the far machine's own declaration as well as the fixed probe: every installed login shell in
+`/etc/shells` on Unix, the WSL launcher on Windows (`shells::available_system`). A pane is then started with the `program` a `ShellInfo`
 carried or the `id` an `AgentTypeInfo` carried, both on `SpawnWorkspace`'s existing `agent_type`:
 one field, and the coordinator's answer to whether the harness library knows that name is what
 decides whether the pane is a composed agent or a program. An `AgentTypeInfo` whose `available` is
@@ -989,8 +994,8 @@ handlers it already runs for the interface — the file worker for `list`, `read
 handlers', not a reimplementation in front of them; only `run` and `info` are new on the drone.
 
 **The host's half is the browser family's.** An agent's `kubiq-remote` tool call (`remote_info`,
-`remote_list`, `remote_read`, `remote_write`, `remote_edit`, `remote_glob`, `remote_grep`,
-`remote_run`, each taking an optional `root`) files a row keyed by a fresh `call_id` and says
+`remote_list`, `remote_read`, `remote_read_files`, `remote_write`, `remote_edit`, `remote_glob`,
+`remote_grep`, `remote_run`, each taking an optional `root`) files a row keyed by a fresh `call_id` and says
 `RemoteToolCall` through the host's own voice; the coordinator sends it to exactly one window — the
 one owning the calling agent, else the lowest-numbered window watching the project — with `remote`
 always `Some`, the agent's bound `SavedRemoteHost.id` (the model never names a machine). A
@@ -999,7 +1004,10 @@ the call with `RemoteToolResult`; the first result wins, a later one is discarde
 30 s, `remote_run` its `timeout_ms` (default 120 s, clamped to 1–600 s) plus 15 s; a window that
 closes ends every call sent to it. At most eight calls are in flight. The output reaches the model
 as compact text — a read numbered like `cat -n` from its `offset`, a run as its exit and the two
-stream tails. The window relays both ways without reading either (`crates/kubiq/src/app/remote_tools.rs`,
+stream tails. `remote_read_files` is no new op: the host raises one `Read` per path (at most 32,
+deduplicated) all at once, waits 30 s over the lot, and answers each under a `==> path <==` header
+with its numbered lines — cut at the call's `max_bytes`, never past `REMOTE_READ_CAP` — or its own
+error, so one bad path fails only its own section. The window relays both ways without reading either (`crates/kubiq/src/app/remote_tools.rs`,
 `Bus::relay_tool_call`): a call goes to the drone link whose `SavedRemoteHost.id` equals `remote`,
 and the result returns to the host it came from, the first winning. A `remote` with no attached link,
 or one whose drone did not advertise `tools`, is answered at once with an `Err` sentence; a link
@@ -2865,7 +2873,11 @@ kubiq-drone --attach --root <r> --linger <L>` — because `--listen` *adopts* a 
 listening on those roots rather than starting a rival, which is the whole of phase 7's adoption
 story on the interface's side. `HOST_SETTINGS_SCHEMA` is 18 for the field: an older build drops it
 on its next write and every saved drone comes back as `Attached` — a real answer, the one every
-record before this schema already meant, not a guess.
+record before this schema already meant, not a guess. **`linger_secs`** is that connection's idle
+timeout in seconds — how long a `Session` drone outlives a dropped link — passed as `--linger` on
+every dial and reconnect; `None` is the preset's own ten minutes, it is read only for `Session`,
+and a project origin's own `linger_secs` wins over it (`D231`). `HOST_SETTINGS_SCHEMA` is 26 for
+it: an older build drops it and the drone reverts to ten minutes.
 
 **`drone_path` says where the drone binary sits on the far machine, when it is not on the remote
 `PATH`.** Typed by hand, or written back by `ssh_connect::ensure_drone` once it has resolved,

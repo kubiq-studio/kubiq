@@ -152,6 +152,7 @@ fn a_saved_host_keeps_the_drone_path_a_dial_used(cx: &mut gpui::TestAppContext) 
                     root: "/srv/proj".to_string(),
                     preset: DronePreset::Session,
                     drone_path: None,
+                    linger_secs: None,
                 },
                 tunnels: Vec::new(),
                 tunnel_rate_bps: None,

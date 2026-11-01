@@ -2941,7 +2941,7 @@ impl AppState {
                 // The new-pane menu offers what this machine has, and only the host can say what
                 // that is. Asked on attach so the first menu is not empty, and again on every
                 // open — see `open_new_pane_menu`.
-                self.bus.send(Message::ListShells);
+                self.ask_shells(cx);
                 self.bus.send(Message::ListAgentTypes);
                 // The identities half of the same question: the New agent menu offers a harness
                 // per account, so an empty account list would offer the harness alone and start
@@ -2957,8 +2957,13 @@ impl AppState {
             }
 
             // What can be started here. Replaced whole rather than merged: the host's answer is
-            // the list, and a shell that has been uninstalled has to leave the menu.
+            // the list, and a shell that has been uninstalled has to leave the menu. Only the host
+            // last asked (`ask_shells`) is taken: the menu offers what the host a new terminal
+            // starts on has — a drone's shells for a project it serves, never this machine's.
             Message::ShellList { shells } => {
+                if self.workbench.shells_from != Some(host) {
+                    return None;
+                }
                 self.workbench.shells = shells;
                 cx.notify();
             }

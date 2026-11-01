@@ -533,12 +533,13 @@ impl Relay {
 
             // ── this machine's shells ───────────────────────────────
             // Probed on every ask, the same as a local host: a shell installed since the window
-            // opened is offered without a restart.
+            // opened is offered without a restart. The far machine's own declaration —
+            // `/etc/shells`, or WSL on Windows — widens the list a local host offers.
             Message::ListShells => {
                 host.send(
                     To::Client(client),
                     Message::ShellList {
-                        shells: shells::available(),
+                        shells: shells::available_system(),
                     },
                 );
             }

@@ -5714,6 +5714,27 @@ host only logs a warning at startup. A launch reads definitions one directory at
 record that does not parse, or whose `id` is not its directory's name, is left out rather than
 failing the read.
 
+### D231 — A saved drone's idle timeout is a field on its carrier, not a fourth preset
+
+Keeping a drone's panes alive across a dropped link is already the `Session` and `Managed` presets
+(`D131`): the drone detaches, its own linger timer runs, and a reconnect's start-or-adopt line finds
+the same socket and replays each pane. What was missing was choosing *how long* per connection —
+`Session` was a fixed ten minutes unless a project origin overrode it. So `RemoteCarrier::Ssh`
+carries `linger_secs: Option<u64>`, `None` meaning the preset's own; the connect modal offers it
+as 10 min / 1 h / 8 h / 24 h pills under `Session` only; every dial and every reconnect passes it as
+`--linger`, which the drone re-asserts on attach. A project origin's own `linger_secs` wins over it,
+and it is read only for `Session` (`ssh_connect::session_linger`) — `Attached` has no linger, and a
+value left over from an earlier `Session` pick must never shorten a `Managed` drone's life.
+
+**Why not a fourth preset or a free number:** the presets name the useful shapes, and a timeout is
+a parameter of one of them rather than a shape of its own; a short fixed list keeps the form a
+click with no input to validate, while `kubiq-drone --linger` still takes any value.
+
+**Cost:** `HOST_SETTINGS_SCHEMA` 26 for one optional field — an older build drops it and the drone
+reverts to ten minutes. Expiry still says nothing to the user, and a reconnect after it silently
+starts a fresh drone with none of the old panes (`G263`); a longer timeout makes that rarer, not
+explained.
+
 ## Related docs
 
 - [`architecture.md`](./architecture.md) — the rules D3 to D6 produce

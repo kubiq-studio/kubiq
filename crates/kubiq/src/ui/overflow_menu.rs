@@ -1,8 +1,8 @@
 //! The titlebar's overflow chevron menu: the rarely-used commands moved off the strip.
 //!
-//! Remote connect, web export, window capture, help and settings are all things the user reaches
+//! Web export, window capture, help and settings are all things the user reaches
 //! for occasionally rather than every session, so they read as one family behind a chevron rather
-//! than five permanent squares — painted over the window for the reason [`super::new_pane_menu`]
+//! than four permanent squares — painted over the window for the reason [`super::new_pane_menu`]
 //! is: the titlebar does not name `AppState` beyond what it already reads, and this is a second
 //! menu the window draws the same way.
 //!
@@ -30,5 +30,23 @@ pub fn overlay(
         at,
         menus::entries(ids::MENU_OVERFLOW, app, cx),
         |this, _, cx| this.dismiss_overflow_menu(cx),
+    )
+}
+
+/// Draw the open remote-host menu (the chevron beside the titlebar's connect button), or nothing.
+pub fn remote_overlay(
+    app: &AppState,
+    _window: &mut Window,
+    cx: &mut Context<AppState>,
+) -> impl IntoElement {
+    let Some(at) = app.workbench.remote_menu else {
+        return div().into_any_element();
+    };
+    menus::overlay(
+        &cx.entity(),
+        "remote-menu",
+        at,
+        menus::entries(ids::MENU_REMOTE, app, cx),
+        |this, _, cx| this.dismiss_remote_menu(cx),
     )
 }

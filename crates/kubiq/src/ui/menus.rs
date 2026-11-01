@@ -439,18 +439,7 @@ fn with_identity(entry: MenuEntry, identity: &SharedString) -> MenuEntry {
 pub fn overflow(app: &AppState, cx: &App) -> Vec<MenuEntry> {
     let has_project = app.project(cx).is_some();
     let capture_offered = app.capture_offered(cx);
-    let remote = app.offers(Tier::Experimental);
     vec![
-        // Remote hosts came off the strip when Settings took its place there: the manager is
-        // consulted occasionally, and its own connect action is the row right under it.
-        MenuEntry::new("Remote hosts")
-            .icon(kit::KubiqIcon::HostRemote)
-            .visible_when(remote)
-            .on(|this, _, cx| this.open_remote_manager(cx)),
-        MenuEntry::new("Connect to a remote host")
-            .icon(kit::KubiqIcon::HostRemote)
-            .visible_when(remote)
-            .on(|this, window, cx| this.open_remote_connect(window, cx)),
         MenuEntry::new("Explore the project in browser")
             .icon(kit::KubiqIcon::TitlebarBrowser)
             .visible_when(has_project)
@@ -476,7 +465,17 @@ pub fn overflow(app: &AppState, cx: &App) -> Vec<MenuEntry> {
     ]
 }
 
-/// The base's four blocks, one per menu, registered the way a second edition registers its own.
+/// The titlebar's remote-host chevron: the host manager. Connecting is the button beside the
+/// chevron; a second edition adds its own remote targets as blocks of this menu.
+pub fn remote(_app: &AppState, _cx: &App) -> Vec<MenuEntry> {
+    vec![
+        MenuEntry::new("Remote hosts")
+            .icon(kit::KubiqIcon::HostRemote)
+            .on(|this, _, cx| this.open_remote_manager(cx)),
+    ]
+}
+
+/// The base's five blocks, one per menu, registered the way a second edition registers its own.
 pub fn blocks(reg: &mut crate::ext::Registry<crate::ext::menu::MenuBlockSpec>) {
     use crate::ext::menu::{MenuBlockSpec, register};
 
@@ -488,6 +487,7 @@ pub fn blocks(reg: &mut crate::ext::Registry<crate::ext::menu::MenuBlockSpec>) {
         ),
         (ids::MENU_NEW_PANE_BASE, ids::MENU_NEW_PANE, new_pane),
         (ids::MENU_OVERFLOW_BASE, ids::MENU_OVERFLOW, overflow),
+        (ids::MENU_REMOTE_BASE, ids::MENU_REMOTE, remote),
         (
             ids::MENU_HIDDEN_AGENTS_BASE,
             ids::MENU_HIDDEN_AGENTS,

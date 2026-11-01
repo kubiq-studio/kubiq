@@ -318,8 +318,9 @@ every window's panes. `SpawnWorkspace` carries a
 instead — a refusal names the project, because there is no pane yet to name. A refused tool run
 answers `ToolError` instead, which is a log line rather than a tab. Which shell a pane runs
 is `SpawnWorkspace`'s existing `agent_type`, and the menu's own rows come from `ListShells` and its
-`ShellList` answer, whose `ShellInfo` carries a label, a program and whether it is the default,
-and from `ListTools` and its `ToolsListed` answer, whose rows carry their scope and whether they
+`ShellList` answer, whose `ShellInfo` carries a label, a program and whether it is the default —
+asked of the host the project's panes start on, so a drone-served project lists the far machine's
+shells — and from `ListTools` and its `ToolsListed` answer, whose rows carry their scope and whether they
 run on the answering host and whether the user wrote them or the host discovered them in a runner
 file. A project's own tools ride `UpdateProject.tools`, replaced whole. Variant names, payload
 fields, the byte-sequence rule and the per-pane ordering guarantee are owned by

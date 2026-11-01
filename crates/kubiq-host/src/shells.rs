@@ -364,13 +364,81 @@ fn label_from_path(program: &Path) -> String {
 }
 
 /// Whether `program` is a shell, and so should be started the way a terminal application starts
-/// one — see [`crate::pty::spawn`], which is what the answer changes.
+/// one — see [`crate::pty::spawn`], which is what the answer changes. On Unix a program
+/// `/etc/shells` names is one too, so a row [`available_system`] offers starts as a login shell.
 pub fn is_shell(program: &str) -> bool {
     let name = basename(program);
     CANDIDATES
         .iter()
         .any(|candidate| names_equal(candidate, &name))
         || names_equal(&name, &basename(&default_program()))
+        || system_listed(program)
+}
+
+/// [`available`] widened to what the machine itself declares: on Unix every login shell
+/// `/etc/shells` lists that is installed, one row per name; on Windows the WSL launcher when it is
+/// there. A drone answers the new-pane menu with this — the far machine's menu is the far
+/// machine's own declaration, where the local menu stays the short fixed list.
+pub fn available_system() -> Vec<ShellInfo> {
+    let mut shells = available();
+    #[cfg(unix)]
+    for program in etc_shells() {
+        let name = basename(&program);
+        if NOT_LOGIN_SHELLS.contains(&name.as_str())
+            || shells
+                .iter()
+                .any(|shell| names_equal(&basename(&shell.program), &name))
+            || !is_executable(Path::new(&program))
+        {
+            continue;
+        }
+        shells.push(ShellInfo {
+            label: label_of(&name),
+            program,
+            is_default: false,
+        });
+    }
+    #[cfg(windows)]
+    if let Some(program) = locate("wsl.exe") {
+        shells.push(ShellInfo {
+            label: "WSL".to_string(),
+            program: program.to_string_lossy().into_owned(),
+            is_default: false,
+        });
+    }
+    shells
+}
+
+/// Entries `/etc/shells` may carry that are not a shell a person would open a terminal into.
+#[cfg(unix)]
+const NOT_LOGIN_SHELLS: &[&str] = &["nologin", "false", "true", "git-shell", "tmux", "screen"];
+
+/// The absolute paths `/etc/shells` lists, comments and blanks skipped. Empty when there is none.
+#[cfg(unix)]
+fn etc_shells() -> Vec<String> {
+    parse_etc_shells(&std::fs::read_to_string("/etc/shells").unwrap_or_default())
+}
+
+#[cfg(unix)]
+fn parse_etc_shells(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|line| line.split('#').next().unwrap_or("").trim())
+        .filter(|line| line.starts_with('/'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Whether `/etc/shells` names `program` by its path. Always `false` off Unix.
+fn system_listed(program: &str) -> bool {
+    #[cfg(unix)]
+    {
+        program.starts_with('/') && etc_shells().iter().any(|listed| listed == program)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = program;
+        false
+    }
 }
 
 /// A shell's row label on Unix: its own bare name.
@@ -691,6 +759,26 @@ fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn etc_shells_is_its_absolute_paths_only() {
+        assert_eq!(
+            parse_etc_shells("# List of shells\n/bin/bash\n\n  /usr/bin/fish # mine\nzsh\n"),
+            vec!["/bin/bash".to_string(), "/usr/bin/fish".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_system_list_keeps_one_default_and_names_each_shell_once() {
+        let shells = available_system();
+        assert_eq!(shells.iter().filter(|shell| shell.is_default).count(), 1);
+        let mut names: Vec<String> = shells.iter().map(|s| basename(&s.program)).collect();
+        names.sort();
+        let count = names.len();
+        names.dedup();
+        assert_eq!(names.len(), count, "{shells:?}");
+    }
 
     #[test]
     fn the_default_shell_is_always_offered_and_marked() {

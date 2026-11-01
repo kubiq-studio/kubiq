@@ -213,6 +213,11 @@ fn ssh_body(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> 
         .as_ref()
         .map(|state| state.preset)
         .unwrap_or_default();
+    let linger = app
+        .workbench
+        .remote_connect
+        .as_ref()
+        .and_then(|state| state.linger_secs);
     let root_focused = app
         .remote_root_input
         .read(cx)
@@ -351,6 +356,39 @@ fn ssh_body(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> 
                         )),
                 ),
         )
+        .children((preset == DronePreset::Session).then(|| idle_timeout_row(linger, cx)))
+        .into_any_element()
+}
+
+/// How long a Session drone outlives a dropped link: its panes and harnesses keep running on the
+/// far machine for that long, and reconnecting within it reattaches to them.
+fn idle_timeout_row(linger: Option<u64>, cx: &mut Context<AppState>) -> AnyElement {
+    let mut pills = div().flex().items_center().gap_2().child(toggle_pill(
+        "remote-connect-linger-default",
+        "10 min",
+        theme::accent(),
+        linger.is_none(),
+        cx.listener(|this, _, _, cx| this.set_remote_linger(None, cx)),
+    ));
+    for &(secs, label) in crate::app::ssh_connect::SESSION_LINGERS {
+        pills = pills.child(toggle_pill(
+            crate::ui::eid("remote-connect-linger", secs),
+            label,
+            theme::accent(),
+            linger == Some(secs),
+            cx.listener(move |this, _, _, cx| this.set_remote_linger(Some(secs), cx)),
+        ));
+    }
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(label_block(
+            "Idle timeout",
+            "How long the drone keeps its panes running after the link drops. Reconnecting \
+             within it reattaches to them; past it the drone stops them and exits.",
+        ))
+        .child(pills)
         .into_any_element()
 }
 
