@@ -26,6 +26,7 @@ use agent_manager::profile::{
     FsProfileStore, Profile as DefinitionRecord, ProfileDefaults, ProfileStore, ScopedProfileStore,
 };
 use agent_manager::provision;
+use agent_manager::registry::OverlayRegistry;
 use agent_manager::resolve;
 use agent_manager::session;
 use agent_manager::settings::Settings;
@@ -37,6 +38,7 @@ use kubiq_proto::messages::{
     AccountInfo, AgentDefinition, AgentTypeInfo, LoginStatus, TAG_COORDINATOR, TAG_DOC,
     TAG_PLANNER, TAG_WORKER,
 };
+use kubiq_proto::projects::{TrustKind, UntrustedItem};
 use kubiq_proto::settings::{AgentHome, Grant};
 use kubiq_proto::work::AgentId;
 
@@ -87,35 +89,81 @@ fn definitions_dir(base: &Path) -> PathBuf {
 /// is made here, through the `ProfileStore` trait's two overlay methods.
 pub(crate) struct DefinitionStore {
     records: FsProfileStore,
+    /// Where the records are, for reading one of them alone.
+    records_root: PathBuf,
     /// The overlays' own root, when it is not the records' one.
     overlays: Option<FsProfileStore>,
     overlays_root: Option<PathBuf>,
+    /// For a project's store: the config root and the project whose trust store every write
+    /// here updates in the same operation (`D230`). `None` for the global root, which is outside
+    /// every project folder and is not checked.
+    trust: Option<(PathBuf, ProjectId)>,
 }
 
 impl DefinitionStore {
     fn single(root: PathBuf) -> Self {
         Self {
-            records: FsProfileStore::new(root),
+            records: FsProfileStore::new(root.clone()),
+            records_root: root,
             overlays: None,
             overlays_root: None,
+            trust: None,
         }
     }
 
-    fn split(records: PathBuf, overlays: PathBuf) -> Self {
+    fn split(records: PathBuf, overlays: PathBuf, trust: (PathBuf, ProjectId)) -> Self {
         Self {
-            records: FsProfileStore::new(records),
+            records: FsProfileStore::new(records.clone()),
+            records_root: records,
             overlays: Some(FsProfileStore::new(overlays.clone())),
             overlays_root: Some(overlays),
+            trust: Some(trust),
         }
     }
 
+    /// Whether this machine trusts the record `id` as it is on disk now. Always for the global
+    /// root; for a project's, read alone so a malformed sibling cannot decide it.
+    fn trusts(&self, id: &str) -> bool {
+        match &self.trust {
+            None => true,
+            Some((root, project)) => crate::trust::read_definition(&self.records_root, id)
+                .is_some_and(|record| crate::trust::definition_trusted(root, *project, &record)),
+        }
+    }
+
+    /// Write `record`; `trusted` says whether this project's trust store vouches for what was
+    /// written (the fingerprint of the record as serialized, not a re-read) or forgets it.
+    fn save_with_standing(&self, record: &DefinitionRecord, trusted: bool) -> Result<PathBuf> {
+        let path = self.records.save(record)?;
+        if let Some((root, project)) = &self.trust {
+            if trusted {
+                crate::trust::record_definition(root, *project, record);
+            } else {
+                crate::trust::record(root, *project, TrustKind::Definition, &record.id, None);
+            }
+        }
+        Ok(path)
+    }
+
+    /// A write the user asked for: what was written is trusted.
     fn save(&self, record: &DefinitionRecord) -> Result<PathBuf> {
-        self.records.save(record)
+        self.save_with_standing(record, true)
+    }
+
+    /// [`Self::save`] for a write the user did not ask for about *this* record — repointing its
+    /// `extends` after a rename. A record this machine did not trust stays untrusted: the rewrite
+    /// must not launder an edit made outside Kubiq (`D230`).
+    fn save_keeping_standing(&self, record: &DefinitionRecord) -> Result<PathBuf> {
+        let trusted = self.trusts(&record.id);
+        self.save_with_standing(record, trusted)
     }
 
     /// The record, and — when they live apart — the overlays saved for it.
     fn delete(&self, id: &str) -> Result<()> {
         self.records.delete(id)?;
+        if let Some((root, project)) = &self.trust {
+            crate::trust::record(root, *project, TrustKind::Definition, id, None);
+        }
         if let Some(root) = &self.overlays_root {
             let dir = root.join(id);
             if dir.is_dir()
@@ -130,6 +178,10 @@ impl DefinitionStore {
     /// The record, and — when they live apart — its overlays, which a rename must not orphan.
     fn rename(&self, from: &str, to: &str) -> Result<()> {
         self.records.rename(from, to)?;
+        // The record moved unchanged, so its standing moves with it — trusted or not.
+        if let Some((root, project)) = &self.trust {
+            crate::trust::rename(root, *project, TrustKind::Definition, from, to);
+        }
         if let Some(root) = &self.overlays_root {
             let (src, dst) = (root.join(from), root.join(to));
             if src.is_dir()
@@ -216,6 +268,23 @@ fn apply_role_mcps(definition: &mut AgentDefinition) {
 
 /// `saved` followed by whatever of `picked` it does not already hold, so a pick made twice, or
 /// one the definition also named, reaches the library once.
+/// `id` with its `extends` chain folded in, as `store` answers it.
+fn flattened(store: &dyn ProfileStore, id: &str) -> Option<DefinitionRecord> {
+    agent_manager::profile::resolve_flattened(store, id).ok()
+}
+
+/// A flattened record's write grants, a project-relative one resolved against `project_root`.
+fn extra_rw_of(record: DefinitionRecord, project_root: Option<&Path>) -> Vec<String> {
+    match project_root {
+        Some(root) => record
+            .extra_rw
+            .into_iter()
+            .map(|path| crate::store::project_dir::resolve_in(root, &path))
+            .collect(),
+        None => record.extra_rw,
+    }
+}
+
 fn union(mut saved: Vec<String>, picked: Vec<String>) -> Vec<String> {
     for name in picked {
         if !saved.contains(&name) {
@@ -287,6 +356,10 @@ pub struct Composed {
     /// the caller as a dismissable notification once the run has actually started; empty in the
     /// overwhelmingly common case.
     pub problems: Vec<String>,
+    /// Project catalog MCP servers this run asked for and was not given, because this machine does
+    /// not trust them as they stand (`D230`). The caller tells the window with
+    /// `Message::UntrustedProjectSettings`; empty in the common case.
+    pub untrusted: Vec<UntrustedItem>,
 }
 
 /// Everything a caller chooses about one run, over and above the harness, the folder and the
@@ -805,6 +878,7 @@ impl Agents {
         DefinitionStore::split(
             ProjectData::resolved(&self.root, project).definitions(),
             ProjectData::under_config(&self.root, project).definition_logins(),
+            (self.root.clone(), project),
         )
     }
 
@@ -935,6 +1009,7 @@ impl Agents {
     /// Read through the library's own flattening of the `extends` chain, so a hand-written parent's
     /// list is not lost when a run's picks are added on top (`flags.skills` and `flags.mcps`
     /// outrank the whole definition, not just its leaf).
+    #[cfg(test)]
     fn definition_mcps(&self, id: &str, project: Option<ProjectId>) -> Option<Vec<String>> {
         self.definition_defaults(id, project)
             .and_then(|defaults| defaults.mcps)
@@ -946,6 +1021,7 @@ impl Agents {
     ///
     /// A grant a project definition saved relative to the project's folder is resolved against
     /// `project_root`; the library is only ever handed absolute or `~`-prefixed paths.
+    #[cfg(test)]
     fn definition_extra_rw(
         &self,
         id: &str,
@@ -956,34 +1032,27 @@ impl Agents {
         let scoped = project.map(|project| self.project_definition_store(project));
         let store =
             ScopedProfileStore::new(&global, scoped.as_ref().map(|it| it as &dyn ProfileStore));
-        let saved = agent_manager::profile::resolve_flattened(&store, id)
-            .map(|record| record.extra_rw)
-            .unwrap_or_default();
-        match project_root {
-            Some(root) => saved
-                .into_iter()
-                .map(|path| crate::store::project_dir::resolve_in(root, &path))
-                .collect(),
-            None => saved,
-        }
+        flattened(&store, id)
+            .map(|record| extra_rw_of(record, project_root))
+            .unwrap_or_default()
     }
 
     /// What a definition saved under `defaults.skills`, read exactly as [`Self::definition_mcps`]
     /// reads its list.
+    #[cfg(test)]
     fn definition_skills(&self, id: &str, project: Option<ProjectId>) -> Option<Vec<String>> {
         self.definition_defaults(id, project)
             .and_then(|defaults| defaults.skills)
     }
 
     /// The named definition's `defaults` with its `extends` chain folded in, through the run's scope.
+    #[cfg(test)]
     fn definition_defaults(&self, id: &str, project: Option<ProjectId>) -> Option<ProfileDefaults> {
         let global = self.definition_store();
         let scoped = project.map(|project| self.project_definition_store(project));
         let store =
             ScopedProfileStore::new(&global, scoped.as_ref().map(|it| it as &dyn ProfileStore));
-        agent_manager::profile::resolve_flattened(&store, id)
-            .ok()
-            .map(|record| record.defaults)
+        flattened(&store, id).map(|record| record.defaults)
     }
 
     /// Write a definition, creating it when its id names none. Overwrites in place: a saved
@@ -1134,7 +1203,7 @@ impl Agents {
         for mut record in store.profiles().unwrap_or_default() {
             if record.extends.as_deref() == Some(old) {
                 record.extends = Some(new.to_string());
-                if let Err(error) = store.save(&record) {
+                if let Err(error) = store.save_keeping_standing(&record) {
                     tracing::warn!("'{}' still extends '{old}': {error:#}", record.id);
                 }
             }
@@ -1171,9 +1240,21 @@ impl Agents {
         if store.profile(new_id).unwrap_or(None).is_some() {
             bail!("an agent definition called '{new_id}' already exists");
         }
+        // A copy is trusted only as far as its source is (`D230`): cloning an edited project
+        // record must not launder it. A global source is outside every project and trusted; the
+        // project's own is checked on the very record being copied.
+        let from_project = scoped
+            .as_ref()
+            .is_some_and(|it| it.profile(id).ok().flatten().is_some());
+        let trusted = match (&scoped, project) {
+            (Some(_), Some(project)) if from_project => {
+                crate::trust::definition_trusted(&self.root, project, &record)
+            }
+            _ => true,
+        };
         record.id = new_id.to_string();
         store
-            .save(&record)
+            .save_with_standing(&record, trusted)
             .with_context(|| format!("saving agent definition '{new_id}'"))?;
         Ok(())
     }
@@ -1581,19 +1662,144 @@ impl Agents {
             .ok_or_else(|| anyhow!("unknown agent type '{agent_type}'"))?;
         let extra_instructions = options.instructions.take();
 
+        // **One read of everything this run is composed from, checked, then used** (`D230`). Every
+        // definition in both scopes, the instructions files they name and both catalog layers are
+        // read into memory here; the trust check runs on that snapshot, and everything below —
+        // the grants, the MCP split, `resolve` itself — reads the snapshot, so a file swapped
+        // between the check and the launch is never used.
+        //
+        // Two definition stores, read as one: this project's own over the global root. Which of the
+        // two a name resolves in is the whole of what "project-scoped" means — the record says
+        // nothing about a project, its location does. `None` for a run belonging to no project
+        // is the global root alone, which is every run's answer before and after this.
+        //
+        // The library resolves the `extends` chain through the same pair, so a project definition
+        // may specialise a global one, and a global definition naming a project's is refused there
+        // rather than here (`agent_manager::profile::resolve_chain`).
+        let global_store = self.definition_store();
+        let project_store = options
+            .project
+            .map(|project| self.project_definition_store(project));
+        let global_definitions = crate::trust::SnapshotProfiles::new(
+            crate::trust::read_definitions(&global_store.records_root),
+            &global_store,
+        );
+        let project_definitions = project_store.as_ref().map(|store| {
+            crate::trust::SnapshotProfiles::new(
+                crate::trust::read_definitions(&store.records_root),
+                store,
+            )
+        });
+        let definitions = ScopedProfileStore::new(
+            &global_definitions,
+            project_definitions
+                .as_ref()
+                .map(|it| it as &dyn ProfileStore),
+        );
+        let instructions: BTreeMap<PathBuf, Option<String>> = global_definitions
+            .records()
+            .iter()
+            .chain(project_definitions.iter().flat_map(|it| it.records()))
+            .filter_map(|record| {
+                let path = record.defaults.instructions.clone()?;
+                Some((path, crate::trust::read_instructions(record)))
+            })
+            .collect();
+        let instructions_of = |path: &PathBuf| instructions.get(path).cloned().flatten();
+        let catalog = Catalog::new(&self.root);
+        let mut catalog_problems: Vec<String> = Vec::new();
+        let mut read_layer = |scope: Option<ProjectId>| {
+            crate::trust::SnapshotRegistry::of(&catalog.layer(scope)).unwrap_or_else(|error| {
+                catalog_problems.push(format!("a catalog layer could not be read: {error:#}"));
+                crate::trust::SnapshotRegistry::empty()
+            })
+        };
+        let mut global_catalog = read_layer(None);
+        let mut project_catalog = options.project.map(|project| read_layer(Some(project)));
+
+        // The definition `resolve` will select: the one named, else the library's implicit
+        // `default` when there is one (`resolve::effective_profile` under default settings).
+        let profile_name = options.definition.clone().or_else(|| {
+            definitions
+                .profile("default")
+                .ok()
+                .flatten()
+                .map(|_| "default".to_string())
+        });
+
+        // The project layer is only used as far as this machine trusts it (`D230`): a project
+        // definition anywhere in the chain this run resolves that does not match its fingerprint
+        // refuses the run, and a project catalog MCP that does not match is left out of it.
+        let mut untrusted: Vec<UntrustedItem> = Vec::new();
+        let mut hidden: Vec<String> = Vec::new();
+        if let (Some(project), Some(own)) = (options.project, &project_definitions) {
+            let trusted = crate::trust::Trusted::of(&self.root, project);
+            let print = |record: &DefinitionRecord| {
+                let text = record
+                    .defaults
+                    .instructions
+                    .as_ref()
+                    .and_then(instructions_of);
+                crate::trust::definition_fingerprint(record, text.as_deref())
+            };
+            if let Some(name) = &profile_name {
+                let refused: Vec<UntrustedItem> =
+                    agent_manager::profile::resolve_chain(&definitions, name)
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|link| own.profile(&link.id).ok().flatten())
+                        .filter_map(|record| {
+                            trusted.check(TrustKind::Definition, &record.id, print(&record))
+                        })
+                        .collect();
+                if !refused.is_empty() {
+                    return Err(crate::trust::Refused {
+                        project,
+                        items: refused,
+                    }
+                    .into());
+                }
+            }
+            if let Some(layer) = &project_catalog {
+                for entry in &layer.mcps {
+                    let print = crate::trust::mcp_fingerprint(entry);
+                    if let Some(item) = trusted.check(TrustKind::Mcp, &entry.id, print) {
+                        hidden.push(item.id.clone());
+                        untrusted.push(item);
+                    }
+                }
+            }
+            // Left out entirely: not replaced by an application entry of the same id either.
+            global_catalog.mcps.retain(|entry| !hidden.contains(&entry.id));
+            if let Some(layer) = &mut project_catalog {
+                layer.mcps.retain(|entry| !hidden.contains(&entry.id));
+            }
+        }
+        let registry = OverlayRegistry::new(global_catalog, project_catalog);
+
+        // The named definition flattened, from the snapshot — what its grants, servers and skills
+        // are read from below.
+        let flat = options
+            .definition
+            .as_deref()
+            .and_then(|definition| flattened(&definitions, definition));
+        let instructions_text = match profile_name
+            .as_deref()
+            .and_then(|name| flattened(&definitions, name))
+            .and_then(|record| record.defaults.instructions)
+        {
+            Some(path) => Some(instructions_of(&path).ok_or_else(|| {
+                anyhow!("reading profile instructions file {}", path.display())
+            })?),
+            None => None,
+        };
+
         // The folders this run may write beyond the host-wide grants: the definition's own, read
         // through the run's scope, then this launch's. Only a confined run has a policy to add to.
         let extra_rw = if self.isolate {
-            let saved = options
-                .definition
-                .as_deref()
-                .map(|definition| {
-                    self.definition_extra_rw(
-                        definition,
-                        options.project,
-                        options.project_root.as_deref(),
-                    )
-                })
+            let saved = flat
+                .clone()
+                .map(|record| extra_rw_of(record, options.project_root.as_deref()))
                 .unwrap_or_default();
             union(saved, std::mem::take(&mut options.extra_rw))
         } else {
@@ -1625,10 +1831,10 @@ impl Agents {
                 picked_catalog.push(name.clone());
             }
         }
-        let catalog_mcps = options
-            .definition
-            .as_deref()
-            .and_then(|definition| self.definition_mcps(definition, options.project))
+        let catalog_mcps = flat
+            .as_ref()
+            .and_then(|record| record.defaults.mcps.clone())
+            .map(canonical_mcps)
             .map(|saved| {
                 saved
                     .into_iter()
@@ -1655,10 +1861,9 @@ impl Agents {
         let skills = if options.skills.is_empty() {
             None
         } else {
-            let saved = options
-                .definition
-                .as_deref()
-                .and_then(|definition| self.definition_skills(definition, options.project))
+            let saved = flat
+                .as_ref()
+                .and_then(|record| record.defaults.skills.clone())
                 .unwrap_or_default();
             Some(union(saved, options.skills.clone()))
         };
@@ -1697,34 +1902,37 @@ impl Agents {
             prompt: options.prompt,
             resume: options.resume,
             fork: options.fork,
+            // The instructions file the definition names, as the snapshot read it — never read
+            // again by the library, so what was checked is what runs.
+            instructions: instructions_text,
             ..Default::default()
         };
-        // Two definition stores, read as one: this project's own over the global root. Which of the
-        // two a name resolves in is the whole of what "project-scoped" means — the record says
-        // nothing about a project, its location does. `None` for a run belonging to no project
-        // is the global root alone, which is every run's answer before and after this.
-        //
-        // The library resolves the `extends` chain through the same pair, so a project definition
-        // may specialise a global one, and a global definition naming a project's is refused there
-        // rather than here (`agent_manager::profile::resolve_chain`).
-        let global_definitions = self.definition_store();
-        let project_definitions = options
-            .project
-            .map(|project| self.project_definition_store(project));
-        let definitions = ScopedProfileStore::new(
-            &global_definitions,
-            project_definitions
-                .as_ref()
-                .map(|it| it as &dyn ProfileStore),
-        );
+        // Only the servers this run asked for and lost are this run's to report; the window is sent
+        // the project's whole list either way.
+        let requested: Vec<String> = flags.mcps.clone().unwrap_or_else(|| {
+            profile_name
+                .as_deref()
+                .and_then(|name| flattened(&definitions, name))
+                .and_then(|record| record.defaults.mcps)
+                .unwrap_or_default()
+        });
+        untrusted.retain(|item| requested.contains(&item.id));
         let mut spec = resolve::resolve(
             &flags,
             &Settings::default(),
-            &Catalog::new(&self.root).registry_for(options.project),
+            &registry,
             &FsAccountStore::new(self.root.join("accounts")),
             &definitions,
         )
         .with_context(|| format!("composing a {agent_type} run"))?;
+        // A left-out server is reported as untrusted, not as the stale reference the library took
+        // it for; a catalog layer that could not be read is said once, as a problem of this run.
+        spec.problems.retain(|problem| {
+            !hidden
+                .iter()
+                .any(|id| problem.starts_with(&format!("unknown mcp id '{id}'")))
+        });
+        spec.problems.extend(catalog_problems);
         // Kubiq's own instructions go after the definition's, never in place of them: where they
         // land is the library's answer, so no harness detail is named here.
         if let Some(extra) = extra_instructions {
@@ -1898,6 +2106,7 @@ impl Agents {
             provisioned,
             spec_account: spec.account.as_ref().map(|a| a.id.clone()),
             problems: spec.problems.clone(),
+            untrusted,
         })
     }
 

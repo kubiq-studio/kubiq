@@ -1699,3 +1699,39 @@ fn join_parts(parts: &[String]) -> Option<String> {
 fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
+
+impl AppState {
+    /// Approve what the trust prompt for `project_id` lists (`D230`), each item with the
+    /// fingerprint it was shown with: the host trusts an item only if its content still has that
+    /// fingerprint, and answers with the project's whole list. `None` approves every item listed.
+    ///
+    /// `project_id` is the project the prompt was drawn for, not whichever is on screen when the
+    /// click lands.
+    pub fn trust_project_items(
+        &mut self,
+        project_id: ProjectId,
+        items: Option<Vec<kubiq_proto::projects::TrustItem>>,
+        _cx: &mut Context<Self>,
+    ) {
+        let items = items.unwrap_or_else(|| {
+            self.projects
+                .get(&project_id)
+                .map(|open| {
+                    open.untrusted
+                        .iter()
+                        .map(|item| kubiq_proto::projects::TrustItem {
+                            kind: item.kind,
+                            id: item.id.clone(),
+                            fingerprint: item.fingerprint.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
+        if items.is_empty() {
+            return;
+        }
+        self.bus
+            .send(Message::TrustProjectItems { project_id, items });
+    }
+}

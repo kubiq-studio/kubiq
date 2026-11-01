@@ -82,7 +82,7 @@ webpki-roots = { version = "1", optional = true }
 # issuer, validity. A parser, no I/O, no UI. Behind `listener`.
 x509-parser = { version = "0.18", optional = true }
 # The fingerprint a pin is: SHA-256 over a certificate's DER. One hash, no drawing. Behind
-# `listener`.
+# `listener`, and behind `harness` for the project-settings trust store's fingerprints (`D230`).
 sha2 = { version = "0.11", optional = true }
 # The self-updater's signature check (`updates/`, `D-updates`): the feed's manifests are minisign
 # signed and verified against a key baked into the build before they are parsed. Pure Rust, one
@@ -172,7 +172,7 @@ index = ["dep:tantivy"]
 # `conversation`, `conversation_record`, `gc`, `quota`, `mcp`, `assist`, `cli_shortcut`, `work`, and
 # the usage meter's SQLite store. It turns on the library's `remote` feature too, for the catalog's
 # MCP registry search — that is the one HTTP client `harness` brings, and the lean build has none.
-harness = ["dep:agent-manager", "agent-manager/remote", "dep:rusqlite", "dep:kubiq-archify"]
+harness = ["dep:agent-manager", "agent-manager/remote", "dep:rusqlite", "dep:kubiq-archify", "dep:sha2"]
 # The remote listener and everything that answers on it: `remote`, `connectors`, `web_assets`.
 # `links` stays out: it is a byte scanner with no dependency of its own, so a lean build carries
 # it for nothing rather than forking `pty`'s read loop around it.

@@ -171,6 +171,7 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
                             (app.workbench.rail_mode == RailMode::GIT && app.project(cx).is_some())
                                 .then(|| git::toolbar(app, cx)),
                         )
+                        .children(crate::ui::trust::strip(app, cx))
                         .child(app.dock().clone())
                         .ui_id(ui_id::WORKSPACE),
                 ),

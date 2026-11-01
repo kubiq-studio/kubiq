@@ -499,6 +499,44 @@ pub enum Scope {
     Project(ProjectId),
 }
 
+/// Which kind of project-layer setting the trust check (`D230`) is about: a project's own agent
+/// definition, or an MCP server in the project's catalog layer.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustKind {
+    Definition,
+    Mcp,
+}
+
+/// Why a project-layer setting is not trusted on this machine: its content no longer matches what
+/// Kubiq last wrote or the user last approved, or this machine has never seen it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustReason {
+    Changed,
+    New,
+}
+
+/// One project-layer setting the user approves: a definition id or a catalog MCP id, with the
+/// fingerprint they were shown. The host trusts it only if what is on disk still has that
+/// fingerprint, so an edit made after the prompt was drawn is never approved by it.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub struct TrustItem {
+    pub kind: TrustKind,
+    pub id: String,
+    pub fingerprint: String,
+}
+
+/// One project-layer setting this machine does not trust, why, and the fingerprint of what is on
+/// disk now — what a [`TrustItem`] echoes back to approve exactly this content.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub struct UntrustedItem {
+    pub kind: TrustKind,
+    pub id: String,
+    pub reason: TrustReason,
+    pub fingerprint: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

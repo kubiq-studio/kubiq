@@ -5663,6 +5663,57 @@ checked at call time and said in the descriptions — so a malformed call fails 
 at the harness. A `MissionDoc` thread is still pointed at `kubiq-doc` by `task_id`, which answers
 the plan, not the mission document: no MCP tool answers a mission document's threads.
 
+### D230 — A project's own definitions and catalog MCPs run only as this machine last trusted them
+
+A project-managed project keeps its agent definitions and its catalog layer in `.kubiq/`, inside the
+folder its agents can write. A definition carries `extra_rw`, `mcps` and an instructions file; a
+catalog MCP entry names a command to run — an agent that edits either widens its own next launch.
+So each project-layer definition and catalog MCP entry is fingerprinted — SHA-256 over the parsed
+record serialized canonically, and for a definition the content of the instructions file it names
+— in a per-machine store, `<config root>/projects/<ulid>/local/trust.toml`, never in `.kubiq/`.
+
+- **Kubiq's own writes record the fingerprint in the same operation**, of the record Kubiq
+  serialized (round-tripped in memory) rather than of a re-read file, so a malformed sibling or a
+  concurrent edit cannot decide it: a definition saved, renamed or deleted, a catalog MCP saved or
+  removed. A clone is trusted only if its source is, and repointing another record's `extends`
+  after a rename keeps that record's standing. Moves that change no content — the storage-mode
+  change, the startup layout migration — need nothing: the store is keyed by id and sits on the
+  side those moves never touch.
+- **A launch reads once and uses what it checked.** Every definition of both scopes, the
+  instructions files they name and both catalog layers are read into an in-memory snapshot; the
+  check runs on it and `resolve` is fed the same snapshot (a snapshot-backed `ProfileStore` and
+  `Registry`, the instructions passed as text), so a file swapped after the check is never used.
+  A project definition anywhere in the run's `extends` chain that does not match refuses the run;
+  a project catalog MCP that does not match is left out of the run and reported.
+- **The window is told the project's whole list** with `UntrustedProjectSettings` — on project
+  open, on a refusal or omission, in answer to an approval — and approves with
+  `TrustProjectItems`, echoing the fingerprint each item was shown with. An item is trusted only if
+  its content still has that fingerprint; one edited since stays untrusted and is listed again.
+
+The global layer is not checked; skills are not covered (`G466`). The rule applies to the project
+layer uniformly, whatever its storage mode.
+
+**Upgrade:** the first start after the upgrade seeds every project in the catalogue that has no
+store from what is on disk, logged, and writes a root-level marker (`<config root>/trust-seeded`).
+From then on a missing store is an empty one — nothing trusted — whether the project was added
+later, was drone-served, had its data directory unmounted at that start, or had its `trust.toml`
+deleted.
+
+**Why not a sandbox deny on those two directories:** isol8 can carve a write-deny out of a writable
+root on macOS and Windows but not under Linux's Landlock; a run without isolation, the default, has
+no sandbox at all; and no harness's own sandbox can protect a subfolder of its workspace. A trust
+check at the one place Kubiq reads the files works for every harness and OS.
+
+**Cost:** an agent can still write the files; it only cannot make Kubiq act on them unasked. A
+hand edit by the user is refused like an agent's until approved. A UI save of an untrusted
+definition trusts it, including the fields the form does not show (`extends`, the instructions
+path), because the save keeps them from the record on disk. A project that existed before the
+upgrade trusts whatever its folder held at that first start. A config root inside a project's
+folder — a development setup — puts the trust store where that project's agents can write it; the
+host only logs a warning at startup. A launch reads definitions one directory at a time, so a
+record that does not parse, or whose `id` is not its directory's name, is left out rather than
+failing the read.
+
 ## Related docs
 
 - [`architecture.md`](./architecture.md) — the rules D3 to D6 produce

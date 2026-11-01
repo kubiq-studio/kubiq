@@ -240,17 +240,38 @@ impl Catalog {
             description: mcp.description.clone().filter(|it| !it.is_empty()),
         };
         layer.put_mcp(&entry)?;
+        if let Some(project) = scope {
+            crate::trust::record_mcp(&self.root, project, &entry);
+        }
         if let Some(previous) = previous_id
             && previous != mcp.id
         {
             layer.remove_mcp(previous)?;
+            self.forget_trust(scope, previous);
         }
         Ok(())
     }
 
     /// Delete one MCP server from a layer.
     pub fn remove_mcp(&self, scope: Option<ProjectId>, id: &str) -> Result<()> {
-        self.layer(scope).remove_mcp(id)
+        self.layer(scope).remove_mcp(id)?;
+        self.forget_trust(scope, id);
+        Ok(())
+    }
+
+    /// Take a removed project-layer MCP entry out of that project's trust store (`D230`). A save
+    /// records the entry it serialized instead ([`crate::trust::record_mcp`]); the application's
+    /// own layer is not checked, so it records nothing.
+    fn forget_trust(&self, scope: Option<ProjectId>, id: &str) {
+        if let Some(project) = scope {
+            crate::trust::record(
+                &self.root,
+                project,
+                kubiq_proto::projects::TrustKind::Mcp,
+                id,
+                None,
+            );
+        }
     }
 
     /// Search the configured sources, or just `source`. Blocking: clones or fetches.

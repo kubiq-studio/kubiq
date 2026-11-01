@@ -375,6 +375,10 @@ pub struct OpenProject {
     /// and one record at a time by `MissionChanged`, so a record arriving twice changes nothing.
     /// Empty rather than absent until the `ListMissions` is answered.
     pub missions: HashMap<TaskId, MissionSnapshot>,
+    /// The project-layer definitions and catalog MCPs this machine does not trust (`D230`), as the
+    /// host last stated them — replaced whole by `UntrustedProjectSettings`, empty when all are
+    /// trusted.
+    pub untrusted: Vec<kubiq_proto::projects::UntrustedItem>,
     /// The last real annotation count this window was told for a project file, by its
     /// project-relative path — `true` for at least one, `false` for none — kept after the
     /// annotation surface closes rather than only while `workbench.plan` names the document.
@@ -534,6 +538,7 @@ impl OpenProject {
             teams: TeamsView::default(),
             board: BoardState::default(),
             missions: HashMap::new(),
+            untrusted: Vec::new(),
             annotation_hints: HashMap::new(),
             mission_view: MissionView::default(),
             mission_history: HashMap::new(),

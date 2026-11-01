@@ -58,7 +58,7 @@ use crate::plan::{
 };
 use crate::projects::{
     DroneChange, DroneOrigin, IndexChange, LanePref, MissionTermChange, ProjectSnapshot, Scope,
-    StorageMode,
+    StorageMode, TrustItem, UntrustedItem,
 };
 use crate::quota::{QuotaSnapshot, QuotaSource};
 use crate::remote_tools::{RemoteOp, RemoteOutput};
@@ -657,6 +657,27 @@ pub enum Message {
     DeleteAgentDefinition {
         id: String,
         project: Option<ProjectId>,
+    },
+    /// Host → UI: project-layer settings this machine does not trust (`D230`) — a project's own
+    /// agent definition or catalog MCP server whose content no longer matches what Kubiq last
+    /// wrote or the user last approved, or one this machine has never seen. Sent to the window
+    /// that opened the project ([`Message::OpenedProject`]) when there is any, to the window
+    /// whose launch was refused (an untrusted definition) or ran without a server (an untrusted
+    /// MCP, omitted), and in answer to [`Message::TrustProjectItems`]. Always the project's whole
+    /// list, so the window replaces what it holds and an empty `items` says everything is trusted.
+    UntrustedProjectSettings {
+        project_id: ProjectId,
+        items: Vec<UntrustedItem>,
+    },
+    /// UI → host: the user approved these project-layer settings as they were shown. The host
+    /// trusts each one whose content on disk still has the [`TrustItem::fingerprint`] sent, and
+    /// answers with the project's whole [`Message::UntrustedProjectSettings`] — an item edited
+    /// since it was shown stays in it, with its new fingerprint.
+    ///
+    /// [`TrustItem::fingerprint`]: crate::projects::TrustItem::fingerprint
+    TrustProjectItems {
+        project_id: ProjectId,
+        items: Vec<TrustItem>,
     },
     /// Which MCP servers this build offers to inject into a harness. Answered with
     /// [`Message::Mcps`].
@@ -3908,7 +3929,9 @@ impl Message {
             | Message::SearchMatches { project_id, .. }
             | Message::SearchProgress { project_id, .. }
             | Message::SearchFinished { project_id, .. }
-            | Message::SearchError { project_id, .. } => Some(*project_id),
+            | Message::SearchError { project_id, .. }
+            | Message::UntrustedProjectSettings { project_id, .. }
+            | Message::TrustProjectItems { project_id, .. } => Some(*project_id),
             // The annotation family names a document rather than a project, and the project is
             // inside the handle — one arm for the whole family, on `Suggest`'s own reasoning.
             Message::LoadPlan { doc }

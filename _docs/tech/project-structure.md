@@ -7,7 +7,7 @@ summary: Every folder in the workspace, what belongs in it, what must never go i
 read_when: you are adding a file and are not certain where it goes, or you are new to the repository
 updated: 2026-11-01
 verified: 2026-11-01
-code_anchors: [crates/kubiq-proto/src/browser.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq/src/app/browser.rs, Cargo.toml, crates/kubiq-host/src/store/usage.rs, crates/kubiq-host/src/store/project_dir.rs, crates/kubiq-host/src/kb/mod.rs, crates/kubiq-host/src/lib.rs, crates/kubiq/Cargo.toml, crates/kubiq-proto/Cargo.toml, crates/kubiq-host/Cargo.toml, crates/kubiq-app/Cargo.toml, crates/kubiq-drone/Cargo.toml, crates/kubiq-tunnel/Cargo.toml, vendor/gpui-terminal/Cargo.toml, _tools/icns.py]
+code_anchors: [crates/kubiq-host/src/trust.rs, crates/kubiq-proto/src/browser.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq/src/app/browser.rs, Cargo.toml, crates/kubiq-host/src/store/usage.rs, crates/kubiq-host/src/store/project_dir.rs, crates/kubiq-host/src/kb/mod.rs, crates/kubiq-host/src/lib.rs, crates/kubiq/Cargo.toml, crates/kubiq-proto/Cargo.toml, crates/kubiq-host/Cargo.toml, crates/kubiq-app/Cargo.toml, crates/kubiq-drone/Cargo.toml, crates/kubiq-tunnel/Cargo.toml, vendor/gpui-terminal/Cargo.toml, _tools/icns.py]
 depends_on: [tech-architecture]
 review_cycle: quarterly
 ---
@@ -185,6 +185,13 @@ holds a non-empty one of that name, in which case both stay and the clash is log
 definition's captured login (the library's `<id>/base/<harness>/` overlay) is credential state and
 never goes into `.kubiq/`: it lives in `<config root>/projects/<ulid>/local/definition-logins/`,
 apart from the record, whichever mode the project is in.
+
+**What this machine trusts of the project layer is beside it, never in `.kubiq/`** (`D230`).
+`<config root>/projects/<ulid>/local/trust.toml` holds a SHA-256 fingerprint per project agent
+definition and per project catalog MCP entry, keyed by id; a launch refuses a project definition
+whose record does not match and omits a catalog MCP that does not (`crates/kubiq-host/src/trust.rs`).
+It sits on the config-root side because `.kubiq/agent-definitions/` and `.kubiq/catalog/` are inside
+the folder an agent can write — a store there would be one more thing the agent could rewrite.
 
 A path a shared setting holds — a knowledge-base folder in `kb.toml`, a SQLite file in `db.toml`, a
 project definition's write grant — is stored **relative to the project's folder** when it lies
@@ -373,6 +380,7 @@ interface does not depend on the host, so a module in the wrong crate does not c
 | `kubiq-host/src/config.rs` | Where the config root is, and how it is found | A setting; the bootstrap file names a directory and nothing else |
 | `kubiq-host/src/store/` | What the host writes down: the catalogue, a project's tasks, the view state and settings behind four traits, and the concrete stores that need no trait beside them | Any opinion about what a Ui-layer blob means |
 | `kubiq-host/src/store/project_dir.rs` | Where one project's data directory is — the pointer a store resolves through, the `.kubiq/` folder, its `.gitignore` and its `project.toml` | A catalogue read, or any opinion about what is in the files it places |
+| `kubiq-host/src/trust.rs` | Which project-layer definitions and catalog MCPs this machine trusts: the fingerprint store under the config root's `local/`, the seeding on upgrade, the launch check (`D230`) | A sandbox rule, or anything about the global layer |
 | `kubiq-host/src/store/usage.rs` | The usage meter: `usage.db`, its two tables, its `PRAGMA user_version` migrations and the accumulating upsert into them | A trait, a second implementation, or an opinion about how a bucket is drawn |
 | `kubiq-host/src/projects.rs` | The catalogue as the host runs it, the reservation of each project's `ui/` workarea, and the palette index a project gets when its creator names none | What a palette index looks like, an opinion about layout, or a read of anything inside a workarea |
 | `kubiq-host/src/settings.rs` | Application settings as the host runs them: Ui opaque, Host parsed | An opinion about what a Ui-layer blob means |

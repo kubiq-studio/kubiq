@@ -2051,6 +2051,14 @@ impl AppState {
                 cx.notify();
             }
 
+            // What this machine does not trust in a project's own `.kubiq/` (`D230`) — the whole
+            // list, so an empty one clears the prompt.
+            Message::UntrustedProjectSettings { project_id, items } => {
+                let open = self.projects.get_mut(&project_id)?;
+                open.untrusted = items;
+                cx.notify();
+            }
+
             // ── Plan family ────────────────────────────────────────────
             // Answers to `LoadPlan`/`SavePlan`, sent only to whoever asked — the open document's
             // surface, or the plan tab still waiting on its first body (or on a save made while

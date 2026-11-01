@@ -1083,7 +1083,8 @@ fn refusal(message: &Message) -> Option<Message> {
         | DeleteAgentDefinition { .. }
         | ListMcps
         | ListTools { .. }
-        | RunTool { .. } => AccountError {
+        | RunTool { .. }
+        | TrustProjectItems { .. } => AccountError {
             error: NOT_HERE.to_string(),
         },
 

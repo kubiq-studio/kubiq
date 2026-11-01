@@ -2555,6 +2555,8 @@ saved recipe one may be started from, and the two never share a word in prose (`
 | `SaveAgentDefinition` | UI → host | `definition`, `replaces?` | `AgentDefinitions`, or `AccountError` |
 | `CloneAgentDefinition` | UI → host | `id`, `new_id`, `project?` | `AgentDefinitions`, or `AccountError` |
 | `DeleteAgentDefinition` | UI → host | `id`, `project?` | `AgentDefinitions`, or `AccountError` |
+| `UntrustedProjectSettings` | host → UI | `project_id`, `items: [UntrustedItem]` | — |
+| `TrustProjectItems` | UI → host | `project_id`, `items: [TrustItem]` (with `fingerprint`) | `UntrustedProjectSettings` |
 | `ListMcps` | UI → host | — | `Mcps` |
 | `Mcps` | host → UI | `servers` | — |
 
@@ -2564,6 +2566,19 @@ saved recipe one may be started from, and the two never share a word in prose (`
 project's own first and then the global one, so a global cloned with `project` set becomes a
 project definition. It is refused when the source is missing or the name is taken, because what it
 would overwrite is the user's own saved setup.
+
+**A project's own settings run only as this machine trusts them** (`D230`). `UntrustedItem` is
+`{ kind: definition | mcp, id, reason: changed | new, fingerprint }` (`kubiq_proto::projects`) —
+`fingerprint` is the content on disk when the list was made; `TrustItem` is `{ kind, id,
+fingerprint }`, echoing the fingerprint the user was shown. Every `UntrustedProjectSettings`
+carries the project's **whole** list, so the window replaces what it holds: it is sent to the
+window that sent `OpenedProject` when the project has any; to the window whose launch was refused
+because a project definition in its chain is untrusted (beside the ordinary `ConversationError` /
+pane refusal); to the window whose launch ran without an untrusted project catalog MCP it asked
+for; and in answer to `TrustProjectItems`. The host trusts each listed item whose content still has
+the fingerprint sent and leaves any other untrusted, so it reappears in the answer with its new
+fingerprint — an empty `items` means everything is trusted. Global definitions and the
+application's catalog layer are never listed.
 
 **Global and project definitions are both deleted one by one.** `DeleteAgentDefinition` takes an
 optional `project` — `None` for a global definition, `Some` for a project's own — and removes that

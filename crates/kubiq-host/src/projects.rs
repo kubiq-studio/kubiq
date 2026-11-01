@@ -166,7 +166,14 @@ impl Projects {
                 // (`G356`). Idempotent, so the second launch is a handful of `stat`s per project.
                 for record in &this.records {
                     project_dir::migrate_project(&this.root, record);
+                    #[cfg(feature = "harness")]
+                    crate::trust::warn_if_root_inside(&this.root, Path::new(&record.path));
                 }
+                // The upgrade into `D230`, once per config root: every project this machine
+                // already had trusts its settings as they stand, then the marker is written and a
+                // missing store trusts nothing from then on.
+                #[cfg(feature = "harness")]
+                crate::trust::seed_on_upgrade(&this.root, this.records.iter().map(|r| r.id));
                 this.reconcile_in_project_metadata();
                 // Only ever after a load that worked. Collecting against the empty catalogue a
                 // *corrupt* file produces would delete every project's view state.

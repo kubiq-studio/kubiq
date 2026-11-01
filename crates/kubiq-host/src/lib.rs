@@ -150,6 +150,8 @@ pub mod shell_integration;
 pub mod shells;
 pub mod store;
 pub mod tasksrc;
+#[cfg(feature = "harness")]
+pub mod trust;
 #[cfg(feature = "listener")]
 pub mod updates;
 pub mod watch;

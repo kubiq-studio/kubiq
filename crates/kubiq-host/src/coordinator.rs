@@ -1945,6 +1945,17 @@ impl Coordinator {
                 let replies = self.projects.opened(project_id);
                 self.answer(client, replies);
                 self.watch_project(client, project_id);
+                // Project-layer settings this machine does not trust are said once, on open, so
+                // the window can ask about them before a launch is refused (`D230`).
+                if !crate::trust::untrusted(&self.root.path, project_id).is_empty() {
+                    self.send_untrusted(client, project_id);
+                }
+            }
+            Message::TrustProjectItems { project_id, items } => {
+                if self.projects.record(project_id).is_some() {
+                    crate::trust::approve(&self.root.path, project_id, &items);
+                }
+                self.send_untrusted(client, project_id);
             }
             Message::AdoptProject { project_id } => self.adopt_project(client, project_id),
             // A drone's verb. This catalogue is the user's own, written through `AddProject`, and
@@ -4590,6 +4601,7 @@ impl Coordinator {
                 // `retire_agent`/`park_agent` forget it on close. The run directory stays as well,
                 // because a resume's session store lives in it.
                 self.close_asks(agent_id, AskClosed::Gone);
+                self.report_refused_by_trust(client, &error);
                 self.refuse_conversation(client, agent_id, format!("{error:#}"));
                 return false;
             }
@@ -4604,6 +4616,9 @@ impl Coordinator {
         // `Composed::problems`) — it still has to reach the person who set the definition up, as a
         // dismissable entry in the bell rather than nothing at all.
         self.report_run_problems(client, &pending.agent_type, &composed.problems);
+        if !composed.untrusted.is_empty() {
+            self.send_untrusted(client, pending.project_id);
+        }
 
         // The one directory the library actually provisioned this run's configuration into, said
         // back to the window now that there is a run to say it about. Kubiq pins that directory to
@@ -5877,6 +5892,24 @@ impl Coordinator {
                 .with_category("agent-definition"),
         );
         self.answer(client, replies);
+    }
+
+    /// Tell `client` which of a project's own settings this machine does not trust (`D230`) —
+    /// always the project's whole list, read fresh, because the window replaces what it holds.
+    fn send_untrusted(&self, client: ClientId, project_id: ProjectId) {
+        let items = crate::trust::untrusted(&self.root.path, project_id);
+        self.host.send(
+            To::Client(client),
+            Message::UntrustedProjectSettings { project_id, items },
+        );
+    }
+
+    /// A launch refused because a project definition is not trusted: the window is sent the
+    /// project's list beside the refusal itself, so it can offer to approve.
+    fn report_refused_by_trust(&self, client: ClientId, error: &anyhow::Error) {
+        if let Some(refused) = error.downcast_ref::<crate::trust::Refused>() {
+            self.send_untrusted(client, refused.project);
+        }
     }
 
     /// Hand one work-family message to the work.
@@ -7482,6 +7515,7 @@ impl Coordinator {
                 Ok(composed) => Some(composed),
                 Err(error) => {
                     tracing::error!("pane {pane_id}: composing {agent_type} failed: {error:#}");
+                    self.report_refused_by_trust(client, &error);
                     self.refuse_pane(client, pane_id, format!("{error:#}"));
                     return;
                 }
@@ -7494,6 +7528,9 @@ impl Coordinator {
         // about the entry that was dropped.
         if let Some(composed) = &composed {
             self.report_run_problems(client, &agent_type, &composed.problems);
+            if !composed.untrusted.is_empty() {
+                self.send_untrusted(client, project_id);
+            }
         }
 
         // Tell the MCP listener who this pane is, before the harness exists to ask — the same
