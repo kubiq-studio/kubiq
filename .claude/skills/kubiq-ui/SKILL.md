@@ -55,6 +55,8 @@ message in `crates/kubiq-proto/src/messages.rs`. `just ui` enforces it.
   same change.
 - **Spacing from the framework's scale**; layout sizes are constants in `theme.rs`.
 - **Status is shown by colour from the status group**, never by wording alone.
+- **An error message is impersonal and terse: `<what failed>: <cause>`** — e.g. `Keychain not
+  supported: <why>`. No "this install cannot…", no "you", no consequence sentence.
 - **A row is one line.** Use `kit::elided` — it truncates and carries the whole string as a
   tooltip, which is why it takes an element id.
 - **An icon-only or otherwise unlabelled action always carries `.tooltip(...)`.** No control's

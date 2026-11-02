@@ -63,10 +63,7 @@ pub fn render(
                 .py_1p5()
                 .text_size(theme::font(Family::Chrome, Role::Label))
                 .text_color(theme::warning())
-                .child(SharedString::from(format!(
-                    "This install cannot keep passwords ({why}). A password you type is held until \
-                     Kubiq closes."
-                ))),
+                .child(SharedString::from(format!("Keychain not supported: {why}"))),
         );
     }
 
