@@ -186,6 +186,21 @@ macro_rules! interruptible {
     }};
 }
 
+/// Whether `sql` opens, commits or rolls back a transaction (`BEGIN TRAN`, `COMMIT`, `SAVE TRAN`…).
+fn is_transaction_control(sql: &str) -> bool {
+    let mut words = sql
+        .split_whitespace()
+        .map(|w| w.trim_end_matches(';').to_ascii_uppercase());
+    match words.next().as_deref() {
+        Some("COMMIT" | "ROLLBACK" | "SAVE") => true,
+        Some("BEGIN") => matches!(
+            words.next().as_deref(),
+            None | Some("TRAN" | "TRANSACTION" | "DISTRIBUTED")
+        ),
+        _ => false,
+    }
+}
+
 /// The first result set of `sql`, at most `limit` rows.
 async fn read_first(
     client: &mut Tds,
@@ -490,6 +505,16 @@ impl Connection for MsSql {
             let Self {
                 client, rt, cancel, ..
             } = me;
+            // `execute` runs through `sp_executesql`, where a statement that changes
+            // @@TRANCOUNT fails with error 266: transaction control goes as a plain batch
+            if is_transaction_control(sql) {
+                rt.block_on(async {
+                    interruptible!(client, &cancel.0, timeout, async {
+                        client.simple_query(sql).await?.into_results().await
+                    })
+                })?;
+                return Ok(ExecOutcome { rows_affected: 0 });
+            }
             let done = rt.block_on(async {
                 interruptible!(client, &cancel.0, timeout, client.execute(sql, &[]))
             })?;
