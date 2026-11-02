@@ -24,7 +24,7 @@ use crate::state::{MenuId, SizePrompt};
 use crate::theme;
 use crate::ui::handler;
 use crate::ui::kit::{
-    Slider, KubiqIcon, choice_pill, ghost_button, popover, prompt_modal, section_label,
+    KubiqIcon, Slider, choice_pill, ghost_button, popover, prompt_modal, section_label,
 };
 
 /// How wide the popover draws. Wide enough that a slider has a track worth dragging and the four

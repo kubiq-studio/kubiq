@@ -193,7 +193,10 @@ pub enum BrowserEvent {
     PageFocused,
     /// A script run for a pending command finished: the token it was started under, and the
     /// webview's JSON-encoded result.
-    Script { token: u64, raw: String },
+    Script {
+        token: u64,
+        raw: String,
+    },
     /// A snapshot of the visible page, as PNG bytes and their pixel size; empty when it could not
     /// be taken. `token` is the command that asked, `None` for the menu's clipboard copy.
     Screenshot {
@@ -384,7 +387,9 @@ fn profiled_builder(
         }
         let context = CONTEXTS.with(|contexts| {
             *contexts.borrow_mut().entry(profile).or_insert_with(|| {
-                Box::into_raw(Box::new(wry::WebContext::new(Some(windows_profile_dir(profile)))))
+                Box::into_raw(Box::new(wry::WebContext::new(Some(windows_profile_dir(
+                    profile,
+                )))))
             })
         });
         // SAFETY: the context is leaked, so it outlives every webview, and it is only ever handed
@@ -406,7 +411,10 @@ pub fn zoom(key: &str, factor: f64, cx: &App) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         let view = platform::view(key).ok_or("no browser behind this tab")?;
-        view.read(cx).raw().zoom(factor).map_err(|err| err.to_string())
+        view.read(cx)
+            .raw()
+            .zoom(factor)
+            .map_err(|err| err.to_string())
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
@@ -552,9 +560,11 @@ pub fn screenshot(key: &str, max: Option<u32>, token: Option<u64>, cx: &App) -> 
             let (png, size) = unsafe { image.as_ref() }
                 .and_then(|image| image.TIFFRepresentation())
                 .and_then(|tiff| {
-                    let mut img =
-                        image::load_from_memory_with_format(&tiff.to_vec(), image::ImageFormat::Tiff)
-                            .ok()?;
+                    let mut img = image::load_from_memory_with_format(
+                        &tiff.to_vec(),
+                        image::ImageFormat::Tiff,
+                    )
+                    .ok()?;
                     // `resize` keeps the aspect ratio, fitting inside the box it is given.
                     if let Some(max) = max
                         && (img.width() > max || img.height() > max)
@@ -571,9 +581,7 @@ pub fn screenshot(key: &str, max: Option<u32>, token: Option<u64>, cx: &App) -> 
         });
         let mtm = objc2::MainThreadMarker::new().ok_or("not on the main thread")?;
         let config = unsafe { WKSnapshotConfiguration::new(mtm) };
-        unsafe {
-            webview.takeSnapshotWithConfiguration_completionHandler(Some(&config), &handler)
-        };
+        unsafe { webview.takeSnapshotWithConfiguration_completionHandler(Some(&config), &handler) };
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]

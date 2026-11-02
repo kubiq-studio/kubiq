@@ -14,8 +14,7 @@ use kubiq_proto::bus::{self, FromClient, To};
 use kubiq_proto::ids::ProjectId;
 use kubiq_proto::messages::Message;
 use kubiq_proto::projects::{
-    ProjectHealth, ProjectRecord, ProjectSnapshot, TrustItem, TrustKind, TrustReason,
-    UntrustedItem,
+    ProjectHealth, ProjectRecord, ProjectSnapshot, TrustItem, TrustKind, TrustReason, UntrustedItem,
 };
 
 const PATIENCE: Duration = Duration::from_millis(500);
@@ -123,7 +122,6 @@ fn a_project() -> ProjectSnapshot {
     }
 }
 
-
 fn item(kind: TrustKind, id: &str, reason: TrustReason) -> UntrustedItem {
     UntrustedItem {
         kind,
@@ -155,25 +153,30 @@ fn untrusted_settings_are_listed_approved_and_cleared(cx: &mut TestAppContext) {
 
     // Approve all names exactly what the prompt lists, with the fingerprints it was shown.
     let project = fixture.project;
-    fixture.with(cx, |state, _, cx| state.trust_project_items(project, None, cx));
+    fixture.with(cx, |state, _, cx| {
+        state.trust_project_items(project, None, cx)
+    });
     let said = fixture.said();
-    assert!(said.iter().any(|message| matches!(
-        message,
-        Message::TrustProjectItems { project_id, items: sent }
-            if *project_id == fixture.project
-                && *sent == vec![
-                    TrustItem {
-                        kind: TrustKind::Definition,
-                        id: "reviewer".to_string(),
-                        fingerprint: "print-of-reviewer".to_string(),
-                    },
-                    TrustItem {
-                        kind: TrustKind::Mcp,
-                        id: "linter".to_string(),
-                        fingerprint: "print-of-linter".to_string(),
-                    },
-                ]
-    )), "{said:?}");
+    assert!(
+        said.iter().any(|message| matches!(
+            message,
+            Message::TrustProjectItems { project_id, items: sent }
+                if *project_id == fixture.project
+                    && *sent == vec![
+                        TrustItem {
+                            kind: TrustKind::Definition,
+                            id: "reviewer".to_string(),
+                            fingerprint: "print-of-reviewer".to_string(),
+                        },
+                        TrustItem {
+                            kind: TrustKind::Mcp,
+                            id: "linter".to_string(),
+                            fingerprint: "print-of-linter".to_string(),
+                        },
+                    ]
+        )),
+        "{said:?}"
+    );
 
     // One item, approved alone.
     fixture.with(cx, |state, _, cx| {
@@ -204,6 +207,8 @@ fn untrusted_settings_are_listed_approved_and_cleared(cx: &mut TestAppContext) {
     fixture.state.read_with(cx, |state, cx| {
         assert!(state.open_project(cx).expect("open").untrusted.is_empty());
     });
-    fixture.with(cx, |state, _, cx| state.trust_project_items(project, None, cx));
+    fixture.with(cx, |state, _, cx| {
+        state.trust_project_items(project, None, cx)
+    });
     assert!(fixture.said().is_empty());
 }

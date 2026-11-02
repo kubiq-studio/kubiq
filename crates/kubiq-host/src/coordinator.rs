@@ -26,7 +26,7 @@ use kubiq_proto::ids::{
 use kubiq_proto::messages::{AgentPicks, CatalogueModel, Message, Secret, TaskField, WorkspaceInfo};
 use kubiq_proto::notifications::{Family, NotificationRequest};
 use kubiq_proto::projects::{IndexLevel, ProjectHealth, Scope};
-use kubiq_proto::settings::{SettingsLayer, SshProfile};
+use kubiq_proto::settings::{DroneModeKind, SettingsLayer, SshProfile};
 use kubiq_proto::stats::{HostStats, UsageRow};
 use kubiq_proto::tools::{ListedTool, ToolDef, ToolOrigin, ToolRun};
 use kubiq_proto::work::{Activity, AgentId, WorkAgent, WorkSession};
@@ -153,6 +153,10 @@ fn gather(
 /// registered before the first window, which is the whole of how a Studio provider reaches
 /// `ListRemoteContainers`. The base binary hands in `Registry::with_defaults()`, unchanged.
 /// `runners` is the same for the runner sources a project's tools are discovered from.
+/// `drones` is the drone-mode service (`D232`), built by the binary with a clone of the hub and the
+/// edition's endpoint kinds; it starts every enabled mode as this thread does. Its hub clone keeps
+/// this inbox open for the life of the process, as the windows' and `--serve`'s already do.
+#[allow(clippy::too_many_arguments)]
 pub fn start(
     host: HostEnd,
     root: ConfigRoot,
@@ -162,20 +166,25 @@ pub fn start(
     providers: crate::tasksrc::Registry,
     runners: crate::runners::Registry,
     pending: Vec<Reply>,
+    drones: crate::drone_modes::DroneModes,
 ) {
     thread::Builder::new()
         .name("kubiq-coordinator".to_string())
         .spawn(move || {
-            Coordinator::new(
-                host, root, projects, work, settings, providers, runners, pending,
-            )
-            .run()
+            let mut coordinator = Coordinator::new(
+                host, root, projects, work, settings, providers, runners, pending, drones,
+            );
+            coordinator.sync_drone_modes();
+            coordinator.run()
         })
         .expect("the coordinator thread");
 }
 
 struct Coordinator {
     host: HostEnd,
+    /// What this process serves to remote clients besides its windows (`D232`), kept matching
+    /// `HostSettings::drone_modes` by [`Self::sync_drone_modes`].
+    drones: crate::drone_modes::DroneModes,
     /// Where everything is written down, and whether that is the usual place. Each window is told
     /// as it attaches, because the interface cannot look.
     root: ConfigRoot,
@@ -909,6 +918,7 @@ fn launch_picks(
 }
 
 impl Coordinator {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         host: HostEnd,
         root: ConfigRoot,
@@ -918,7 +928,9 @@ impl Coordinator {
         providers: crate::tasksrc::Registry,
         runners: crate::runners::Registry,
         pending: Vec<Reply>,
+        mut drones: crate::drone_modes::DroneModes,
     ) -> Self {
+        drones.bind(host.mailbox(To::Everyone));
         let runners = Arc::new(runners);
         // Shared with the MCP listener so an agent can read and write the same board a window
         // does, without asking this thread a question (`D120`).
@@ -1280,6 +1292,7 @@ impl Coordinator {
             usage,
             meta,
             mcp,
+            drones,
         }
     }
 
@@ -1395,6 +1408,65 @@ impl Coordinator {
         );
         for reply in std::mem::take(&mut self.pending) {
             self.host.send(To::Client(client), reply.into_message());
+        }
+        for status in self.drones.statuses() {
+            self.host.send(To::Client(client), status);
+        }
+    }
+
+    /// Mint a token for any `http` drone mode that has none, persist it, and make what runs match
+    /// the host record (`D232`). At boot, after every host-layer write, and after a token is
+    /// rotated. A minted token is said to every window with the record it now sits in.
+    fn sync_drone_modes(&mut self) {
+        let mut host = self.settings.host();
+        let unminted = host.drone_modes.iter().any(
+            |mode| matches!(&mode.kind, DroneModeKind::Http { token, .. } if token.is_empty()),
+        );
+        if unminted {
+            match self.settings.update_host(|settings| {
+                settings.mint_drone_tokens(crate::remote::generate_token);
+            }) {
+                Ok(written) => {
+                    host = written;
+                    self.host
+                        .send(To::Everyone, host_settings(&host).into_message());
+                }
+                // Not durable: the modes still start, on tokens this run alone knows.
+                Err(error) => {
+                    tracing::warn!("drone mode tokens were not stored: {error}");
+                    host.mint_drone_tokens(crate::remote::generate_token);
+                }
+            }
+        }
+        self.drones.reconcile(&host.drone_modes);
+    }
+
+    /// Rotate one `http` mode's token: persisted, said to every window, and the mode restarted on
+    /// it — which closes every remote attached on the old one.
+    fn regenerate_drone_token(&mut self, client: ClientId, id: String) {
+        let mut found = false;
+        let written = self.settings.update_host(|settings| {
+            for mode in &mut settings.drone_modes {
+                if mode.id == id
+                    && let DroneModeKind::Http { token, .. } = &mut mode.kind
+                {
+                    *token = crate::remote::generate_token();
+                    found = true;
+                }
+            }
+        });
+        match written {
+            Ok(_) if !found => self.answer(
+                client,
+                vec![settings_error(format!("no http drone mode `{id}`"))],
+            ),
+            Ok(host) => {
+                // Every window, not only the asker: each one's settings copy now holds a dead token.
+                self.host
+                    .send(To::Everyone, host_settings(&host).into_message());
+                self.drones.reconcile(&host.drone_modes);
+            }
+            Err(error) => self.answer(client, vec![settings_error(error)]),
         }
     }
 
@@ -2590,6 +2662,8 @@ impl Coordinator {
                 // actually there.
                 if layer == SettingsLayer::Host && replies.is_empty() {
                     replies.extend(self.reconcile_ssh_secrets(&before.ssh_profiles));
+                    // The drone modes rode the blob whole: start, stop or restart to match.
+                    self.sync_drone_modes();
                 }
                 // How an agent is confined is acted on at the next spawn, so the settings are
                 // re-read here rather than kept in a copy that could go stale.
@@ -2624,6 +2698,17 @@ impl Coordinator {
                     self.settle_index(project_id);
                 }
             }
+
+            // ── the drone-mode family (`D232`) ───────────────────────
+            Message::RestartDroneMode { id } => {
+                if !self.drones.restart(&id) {
+                    self.answer(
+                        client,
+                        vec![settings_error(format!("no drone mode `{id}`"))],
+                    );
+                }
+            }
+            Message::RegenerateDroneToken { id } => self.regenerate_drone_token(client, id),
 
             // ── the host browse family ───────────────────────────────
             // No project to look up, and so no syscall here either: the request goes straight to
@@ -8740,6 +8825,7 @@ mod tests {
             crate::tasksrc::Registry::with_defaults(),
             crate::runners::Registry::with_defaults(),
             pending,
+            crate::drone_modes::DroneModes::new(None, Default::default()),
         );
         let client = hub.connect();
         (coordinator, client)

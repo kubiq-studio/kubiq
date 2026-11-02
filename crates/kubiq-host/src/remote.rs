@@ -25,10 +25,18 @@
 //! [`kubiq_tunnel::serve`] under an allow list ([`loopback_tunnels`] unless `--tunnel-allow` says
 //! otherwise). Nothing on it reaches the bus. When it answers, the attach's `101` says so in
 //! [`CAPS_HEADER`].
+//!
+//! **A listener can be stopped** (`D232`). [`listen`] hands back a [`Listening`] beside the
+//! address: [`Listening::stop`] ends the accept loop, which drops the socket and frees the port,
+//! and shuts down every connection it accepted — attached windows and tunnel links alike — so a
+//! remote window sees its carrier drop and the host reaps its panes as for any departed client.
+//! `kubiq-app --serve` keeps no handle and never stops; a desktop drone mode does.
 
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -47,6 +55,11 @@ const MAX_HEADER: usize = 8 * 1024;
 /// is idle between frames by design.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How often an idle accept loop looks at its stop flag. The socket is non-blocking so that a
+/// stopped listener is noticed without a self-connect, which an unspecified bind on Windows cannot
+/// make; a connection waiting this long to be accepted is invisible next to its own handshake.
+const ACCEPT_POLL: Duration = Duration::from_millis(25);
+
 /// What starting the listener hands back: where it ended up bound, the token a client must
 /// present to attach, and whether the socket speaks TLS.
 pub struct Serving {
@@ -55,6 +68,236 @@ pub struct Serving {
     pub tls: bool,
     /// Whether `/tunnel` answers.
     pub tunnels: bool,
+    /// The way to stop it, and to count who is attached. Dropping it stops nothing.
+    pub listening: Listening,
+}
+
+impl Serving {
+    /// The string a window pastes into its connect modal: `http[s]://<ip>:<port>?token=<token>`,
+    /// with an unspecified bind replaced by [`advertised_ip`].
+    pub fn connect_string(&self) -> String {
+        let scheme = if self.tls { "https" } else { "http" };
+        let ip = advertised_ip(self.addr);
+        let host = match ip {
+            IpAddr::V6(v6) => format!("[{v6}]"),
+            IpAddr::V4(v4) => v4.to_string(),
+        };
+        format!(
+            "{scheme}://{host}:{}?token={}",
+            self.addr.port(),
+            self.token
+        )
+    }
+}
+
+/// The address to tell a remote to dial.
+///
+/// Bound to one interface, that address is the answer. Bound to all of them, `0.0.0.0` is useless
+/// to paste, so ask the routing table which source address it would use to leave this machine —
+/// a connected UDP socket assigns one without sending a packet or needing a reachable peer, which
+/// is why the address it is pointed at does not matter and no traffic is generated. A machine with
+/// no route out has nothing to advertise, and the bind address is returned unchanged.
+pub fn advertised_ip(addr: SocketAddr) -> IpAddr {
+    if !addr.ip().is_unspecified() {
+        return addr.ip();
+    }
+    UdpSocket::bind(("0.0.0.0", 0))
+        .and_then(|socket| {
+            socket.connect(("192.0.2.1", 53))?;
+            socket.local_addr()
+        })
+        .map(|local| local.ip())
+        .unwrap_or_else(|_| addr.ip())
+}
+
+/// Told how many windows are attached, each time that number moves.
+pub type ClientsWatch = Box<dyn Fn(u32) + Send + Sync>;
+
+/// A running listener, from the caller's side: stop it, or ask how many windows are attached.
+/// Cloneable; every clone is the same listener. Dropping one stops nothing.
+#[derive(Clone)]
+pub struct Listening(Arc<Shared>);
+
+struct Shared {
+    stopped: AtomicBool,
+    next: AtomicU64,
+    /// Every accepted socket still open, by a listener-local number: a clone of it to shut down,
+    /// and whether it is an attached window rather than a handshake or a tunnel link.
+    conns: Mutex<HashMap<u64, (TcpStream, bool)>>,
+    watch: Option<ClientsWatch>,
+    /// Held across reading the count and telling `watch`, so two threads whose sockets moved at
+    /// once cannot report their counts in the opposite order.
+    notifying: Mutex<()>,
+    /// The accept thread, which owns the socket: [`Listening::stop`] waits for it so the port is
+    /// free when `stop` returns.
+    accepting: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+/// How long [`Listening::stop`] waits for the accept loop to notice and drop the socket — a few
+/// [`ACCEPT_POLL`]s, so a loop asleep between polls is always caught.
+const STOP_WAIT: Duration = Duration::from_millis(250);
+
+impl Listening {
+    fn new(watch: Option<ClientsWatch>) -> Self {
+        Listening(Arc::new(Shared {
+            stopped: AtomicBool::new(false),
+            next: AtomicU64::new(0),
+            conns: Mutex::new(HashMap::new()),
+            watch,
+            notifying: Mutex::new(()),
+            accepting: Mutex::new(None),
+        }))
+    }
+
+    /// Stop accepting, free the port, and close every connection this listener accepted. Returns
+    /// once the accept loop has ended and dropped the socket (bounded by [`STOP_WAIT`]), so the same
+    /// port can be bound again straight away; each closed window's client goes as a dropped
+    /// socket's does, so the host reaps its panes. Idempotent.
+    pub fn stop(&self) {
+        self.0.stopped.store(true, Ordering::SeqCst);
+        let conns: Vec<(TcpStream, bool)> = self.lock().drain().map(|(_, conn)| conn).collect();
+        for (socket, _) in conns {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
+        let accepting = self
+            .0
+            .accepting
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take();
+        if let Some(accepting) = accepting {
+            let deadline = std::time::Instant::now() + STOP_WAIT;
+            while !accepting.is_finished() && std::time::Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            if accepting.is_finished() {
+                let _ = accepting.join();
+            } else {
+                tracing::warn!("remote: the accept loop did not stop within {STOP_WAIT:?}");
+            }
+        }
+    }
+
+    /// Whether [`Self::stop`] was called.
+    pub fn is_stopped(&self) -> bool {
+        self.0.stopped.load(Ordering::SeqCst)
+    }
+
+    /// Windows attached through this listener right now. Tunnel links are not counted.
+    pub fn clients(&self) -> u32 {
+        self.lock()
+            .values()
+            .filter(|(_, attached)| *attached)
+            .count() as u32
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, (TcpStream, bool)>> {
+        self.0
+            .conns
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    /// File an accepted socket. One accepted after a stop is shut down at once.
+    fn track(&self, stream: &TcpStream) -> Option<Tracked> {
+        let clone = stream.try_clone().ok()?;
+        let id = self.0.next.fetch_add(1, Ordering::Relaxed);
+        self.lock().insert(id, (clone, false));
+        if self.is_stopped() {
+            self.lock().remove(&id);
+            let _ = stream.shutdown(Shutdown::Both);
+            return None;
+        }
+        Some(Tracked {
+            listening: self.clone(),
+            id,
+        })
+    }
+
+    fn notify(&self) {
+        if let Some(watch) = &self.0.watch {
+            let _order = self
+                .0
+                .notifying
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            watch(self.clients());
+        }
+    }
+}
+
+/// One accepted socket's row in [`Listening`], removed when its thread ends.
+struct Tracked {
+    listening: Listening,
+    id: u64,
+}
+
+impl Tracked {
+    /// The upgrade to `/attach` was written: this socket is a window now.
+    fn attached(&self) {
+        if let Some(row) = self.listening.lock().get_mut(&self.id) {
+            row.1 = true;
+        }
+        self.listening.notify();
+    }
+}
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        let was = self.listening.lock().remove(&self.id);
+        if matches!(was, Some((_, true))) {
+            self.listening.notify();
+        }
+    }
+}
+
+/// Everything [`listen`] needs to start one listener.
+pub struct Listen {
+    pub bind: SocketAddr,
+    /// The bearer token a client presents. [`generate_token`] mints one.
+    pub token: String,
+    /// `(cert_pem, key_pem)` — the chain, leaf first, and the private key. `None` is plaintext.
+    pub tls: Option<(Vec<u8>, Vec<u8>)>,
+    /// What `/tunnel` may dial; `None` answers it as a path this host does not serve.
+    pub tunnels: Option<kubiq_tunnel::AllowList>,
+    /// Told the attached count each time it moves.
+    pub watch: Option<ClientsWatch>,
+}
+
+/// Start a listener on a thread of its own and return immediately. [`serve`] and [`serve_tls`] are
+/// this with a fresh token; a desktop drone mode (`D232`) calls it with its persisted one and keeps
+/// [`Serving::listening`] to stop it.
+pub fn listen(hub: Hub, options: Listen) -> io::Result<Serving> {
+    let config = match &options.tls {
+        Some((cert_pem, key_pem)) => Some(tls_config(cert_pem, key_pem)?),
+        None => None,
+    };
+    let listener = TcpListener::bind(options.bind)?;
+    let addr = listener.local_addr()?;
+    listener.set_nonblocking(true)?;
+    let listening = Listening::new(options.watch);
+    let serving_tunnels = options.tunnels.is_some();
+    let accept_token = options.token.clone();
+    let tls = config.is_some();
+    let looping = listening.clone();
+    let tunnels = options.tunnels;
+
+    let accepting = thread::Builder::new()
+        .name("kubiq-remote-listen".to_string())
+        .spawn(move || accept_loop(listener, hub, accept_token, config, tunnels, looping))?;
+    *listening
+        .0
+        .accepting
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner()) = Some(accepting);
+
+    Ok(Serving {
+        addr,
+        token: options.token,
+        tls,
+        tunnels: serving_tunnels,
+        listening,
+    })
 }
 
 /// The response header an attach's `101` names this host's carrier capabilities in — the socket
@@ -84,7 +327,10 @@ pub fn tunnel_allow(values: &[String]) -> Result<Option<kubiq_tunnel::AllowList>
     if patterns.is_empty() {
         return Ok(Some(loopback_tunnels()));
     }
-    if patterns.iter().any(|pattern| pattern.eq_ignore_ascii_case("none")) {
+    if patterns
+        .iter()
+        .any(|pattern| pattern.eq_ignore_ascii_case("none"))
+    {
         return if patterns.len() == 1 {
             Ok(None)
         } else {
@@ -105,23 +351,16 @@ pub fn serve(
     bind: SocketAddr,
     tunnels: Option<kubiq_tunnel::AllowList>,
 ) -> io::Result<Serving> {
-    let listener = TcpListener::bind(bind)?;
-    let addr = listener.local_addr()?;
-    let token = generate_token();
-    let accept_token = token.clone();
-    let serving_tunnels = tunnels.is_some();
-
-    thread::Builder::new()
-        .name("kubiq-remote-listen".to_string())
-        .spawn(move || accept_loop(listener, hub, accept_token, None, tunnels))
-        .expect("the remote listener thread");
-
-    Ok(Serving {
-        addr,
-        token,
-        tls: false,
-        tunnels: serving_tunnels,
-    })
+    listen(
+        hub,
+        Listen {
+            bind,
+            token: generate_token(),
+            tls: None,
+            tunnels,
+            watch: None,
+        },
+    )
 }
 
 /// Start the listener with TLS: every accepted socket runs its handshake before the HTTP
@@ -137,58 +376,38 @@ pub fn serve_tls(
     key_pem: &[u8],
     tunnels: Option<kubiq_tunnel::AllowList>,
 ) -> io::Result<Serving> {
+    listen(
+        hub,
+        Listen {
+            bind,
+            token: generate_token(),
+            tls: Some((cert_pem.to_vec(), key_pem.to_vec())),
+            tunnels,
+            watch: None,
+        },
+    )
+}
+
+/// The server half of a TLS listener from PEM, refused before anything is bound.
+fn tls_config(cert_pem: &[u8], key_pem: &[u8]) -> io::Result<Arc<rustls::ServerConfig>> {
+    let invalid = |what: &str| io::Error::new(io::ErrorKind::InvalidInput, what.to_string());
     let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
         rustls_pemfile::certs(&mut &*cert_pem)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "could not read --tls-cert")
-            })?;
+            .map_err(|_| invalid("could not read the TLS certificate"))?;
     if certs.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "--tls-cert holds no certificate",
-        ));
+        return Err(invalid("the TLS certificate file holds no certificate"));
     }
     let key = rustls_pemfile::private_key(&mut &*key_pem)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "could not read --tls-key"))?
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "--tls-key holds no private key",
-            )
-        })?;
+        .map_err(|_| invalid("could not read the TLS key"))?
+        .ok_or_else(|| invalid("the TLS key file holds no private key"))?;
     let config = rustls::ServerConfig::builder_with_provider(tls_provider())
         .with_safe_default_protocol_versions()
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?
+        .map_err(|error| invalid(&error.to_string()))?
         .with_no_client_auth()
         .with_single_cert(certs, key)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
-
-    let listener = TcpListener::bind(bind)?;
-    let addr = listener.local_addr()?;
-    let token = generate_token();
-    let accept_token = token.clone();
-    let serving_tunnels = tunnels.is_some();
-
-    thread::Builder::new()
-        .name("kubiq-remote-listen".to_string())
-        .spawn(move || {
-            accept_loop(
-                listener,
-                hub,
-                accept_token,
-                Some(Arc::new(config)),
-                tunnels,
-            )
-        })
-        .expect("the remote listener thread");
-
-    Ok(Serving {
-        addr,
-        token,
-        tls: true,
-        tunnels: serving_tunnels,
-    })
+        .map_err(|error| invalid(&error.to_string()))?;
+    Ok(Arc::new(config))
 }
 
 /// The crypto provider, named rather than inherited — the connector family's `tls::provider`
@@ -203,7 +422,7 @@ fn tls_provider() -> Arc<rustls::crypto::CryptoProvider> {
 
 /// 256 bits, rendered URL-safe with no padding — long enough to paste into a connection string and
 /// short enough to actually paste.
-fn generate_token() -> String {
+pub fn generate_token() -> String {
     let mut bytes = [0u8; 32];
     rand::fill(&mut bytes[..]);
     base64_url_no_pad(&bytes)
@@ -262,14 +481,28 @@ fn accept_loop(
     token: String,
     tls: Option<Arc<rustls::ServerConfig>>,
     tunnels: Option<kubiq_tunnel::AllowList>,
+    listening: Listening,
 ) {
-    for incoming in listener.incoming() {
-        let stream = match incoming {
-            Ok(stream) => stream,
-            Err(error) => {
-                tracing::warn!("remote: accept failed: {error}");
+    // Ends when the listener is stopped; dropping `listener` here is what frees the port.
+    while !listening.is_stopped() {
+        let stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(ACCEPT_POLL);
                 continue;
             }
+            Err(error) => {
+                tracing::warn!("remote: accept failed: {error}");
+                thread::sleep(ACCEPT_POLL);
+                continue;
+            }
+        };
+        // The listener is non-blocking for the stop flag's sake; a session's socket must not be.
+        if stream.set_nonblocking(false).is_err() {
+            continue;
+        }
+        let Some(tracked) = listening.track(&stream) else {
+            continue;
         };
         let hub = hub.clone();
         let token = token.clone();
@@ -277,19 +510,22 @@ fn accept_loop(
         let tunnels = tunnels.clone();
         thread::Builder::new()
             .name("kubiq-remote-conn".to_string())
-            .spawn(move || handle_accepted(stream, hub, token, tls, tunnels))
+            .spawn(move || handle_accepted(stream, hub, token, tls, tunnels, tracked))
             .ok();
     }
 }
 
-/// One accepted socket, from the handshake through the life of the session.
+/// One accepted socket, from the handshake through the life of the session. `tracked` is its row
+/// in the listener's table, removed as this returns.
 fn handle_accepted(
     stream: TcpStream,
     hub: Hub,
     token: String,
     tls: Option<Arc<rustls::ServerConfig>>,
     tunnels: Option<kubiq_tunnel::AllowList>,
+    tracked: Tracked,
 ) {
+    let tracked = &tracked;
     let _ = stream.set_nodelay(true);
     let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
 
@@ -321,6 +557,7 @@ fn handle_accepted(
                 hub,
                 &token,
                 tunnels,
+                tracked,
             );
         }
         Some(config) => {
@@ -352,6 +589,7 @@ fn handle_accepted(
                 hub,
                 &token,
                 tunnels,
+                tracked,
             );
         }
     }
@@ -365,6 +603,7 @@ fn handle_accepted(
 ///
 /// `/attach` attaches a client to the bus; `/tunnel`, when `tunnels` is set, serves the tunnel
 /// channel (`D227`) on the connection instead — same token, and nothing on it reaches the bus.
+#[allow(clippy::too_many_arguments)]
 fn handle_connection(
     mut reader: Box<dyn Socket>,
     mut writer: Box<dyn Socket>,
@@ -373,6 +612,7 @@ fn handle_connection(
     hub: Hub,
     token: &str,
     tunnels: Option<kubiq_tunnel::AllowList>,
+    tracked: &Tracked,
 ) {
     let request = match read_request(&mut reader) {
         Ok(request) => request,
@@ -396,6 +636,7 @@ fn handle_connection(
             // The deadline was the handshake's, not the session's: a client that says nothing for
             // an hour is an idle window, not a stalled peer.
             on_upgrade();
+            tracked.attached();
             pump(reader, writer, Box::new(SocketCloser(closer)), hub);
         }
         Request::Tunnel { token: presented } => {

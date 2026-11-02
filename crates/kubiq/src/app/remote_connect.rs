@@ -349,7 +349,9 @@ pub(super) fn open_socket_tunnel(
     rate: Option<u64>,
 ) -> Result<kubiq_tunnel::Mux, String> {
     if params.scheme == RemoteScheme::Https && params.trust_insecure && params.tls_pin.is_none() {
-        return Err("no key is pinned for this host \u{2014} connect from the panel to pin one".into());
+        return Err(
+            "no key is pinned for this host \u{2014} connect from the panel to pin one".into(),
+        );
     }
     let session = upgrade(params, Upgrade::Tunnel).map_err(|failure| match failure {
         ConnectFailure::Refused(why) if why.ends_with("404") => {
@@ -458,12 +460,16 @@ fn upgrade(params: &DialParams, kind: Upgrade) -> Result<RawSession, ConnectFail
             })
         }
         RemoteScheme::Https => {
-            let trust =
-                kubiq_tunnel::pin::Trust::for_host(params.tls_pin.as_deref(), params.trust_insecure);
+            let trust = kubiq_tunnel::pin::Trust::for_host(
+                params.tls_pin.as_deref(),
+                params.trust_insecure,
+            );
             // The tunnel channel only ever follows a bus dial that settled the trust: never a
             // first use of its own (`open_socket_tunnel`).
             if kind == Upgrade::Tunnel && trust == kubiq_tunnel::pin::Trust::FirstUse {
-                return Err(ConnectFailure::Tls("no key is pinned for this host".to_string()));
+                return Err(ConnectFailure::Tls(
+                    "no key is pinned for this host".to_string(),
+                ));
             }
             let (conn, sock, learned_pin) = tls_handshake(stream, &params.address, trust)?;
             let closer = sock
@@ -2177,8 +2183,14 @@ impl AppState {
                 // been the last thing on that machine's `PATH`. Filed against the same entry the
                 // first connect saved, so the loop does not re-deploy on every later attempt.
                 self.remember_drone_path(&save_id, dial.drone_path);
-                let host_id =
-                    self.attach_remote(dial.client, label, save_id, address, RemoteScheme::Http, cx);
+                let host_id = self.attach_remote(
+                    dial.client,
+                    label,
+                    save_id,
+                    address,
+                    RemoteScheme::Http,
+                    cx,
+                );
                 self.bus
                     .set_remote_caps(host_id, dial.identity.capabilities);
                 self.link_tunnels(host_id);

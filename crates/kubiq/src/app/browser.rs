@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 use gpui_component::input::{InputEvent, InputState};
 
 use super::*;
-use serde_json::{Value, json};
 use kubiq_proto::browser::{BrowserCmd, BrowserContentFormat};
 use kubiq_proto::ids::BrowserReqId;
+use serde_json::{Value, json};
 
 use crate::state::browser::{self, BrowserTab, HistoryEntry, Profile, SearchEngine};
 use crate::ui::web_view::{self, BrowserEvent};
@@ -200,7 +200,13 @@ impl AppState {
         let keys: Vec<String> = self
             .projects
             .get(&project)
-            .map(|open| open.browser.tabs.iter().map(|tab| tab.key.clone()).collect())
+            .map(|open| {
+                open.browser
+                    .tabs
+                    .iter()
+                    .map(|tab| tab.key.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         if keys.is_empty() {
             return;
@@ -317,7 +323,11 @@ impl AppState {
         cx.spawn(async move |this: gpui::WeakEntity<Self>, cx| {
             loop {
                 let running = this.update(cx, |this, cx| {
-                    if this.projects.values().all(|open| open.browser.tabs.is_empty()) {
+                    if this
+                        .projects
+                        .values()
+                        .all(|open| open.browser.tabs.is_empty())
+                    {
                         this.browser_polling = false;
                         return false;
                     }
@@ -337,7 +347,11 @@ impl AppState {
         let expired = self.expire_browser_waits();
         let events = {
             let projects = &self.projects;
-            web_view::take_events(|key| projects.values().any(|open| open.browser.tab(key).is_some()))
+            web_view::take_events(|key| {
+                projects
+                    .values()
+                    .any(|open| open.browser.tab(key).is_some())
+            })
         };
         if events.is_empty() {
             if expired {
@@ -411,10 +425,9 @@ impl AppState {
             }
             BrowserEvent::Screenshot { png, .. } => {
                 if !png.is_empty() {
-                    cx.write_to_clipboard(gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(
-                        gpui::ImageFormat::Png,
-                        png,
-                    )));
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_image(
+                        &gpui::Image::from_bytes(gpui::ImageFormat::Png, png),
+                    ));
                 }
                 return;
             }
@@ -513,7 +526,11 @@ impl AppState {
             .map(|input| input.read(cx).value().to_string())
             .unwrap_or_default();
         // A field that is just showing the page's own address offers everything recent.
-        let typed = if typed == tab.url { String::new() } else { typed };
+        let typed = if typed == tab.url {
+            String::new()
+        } else {
+            typed
+        };
         self.open_project(cx)
             .map(|open| open.browser.suggestions(&typed))
             .unwrap_or_default()
@@ -628,7 +645,12 @@ impl AppState {
 
     /// Switch a project between the common profile and its own. Tabs already open keep the profile
     /// they were built on until they are reopened.
-    pub fn set_browser_private(&mut self, project: ProjectId, private: bool, cx: &mut Context<Self>) {
+    pub fn set_browser_private(
+        &mut self,
+        project: ProjectId,
+        private: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(open) = self.projects.get_mut(&project) else {
             return;
         };
@@ -1323,15 +1345,16 @@ impl AppState {
             state.set_value(seed, window, cx);
             state
         });
-        let subscription = cx.subscribe_in(
-            &input,
-            window,
-            |this, _, event: &InputEvent, _, cx| match event {
-                InputEvent::PressEnter { .. } => this.confirm_browser_width(cx),
-                // The confirm button's enabled state follows the text.
-                _ => cx.notify(),
-            },
-        );
+        let subscription =
+            cx.subscribe_in(
+                &input,
+                window,
+                |this, _, event: &InputEvent, _, cx| match event {
+                    InputEvent::PressEnter { .. } => this.confirm_browser_width(cx),
+                    // The confirm button's enabled state follows the text.
+                    _ => cx.notify(),
+                },
+            );
         let handle = input.read(cx).focus_handle(cx);
         window.focus(&handle, cx);
         self.browser_width_prompt = Some(WidthPrompt {

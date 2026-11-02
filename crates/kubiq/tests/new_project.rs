@@ -120,7 +120,9 @@ fn the_menu_offers_add_clone_and_remote_in_the_pickers_own_order(cx: &mut TestAp
             "Clone a project\u{2026}".to_string(),
         ]
     );
-    fixture.state.update(cx, |state, cx| state.toggle_experimental(cx));
+    fixture
+        .state
+        .update(cx, |state, cx| state.toggle_experimental(cx));
     assert_eq!(
         fixture.rows(cx),
         vec![
@@ -159,7 +161,9 @@ fn picking_clone_raises_the_clone_modal(cx: &mut TestAppContext) {
 #[gpui::test]
 fn picking_remote_with_nothing_attached_raises_the_connect_modal(cx: &mut TestAppContext) {
     let fixture = Fixture::open(cx);
-    fixture.state.update(cx, |state, cx| state.toggle_experimental(cx));
+    fixture
+        .state
+        .update(cx, |state, cx| state.toggle_experimental(cx));
 
     fixture.pick(2, cx);
 

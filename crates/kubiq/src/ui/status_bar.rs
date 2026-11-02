@@ -26,7 +26,7 @@ use crate::state::{MenuId, RailMode};
 use crate::theme;
 use crate::ui::board::status_colour;
 use crate::ui::ident::Identified as _;
-use crate::ui::kit::{Picker, PickerStyle, KubiqIcon, icon_button, mono};
+use crate::ui::kit::{KubiqIcon, Picker, PickerStyle, icon_button, mono};
 use crate::ui::work::bucket_colour;
 use crate::ui::{handler, indexed, size};
 use crate::version;

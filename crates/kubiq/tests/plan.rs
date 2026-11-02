@@ -275,7 +275,12 @@ fn open_plan_asks_and_loads(cx: &mut TestAppContext) {
     let said: Vec<_> = fixture
         .said()
         .into_iter()
-        .filter(|message| matches!(message, Message::LoadPlan { .. } | Message::ListPlanAnnotations { .. }))
+        .filter(|message| {
+            matches!(
+                message,
+                Message::LoadPlan { .. } | Message::ListPlanAnnotations { .. }
+            )
+        })
         .collect();
     assert_eq!(said.len(), 1, "{said:?}");
     assert!(matches!(&said[0], Message::LoadPlan { doc } if *doc == handle));
@@ -444,7 +449,12 @@ fn open_mission_doc_asks_and_loads(cx: &mut TestAppContext) {
     let said: Vec<_> = fixture
         .said()
         .into_iter()
-        .filter(|message| matches!(message, Message::LoadPlan { .. } | Message::ListPlanAnnotations { .. }))
+        .filter(|message| {
+            matches!(
+                message,
+                Message::LoadPlan { .. } | Message::ListPlanAnnotations { .. }
+            )
+        })
         .collect();
     assert_eq!(said.len(), 1, "{said:?}");
     assert!(matches!(&said[0], Message::LoadPlan { doc } if *doc == handle));
@@ -619,7 +629,11 @@ fn another_tab_puts_the_plan_away(cx: &mut TestAppContext) {
     let key = format!("{}.md", doc_of(fixture.project, task).key());
     fixture.state.read_with(cx, |state, cx| {
         assert!(state.workbench.plan.is_none());
-        assert!(state.file(&key, cx).is_some_and(|file| file.buffer().is_some()));
+        assert!(
+            state
+                .file(&key, cx)
+                .is_some_and(|file| file.buffer().is_some())
+        );
     });
 }
 
@@ -1053,7 +1067,10 @@ fn a_remote_change_never_eats_an_unsaved_edit(cx: &mut TestAppContext) {
     );
     fixture.with(cx, |state, window, cx| state.settle_plan_editor(window, cx));
     fixture.state.read_with(cx, |state, cx| {
-        assert_eq!(plan_buffer(state, cx).read(cx).value().to_string(), "mine\n");
+        assert_eq!(
+            plan_buffer(state, cx).read(cx).value().to_string(),
+            "mine\n"
+        );
         let plan = state.workbench.plan.as_ref().expect("still open");
         assert!(plan.stale, "the surface says the other copy moved");
         assert!(plan.dirty);
@@ -1718,7 +1735,10 @@ fn a_stale_buffer_asks_before_it_overwrites(cx: &mut TestAppContext) {
         "a stale save is a question before it is a write"
     );
     fixture.state.read_with(cx, |state, cx| {
-        assert_eq!(plan_buffer(state, cx).read(cx).value().to_string(), "mine\n");
+        assert_eq!(
+            plan_buffer(state, cx).read(cx).value().to_string(),
+            "mine\n"
+        );
         let plan = state.workbench.plan.as_ref().expect("still open");
         assert!(plan.confirm_overwrite);
     });

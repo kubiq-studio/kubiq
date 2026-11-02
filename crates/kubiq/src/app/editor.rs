@@ -1221,7 +1221,10 @@ impl AppState {
             return None;
         };
         let doc = self.file(key, cx)?.doc.as_ref()?;
-        Some(matches!(doc, crate::state::document::DocumentHandle::Plan { .. }))
+        Some(matches!(
+            doc,
+            crate::state::document::DocumentHandle::Plan { .. }
+        ))
     }
 
     pub fn tab_formattable(&self, kind: &PanelKind, cx: &App) -> bool {

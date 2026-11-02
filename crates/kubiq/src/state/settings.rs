@@ -6,7 +6,6 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
 use kubiq_proto::acp::AcpCapabilitiesRecord;
 use kubiq_proto::assist::{
     AiModelList, AiProviderInfo, AiProviderKind, AssistLimits, AssistReason, ModelRole,
@@ -21,6 +20,7 @@ use kubiq_proto::ids::{
 use kubiq_proto::messages::{AccountInfo, AgentDefinition, CliDir, LoginStatus};
 use kubiq_proto::quota::{QuotaGauge, QuotaReading, QuotaSnapshot};
 use kubiq_proto::settings::{HostSettings, SshAuth, SshProfile};
+use serde::{Deserialize, Serialize};
 
 use crate::app::ssh_connect::{DroneState, HostCheck};
 use crate::ext::settings::SettingsSectionSpec;

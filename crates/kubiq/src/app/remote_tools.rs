@@ -7,7 +7,11 @@ use super::*;
 
 impl AppState {
     /// The remote-tool family. `None` means the message was ours.
-    pub(super) fn receive_remote_tools(&mut self, host: HostRef, message: Message) -> Option<Message> {
+    pub(super) fn receive_remote_tools(
+        &mut self,
+        host: HostRef,
+        message: Message,
+    ) -> Option<Message> {
         match message {
             call @ Message::RemoteToolCall { .. } => self.bus.relay_tool_call(host, call),
             result @ Message::RemoteToolResult { .. } => self.bus.relay_tool_result(host, result),

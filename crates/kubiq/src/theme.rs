@@ -4,11 +4,11 @@
 //! — see `_docs/tech/ui-and-design.md`, which owns the token set.
 
 use gpui::{App, Pixels, Rems, Rgba, SharedString, px, rems};
+use kubiq_proto::plan::HighlightColour;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
-use kubiq_proto::plan::HighlightColour;
 
 // ── Design constants ────────────────────────────────────────────────
 

@@ -8,9 +8,9 @@
 // - ext: the extension spine — SlotId and the generic Registry<T> (D177, D178)
 
 pub mod app;
+pub mod devtools;
 pub mod ext;
 pub mod state;
-pub mod devtools;
 pub mod theme;
 pub mod ui;
 pub mod version;

@@ -61,12 +61,16 @@ fn dialog(
             .gap_3()
             .child(markdown_body(app, run, source, cx))
             .child(
-                div().flex().flex_none().justify_center().child(primary_button(
-                    "onboarding-launch",
-                    None,
-                    launch.clone(),
-                    cx.listener(|this, _, _, cx| this.onboarding_start_sub(cx)),
-                )),
+                div()
+                    .flex()
+                    .flex_none()
+                    .justify_center()
+                    .child(primary_button(
+                        "onboarding-launch",
+                        None,
+                        launch.clone(),
+                        cx.listener(|this, _, _, cx| this.onboarding_start_sub(cx)),
+                    )),
             )
             .into_any_element(),
         StepBody::Form(FormKind::Palette) => palette_form(app, cx),

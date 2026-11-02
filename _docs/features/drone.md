@@ -5,9 +5,9 @@ kind: feature
 status: current
 summary: One small executable Kubiq places on a machine it is not running on, serving that machine's terminal, files, search and machine facts over a single duplex byte stream — attached as an ordinary host over an SSH exec channel, with three lifetimes, a per-project origin, and a hash-pinned binary the interface uploads when the remote `PATH` has none.
 read_when: you are changing how Kubiq reaches a machine it is not running on — the drone binary, its handshake, its lifetime, its deployment, or the SSH profiles and surfaces behind it
-updated: 2026-10-29
-verified: 2026-10-29
-code_anchors: [crates/kubiq-drone/src/main.rs, crates/kubiq-drone/src/lib.rs, crates/kubiq-drone/src/relay.rs, crates/kubiq-drone/src/socket.rs, crates/kubiq-drone/src/held.rs, crates/kubiq-drone/src/linger.rs, crates/kubiq-drone/src/state.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-drone/src/scrollback.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq/src/ui/tunnels.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-proto/src/drone/mod.rs, crates/kubiq-proto/src/drone/manifest.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/ssh.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-host/src/settings.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/app/unix_connect.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/ui/remote_connect.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/ext/origin.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-app/src/lib.rs, _tools/drone.py]
+updated: 2026-11-02
+verified: 2026-11-02
+code_anchors: [crates/kubiq-drone/src/main.rs, crates/kubiq-drone/src/lib.rs, crates/kubiq-drone/src/relay.rs, crates/kubiq-drone/src/socket.rs, crates/kubiq-drone/src/held.rs, crates/kubiq-drone/src/linger.rs, crates/kubiq-drone/src/state.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-drone/src/scrollback.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq/src/ui/tunnels.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-proto/src/drone/mod.rs, crates/kubiq-proto/src/drone/manifest.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/ssh.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-host/src/settings.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/app/unix_connect.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/ui/remote_connect.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/ext/origin.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-app/src/lib.rs, crates/kubiq-host/src/drone_modes.rs, crates/kubiq-host/src/remote.rs, _tools/drone.py]
 depends_on: [tech-architecture, tech-transport, tech-structure, wip-drone]
 review_cycle: monthly
 ---
@@ -302,6 +302,17 @@ host. Until a drone serves a project whose row says `runs_on`, the bus drops tha
 and pane requests (`Bus::send`) instead of letting them fall to the local host, which would read the
 same path on the wrong machine; there is no reply to refuse with, so the tree re-ask is the recovery.
 
+### Drone mode: a running Kubiq serves remotes itself
+
+**A desktop Kubiq can be the far end** (`D232`), with no console copy (`kubiq --serve`, Studio's
+`--drone --rdp-dvc`) beside it. A **drone mode** is a row in `HostSettings.drone_modes`; every
+enabled one starts with the host, and every host-settings write starts, stops or restarts modes to
+match. A remote attached through one is an ordinary client of the process's hub (`D28`). **`http`**
+is the `--serve` listener in-process, bound to **`127.0.0.1` by default**, with a host-minted token
+kept in the settings so a saved connect string survives a restart; an edition's kind (`ext`, by
+name — Studio's `rdp`) is started by an endpoint the binary registered. **Stopping or rotating
+closes what the mode accepted** — the remote windows lose their carrier and their panes are reaped.
+
 ### The surfaces
 
 - **The connect modal** carries a carrier pill: a socket body, or a profile chosen from the saved
@@ -364,6 +375,8 @@ Every message a drone speaks is an existing one, and
 - **`SavedRemoteHost.carrier`**, its `DronePreset` and its remembered `drone_path`, in
   `crates/kubiq-proto/src/settings.rs` beside `SshProfile` and its authentication choice.
 - **The search family**, answered by a drone exactly as the local worker answers it.
+- **`HostSettings.drone_modes`** and **the drone-mode family** — `RestartDroneMode`,
+  `RegenerateDroneToken`, `DroneModeStatus` — for a running Kubiq serving remotes itself.
 - **`HostInfo`**, which the relay greets each attaching client with.
 
 ## Implementation
@@ -425,6 +438,11 @@ path on the socket host's backoff. The modal shows the path read-only: such an e
 programmatically, never typed. On a platform without Unix sockets the variant still loads and
 dialling it fails with a sentence.
 
+**Drone mode is a host service.** `crates/kubiq-host/src/drone_modes.rs` holds `DroneModes`, owned by
+the coordinator, and the `DroneEndpoint` trait an edition implements; `kubiq-app` builds it with a
+hub clone and `Contributions::drone_endpoints`. `http` calls `remote::listen`, whose `Listening`
+stops the accept loop, shuts every accepted socket and counts the attached ones.
+
 The askpass helper mode lives in `crates/kubiq-app/src/lib.rs`, the one crate that names both halves.
 The drawing sits in `crates/kubiq/src/ui/remote_connect.rs` (the carrier pill and the per-step note),
 `crates/kubiq/src/ui/settings.rs` (the SSH profiles and Drones sections) and
@@ -450,6 +468,9 @@ panel). `_tools/drone.py` generates and verifies the manifest.
   nothing, because cross-compiling `git2` per triple is unstarted.
 - **A version skew** is flagged on the Drones row. The schema number is what actually catches a
   disagreement at the handshake.
+- **A drone mode that cannot start** — its port taken (by `--serve` on the same port too: whichever
+  binds first wins), a certificate unreadable, a kind this build lacks — reads `Failed` with the
+  reason; `RestartDroneMode` retries it.
 
 ## Related docs
 
@@ -461,7 +482,8 @@ panel). `_tools/drone.py` generates and verifies the manifest.
   host's feature split
 - [`../tech/operations.md`](../tech/operations.md) — the lean-build check, the cross build, the
   manifest and its verifier
-- [`../tech/decisions.md`](../tech/decisions.md) — `D116`–`D118`, `D124`, `D125` and `D131`–`D139`
+- [`../tech/decisions.md`](../tech/decisions.md) — `D116`–`D118`, `D124`, `D125`, `D131`–`D139` and
+  `D232`
 - [`workbench.md`](./workbench.md) — the settings dialog and the connect modal these sections sit in
 - [`../wip/drone.md`](../wip/drone.md) — the drone as a tool an agent can reach: designed, unbuilt
 - [`../backlog.md`](../backlog.md) — `G108`, `G149`, `G256`–`G258` and `G261`–`G268`

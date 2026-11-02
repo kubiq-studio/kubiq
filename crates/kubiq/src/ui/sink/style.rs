@@ -25,7 +25,7 @@ use gpui_component::{Icon, IconName, Sizable as _, Size};
 
 use crate::app::AppState;
 use crate::state::MenuId;
-use kubiq_proto::notifications::{Family, NotificationRequest, KubiqLink};
+use kubiq_proto::notifications::{Family, KubiqLink, NotificationRequest};
 
 use crate::state::sink::{CHOICES, FACETS, MENU_ITEMS, SinkModal};
 use crate::theme;
@@ -37,7 +37,7 @@ use crate::ui::kit::{
     removable_tag, ribbon, row_action, row_font, section_label, slab, state_chip, status_dot,
     stepper, tab_strip, tag, toggle_pill, view_switch,
 };
-use crate::ui::kit::{Slider, KubiqIcon};
+use crate::ui::kit::{KubiqIcon, Slider};
 use crate::ui::{handler, hsv, indexed};
 
 pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> AnyElement {
@@ -768,13 +768,14 @@ fn controls(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
             // Five hours, an hour in (20% elapsed): the outer band runs ahead of its tick, the
             // inner one (a week, 3 days in) is under pace.
             let now = chrono::Utc::now().timestamp();
-            let gauge = |label: &str, used_pct: u8, resets_in: i64| kubiq_proto::quota::QuotaGauge {
-                label: label.to_string(),
-                reading: kubiq_proto::quota::QuotaReading::Window { used_pct },
-                resets_at: Some(now + resets_in),
-                window_secs: None,
-                detail: None,
-            };
+            let gauge =
+                |label: &str, used_pct: u8, resets_in: i64| kubiq_proto::quota::QuotaGauge {
+                    label: label.to_string(),
+                    reading: kubiq_proto::quota::QuotaReading::Window { used_pct },
+                    resets_at: Some(now + resets_in),
+                    window_secs: None,
+                    detail: None,
+                };
             let snapshot = kubiq_proto::quota::QuotaSnapshot {
                 account: "sample".to_string(),
                 harness: "claude-code".to_string(),

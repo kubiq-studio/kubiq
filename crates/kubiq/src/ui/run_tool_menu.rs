@@ -27,7 +27,9 @@ use crate::ext::runner;
 use crate::state::run_picker::{PickerRow, Section};
 use crate::theme;
 use crate::ui::kit::menu::MENU_LAYER;
-use crate::ui::kit::{KubiqIcon, elided, file_row, filter_bar, row_font, section_label, status_dot};
+use crate::ui::kit::{
+    KubiqIcon, elided, file_row, filter_bar, row_font, section_label, status_dot,
+};
 
 /// The context the picker is answered in, and the one the component library gives the field
 /// inside it.

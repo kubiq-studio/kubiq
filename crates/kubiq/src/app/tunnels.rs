@@ -197,7 +197,12 @@ impl AppState {
     }
 
     /// Open the Tunnels form for a saved SSH host.
-    pub fn open_tunnel_form(&mut self, save_id: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_tunnel_form(
+        &mut self,
+        save_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(saved) = self
             .workbench
             .settings
@@ -292,7 +297,10 @@ impl AppState {
         };
         saved.tunnels = form.specs;
         saved.tunnel_rate_bps = rate;
-        let (specs, keep) = (saved.tunnels.clone(), saved.tunnels.iter().any(|s| s.enabled));
+        let (specs, keep) = (
+            saved.tunnels.clone(),
+            saved.tunnels.iter().any(|s| s.enabled),
+        );
         self.remember_host_settings();
 
         let registry = kubiq_tunnel::global();

@@ -1103,6 +1103,7 @@ impl AppState {
             ),
             (Layer::RemoteManager, w.remote_manager.open),
             (Layer::RemoteConnect, w.remote_connect.is_some()),
+            (Layer::DroneModes, w.drone_modes.open),
             (Layer::Notifications, self.notifications.open),
             // Only the modal shape takes a rung, for the plan's reason one line down: a mission
             // full view open as a document tab is not an overlay.
@@ -1234,7 +1235,14 @@ impl AppState {
             return;
         }
         let settings = &self.workbench.settings;
-        if self.workbench.remote_connect.is_some() {
+        if self.workbench.drone_modes.open {
+            // The form is peeled before the list it was opened from.
+            if self.drone_form_open() {
+                self.cancel_drone_edit(cx);
+            } else {
+                self.close_drone_modes(cx);
+            }
+        } else if self.workbench.remote_connect.is_some() {
             self.cancel_remote_connect(window, cx);
         } else if self.workbench.remote_manager.renaming.is_some() {
             self.cancel_rename_remote_host(cx);

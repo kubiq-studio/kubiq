@@ -641,6 +641,13 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
                 .as_ref()
                 .map(|_| remote_connect::render(app, window, cx)),
         )
+        // The drone-mode dialog, raised from the remote menu and painted on the same terms.
+        .children(
+            app.workbench
+                .drone_modes
+                .open
+                .then(|| crate::ui::drone_modes::render(app, window, cx)),
+        )
         // The bell's list, painted last of the overlays: it is reached from the titlebar, which
         // is above every screen, so it has to be above every dialog a screen raised.
         .child(crate::ui::notifications::render(app, window, cx))
@@ -865,6 +872,7 @@ fn overlaid(app: &AppState, cx: &App) -> bool {
         || workbench.doc_conflict.is_some()
         || workbench.remote_manager.open
         || workbench.remote_connect.is_some()
+        || workbench.drone_modes.open
         || workbench.new_agent_menu.is_some()
         || workbench.teams_create_menu.is_some()
         || workbench.open_menu.is_some()

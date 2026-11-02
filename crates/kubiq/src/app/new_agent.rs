@@ -844,7 +844,9 @@ impl AppState {
             // Not `drone_binding`: each way it answers `None` is a different sentence here.
             let serving = self.bus.serving_save_id(project_id);
             let refusal = match &serving {
-                _ if terminal => "a terminal agent cannot reach a remote machine: start it as a chat",
+                _ if terminal => {
+                    "a terminal agent cannot reach a remote machine: start it as a chat"
+                }
                 Some(save_id) if self.bus.serves_tools(save_id) => "",
                 Some(_) => "the remote serving this project does not offer tools",
                 None => "agents run on this machine only for a project it owns",
@@ -1002,7 +1004,8 @@ impl AppState {
     /// there is no first turn to fold anything in front of. The opening prompt and the subagent
     /// ceiling the form carries are simply not said.
     pub fn start_new_agent_in_terminal(&mut self, cx: &mut Context<Self>) {
-        let Some((form, project_id, definition, _)) = self.take_startable_new_agent(true, cx) else {
+        let Some((form, project_id, definition, _)) = self.take_startable_new_agent(true, cx)
+        else {
             return;
         };
         let picks = AgentPicks {

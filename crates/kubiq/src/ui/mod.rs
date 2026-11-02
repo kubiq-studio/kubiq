@@ -24,6 +24,7 @@ pub mod db;
 pub mod devtools;
 pub mod dock;
 pub mod document;
+pub mod drone_modes;
 pub mod editor;
 pub mod empty;
 pub mod explorer;

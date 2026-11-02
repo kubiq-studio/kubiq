@@ -4,7 +4,9 @@
 
 use kubiq::state::dock::ChatId;
 use kubiq::state::nav::{Bookmark, Destination, Locus, View};
-use kubiq::state::navigator::{Group, NavAction, NavRow, RECENTS_MAX, kept_recents, remember, rows};
+use kubiq::state::navigator::{
+    Group, NavAction, NavRow, RECENTS_MAX, kept_recents, remember, rows,
+};
 use kubiq_proto::ids::{ProjectId, TaskId};
 use kubiq_proto::work::AgentId;
 
@@ -292,10 +294,7 @@ fn an_address_is_offered_to_the_internal_browser() {
     );
 
     let found = ask("browser", project, &[], &[]);
-    assert_eq!(
-        found[0].action,
-        Some(NavAction::OpenBrowser(String::new()))
-    );
+    assert_eq!(found[0].action, Some(NavAction::OpenBrowser(String::new())));
 
     assert!(
         ask("router", project, &[], &[])

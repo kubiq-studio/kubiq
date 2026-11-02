@@ -185,3 +185,9 @@ pub const ARCHIFY_SETTINGS: SlotId = SlotId::new("kubiq.app.archify");
 pub const EXT_DEMO_SETTINGS: SlotId = SlotId::new("kubiq.settings.ext-demo");
 /// The demo rail mode, gated by `Availability::When` reading the switch the section above draws.
 pub const EXT_DEMO_RAIL: SlotId = SlotId::new("kubiq.rail.ext-demo");
+
+// ── The drone-mode-kind container ───────────────────────────────────
+
+/// The kinds of drone mode an edition adds to the base's `http` one — one group, since a kind has
+/// nothing to be ordered against.
+pub const DRONE_KIND: SlotId = SlotId::new("drone-kind");

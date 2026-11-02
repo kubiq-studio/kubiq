@@ -26,6 +26,7 @@ use crate::ext::ids;
 use crate::ext::rail::RailModeSpec;
 use crate::state::PanelKind;
 use crate::state::clone::CloneState;
+use crate::state::drone::DroneDialog;
 use crate::state::remote::RemoteConnectState;
 use crate::state::remote_hosts::RemoteManagerState;
 use crate::state::settings::SettingsState;
@@ -895,6 +896,9 @@ pub struct WorkbenchState {
     /// The "Remote hosts" manager panel, while it is up. The connections it lists live on the
     /// bus and in the settings record — this is only the panel's own test outcomes.
     pub remote_manager: RemoteManagerState,
+    /// The "Configure drone mode" dialog, and the last status of each of this process's drone
+    /// modes (`D232`).
+    pub drone_modes: DroneDialog,
     /// Application settings, raised from the titlebar's gear. Interface-wide, so it opens with
     /// no project.
     pub settings: SettingsState,
@@ -1145,6 +1149,7 @@ impl Default for WorkbenchState {
             doc_conflict_refused: Vec::new(),
             remote_connect: None,
             remote_manager: RemoteManagerState::default(),
+            drone_modes: DroneDialog::default(),
             settings: SettingsState::default(),
             project_error: None,
             work_error: None,

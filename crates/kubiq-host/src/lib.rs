@@ -111,6 +111,8 @@ pub mod coordinator;
 pub mod db;
 #[cfg(feature = "listener")]
 pub mod drone;
+#[cfg(feature = "listener")]
+pub mod drone_modes;
 pub mod environment;
 pub mod feedback;
 pub mod files;

@@ -854,7 +854,19 @@ a project), Capture this window (needing a project and captures offered on this 
 **Remote hosts** has its own pair between add-a-project and the back/forward arrows, a rule on each
 side (`Tier::Experimental`, so absent otherwise): a **Connect to a remote host** button
 (`KubiqIcon::HostRemote`) and a chevron whose menu (`ext::ids::MENU_REMOTE`) holds *Remote hosts*, the
-manager, and any block a second edition contributes — Studio's saved RDP targets, for one.
+manager, *Configure drone mode…* (`D232`), and any block a second edition contributes — Studio's saved
+RDP targets, for one. **Configure drone mode** is a modal (`ui/drone_modes.rs`, `Layer::DroneModes`,
+Escape peels the form before the list) listing `HostSettings::drone_modes`: per mode an enabled tick,
+the kind, the host's last `DroneModeStatus` (serving address and client count, or the failure with
+*Restart*), the connect string with *Copy* and, for `http`, *Regenerate token*; *Edit* and *Remove*
+per row, and an *Add* row of `HTTP` plus every kind an edition registered in `ext::drone`
+(`DroneKindSpec`: a name, a default configuration and the declared fields — text, number, tick,
+choice — the form draws for it). The `http` form takes a name, the bind as *This machine only
+(127.0.0.1)* / *Local network (0.0.0.0)* / a custom address, the port, optional TLS certificate and
+key paths and the tunnel allow-list, and warns that the token is the only protection when the bind
+is not loopback and there is no TLS. Every change is a `SetSettings` on the host layer. While any
+mode is serving, the Connect button carries a green dot (`theme::success`) pulsing on a two-second
+period.
 Then the theme switch, and last of all **About** (`KubiqIcon::TitlebarAbout`, the Kubiq mark), the strip's right-most control. The overflow chevron lights while its own menu is open, the rule
 every menu-raising control in this strip follows; the bell lights while its list is up, carries a
 badge of what has not been read, and flashes when something arrives —

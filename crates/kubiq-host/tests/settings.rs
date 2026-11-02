@@ -262,6 +262,40 @@ fn a_ui_write_cannot_drop_an_ai_provider_and_strand_its_key() {
     assert_eq!(after.assist, AssistProvider::Off);
 }
 
+/// A drone mode's token is the host's (`D232`): a stale settings page writing the mode back with
+/// an old or empty token keeps the one on disk, while everything else about the mode is its to set.
+#[test]
+fn a_ui_write_cannot_roll_back_a_drone_token() {
+    use kubiq_host::settings::Settings;
+    use kubiq_proto::settings::{DroneMode, DroneModeKind};
+
+    let mode = |token: &str, port: u16| DroneMode {
+        id: "desk".into(),
+        name: "desk".into(),
+        enabled: true,
+        kind: DroneModeKind::Http {
+            bind: "127.0.0.1".into(),
+            port,
+            tls_cert: None,
+            tls_key: None,
+            tunnel_allow: Vec::new(),
+            token: token.into(),
+        },
+    };
+    let settings = Settings::open(Box::new(MemorySettingsStore::new()));
+    settings
+        .update_host(|host| host.drone_modes = vec![mode("rotated", 7420)])
+        .unwrap();
+
+    let stale = HostSettings {
+        drone_modes: vec![mode("", 9000)],
+        ..HostSettings::default()
+    };
+    let replies = settings.set(SettingsLayer::Host, serde_json::to_string(&stale).unwrap());
+    assert!(replies.is_empty());
+    assert_eq!(settings.host().drone_modes, vec![mode("rotated", 9000)]);
+}
+
 /// A record from a newer Kubiq is still refused, and the connector fields did not change that.
 #[test]
 fn a_newer_schema_is_still_refused() {

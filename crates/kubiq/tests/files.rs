@@ -1567,8 +1567,8 @@ fn a_guest_tab_saves_over_write_host_file(cx: &mut TestAppContext) {
 /// spelling tree selection and tab keys use.
 #[test]
 fn a_path_under_a_root_is_named_with_forward_slashes() {
-    use std::path::Path;
     use kubiq::app::relative_to_root;
+    use std::path::Path;
 
     let root = if cfg!(windows) {
         r"C:\works\kubiq"
@@ -1593,8 +1593,8 @@ fn a_path_under_a_root_is_named_with_forward_slashes() {
 #[test]
 #[cfg(windows)]
 fn a_windows_path_matches_its_root_whatever_the_case_or_prefix() {
-    use std::path::Path;
     use kubiq::app::relative_to_root;
+    use std::path::Path;
 
     let want = Some("crates/kubiq/x.rs");
     let file = Path::new(r"C:\Works\Kubiq\crates\kubiq\x.rs");

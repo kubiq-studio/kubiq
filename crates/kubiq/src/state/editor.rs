@@ -850,7 +850,11 @@ impl OpenFile {
             name: name.to_string(),
             doc: Some(doc.clone()),
             layout: ViewLayout::Annotation,
-            ..Self::opening(&Self::hosted_path(&doc), Subject::File, ViewLayout::Annotation)
+            ..Self::opening(
+                &Self::hosted_path(&doc),
+                Subject::File,
+                ViewLayout::Annotation,
+            )
         }
     }
 

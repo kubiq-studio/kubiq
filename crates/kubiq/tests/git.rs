@@ -1150,7 +1150,15 @@ fn the_repositories_section_lists_managed_repositories_and_hides_for_one() {
     let root = overview("main", None);
     // One repository is nothing to choose between.
     assert!(repo_entries(Some(&root), &[], "", "kubiq").is_empty());
-    assert!(repo_entries(Some(&root), &[nested_repo("vendor/lib", false)], "", "kubiq").is_empty());
+    assert!(
+        repo_entries(
+            Some(&root),
+            &[nested_repo("vendor/lib", false)],
+            "",
+            "kubiq"
+        )
+        .is_empty()
+    );
     assert!(
         repo_entries(
             None,

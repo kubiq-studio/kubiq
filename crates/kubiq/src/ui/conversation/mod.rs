@@ -54,7 +54,7 @@ use crate::state::{AttachmentPreview, MenuId};
 use crate::theme;
 use crate::ui::kit::menu::MENU_ANCHOR_UP;
 use crate::ui::kit::{
-    self, ContextItem, Picker, PickerStyle, KubiqIcon, context_menu, ghost_button, harness_icon,
+    self, ContextItem, KubiqIcon, Picker, PickerStyle, context_menu, ghost_button, harness_icon,
     icon_button, icon_button_tip, mono, pill, popover, primary_button, progress_ring,
     progress_ring_in, pulse_animation, removable_tag, status_dot, tag as kit_tag,
 };

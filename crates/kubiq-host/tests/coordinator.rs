@@ -54,6 +54,7 @@ fn coordinator() -> (Hub, Client) {
         kubiq_host::tasksrc::Registry::with_defaults(),
         kubiq_host::runners::Registry::with_defaults(),
         pending,
+        kubiq_host::drone_modes::DroneModes::new(None, Default::default()),
     );
     let client = hub.connect();
     (hub, client)
@@ -92,6 +93,7 @@ fn coordinator_on_disk() -> (Hub, Client, std::path::PathBuf) {
         kubiq_host::tasksrc::Registry::with_defaults(),
         kubiq_host::runners::Registry::with_defaults(),
         pending,
+        kubiq_host::drone_modes::DroneModes::new(None, Default::default()),
     );
     let client = hub.connect();
     (hub, client, path)
@@ -1067,6 +1069,7 @@ fn coordinator_with_catalogue() -> (Hub, Client, std::path::PathBuf) {
         kubiq_host::tasksrc::Registry::with_defaults(),
         kubiq_host::runners::Registry::with_defaults(),
         pending,
+        kubiq_host::drone_modes::DroneModes::new(None, Default::default()),
     );
     let client = hub.connect();
     (hub, client, path)

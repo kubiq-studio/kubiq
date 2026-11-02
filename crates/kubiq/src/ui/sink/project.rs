@@ -41,7 +41,7 @@ use crate::theme::{Family, Role};
 use crate::ui::board::status_colour;
 use crate::ui::hsv;
 use crate::ui::kit::{
-    RowAction, KubiqIcon, check_box, choice_pill, elided, ghost_button, heading, icon_button, mono,
+    KubiqIcon, RowAction, check_box, choice_pill, elided, ghost_button, heading, icon_button, mono,
     nav_item, primary_button, row_action, section_label, setting_row, settings_split, toggle_pill,
 };
 use crate::ui::rail::mode_icon;

@@ -399,8 +399,8 @@ fn element(b: &[u8], open: usize, index: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
     use kubiq_archify::diag::Subject;
+    use serde_json::Value;
 
     const EVENT_STREAM: &str =
         include_str!("../../../../kubiq-archify/tests/fixtures/event-stream.dataflow.golden.json");

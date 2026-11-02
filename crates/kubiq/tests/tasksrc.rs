@@ -11,10 +11,10 @@
 //! These assert what falls out of the schema: which control each field gets, which fields Test is
 //! offered for, which write rows are lit, and which caveats are owed.
 
-use std::collections::BTreeMap;
 use kubiq::ext::ids;
 use kubiq::ext::settings::project_sections;
 use kubiq::state::tasksrc::{ABILITIES, CAVEATS, TaskSrcState};
+use std::collections::BTreeMap;
 
 use chrono::Utc;
 use kubiq_proto::ids::{BindingId, ConnectionId, TaskId};

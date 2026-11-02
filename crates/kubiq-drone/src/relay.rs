@@ -225,6 +225,9 @@ impl Relay {
         if holding.live.stopping() {
             return true;
         }
+        if holding.live.is_persistent() {
+            return false;
+        }
         let Some(since) = holding.alone_since else {
             return false;
         };

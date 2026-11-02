@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
 use kubiq_proto::ids::ProjectId;
+use serde::{Deserialize, Serialize};
 
 /// Which theme a web editor wears: the window's own, or one pinned for that editor kind so a
 /// draw.io canvas can be light under a dark window. Persisted per kind in `UiSettings`.

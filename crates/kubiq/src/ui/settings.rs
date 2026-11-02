@@ -40,9 +40,9 @@ use crate::state::settings::{
 use crate::theme;
 use crate::theme::{Family, Role};
 use crate::ui::kit::{
-    RowAction, KubiqIcon, badge, card, check_box, choice_pill, column, confirm_modal, elided, field,
-    ghost_button, heading, icon_button, icon_button_tip, label_block, menu::Picker, meter, modal,
-    modal_note, modal_sized, mono, nav_item, primary_button, prompt_modal,
+    KubiqIcon, RowAction, badge, card, check_box, choice_pill, column, confirm_modal, elided,
+    field, ghost_button, heading, icon_button, icon_button_tip, label_block, menu::Picker, meter,
+    modal, modal_note, modal_sized, mono, nav_item, primary_button, prompt_modal,
     quota_ring as kit_quota_ring, removable_tag, row_action, section_label, setting_row,
     settings_split, slab, state_chip, status_dot,
 };
@@ -496,7 +496,15 @@ pub fn sections(reg: &mut Registry<SettingsSectionSpec>) {
             ..section(
                 ids::DRONES,
                 "Drones",
-                &["drone", "remote", "kubiq-drone", "ssh", "unattended", "tunnel", "port forward"],
+                &[
+                    "drone",
+                    "remote",
+                    "kubiq-drone",
+                    "ssh",
+                    "unattended",
+                    "tunnel",
+                    "port forward",
+                ],
                 // A drone is unattended by design — the same mark the titlebar's own agent menu
                 // wears.
                 || IconName::Bot.into(),
@@ -3855,7 +3863,11 @@ fn capabilities_button(
 ///
 /// A window the ring draws has no bar here (`ringed`); a reading with no denominator draws none — a meter without one somebody stated is the exact
 /// thing the stats screen refuses to draw — and a reset nobody named is an em dash, never a zero.
-fn quota_gauge_row(gauge: &kubiq_proto::quota::QuotaGauge, now_ms: i64, ringed: bool) -> AnyElement {
+fn quota_gauge_row(
+    gauge: &kubiq_proto::quota::QuotaGauge,
+    now_ms: i64,
+    ringed: bool,
+) -> AnyElement {
     let pct = gauge.reading.used_pct();
     let reset = match gauge.resets_at {
         Some(resets_at) if resets_at * 1000 >= now_ms => {
@@ -5241,9 +5253,8 @@ fn tunnels_block(
     let mut out = vec![section_label("Tunnels").into_any_element()];
     if let Some(form) = app.tunnel_form.as_ref().filter(|f| f.save_id == host_id) {
         let view = cx.entity();
-        let on_edit: OnEdit = std::rc::Rc::new(|this: &mut AppState, id, edit, cx| {
-            this.edit_tunnel(id, edit, cx)
-        });
+        let on_edit: OnEdit =
+            std::rc::Rc::new(|this: &mut AppState, id, edit, cx| this.edit_tunnel(id, edit, cx));
         out.push(setting_row(
             "Rate limit",
             "Bytes per second over the tunnel channel, shared by every tunnel. Empty is \

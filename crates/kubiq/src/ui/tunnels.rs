@@ -94,7 +94,9 @@ fn input(
 ) -> Entity<InputState> {
     let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
     if !value.is_empty() {
-        input.update(cx, |input, cx| input.set_value(value.to_string(), window, cx));
+        input.update(cx, |input, cx| {
+            input.set_value(value.to_string(), window, cx)
+        });
     }
     input
 }
@@ -415,7 +417,12 @@ fn small(text: &'static str) -> AnyElement {
 }
 
 /// A single-line input of a fixed width.
-pub fn sized_field(input: &Entity<InputState>, width: f32, window: &Window, cx: &App) -> AnyElement {
+pub fn sized_field(
+    input: &Entity<InputState>,
+    width: f32,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
     let focused = input.read(cx).focus_handle(cx).is_focused(window);
     field(theme::border(), focused)
         .w(px(width))
@@ -471,6 +478,9 @@ mod tests {
         };
         apply_fields(&mut specs, &[tcp]).unwrap();
         let s = &specs[0];
-        assert_eq!((s.host.as_str(), s.port, s.upstream_tls), ("db", 5432, false));
+        assert_eq!(
+            (s.host.as_str(), s.port, s.upstream_tls),
+            ("db", 5432, false)
+        );
     }
 }

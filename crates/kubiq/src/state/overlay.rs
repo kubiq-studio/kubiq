@@ -157,6 +157,8 @@ pub enum Layer {
     RemoteManager,
     /// The remote-connect modal, over that manager.
     RemoteConnect,
+    /// The "Configure drone mode" dialog.
+    DroneModes,
     /// The bell's list, painted last of the window's overlays.
     Notifications,
     /// Any dropdown a form keeps open on its own state — a picker inside a modal is painted above

@@ -21,8 +21,8 @@ use super::*;
 use std::ops::Range;
 
 use crate::state::document::{
-    AnnotationsBody, ComposerTarget, DocumentEditor, DocumentHandle, Notice,
-    addressed, change_ranges, follow_target, mark_target, resolve_target, target_block,
+    AnnotationsBody, ComposerTarget, DocumentEditor, DocumentHandle, Notice, addressed,
+    change_ranges, follow_target, mark_target, resolve_target, target_block,
 };
 use crate::state::plan::{mission_doc_document, plan_document};
 use crate::state::workbench::FileDialog;
@@ -159,7 +159,11 @@ impl AppState {
 
     /// The agent bound to a mission's plan: the planner conversation its settings name, when this
     /// window knows it as a live agent.
-    pub(crate) fn mission_planner(&self, project_id: ProjectId, task_id: TaskId) -> Option<AgentId> {
+    pub(crate) fn mission_planner(
+        &self,
+        project_id: ProjectId,
+        task_id: TaskId,
+    ) -> Option<AgentId> {
         let open = self.projects.get(&project_id)?;
         let planner = open.missions.get(&task_id)?.settings.planner_agent?;
         open.work.agent(planner).map(|_| planner)
@@ -186,7 +190,11 @@ impl AppState {
 
     /// Bind a document to `agent` unless some agent already holds it, without it being the open
     /// one. Answers whether the binding was sent.
-    pub(crate) fn bind_doc_agent(&mut self, doc: DocumentHandle, agent_id: Option<AgentId>) -> bool {
+    pub(crate) fn bind_doc_agent(
+        &mut self,
+        doc: DocumentHandle,
+        agent_id: Option<AgentId>,
+    ) -> bool {
         let held = self.workbench.doc_binds.values().any(|bound| *bound == doc)
             || self
                 .workbench
@@ -313,10 +321,11 @@ impl AppState {
             return;
         }
         self.doc_notices.insert(doc.clone(), notice);
-        self.pending_panels.push(PanelEdit::Reveal(PanelKind::File(tab_key(
-            &path,
-            Subject::File,
-        ))));
+        self.pending_panels
+            .push(PanelEdit::Reveal(PanelKind::File(tab_key(
+                &path,
+                Subject::File,
+            ))));
     }
 
     /// The host's answer to a save made from a tab with no surface open: the tab's baseline moves
@@ -356,24 +365,34 @@ impl AppState {
         }
         self.hosted_notice(
             doc,
-            Notice::Err("Saved elsewhere while you were editing \u{2014} save again to review it.".to_string()),
+            Notice::Err(
+                "Saved elsewhere while you were editing \u{2014} save again to review it."
+                    .to_string(),
+            ),
         );
     }
 
     /// Save one tab's own document. With its surface open that is `save_document`'s two-step
     /// guard; with none, the buffer is written against the revision it was last rebased onto, and
     /// a refusal brings the tab forward.
-    pub(crate) fn save_hosted_tab(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn save_hosted_tab(
+        &mut self,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(project) = self.project(cx) else {
             return;
         };
-        let Some(handle) = self
-            .file(key, cx)
-            .and_then(|file| file.doc.clone())
-        else {
+        let Some(handle) = self.file(key, cx).and_then(|file| file.doc.clone()) else {
             return;
         };
-        if self.workbench.plan.as_ref().is_some_and(|open| open.doc == handle) {
+        if self
+            .workbench
+            .plan
+            .as_ref()
+            .is_some_and(|open| open.doc == handle)
+        {
             self.save_document(window, cx);
             return;
         }
@@ -387,7 +406,10 @@ impl AppState {
         if !file.dirty() || file.is_saving() {
             return;
         }
-        let Some(body) = file.buffer().map(|buffer| buffer.read(cx).value().to_string()) else {
+        let Some(body) = file
+            .buffer()
+            .map(|buffer| buffer.read(cx).value().to_string())
+        else {
             return;
         };
         let expected = file.doc_revision;
@@ -1185,7 +1207,12 @@ impl AppState {
 
     /// Raise the Export question for a plan's tab — an explicit, one-shot write into the
     /// project's working tree, never a continuous mirror.
-    pub fn open_export_plan_dialog(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_export_plan_dialog(
+        &mut self,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(task_id) = self.file(key, cx).and_then(|file| match file.doc {
             Some(DocumentHandle::Plan { task_id, .. }) => Some(task_id),
             _ => None,

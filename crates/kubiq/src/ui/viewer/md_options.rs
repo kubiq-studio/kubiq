@@ -40,7 +40,7 @@ use crate::state::editor::{
 };
 use crate::theme::{MdDensity, MdMinimapSide, MdWidth};
 use crate::ui::kit::{
-    Slider, KubiqIcon, check_box, choice_pill, ghost_button, icon_button, popover, section_label,
+    KubiqIcon, Slider, check_box, choice_pill, ghost_button, icon_button, popover, section_label,
     slider_state,
 };
 use crate::ui::{eid, eid2, handler};

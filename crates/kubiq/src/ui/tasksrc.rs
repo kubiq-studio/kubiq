@@ -53,7 +53,7 @@ use crate::state::{Layer, MenuId};
 use crate::theme::{self, Family, Role};
 use crate::ui::board::status_colour;
 use crate::ui::kit::{
-    Picker, PickerStyle, KubiqIcon, check_box, column, field, ghost_button, heading, mono,
+    KubiqIcon, Picker, PickerStyle, check_box, column, field, ghost_button, heading, mono,
     primary_button, setting_row, state_chip, status_dot, toggle_pill,
 };
 use crate::ui::{dismiss, handler, indexed};

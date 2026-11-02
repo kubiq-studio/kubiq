@@ -12,12 +12,12 @@ use std::rc::Rc;
 
 use gpui::{AppContext as _, Context, Entity, TestAppContext, Window, WindowHandle};
 use gpui_component::Root;
-use serde_json::{Value, json};
 use kubiq::app::{AppState, BusHub};
 use kubiq::state::WindowRegistry;
 use kubiq::state::a2ui::{self, BASIC, Kind, Scope, action, eval, live, value};
 use kubiq::ui::a2ui::registry;
 use kubiq_proto::bus;
+use serde_json::{Value, json};
 
 /// Every example the picker offers parses, and between them they use every component this build
 /// claims to draw — the eighteen of the basic catalog, and everything Kubiq's own catalog adds.

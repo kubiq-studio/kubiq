@@ -91,6 +91,8 @@ pub struct Live {
     linger: Mutex<Linger>,
     panes: AtomicUsize,
     stopping: AtomicBool,
+    /// Never self-quits: neither the startup grace nor the linger ends it, only [`Live::stop`].
+    persistent: bool,
 }
 
 impl Live {
@@ -100,7 +102,23 @@ impl Live {
             linger: Mutex::new(linger),
             panes: AtomicUsize::new(0),
             stopping: AtomicBool::new(false),
+            persistent: false,
         }
+    }
+
+    /// A drone that lives inside a longer-lived process (a desktop serving in-process): held
+    /// panes are kept for as long as it runs, with no startup grace and no linger, until
+    /// [`Live::stop`].
+    pub fn persistent() -> Self {
+        Self {
+            persistent: true,
+            ..Self::new(Linger::Never)
+        }
+    }
+
+    /// Whether only [`Live::stop`] ends this drone.
+    pub fn is_persistent(&self) -> bool {
+        self.persistent
     }
 
     /// The linger as it stands right now — re-asserted on every attach, so this can change between

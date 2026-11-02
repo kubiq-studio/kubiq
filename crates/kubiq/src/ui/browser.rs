@@ -11,9 +11,9 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, Context, Focusable as _, InteractiveElement, IntoElement, KeyBinding,
-    MouseButton, ParentElement, StatefulInteractiveElement as _, Styled, Transformation, anchored,
-    deferred, div, percentage, point, px,
+    Animation, AnimationExt as _, AnyElement, Context, Focusable as _, InteractiveElement,
+    IntoElement, KeyBinding, MouseButton, ParentElement, StatefulInteractiveElement as _, Styled,
+    Transformation, anchored, deferred, div, percentage, point, px,
 };
 use gpui_component::input::Input;
 use gpui_component::{Icon, IconName, Sizable as _, Size};
@@ -121,7 +121,10 @@ pub fn tab(app: &AppState, key: &str, cx: &gpui::App) -> TabInfo {
     };
     let label = tab.label();
     let short = match label.chars().count() > LABEL_MAX {
-        true => format!("{}\u{2026}", label.chars().take(LABEL_MAX - 1).collect::<String>()),
+        true => format!(
+            "{}\u{2026}",
+            label.chars().take(LABEL_MAX - 1).collect::<String>()
+        ),
         false => label,
     };
     TabInfo {
@@ -296,7 +299,9 @@ fn more(app: &AppState, tab: &BrowserTab, cx: &mut Context<AppState>) -> AnyElem
             }),
         )
         .h_full()
-        .tooltip(|window, cx| gpui_component::tooltip::Tooltip::new("More: reload, zoom, width").build(window, cx)),
+        .tooltip(|window, cx| {
+            gpui_component::tooltip::Tooltip::new("More: reload, zoom, width").build(window, cx)
+        }),
     );
     if let Some((_, at)) = menu {
         let percent = format!("{}%", (tab.zoom * 100.0).round() as i64);
@@ -307,16 +312,26 @@ fn more(app: &AppState, tab: &BrowserTab, cx: &mut Context<AppState>) -> AnyElem
             rows.push((ContextItem::separator(), None));
         }
         rows.extend([
-            (ContextItem::new("Reload").detail(shortcut("R")), Some(More::Reload(false))),
+            (
+                ContextItem::new("Reload").detail(shortcut("R")),
+                Some(More::Reload(false)),
+            ),
             (
                 ContextItem::new("Reload, bypassing the cache").detail(shortcut("\u{21e7}R")),
                 Some(More::Reload(true)),
             ),
             (ContextItem::separator(), None),
-            (ContextItem::new("Zoom in").detail(shortcut("\u{21e7}=")), Some(More::Zoom(Some(true)))),
-            (ContextItem::new("Zoom out").detail(shortcut("\u{21e7}-")), Some(More::Zoom(Some(false)))),
             (
-                ContextItem::new("Reset zoom").detail(format!("{percent}  {}", shortcut("\u{21e7}0"))),
+                ContextItem::new("Zoom in").detail(shortcut("\u{21e7}=")),
+                Some(More::Zoom(Some(true))),
+            ),
+            (
+                ContextItem::new("Zoom out").detail(shortcut("\u{21e7}-")),
+                Some(More::Zoom(Some(false))),
+            ),
+            (
+                ContextItem::new("Reset zoom")
+                    .detail(format!("{percent}  {}", shortcut("\u{21e7}0"))),
                 Some(More::Zoom(None)),
             ),
             (ContextItem::separator(), None),
@@ -326,7 +341,10 @@ fn more(app: &AppState, tab: &BrowserTab, cx: &mut Context<AppState>) -> AnyElem
             false => row,
         };
         rows.push((
-            mark(ContextItem::new("Width: fill the tab"), tab.viewport.is_none()),
+            mark(
+                ContextItem::new("Width: fill the tab"),
+                tab.viewport.is_none(),
+            ),
             Some(More::Viewport(None)),
         ));
         for (name, width) in browser::VIEWPORTS {
@@ -407,7 +425,9 @@ fn load_button(key: &str, loading: bool, cx: &mut Context<AppState>) -> AnyEleme
         .justify_center()
         .cursor_pointer()
         .hover(|this| this.bg(theme::hover()))
-        .tooltip(|window, cx| gpui_component::tooltip::Tooltip::new("Stop loading").build(window, cx))
+        .tooltip(|window, cx| {
+            gpui_component::tooltip::Tooltip::new("Stop loading").build(window, cx)
+        })
         .on_click(cx.listener(move |this, _, _, cx| {
             this.browser_stop(&target, cx);
         }))
@@ -445,15 +465,17 @@ fn address(
         .h_full()
         .px_2()
         .key_context(CONTEXT)
-        .on_action(cx.listener(move |this, _: &BrowserUp, _, cx| {
-            this.move_browser_dropdown(&up, false, cx)
-        }))
+        .on_action(
+            cx.listener(move |this, _: &BrowserUp, _, cx| {
+                this.move_browser_dropdown(&up, false, cx)
+            }),
+        )
         .on_action(cx.listener(move |this, _: &BrowserDown, _, cx| {
             this.move_browser_dropdown(&down, true, cx)
         }))
-        .on_action(cx.listener(move |this, _: &BrowserEnter, _, cx| {
-            this.submit_browser_bar(&enter, cx)
-        }))
+        .on_action(
+            cx.listener(move |this, _: &BrowserEnter, _, cx| this.submit_browser_bar(&enter, cx)),
+        )
         // Escape closes the list and leaves the text; with no list up it is the window's.
         .on_action(cx.listener(move |this, _: &BrowserDismiss, _, cx| {
             match this.browser_dropdown.is_some() {

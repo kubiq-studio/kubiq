@@ -7,6 +7,7 @@
 //!
 //! See `_docs/tech/decisions.md` `D177`–`D178`.
 
+pub mod drone;
 mod id;
 pub mod ids;
 pub mod menu;

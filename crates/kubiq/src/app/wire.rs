@@ -611,6 +611,9 @@ impl AppState {
         let Some(message) = self.receive_notifications(host, message, cx) else {
             return;
         };
+        let Some(message) = self.receive_drone(host, message, cx) else {
+            return;
+        };
         let Some(message) = self.receive_remote_tools(host, message) else {
             return;
         };
@@ -3719,7 +3722,9 @@ impl AppState {
                             open.editor
                                 .open
                                 .iter()
-                                .filter(|file| !file.guest && file.doc.is_none() && under(&file.path))
+                                .filter(|file| {
+                                    !file.guest && file.doc.is_none() && under(&file.path)
+                                })
                                 .map(|file| {
                                     (file.key(), format!("{to}{}", &file.path[rel_path.len()..]))
                                 })

@@ -5,8 +5,8 @@
 //! plain synchronous function and the cache is a directory, which is exactly what lets the window
 //! hand both to a background thread.
 
-use tempfile::TempDir;
 use kubiq::state::diagrams::{self, DiagramPalette, Disk};
+use tempfile::TempDir;
 
 const FLOWCHART: &str =
     "flowchart TD\n  A[Start] --> B{Ready?}\n  B -->|yes| C[Go]\n  B -->|no| A\n";

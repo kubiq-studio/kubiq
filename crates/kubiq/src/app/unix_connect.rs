@@ -84,9 +84,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kubiq_proto::wire::MESSAGE_SCHEMA;
     use std::os::unix::net::UnixStream;
     use std::thread;
-    use kubiq_proto::wire::MESSAGE_SCHEMA;
 
     /// The drone's half, served by the library's own `greet` on the far end of a socket pair.
     fn drone_side(

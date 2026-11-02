@@ -5,8 +5,8 @@
 //! dropped into the Tools dialog, which the host never held and so has nothing to compare. Same
 //! library, same context width and the same row rules as the host's `files::diff`.
 
-use similar::{ChangeTag, TextDiff};
 use kubiq_proto::files::{DiffBase, DiffHunk, DiffRow, DiffRowKind, FileDiff};
+use similar::{ChangeTag, TextDiff};
 
 /// Lines of context around a change — the host's own number.
 const CONTEXT: usize = 3;

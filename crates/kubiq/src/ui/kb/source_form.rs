@@ -286,7 +286,10 @@ fn body(
 
         let store_rows: Vec<(String, Option<KbStore>)> = vec![
             ("Cache".to_string(), Some(KbStore::Cache)),
-            ("Kubiq's project folder".to_string(), Some(KbStore::Internal)),
+            (
+                "Kubiq's project folder".to_string(),
+                Some(KbStore::Internal),
+            ),
             ("Inside the project".to_string(), Some(KbStore::Project)),
         ];
         repo = repo.child(picker_row(

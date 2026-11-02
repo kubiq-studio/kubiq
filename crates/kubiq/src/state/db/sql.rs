@@ -692,7 +692,8 @@ mod tests {
             explain: None,
         };
         let rows = |n: usize, truncated: bool| {
-            let meta = kubiq_proto::db::ColumnMeta::new(kubiq_proto::db::DbKind::Sqlite, "a", "INT");
+            let meta =
+                kubiq_proto::db::ColumnMeta::new(kubiq_proto::db::DbKind::Sqlite, "a", "INT");
             Ok(Box::new(DbOutcome::Rows(ResultSet {
                 columns: vec![meta],
                 rows: vec![vec![kubiq_proto::db::Value::Int(1)]; n],

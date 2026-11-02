@@ -467,11 +467,15 @@ pub fn overflow(app: &AppState, cx: &App) -> Vec<MenuEntry> {
 
 /// The titlebar's remote-host chevron: the host manager. Connecting is the button beside the
 /// chevron; a second edition adds its own remote targets as blocks of this menu.
-pub fn remote(_app: &AppState, _cx: &App) -> Vec<MenuEntry> {
+pub fn remote(app: &AppState, _cx: &App) -> Vec<MenuEntry> {
     vec![
         MenuEntry::new("Remote hosts")
             .icon(kit::KubiqIcon::HostRemote)
+            .visible_when(app.offers(Tier::Experimental))
             .on(|this, _, cx| this.open_remote_manager(cx)),
+        MenuEntry::new("Configure drone mode\u{2026}")
+            .icon(IconName::Network)
+            .on(|this, _, cx| this.open_drone_modes(cx)),
     ]
 }
 

@@ -310,3 +310,104 @@ fn a_remote_url_parses_with_the_scheme_port_by_default() {
     }
     assert_eq!(spec.remote_origin(), "http://[::1]:3000");
 }
+
+fn http_mode(id: &str, token: &str) -> kubiq_proto::settings::DroneMode {
+    kubiq_proto::settings::DroneMode {
+        id: id.to_string(),
+        name: "desk".to_string(),
+        enabled: true,
+        kind: kubiq_proto::settings::DroneModeKind::Http {
+            bind: "127.0.0.1".to_string(),
+            port: 7420,
+            tls_cert: None,
+            tls_key: None,
+            tunnel_allow: Vec::new(),
+            token: token.to_string(),
+        },
+    }
+}
+
+#[test]
+fn a_record_from_before_drone_modes_reads_with_none() {
+    let json = r#"{ "schema": 26 }"#;
+    let settings = serde_json::from_str::<HostSettings>(json).unwrap();
+    assert!(settings.drone_modes.is_empty());
+    const { assert!(HOST_SETTINGS_SCHEMA >= 27) };
+}
+
+#[test]
+fn drone_modes_round_trip_through_json_and_toml() {
+    use kubiq_proto::settings::{DroneMode, DroneModeKind};
+    let mut config = serde_json::Map::new();
+    config.insert("linger".to_string(), serde_json::json!("10m"));
+    config.insert("roots".to_string(), serde_json::json!(["/a", "/b"]));
+    let written = HostSettings {
+        drone_modes: vec![
+            http_mode("one", "tok"),
+            DroneMode {
+                id: "two".to_string(),
+                name: "rdp".to_string(),
+                enabled: false,
+                kind: DroneModeKind::Ext {
+                    kind: "rdp".to_string(),
+                    config,
+                },
+            },
+        ],
+        ..HostSettings::default()
+    };
+    let json = serde_json::to_string(&written).unwrap();
+    assert_eq!(
+        serde_json::from_str::<HostSettings>(&json).unwrap(),
+        written
+    );
+    // The file store writes TOML: no null may sneak in, and the tag reads as `type`.
+    let toml_text = toml::to_string_pretty(&written).unwrap();
+    assert!(toml_text.contains("type = \"http\""), "{toml_text}");
+    assert_eq!(toml::from_str::<HostSettings>(&toml_text).unwrap(), written);
+
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    struct Rdp {
+        linger: String,
+        roots: Vec<String>,
+    }
+    let ext = written.drone_modes[1]
+        .kind
+        .ext_config::<Rdp>()
+        .unwrap()
+        .unwrap();
+    assert_eq!(ext.linger, "10m");
+    assert!(written.drone_modes[0].kind.ext_config::<Rdp>().is_none());
+}
+
+#[test]
+fn an_http_mode_written_bare_takes_the_loopback_defaults() {
+    let toml_text = r#"
+        schema = 27
+        [[drone_modes]]
+        id = "m"
+        name = "desk"
+        [drone_modes.kind]
+        type = "http"
+    "#;
+    let settings = toml::from_str::<HostSettings>(toml_text).unwrap();
+    let mode = &settings.drone_modes[0];
+    assert!(!mode.enabled);
+    assert_eq!(mode.kind, http_mode("m", "").kind);
+}
+
+#[test]
+fn a_stale_blob_keeps_the_hosts_drone_token_and_empty_ones_are_minted() {
+    let held = vec![http_mode("one", "disk")];
+    let mut incoming = HostSettings {
+        drone_modes: vec![http_mode("one", "stale"), http_mode("new", "")],
+        ..HostSettings::default()
+    };
+    incoming.keep_drone_tokens(&held);
+    assert_eq!(incoming.drone_modes[0], http_mode("one", "disk"));
+    assert_eq!(incoming.drone_modes[1], http_mode("new", ""));
+
+    assert!(incoming.mint_drone_tokens(|| "minted".to_string()));
+    assert_eq!(incoming.drone_modes[1], http_mode("new", "minted"));
+    assert!(!incoming.mint_drone_tokens(|| unreachable!()));
+}

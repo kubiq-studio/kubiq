@@ -495,7 +495,8 @@ impl AppState {
         let ssh_key_path_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("~/.ssh/id_ed25519"));
         let ssh_initial_command_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Optional \u{2014} e.g. cd /srv/app && tmux attach")
+            InputState::new(window, cx)
+                .placeholder("Optional \u{2014} e.g. cd /srv/app && tmux attach")
         });
         let ssh_secret_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Type it once \u{2014} it is never read back")

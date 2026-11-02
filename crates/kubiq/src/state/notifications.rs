@@ -10,7 +10,7 @@
 
 use std::time::{Duration, Instant};
 
-use kubiq_proto::notifications::{Level, MuteScope, Notifications, KubiqLink};
+use kubiq_proto::notifications::{KubiqLink, Level, MuteScope, Notifications};
 
 /// How long the bell keeps flashing after something loud arrives.
 ///

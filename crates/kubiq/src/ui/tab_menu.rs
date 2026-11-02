@@ -110,12 +110,7 @@ pub fn rows_for(
             ]);
             // The explorer's own path rows, drawn from the one list both menus read.
             rows.extend(ExplorerAction::SHARED_FILE.map(ExplorerAction::label));
-            rows.extend([
-                "Reveal in Explorer",
-                "Refresh",
-                SEPARATOR,
-                "Save",
-            ]);
+            rows.extend(["Reveal in Explorer", "Refresh", SEPARATOR, "Save"]);
             if formattable {
                 rows.push("Format");
             }

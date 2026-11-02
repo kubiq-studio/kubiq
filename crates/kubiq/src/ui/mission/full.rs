@@ -31,7 +31,7 @@ use crate::state::mission::{HISTORY_KINDS, MissionTab, MissionView, NoteKind, hi
 use crate::state::work::WorkProjection;
 use crate::theme::{self, Family, Role};
 use crate::ui::kit::{
-    Tab, KubiqIcon, choice_pill, elided, ghost_button, mono, panel, primary_button, section_label,
+    KubiqIcon, Tab, choice_pill, elided, ghost_button, mono, panel, primary_button, section_label,
     state_chip, tab_strip,
 };
 use crate::ui::mission::panel::{

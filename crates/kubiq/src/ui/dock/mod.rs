@@ -51,8 +51,8 @@ use crate::state::git::{CHANGES_WIDTH, SIDEBAR_WIDTH};
 use crate::state::settings::TabClose;
 use crate::theme;
 use crate::ui::{
-    agents, board, browser, chat, db, editor, empty, explorer, git, help, kb, logs, mission, outline, rail,
-    search, terminal,
+    agents, board, browser, chat, db, editor, empty, explorer, git, help, kb, logs, mission,
+    outline, rail, search, terminal,
 };
 
 /// The version a saved layout is written under. It travels with the preferences schema, because
@@ -789,9 +789,10 @@ impl Render for WorkbenchPanel {
                     || body(&kind, app, window, cx),
                 ),
                 PanelKind::Centre if app.workbench.rail_mode == crate::state::RailMode::TASKS => {
-                    crate::state::board::with_view_board(kubiq_proto::work::BoardId::DEFAULT, || {
-                        body(&kind, app, window, cx)
-                    })
+                    crate::state::board::with_view_board(
+                        kubiq_proto::work::BoardId::DEFAULT,
+                        || body(&kind, app, window, cx),
+                    )
                 }
                 _ => body(&kind, app, window, cx),
             })
@@ -1643,9 +1644,15 @@ mod tests {
     #[test]
     fn a_pre_rename_ubiq_panel_name_restores() {
         let none = serde_json::json!({ "panel": null });
-        assert_eq!(leaf(&saved("ubiq.explorer", none.clone())), Some(PanelKind::Explorer));
+        assert_eq!(
+            leaf(&saved("ubiq.explorer", none.clone())),
+            Some(PanelKind::Explorer)
+        );
         assert_eq!(leaf(&saved("ubiq.centre", none)), Some(PanelKind::Centre));
-        let file = saved("ubiq.file", serde_json::json!({ "panel": { "key": "a.rs" } }));
+        let file = saved(
+            "ubiq.file",
+            serde_json::json!({ "panel": { "key": "a.rs" } }),
+        );
         assert_eq!(leaf(&file), Some(PanelKind::File("a.rs".to_string())));
     }
 }

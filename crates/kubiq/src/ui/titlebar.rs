@@ -1,21 +1,23 @@
 //! The top row: what is open, where it lives, and the switches for the dock's three edge regions.
 
 use gpui::prelude::FluentBuilder as _;
+use std::time::Duration;
+
 use gpui::{
-    App, ClickEvent, Context, Focusable, InteractiveElement as _, IntoElement, ParentElement,
-    StatefulInteractiveElement as _, Styled, Window, div, px,
+    AnimationExt as _, App, ClickEvent, Context, Focusable, InteractiveElement as _, IntoElement,
+    ParentElement, StatefulInteractiveElement as _, Styled, Window, div, pulsating_between, px,
 };
 use gpui_component::input::Input;
 use gpui_component::{Icon, IconName, Sizable as _, Size};
 
-use kubiq_proto::notifications::{Level, KubiqLink};
+use kubiq_proto::notifications::{KubiqLink, Level};
 
 use crate::app::{AppState, NavBack, NavForward};
 use crate::state::MenuId;
 use crate::state::ui_id::{self, UiId};
 use crate::theme;
 use crate::ui::ident::Identified as _;
-use crate::ui::kit::{KubiqIcon, badge, field, icon_button, mono};
+use crate::ui::kit::{KubiqIcon, badge, field, icon_button, mono, pulse_animation};
 use crate::ui::navigator;
 use crate::ui::project_menu;
 
@@ -147,43 +149,79 @@ pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> im
         )
         // Remote hosts: connect, and the chevron for the host manager and a second edition's
         // remote targets. Experimental, like every way in to a remote.
-        .children(app.offers(crate::state::settings::Tier::Experimental).then(|| {
-            div()
-                .h_full()
-                .flex()
-                .flex_none()
-                .items_center()
-                .child(rule())
-                .child(
-                    split_pair()
+        .children(
+            app.drone_modes_reachable()
+                .then(|| {
+                    div()
+                        .h_full()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .child(rule())
                         .child(
-                            icon_button(
-                                "remote-connect",
-                                KubiqIcon::HostRemote,
-                                false,
-                                cx.listener(|this, _, window, cx| {
-                                    this.open_remote_connect(window, cx)
-                                }),
-                            )
-                            .h_full()
-                            .tooltip(move |window, cx| {
-                                gpui_component::tooltip::Tooltip::new("Connect to a remote host")
-                                    .build(window, cx)
-                            }),
+                            split_pair()
+                                .child(
+                                    div()
+                                        .relative()
+                                        .h_full()
+                                        .flex_none()
+                                        .child(
+                                            icon_button(
+                                                "remote-connect",
+                                                KubiqIcon::HostRemote,
+                                                false,
+                                                cx.listener(|this, _, window, cx| {
+                                                    this.open_remote_connect(window, cx)
+                                                }),
+                                            )
+                                            .h_full()
+                                            .tooltip(
+                                                move |window, cx| {
+                                                    gpui_component::tooltip::Tooltip::new(
+                                                        "Connect to a remote host",
+                                                    )
+                                                    .build(window, cx)
+                                                },
+                                            ),
+                                        )
+                                        // A drone mode is serving: a slow green pulse, a hint at the
+                                        // edge of vision rather than an alert.
+                                        .when(app.workbench.drone_modes.any_serving(), |this| {
+                                            this.child(
+                                                div()
+                                                    .absolute()
+                                                    .top(px(6.))
+                                                    .right(px(6.))
+                                                    .size(px(7.))
+                                                    .rounded_full()
+                                                    .bg(theme::success())
+                                                    .with_animation(
+                                                        "drone-serving-pulse",
+                                                        pulse_animation(Duration::from_millis(
+                                                            2_000,
+                                                        ))
+                                                        .with_easing(pulsating_between(0.3, 1.0)),
+                                                        |this, delta| this.opacity(delta),
+                                                    ),
+                                            )
+                                        }),
+                                )
+                                .child(split_chevron(
+                                    "remote-menu",
+                                    None,
+                                    app.workbench.open_menu == Some(MenuId::Remote),
+                                    "Remote hosts",
+                                    cx.listener(|this, event: &ClickEvent, _, cx| {
+                                        let at = (
+                                            f32::from(event.position().x),
+                                            f32::from(event.position().y),
+                                        );
+                                        this.open_remote_menu(at, cx);
+                                    }),
+                                )),
                         )
-                        .child(split_chevron(
-                            "remote-menu",
-                            None,
-                            app.workbench.open_menu == Some(MenuId::Remote),
-                            "Remote hosts",
-                            cx.listener(|this, event: &ClickEvent, _, cx| {
-                                let at =
-                                    (f32::from(event.position().x), f32::from(event.position().y));
-                                this.open_remote_menu(at, cx);
-                            }),
-                        )),
-                )
-        }))
+                }),
+        )
         // Back and forward belong to the project they walk, so they sit beside it rather than
         // beside the field: settings, web, tools, a rule, add project, a rule, remote, a rule, then
         // the two arrows.

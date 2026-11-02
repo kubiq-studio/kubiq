@@ -10,8 +10,8 @@
 
 use std::sync::OnceLock;
 
-use serde::Deserialize;
 use kubiq_proto::update::ChannelRelease;
+use serde::Deserialize;
 
 /// The modal's three tabs, in strip order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

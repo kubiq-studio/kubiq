@@ -22,11 +22,11 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use serde::Deserialize;
 use kubiq_proto::bus::Client;
 use kubiq_proto::carrier::{self, DroneIdentity, HandshakeError};
 use kubiq_proto::ids::ProjectId;
 use kubiq_proto::settings::{DronePreset, SshProfile};
+use serde::Deserialize;
 // The argv a profile stands for is shared with the host's database tunnel, so it lives in the
 // contract crate; the two askpass names stay reachable from here for their existing readers.
 pub use kubiq_proto::ssh::{ASKPASS_PROFILE_VAR, ASKPASS_ROOT_VAR};
@@ -441,14 +441,15 @@ fn remote_command(
 
 /// The idle timeouts the connect modal offers a [`DronePreset::Session`] drone, in seconds, beside
 /// the preset's own ten minutes.
-pub const SESSION_LINGERS: &[(u64, &str)] =
-    &[(3_600, "1 h"), (8 * 3_600, "8 h"), (86_400, "24 h")];
+pub const SESSION_LINGERS: &[(u64, &str)] = &[(3_600, "1 h"), (8 * 3_600, "8 h"), (86_400, "24 h")];
 
 /// A saved connection's idle timeout as the `--linger` a dial passes: only a
 /// [`DronePreset::Session`] drone's — `Attached` has no linger and `Managed` waits forever, so a
 /// timeout left over from an earlier Session pick never shortens a Managed drone's life.
 pub fn session_linger(preset: DronePreset, linger_secs: Option<u64>) -> Option<u64> {
-    (preset == DronePreset::Session).then_some(linger_secs).flatten()
+    (preset == DronePreset::Session)
+        .then_some(linger_secs)
+        .flatten()
 }
 
 /// The `--linger` value a preset launches with, or the override a project's `DroneOrigin` carries.
@@ -1169,7 +1170,13 @@ mod tests {
         );
         assert_eq!(shell_path("/opt/it's/drone"), "'/opt/it'\\''s/drone'");
         assert_eq!(
-            remote_command("", DronePreset::Attached, None, None, Some("~/bin/kubiq-drone")),
+            remote_command(
+                "",
+                DronePreset::Attached,
+                None,
+                None,
+                Some("~/bin/kubiq-drone")
+            ),
             "\"$HOME\"/'bin/kubiq-drone' --stdio"
         );
     }

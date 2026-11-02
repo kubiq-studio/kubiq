@@ -223,6 +223,107 @@ pub struct HostSettings {
     /// `Settings::set` keeps what is on disk over whatever a `SetSettings` blob carries.
     #[serde(default)]
     pub feedback_url: Option<String>,
+
+    /// The ways this host serves remote clients from inside the running process — a desktop
+    /// Kubiq in "drone mode" (`D232`). Each enabled one is started at boot and on every write
+    /// that changes it; how each one is doing crosses as [`crate::messages::Message::DroneModeStatus`].
+    ///
+    /// **UI-mutated, except the token.** A mode is added, edited, enabled or forgotten only on the
+    /// settings page, so it rides `SetSettings` whole like [`Self::remote_hosts`]; but an
+    /// [`DroneModeKind::Http`] token is minted and rotated by the host, so `Settings::set` keeps
+    /// the one on disk for a mode it already holds ([`Self::keep_drone_tokens`]).
+    #[serde(default)]
+    pub drone_modes: Vec<DroneMode>,
+}
+
+/// One way of serving remote clients from this process (`D232`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DroneMode {
+    /// Stable id, minted UI-side when the row is added — the [`SavedRemoteHost::id`] discipline.
+    pub id: String,
+    /// What the user called it.
+    pub name: String,
+    /// Whether it runs. Enabled modes start when the host does, desktop or headless.
+    #[serde(default)]
+    pub enabled: bool,
+    pub kind: DroneModeKind,
+}
+
+/// What a [`DroneMode`] serves on. Tagged by `type`, so the TOML reads `type = "http"`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum DroneModeKind {
+    /// The base listener, `kubiq --serve`'s: `GET /attach` and `/tunnel` over TCP, TLS when both
+    /// PEM paths are set.
+    Http {
+        /// An IP literal. Loopback by default — unlike `--serve`'s `0.0.0.0` (`D80`), a desktop
+        /// must not expose itself because a box was ticked.
+        #[serde(default = "drone_bind_default")]
+        bind: String,
+        /// `0` takes any free port.
+        #[serde(default = "drone_port_default")]
+        port: u16,
+        /// PEM chain, leaf first. A path on the host's machine, as the user typed it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tls_cert: Option<String>,
+        /// PEM private key, beside `tls_cert`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tls_key: Option<String>,
+        /// `--tunnel-allow`'s values: empty is loopback only, `none` turns `/tunnel` off.
+        #[serde(default)]
+        tunnel_allow: Vec<String>,
+        /// The bearer token a remote presents. Host-minted when empty, and kept on disk so a
+        /// saved connect string survives a restart (`G169`). Credential material in a plaintext
+        /// file, on `--serve`'s own footing: whoever reads it has the workbench.
+        #[serde(default)]
+        token: String,
+    },
+    /// A kind an edition registers by name (Studio's `rdp`), with a configuration the base never
+    /// parses. The registered endpoint reads `config` with [`DroneModeKind::ext_config`].
+    Ext {
+        kind: String,
+        #[serde(default)]
+        config: serde_json::Map<String, serde_json::Value>,
+    },
+}
+
+impl DroneModeKind {
+    /// An [`Self::Ext`] configuration as the edition's own type. `None` for [`Self::Http`].
+    pub fn ext_config<T: serde::de::DeserializeOwned>(&self) -> Option<Result<T, String>> {
+        match self {
+            Self::Http { .. } => None,
+            Self::Ext { config, .. } => Some(
+                serde_json::from_value(serde_json::Value::Object(config.clone()))
+                    .map_err(|error| error.to_string()),
+            ),
+        }
+    }
+}
+
+/// How one [`DroneMode`] is doing, as [`crate::messages::Message::DroneModeStatus`] carries it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DroneModeState {
+    Stopped,
+    Starting,
+    Serving {
+        /// Where it is bound, as the endpoint words it (`127.0.0.1:7420`).
+        addr: String,
+        /// What to paste on the other end — for `http`, `http[s]://<ip>:<port>?token=<token>`.
+        connect_string: String,
+        /// Windows attached through it right now.
+        clients: u32,
+    },
+    Failed {
+        reason: String,
+    },
+}
+
+fn drone_bind_default() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn drone_port_default() -> u16 {
+    7420
 }
 
 /// One SSH target: enough to dial it, never enough to unlock it.
@@ -808,7 +909,11 @@ pub enum RemoteScheme {
 /// Twenty-six adds `linger_secs` to [`RemoteCarrier::Ssh`]. An older build drops it on its next
 /// write and the drone goes back to its preset's own linger — eighteen's lighter footing: the
 /// choice is lost, never a fact, and what it reverts to is the shape that was always meant.
-pub const HOST_SETTINGS_SCHEMA: u32 = 26;
+///
+/// Twenty-seven adds [`HostSettings::drone_modes`] (`D232`). An older build drops the list on its
+/// next write: every drone mode is gone, its token with it, and a remote holding the old connect
+/// string is refused once a newer build mints a fresh one — lost configuration, nothing stranded.
+pub const HOST_SETTINGS_SCHEMA: u32 = 27;
 
 fn isolate_agents_default() -> bool {
     true
@@ -857,6 +962,42 @@ fn mission_term_default() -> String {
 }
 
 impl HostSettings {
+    /// Keep the host's token for every [`DroneModeKind::Http`] mode `held` (on disk) already has
+    /// under the same id: the token is host-minted and host-rotated, and a window's copy is as old
+    /// as its settings page. A mode the host has never seen keeps whatever the blob carries —
+    /// empty, so the host mints one, or a token the user pasted.
+    pub fn keep_drone_tokens(&mut self, held: &[DroneMode]) {
+        for mode in &mut self.drone_modes {
+            let DroneModeKind::Http { token, .. } = &mut mode.kind else {
+                continue;
+            };
+            let disk = held.iter().find_map(|disk| match &disk.kind {
+                DroneModeKind::Http { token, .. } if disk.id == mode.id && !token.is_empty() => {
+                    Some(token)
+                }
+                _ => None,
+            });
+            if let Some(disk) = disk {
+                token.clone_from(disk);
+            }
+        }
+    }
+
+    /// Mint a token for every [`DroneModeKind::Http`] mode that has none, with `mint`. Says
+    /// whether anything changed, so the caller writes only then.
+    pub fn mint_drone_tokens(&mut self, mut mint: impl FnMut() -> String) -> bool {
+        let mut changed = false;
+        for mode in &mut self.drone_modes {
+            if let DroneModeKind::Http { token, .. } = &mut mode.kind
+                && token.is_empty()
+            {
+                *token = mint();
+                changed = true;
+            }
+        }
+        changed
+    }
+
     /// Merge the key pins of an incoming blob against what is on disk (`held`), per saved host:
     /// for the same id at the same address, the on-disk pin stands unless the incoming one
     /// carries a strictly newer [`SavedRemoteHost::tls_pin_rev`]. A moved address takes the
@@ -905,6 +1046,7 @@ impl Default for HostSettings {
             remote_hosts: Vec::new(),
             ssh_profiles: Vec::new(),
             feedback_url: None,
+            drone_modes: Vec::new(),
         }
     }
 }

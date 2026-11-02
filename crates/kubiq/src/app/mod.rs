@@ -113,7 +113,7 @@ use kubiq_proto::messages::{
 };
 use kubiq_proto::mission::{HistoryEntry, MissionSnapshot};
 use kubiq_proto::notifications::{
-    Family, HISTORY_CAP, Level, MuteFor, MuteScope, NotificationRequest, KubiqLink,
+    Family, HISTORY_CAP, KubiqLink, Level, MuteFor, MuteScope, NotificationRequest,
 };
 use kubiq_proto::projects::{ProjectSnapshot, Scope, StorageMode};
 use kubiq_proto::settings::{
@@ -1483,6 +1483,7 @@ pub use hosts::{
 };
 mod db;
 mod devtools;
+mod drone_modes;
 mod image_edit;
 pub use db::{DbPageRequest, DbQueryReply, DbQueryRequest};
 mod kb;

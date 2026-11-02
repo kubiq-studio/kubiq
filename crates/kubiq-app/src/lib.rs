@@ -9,7 +9,7 @@
 //! behaviour that only works because something was registered is a bug `just verify` catches by
 //! never registering anything.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "ui")]
@@ -203,6 +203,11 @@ pub struct Contributions {
     ///
     /// Unconditional, for the reason `task_providers` is.
     pub runner_sources: kubiq_host::runners::Registry,
+    /// The edition's drone-mode kinds (`D232`) — what a `DroneModeKind::Ext { kind, .. }` mode in
+    /// the host settings starts. Empty in the base, whose one kind (`http`) is built in; Studio
+    /// registers `rdp`. Handed to the coordinator's `DroneModes` with the hub, before it starts.
+    /// `register` substitutes by kind. Unconditional, for the reason `task_providers` is.
+    pub drone_endpoints: kubiq_host::drone_modes::Registry,
     /// The settings container, both instances — the application overlay and the project dialog
     /// (`D180`). Seeded with the base's own 15 + 8.
     #[cfg(feature = "ui")]
@@ -227,6 +232,11 @@ pub struct Contributions {
     /// registered a kind for is drawn with a generic icon. See `kubiq::ext::runner`.
     #[cfg(feature = "ui")]
     pub runner_kinds: kubiq::ext::Registry<kubiq::ext::runner::RunnerKindSpec>,
+    /// The kinds of drone mode the "Configure drone mode" dialog adds besides `http` — a name, a
+    /// default configuration and the fields the form draws, per `DroneModeKind::Ext` kind. Empty
+    /// in the base. See `kubiq::ext::drone`.
+    #[cfg(feature = "ui")]
+    pub drone_kinds: kubiq::ext::Registry<kubiq::ext::drone::DroneKindSpec>,
     /// The carriers a drone-served project can be reached through besides SSH. Empty in the base;
     /// a carrier registered here is named by a project origin's `via`. See `kubiq::ext::origin`.
     #[cfg(feature = "ui")]
@@ -244,6 +254,7 @@ impl Default for Contributions {
         Contributions {
             task_providers: kubiq_host::tasksrc::Registry::with_defaults(),
             runner_sources: kubiq_host::runners::Registry::with_defaults(),
+            drone_endpoints: kubiq_host::drone_modes::Registry::new(),
             #[cfg(feature = "ui")]
             settings_sections: kubiq::ext::settings::base_registry(),
             #[cfg(feature = "ui")]
@@ -252,6 +263,8 @@ impl Default for Contributions {
             bar_menus: kubiq::ext::menu::base_registry(),
             #[cfg(feature = "ui")]
             runner_kinds: kubiq::ext::runner::base_registry(),
+            #[cfg(feature = "ui")]
+            drone_kinds: kubiq::ext::drone::base_registry(),
             #[cfg(feature = "ui")]
             origin_carriers: kubiq::ext::origin::base_registry(),
             #[cfg(feature = "ui")]
@@ -402,6 +415,12 @@ pub fn run(boot: Boot) {
     // same discipline the two UI containers keep below, one step earlier because the coordinator
     // starts before the first window (`D189`). Moved out of `boot` field by field: the interface
     // half is installed further down, and nothing between the two may add a provider.
+    // The drone modes get a clone of the hub, which is all serving a remote takes (`D28`, `D232`):
+    // enabled ones start with the coordinator, desktop or headless, beside any `--serve` below.
+    let drones = kubiq_host::drone_modes::DroneModes::new(
+        Some(hub.clone()),
+        boot.contributions.drone_endpoints,
+    );
     coordinator::start(
         host,
         root,
@@ -411,6 +430,7 @@ pub fn run(boot: Boot) {
         boot.contributions.task_providers,
         boot.contributions.runner_sources,
         pending,
+        drones,
     );
 
     // After the coordinator, so a client that attaches in the same breath has something to talk to,
@@ -488,6 +508,7 @@ pub fn run(boot: Boot) {
         kubiq::ext::rail::install(boot.contributions.rail_modes);
         kubiq::ext::menu::install(boot.contributions.bar_menus);
         kubiq::ext::runner::install(boot.contributions.runner_kinds);
+        kubiq::ext::drone::install(boot.contributions.drone_kinds);
         kubiq::ext::origin::install(boot.contributions.origin_carriers);
         kubiq::ext::viewer::install(boot.contributions.viewers);
         window(hub, paths, listener);
@@ -923,43 +944,17 @@ fn parse_bind(value: &str) -> Option<SocketAddr> {
         .map(|ip| SocketAddr::new(ip, SERVE_PORT))
 }
 
-/// What to print as `<ip>` in the connection string.
-///
-/// Bound to one interface, that address is the answer. Bound to all of them, `0.0.0.0` is useless
-/// to paste, so ask the routing table which source address it would use to leave this machine —
-/// a connected UDP socket assigns one without sending a packet or needing a reachable peer, which
-/// is why the address it is pointed at does not matter and no traffic is generated. A machine with
-/// no route out has nothing to advertise, and the bind address is printed unchanged.
-fn advertised_ip(addr: SocketAddr) -> IpAddr {
-    if !addr.ip().is_unspecified() {
-        return addr.ip();
-    }
-    UdpSocket::bind(("0.0.0.0", 0))
-        .and_then(|socket| {
-            socket.connect(("192.0.2.1", 53))?;
-            socket.local_addr()
-        })
-        .map(|local| local.ip())
-        .unwrap_or_else(|_| addr.ip())
-}
-
 /// The banner: where it is listening, the token, and the string to paste into a UI.
 ///
 /// Printed to stdout rather than logged, because it is the whole output of a `--serve` run and
 /// must not depend on a log filter. The warning is here because the flag hands a shell on this
 /// machine to whoever holds the token — said plainly, once, rather than buried in a document.
+/// The `<ip>` in the connection string is `kubiq_host::remote::advertised_ip`'s.
 fn announce(serving: &kubiq_host::remote::Serving) {
-    let addr = serving.addr;
-    let ip = advertised_ip(addr);
-    let scheme = if serving.tls { "https" } else { "http" };
-    println!("kubiq host listening on {addr}");
+    println!("kubiq host listening on {}", serving.addr);
     println!();
     println!("  token  {}", serving.token);
-    println!(
-        "  connect  {scheme}://{ip}:{}?token={}",
-        addr.port(),
-        serving.token
-    );
+    println!("  connect  {}", serving.connect_string());
     println!();
     println!("Anyone who reaches this port with that token gets a terminal on this machine.");
     if serving.tls {
@@ -1185,6 +1180,7 @@ mod tests {
     /// An unspecified bind is not something anyone can paste, so the string carries a real one.
     #[test]
     fn the_advertised_address_is_never_the_unspecified_one() {
+        use kubiq_host::remote::advertised_ip;
         let advertised = advertised_ip(SocketAddr::from((Ipv4Addr::UNSPECIFIED, SERVE_PORT)));
         // A sandbox with no route out has nothing better to offer, and says so by handing the
         // bind address back rather than by inventing one.

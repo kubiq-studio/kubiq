@@ -261,8 +261,12 @@ pub const TASK_ASSIGN_MCPS: [&str; 2] = ["manage-kubiq-tasks", "kubiq-ask"];
 /// The host re-adds this set on every save of a definition carrying the flag, so the interface
 /// draws these servers as ticked and takes no click on them: a checklist that let one be unticked
 /// would be describing a save that is not going to happen.
-pub const COORDINATOR_MCPS: [&str; 4] =
-    ["kubiq-mission", "kubiq-doc", "manage-kubiq-tasks", "kubiq-kb"];
+pub const COORDINATOR_MCPS: [&str; 4] = [
+    "kubiq-mission",
+    "kubiq-doc",
+    "manage-kubiq-tasks",
+    "kubiq-kb",
+];
 
 /// What the **worker** flag implies — mirrors `catalogue::WORKER_MCPS`, on the same terms as
 /// [`COORDINATOR_MCPS`]. Workers have no mission server: the runner puts the task, the plan and

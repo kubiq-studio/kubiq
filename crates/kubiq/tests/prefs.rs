@@ -80,7 +80,10 @@ fn a_blob_survives_the_round_trip() {
 #[test]
 fn a_blob_carries_what_the_project_was_looking_at() {
     let view = ViewPrefs {
-        open_files: vec!["justfile".to_string(), "crates/kubiq/src/app.rs".to_string()],
+        open_files: vec![
+            "justfile".to_string(),
+            "crates/kubiq/src/app.rs".to_string(),
+        ],
         active_file: Some("crates/kubiq/src/app.rs".to_string()),
         expanded: vec!["crates".to_string(), "crates/kubiq".to_string()],
         selected: Some("crates/kubiq/src/app.rs".to_string()),

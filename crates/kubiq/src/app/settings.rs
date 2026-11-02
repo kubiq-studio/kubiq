@@ -2866,7 +2866,9 @@ impl AppState {
         self.workbench.settings.ssh_form = Some(SshProfileForm {
             id,
             method,
-            terminal: held.as_ref().is_some_and(|profile| profile.terminal_enabled),
+            terminal: held
+                .as_ref()
+                .is_some_and(|profile| profile.terminal_enabled),
         });
         self.workbench.settings.error = None;
         cx.notify();
@@ -2904,7 +2906,12 @@ impl AppState {
         let port = self.ssh_port_input.read(cx).value().trim().to_string();
         let user = self.ssh_user_input.read(cx).value().trim().to_string();
         let key_path = self.ssh_key_path_input.read(cx).value().trim().to_string();
-        let typed_command = self.ssh_initial_command_input.read(cx).value().trim().to_string();
+        let typed_command = self
+            .ssh_initial_command_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
         // Trimmed, because a passphrase pasted with a newline around it is not a different one.
         let secret = self.ssh_secret_input.read(cx).value().trim().to_string();
         let Some(form) = self.workbench.settings.ssh_form.take() else {
@@ -2987,7 +2994,12 @@ impl AppState {
     /// Copy a profile under a fresh id and "<name> copy". The secret is not copied (see
     /// [`SshProfile::cloned`]), so the copy has none filed until the user types one.
     pub fn clone_ssh_profile(&mut self, id: SshProfileId, cx: &mut Context<Self>) {
-        let Some(copy) = self.workbench.settings.ssh_profile(id).map(SshProfile::cloned) else {
+        let Some(copy) = self
+            .workbench
+            .settings
+            .ssh_profile(id)
+            .map(SshProfile::cloned)
+        else {
             return;
         };
         self.workbench.settings.host.ssh_profiles.push(copy);

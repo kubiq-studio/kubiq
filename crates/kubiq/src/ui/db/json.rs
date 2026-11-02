@@ -35,8 +35,8 @@ use crate::theme::{self, Family, Role};
 
 /// Everything about JSON text that needs no window.
 pub mod json {
-    use serde::de::IgnoredAny;
     use kubiq_proto::db::DataType;
+    use serde::de::IgnoredAny;
 
     /// Where and why a text is not JSON.
     #[derive(Debug, Clone, PartialEq, Eq)]

@@ -112,29 +112,38 @@ fn header(app: &AppState, file: &OpenFile, cx: &mut Context<AppState>) -> impl I
             this.child(md_options::control(app, file, cx))
         })
         .children(slot(app, file, |spec| spec.header_right, cx))
-        .child(div().flex().items_center().h_full().children(
-            file.viewer.layouts().iter().copied().filter(|layout| file.doc.is_none() || layout.is_annotation()).map(|layout| {
-                let key = key.clone();
-                let pill = choice_pill(
-                    eid2("view-layout", &key, layout.label()),
-                    layout.label(),
-                    current == layout,
-                    cx.listener(move |this, _, _, cx| this.set_view_layout(&key, layout, cx)),
-                )
-                .h_full();
-                if badge && layout.is_annotation() {
-                    div()
-                        .flex()
-                        .items_center()
-                        .h_full()
-                        .child(pill)
-                        .child(status_dot(theme::info(), theme::transparent()))
-                        .into_any_element()
-                } else {
-                    pill.into_any_element()
-                }
-            }),
-        ))
+        .child(
+            div().flex().items_center().h_full().children(
+                file.viewer
+                    .layouts()
+                    .iter()
+                    .copied()
+                    .filter(|layout| file.doc.is_none() || layout.is_annotation())
+                    .map(|layout| {
+                        let key = key.clone();
+                        let pill = choice_pill(
+                            eid2("view-layout", &key, layout.label()),
+                            layout.label(),
+                            current == layout,
+                            cx.listener(move |this, _, _, cx| {
+                                this.set_view_layout(&key, layout, cx)
+                            }),
+                        )
+                        .h_full();
+                        if badge && layout.is_annotation() {
+                            div()
+                                .flex()
+                                .items_center()
+                                .h_full()
+                                .child(pill)
+                                .child(status_dot(theme::info(), theme::transparent()))
+                                .into_any_element()
+                        } else {
+                            pill.into_any_element()
+                        }
+                    }),
+            ),
+        )
         .children(has_more(file).then(|| more(app, file, cx)))
         .into_any_element()
 }

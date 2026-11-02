@@ -443,7 +443,10 @@ fn the_last_declaration_wins_and_clear_withdraws() {
     let ui = outcome.ui.expect("a declaration");
     assert!(ui.payload.contains(r#""surfaceId":"t""#), "{}", ui.payload);
 
-    let outcome = run("", &format!("kubiq.sink.ui({PANEL}); kubiq.sink.clear(); 0"));
+    let outcome = run(
+        "",
+        &format!("kubiq.sink.ui({PANEL}); kubiq.sink.clear(); 0"),
+    );
     assert!(outcome.ui.is_none(), "clear withdraws the panel");
 }
 

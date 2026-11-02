@@ -51,7 +51,7 @@ use crate::theme::{Family, Role};
 use crate::ui::eid;
 use crate::ui::empty;
 use crate::ui::kit::{
-    MultiPicker, Picker, PickerStyle, KubiqIcon, card, field, ghost_button, icon_button, meter,
+    KubiqIcon, MultiPicker, Picker, PickerStyle, card, field, ghost_button, icon_button, meter,
     mono, pill, primary_button, section_label, tag, toggle_pill,
 };
 use crate::ui::work::{activity_colour, bucket_colour};

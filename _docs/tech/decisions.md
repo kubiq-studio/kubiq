@@ -5,7 +5,7 @@ kind: tech
 status: current
 summary: One entry per structural decision — what was chosen, why, and what it costs — cited as `Dnn` across this library.
 read_when: you are about to argue with a rule, reverse a design choice, or make one a reasonable person might later reverse
-updated: 2026-11-01
+updated: 2026-11-02
 verified: 2026-10-08
 depends_on: [tech-architecture]
 review_cycle: quarterly
@@ -5734,6 +5734,33 @@ click with no input to validate, while `kubiq-drone --linger` still takes any va
 reverts to ten minutes. Expiry still says nothing to the user, and a reconnect after it silently
 starts a fresh drone with none of the old panes (`G263`); a longer timeout makes that rarer, not
 explained.
+
+### D232 — A running Kubiq serves remote clients in-process: drone modes are a host setting
+
+Serving used to be a kind of process: `kubiq --serve` opened no window, and Studio's
+`--drone --rdp-dvc` ran a separate console copy, so reaching a machine meant running Kubiq on it
+twice. A remote attach is just another client of the one `Hub` (`D28`), so nothing makes a
+desktop process unfit to serve — and this entry retires the assumption that serving is headless.
+`HostSettings.drone_modes` lists the ways this process serves; `kubiq_host::drone_modes::DroneModes`,
+owned by the coordinator with a clone of the hub that `kubiq-app` hands it, starts every enabled one
+at boot (desktop, headless or `--serve` alike) and reconciles on every host-settings write. The base
+kind `http` is the `--serve` listener (`remote::listen`, with a stop handle); an edition registers more
+by name (`DroneEndpoint` in `Contributions::drone_endpoints`) with a configuration the base never
+parses. `--serve` itself is unchanged.
+
+**Why a setting rather than per-window messages:** what runs must survive a restart and be the same
+for every window, which is exactly what the host record is; the family adds only the asks a
+blob cannot say (`RestartDroneMode`, `RegenerateDroneToken`) and the state only the host knows
+(`DroneModeStatus`). **Why `127.0.0.1`:** unlike `D80`'s `0.0.0.0`, a desktop that starts serving
+because a box was ticked must not appear on the network until the user names an address.
+
+**Cost:** the token is persisted in plaintext in `host-settings.toml` and reaches every attached
+client in `DroneModeStatus.connect_string` — the same reach as the record itself, and the same
+"whoever has it has the workbench" as `D80`. Stopping or rotating closes every remote attached
+through the mode, and with it their panes. The coordinator holds a strong `Hub`, so its inbox
+never closes on its own — as was true of every desktop and `--serve` run before it. A mode on the same port
+as `--serve` races it at boot and one of them fails. `HOST_SETTINGS_SCHEMA` 27: an older build drops
+every mode on its next write.
 
 ## Related docs
 

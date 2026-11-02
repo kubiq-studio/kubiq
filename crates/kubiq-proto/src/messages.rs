@@ -64,7 +64,7 @@ use crate::quota::{QuotaSnapshot, QuotaSource};
 use crate::remote_tools::{RemoteOp, RemoteOutput};
 use crate::repos::{CloneError, CloneRequest, CloneStage, RemoteRepo, RepoSource};
 use crate::search::{self, Batch, Query, Source};
-use crate::settings::SettingsLayer;
+use crate::settings::{DroneModeState, SettingsLayer};
 use crate::stats::HostStats;
 use crate::tasksrc::{
     Binding, DriftSide, Facets, ProviderInfo, RemoteContainer, RemoteItem, RemoteItemId,
@@ -1431,6 +1431,31 @@ pub enum Message {
     SettingsError {
         layer: SettingsLayer,
         error: String,
+    },
+
+    // ── Drone-mode family: UI → host ────────────────────────────────
+    // What runs is [`crate::settings::HostSettings::drone_modes`], written through `SetSettings`:
+    // the host starts, stops and restarts modes to match every write (`D232`). These two are the
+    // asks a blob cannot say.
+    /// Stop the mode if it runs and start it again if it is enabled — the retry after a
+    /// [`DroneModeState::Failed`]. Answered with [`Message::DroneModeStatus`].
+    RestartDroneMode {
+        id: String,
+    },
+    /// Mint a new token for an `http` mode, persist it and restart the mode on it — every window
+    /// attached on the old one is closed. Answered with the host record to every window and a
+    /// [`Message::DroneModeStatus`] carrying the new connect string.
+    RegenerateDroneToken {
+        id: String,
+    },
+
+    // ── Drone-mode family: host → UI ────────────────────────────────
+    /// How one drone mode is doing. To every window, at each change and once per mode to a
+    /// window as it attaches. A mode removed from the settings is said `Stopped` once, then
+    /// never again.
+    DroneModeStatus {
+        id: String,
+        state: DroneModeState,
     },
 
     // ── The command-line shortcut ───────────────────────────────────

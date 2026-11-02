@@ -37,7 +37,8 @@ use crate::ui::kit::blocks::{self, Board, Fence, Look, Word};
 use crate::ui::kit::canvas::Link;
 use crate::ui::kit::menu::{Picker, PickerStyle};
 use crate::ui::kit::{
-    KubiqIcon, ghost_button, harness_icon, icon_button, mono, primary_button, section_label, stepper,
+    KubiqIcon, ghost_button, harness_icon, icon_button, mono, primary_button, section_label,
+    stepper,
 };
 use crate::ui::work::{activity_colour, role_mark};
 use crate::ui::{eid, eid2, handler, indexed};

@@ -5,8 +5,8 @@ kind: tech
 status: current
 summary: The two halves — coordinator and UI — the single bus between them, the rules neither may break, and why the split is drawn before it is needed.
 read_when: you are about to add a capability that crosses the UI/coordinator line, or you want to know why the code is shaped this way
-updated: 2026-11-01
-verified: 2026-11-01
+updated: 2026-11-02
+verified: 2026-11-02
 code_anchors: [crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq/src/lib.rs, crates/kubiq/src/ext/mod.rs, crates/kubiq/src/ext/id.rs, crates/kubiq/src/ext/registry.rs, crates/kubiq/src/ext/ids.rs, crates/kubiq/src/ext/settings.rs, crates/kubiq/src/ext/rail.rs, crates/kubiq/src/ext/menu.rs, crates/kubiq/src/version.rs, crates/kubiq-app/src/lib.rs, crates/kubiq-app/src/main.rs, crates/kubiq/src/app/mod.rs, crates/kubiq/src/app/boot.rs, crates/kubiq/src/app/wire.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/state/remote.rs, crates/kubiq/src/state/windows.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-host/src/remote.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/log.rs, crates/kubiq-host/src/lib.rs, crates/kubiq-proto/src/lib.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-host/src/files/mod.rs, crates/kubiq-host/src/files/diff.rs, crates/kubiq-host/src/kb/mod.rs, crates/kubiq-host/src/git/mod.rs, crates/kubiq-host/src/git/observe.rs, crates/kubiq-host/src/repos/mod.rs, crates/kubiq-host/src/projects.rs, crates/kubiq-host/src/settings.rs, crates/kubiq-host/src/store/mod.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-host/src/store/memory.rs, crates/kubiq-host/src/watch/mod.rs, crates/kubiq-host/src/links.rs, crates/kubiq/src/web_export/mod.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-drone/src/lib.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq/src/ext/runner.rs, crates/kubiq/src/ext/viewer.rs]
 review_cycle: quarterly
 ---
@@ -165,8 +165,11 @@ MessagePack body; the transport contract's framing section owns the shape and wh
 self-describing. `crates/kubiq-host/src/remote.rs` accepts TCP connections, checks a bearer token
 handed out at startup, and upgrades each one to raw `wire` frames. `kubiq-app --serve` (or
 `--serve=<addr>`, `--bind`, `--port`) starts it, and that run opens no window: it is the machine's
-host, reporting to the terminal it was started in. [`operations.md`](./operations.md) documents the
-flags and
+host, reporting to the terminal it was started in. **A windowed run serves too** when a drone mode
+in the host settings says so (`D232`): the same listener, started by the coordinator's
+`drone_modes` service with a clone of the hub and stopped through its `Listening` handle, beside
+the windows rather than instead of them ([`../features/drone.md`](../features/drone.md)).
+[`operations.md`](./operations.md) documents the flags and
 [`../backlog.md`](../backlog.md) (`G168`) what it still lacks — TLS chief among them. The handshake
 is the one part of a connection with a deadline: an unauthenticated peer has ten seconds
 (`HANDSHAKE_TIMEOUT`) to finish it, cleared the moment the `101` upgrade is written, because a

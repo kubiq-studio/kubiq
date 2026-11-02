@@ -132,7 +132,12 @@ pub fn zoom_step(now: f64, up: bool) -> f64 {
     let at = ZOOMS
         .iter()
         .position(|z| (*z - now).abs() < 0.001)
-        .unwrap_or_else(|| ZOOMS.iter().position(|z| *z >= now).unwrap_or(ZOOMS.len() - 1));
+        .unwrap_or_else(|| {
+            ZOOMS
+                .iter()
+                .position(|z| *z >= now)
+                .unwrap_or(ZOOMS.len() - 1)
+        });
     let to = match up {
         true => (at + 1).min(ZOOMS.len() - 1),
         false => at.saturating_sub(1),
@@ -419,7 +424,10 @@ mod tests {
     fn addresses_and_searches() {
         let ddg = SearchEngine::DuckDuckGo;
         assert_eq!(normalize("example.com", ddg), "https://example.com");
-        assert_eq!(normalize("localhost:3000/x", ddg), "http://localhost:3000/x");
+        assert_eq!(
+            normalize("localhost:3000/x", ddg),
+            "http://localhost:3000/x"
+        );
         assert_eq!(normalize("https://a.b/c", ddg), "https://a.b/c");
         assert_eq!(
             normalize("rust lifetimes", ddg),
