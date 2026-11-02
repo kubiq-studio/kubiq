@@ -872,6 +872,25 @@ mod tests {
     use crate::driver::connect;
 
     #[test]
+    fn transaction_control() {
+        for sql in [
+            "BEGIN TRAN",
+            "BEGIN TRANSACTION",
+            "begin",
+            "COMMIT",
+            "COMMIT;",
+            "ROLLBACK TRAN",
+            "SAVE TRANSACTION x",
+            "BEGIN DISTRIBUTED TRANSACTION",
+        ] {
+            assert!(is_transaction_control(sql), "{sql}");
+        }
+        for sql in ["BEGIN TRY", "SELECT 1", "UPDATE t SET a = 1"] {
+            assert!(!is_transaction_control(sql), "{sql}");
+        }
+    }
+
+    #[test]
     fn decimals() {
         assert_eq!(decimal(-1250, 2), "-12.50");
         assert_eq!(decimal(5, 3), "0.005");

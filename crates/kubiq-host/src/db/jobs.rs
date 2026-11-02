@@ -820,7 +820,10 @@ fn apply_edits(
         DbKind::MySql => "START TRANSACTION",
         DbKind::Postgres | DbKind::Sqlite => "BEGIN",
     };
-    conn.execute(begin).map_err(|e| at(0, begin, failure(&e)))?;
+    if let Err(error) = conn.execute(begin) {
+        rollback(conn);
+        return Err(at(0, begin, failure(&error)));
+    }
 
     let opts = ExecOptions {
         read_only: false,
