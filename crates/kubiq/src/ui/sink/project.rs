@@ -2233,7 +2233,7 @@ fn harness_agent_rows(app: &AppState, form: Form, cx: &mut Context<AppState>) ->
         .definition_scope(project)
         .harness_agents;
     let prefix = form.prefix();
-    vec![
+    let mut rows = vec![
         setting_row(
             "Use harness agents",
             "Also list the agents the harnesses read from this project's own folders, marked \
@@ -2265,7 +2265,22 @@ fn harness_agent_rows(app: &AppState, form: Form, cx: &mut Context<AppState>) ->
             )
             .into_any_element(),
         ),
-    ]
+    ];
+    // Only a project that syncs has anything to run on demand.
+    if current.sync {
+        rows.push(setting_row(
+            "Sync now",
+            "Reread the agent files in this project's harness folders and align them now.",
+            ghost_button(
+                ElementId::Name(format!("{prefix}-harness-agents-sync-now").into()),
+                None,
+                "Sync",
+                cx.listener(move |this, _, _, cx| this.sync_project_harness_agents(project, cx)),
+            )
+            .into_any_element(),
+        ));
+    }
+    rows
 }
 
 /// Which of the two catalog pages a project section is.

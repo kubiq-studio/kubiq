@@ -5787,8 +5787,13 @@ owns the mapping onto `AgentDefinition` and when it runs.
   `kubiq-updated`, or the file time where there is none, ties broken by file time — and is written
   to the others with its stamp, so the copies converge.
 - **When.** On project open, on the flag, every time the host sends the definitions list, and after
-  a local agent is saved. No watcher: a file edited by a harness is picked up the next time the list
-  is asked for.
+  a local agent is saved, and on demand (`SyncProjectHarnessAgents`, the project settings' Sync
+  button). No watcher: a file edited by a harness is picked up the next time the list is asked for.
+- **Trust under sync.** Where `sync` is on, each of those runs also trusts the local agents as the
+  files hold them (`trust::trust_local`), so the `D230` prompt never fires for them: the project
+  chose the files as the source of truth. Where `sync` is off the prompt is unchanged. Cost: a
+  definition pulled in with the project's files (a `git pull`) gains its write access without a
+  review once the project syncs.
 - **Starting one.** While the project shows them, a local agent is a project definition to a
   launch: read into the launch snapshot as a record (no grant, no `extends`, no instructions file),
   resolved like a stored one, and checked under `D230` — fingerprinted in the same per-machine

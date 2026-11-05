@@ -503,7 +503,11 @@ sync rule are `agent-manager`'s (`crates/agent-manager/src/harness_agents.rs`, l
 [`../tech/agent-manager.md`](../tech/agent-manager.md)). Both off by default,
 both drawn only for a project already in the catalogue, both `ProjectRecord.harness_agents` written
 by `SetProjectHarnessAgents` on the click (`AppState::set_project_harness_agents`, mirrored at once
-into `DefinitionScope::harness_agents`). With `Use harness agents` on, every agent found in those
+into `DefinitionScope::harness_agents`). With `Sync agents between harnesses` on, a **Sync now**
+row shows a `Sync` button that sends `SyncProjectHarnessAgents` (`AppState::sync_project_harness_agents`):
+the host rereads and aligns the files by the same newest-wins rule and sends the definitions list
+back. A synced project is never prompted about its local agents (`D230` strip): the host trusts them
+as the files hold them each time it syncs. With `Use harness agents` on, every agent found in those
 folders is listed among this project's own setups with a `Local` badge and the folders it has a
 copy in; Edit opens it in the same form and saves back to its files, Delete removes every copy
 behind a confirm that names the folders, Clone writes a stored copy, and a stored setup of the same

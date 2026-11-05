@@ -423,6 +423,34 @@ pub fn record_local(root: &Path, project: ProjectId, definition: &AgentDefinitio
     record(root, project, TrustKind::Definition, &written.id, value);
 }
 
+/// Trust every harness agent under `local` as the files hold it now: what a project that syncs
+/// its agents (`D233`) says about them, so a file edited outside Kubiq, or one a sync wrote, is
+/// not asked about. Stored definitions are untouched.
+pub fn trust_local(root: &Path, project: ProjectId, local: &Path) {
+    let records = local_records(Some(local), &read_definitions(&definitions_dir(root, project)));
+    if records.is_empty() {
+        return;
+    }
+    let trusted = Trusted::of(root, project);
+    let changed: Vec<(String, String)> = records
+        .iter()
+        .filter_map(|record| {
+            let print = definition_print(record);
+            trusted
+                .reason(TrustKind::Definition, &record.id, &print)
+                .map(|_| (record.id.clone(), print))
+        })
+        .collect();
+    if changed.is_empty() {
+        return;
+    }
+    edit(root, project, |file| {
+        for (id, print) in changed {
+            file.map(TrustKind::Definition).insert(id, print);
+        }
+    });
+}
+
 /// Every project-layer setting of `project` this machine does not trust, definitions first — the
 /// project's whole list, which is what the window is always sent. `local` is the project's folder
 /// when it lists its harness agents (`D233`): they are definitions it runs, so they are checked

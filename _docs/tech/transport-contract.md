@@ -141,6 +141,7 @@ recolour and a move on disk.
 | `UpdateProject` | UI → host | `project_id`, `name?`, `colour?`, `custom_colour?`, `search_excludes?`, `index?`, `mission_term?`, `tools?`, `managed_repos?`, `lanes?`, `runs_on?`, `definitions_use_global?`, `definitions_allowed?` | `ProjectChanged` |
 | `SetProjectInitials` | UI → host | `project_id`, `initials` | `ProjectChanged` |
 | `SetProjectHarnessAgents` | UI → host | `project_id`, `harness_agents: { show, sync }` | `ProjectChanged` (to everyone) and `AgentDefinitions` |
+| `SyncProjectHarnessAgents` | UI → host | `project_id` | `AgentDefinitions` to the asker, then `UntrustedProjectSettings`; ignored while the project does not sync |
 | `LocateProject` | UI → host | `project_id`, `path` | `ProjectChanged` or `ProjectError` |
 | `SetProjectStorage` | UI → host | `project_id`, `storage` | `ProjectStorageMoved` + `ProjectChanged`, or `ProjectStorageError` |
 | `OpenedProject` | UI → host | `project_id` | `ProjectChanged` |

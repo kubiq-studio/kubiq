@@ -1993,9 +1993,15 @@ impl Coordinator {
             } => {
                 let replies = self.projects.set_harness_agents(project_id, harness_agents);
                 self.answer(client, replies);
+                self.align_harness_agents(project_id);
                 self.send_definitions(client);
                 // Listed, they are definitions the project runs, so the window hears which of
                 // them this machine does not trust yet (`D230`).
+                self.send_untrusted(client, project_id);
+            }
+            Message::SyncProjectHarnessAgents { project_id } => {
+                self.align_harness_agents(project_id);
+                self.send_definitions(client);
                 self.send_untrusted(client, project_id);
             }
             Message::SetProjectStorage {
@@ -8233,10 +8239,30 @@ impl Coordinator {
 
     /// `project`'s folder when it lists its harness agents (`D233`) — what makes them definitions
     /// a run in it can start from and the trust check covers (`D230`). `None` otherwise.
+    ///
+    /// A project that syncs has them aligned and trusted first ([`Self::align_harness_agents`]),
+    /// so asking is what keeps a synced project from being prompted about its own agent files.
     fn local_agents(&self, project: ProjectId) -> Option<PathBuf> {
+        self.align_harness_agents(project);
         self.harness_agents_of(project)
             .filter(|(_, flags)| flags.show)
             .map(|(root, _)| root)
+    }
+
+    /// Reread and align `project`'s harness agent files when it syncs them, and trust what they
+    /// hold: the user opted into the files being the source of truth, so a changed agent is not
+    /// asked about (`D230` still prompts where `sync` is off). No-op without `sync`.
+    fn align_harness_agents(&self, project: ProjectId) {
+        let Some((root, flags)) = self.harness_agents_of(project) else {
+            return;
+        };
+        if !flags.sync {
+            return;
+        }
+        crate::harness_agents::sync(&root);
+        if flags.show {
+            crate::trust::trust_local(&self.root.path, project, &root);
+        }
     }
 
     /// Whether `project`'s own store holds a definition `id` — the one listed when a harness

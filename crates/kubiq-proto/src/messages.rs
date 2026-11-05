@@ -1324,6 +1324,10 @@ pub enum Message {
         project_id: ProjectId,
         harness_agents: crate::projects::HarnessAgents,
     },
+    /// Reread this project's harness agent files and align them now (`D233`) — the sync a project
+    /// with `sync` on runs on open and on every definitions list, on demand. Ignored while the
+    /// project does not sync. Answered with the [`Message::AgentDefinitions`] list to the asker.
+    SyncProjectHarnessAgents { project_id: ProjectId },
     /// Move this project's own data between the two storage modes (`D173`) — out of
     /// `<config root>/projects/<ulid>/` into the project's own `.kubiq/`, or back.
     ///
@@ -3845,6 +3849,7 @@ impl Message {
             | Message::UpdateProject { project_id, .. }
             | Message::SetProjectInitials { project_id, .. }
             | Message::SetProjectHarnessAgents { project_id, .. }
+            | Message::SyncProjectHarnessAgents { project_id }
             | Message::LocateProject { project_id, .. }
             | Message::SetProjectStorage { project_id, .. }
             | Message::ProjectStorageMoved { project_id, .. }

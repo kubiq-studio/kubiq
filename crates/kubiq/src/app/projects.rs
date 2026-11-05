@@ -314,6 +314,15 @@ impl AppState {
         cx.notify();
     }
 
+    /// Reread this project's harness agent files and align them now (`D233`). The host answers
+    /// with the definitions list, so nothing is mirrored here.
+    pub fn sync_project_harness_agents(&mut self, project: ProjectId, cx: &mut Context<Self>) {
+        self.bus.send(Message::SyncProjectHarnessAgents {
+            project_id: project,
+        });
+        cx.notify();
+    }
+
     /// Whether this project is on every global definition or only on the ones it named.
     ///
     /// Sent on the click, the way `set_project_index` is: the host holds the answer, so a dialog
