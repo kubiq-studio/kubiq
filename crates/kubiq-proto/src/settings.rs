@@ -234,6 +234,25 @@ pub struct HostSettings {
     /// the one on disk for a mode it already holds ([`Self::keep_drone_tokens`]).
     #[serde(default)]
     pub drone_modes: Vec<DroneMode>,
+
+    /// The harness and model the definitions a fresh install starts with run on — what the
+    /// onboarding's **Default agent** step picks. `None` is the step's "not configured": it is
+    /// offered while this is unset, and the host seeds with the first harness it finds.
+    ///
+    /// **Host-mutated.** Written only by [`crate::messages::Message::SetDefaultAgent`], which also
+    /// re-points the seeded definitions; it rides `SetSettings` as an echo of what the host said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_agent: Option<DefaultAgent>,
+}
+
+/// The default agent's harness and model ([`HostSettings::default_agent`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefaultAgent {
+    /// The library's harness id, e.g. `claude-code`.
+    pub agent_type: String,
+    /// The harness's own model id; `None` is the harness's own default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// One way of serving remote clients from this process (`D232`).
@@ -1047,6 +1066,7 @@ impl Default for HostSettings {
             ssh_profiles: Vec::new(),
             feedback_url: None,
             drone_modes: Vec::new(),
+            default_agent: None,
         }
     }
 }

@@ -287,7 +287,7 @@ pub fn render(
         cx.entity(),
         Some(crate::state::editor::from_tab_key(key).0.into()),
     );
-    render_linked_scrollable(app, key, source, frontmatter_open, follow, cx)
+    render_linked_scrollable(app, key, source, frontmatter_open, true, follow, cx)
 }
 
 /// The same document, with a caller's own answer to a clicked link.
@@ -308,14 +308,34 @@ pub fn render_linked(
     + 'static,
     cx: &mut gpui::Context<AppState>,
 ) -> AnyElement {
-    render_linked_scrollable(app, key, source, frontmatter_open, follow, cx)
+    render_linked_scrollable(app, key, source, frontmatter_open, true, follow, cx)
 }
 
+/// [`render_linked`] for a small fixed box — a dialog's body — without the bottom inset.
+///
+/// The inset is padding on the view's own box, outside the scrolling list, so it does not scroll
+/// the last line clear: it takes eight lines off the viewport. A pane can spare that; the
+/// onboarding dialog could not, and its page was cut off at half the body with the rest empty.
+pub fn render_fitted(
+    app: &AppState,
+    key: &str,
+    source: &str,
+    follow: impl Fn(&SharedString, &gpui::ClickEvent, &mut gpui::Window, &mut gpui::App)
+    + Send
+    + Sync
+    + 'static,
+    cx: &mut gpui::Context<AppState>,
+) -> AnyElement {
+    render_linked_scrollable(app, key, source, false, false, follow, cx)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_linked_scrollable(
     app: &AppState,
     key: &str,
     source: &str,
     frontmatter_open: bool,
+    bottom_inset: bool,
     follow: impl Fn(&SharedString, &gpui::ClickEvent, &mut gpui::Window, &mut gpui::App)
     + Send
     + Sync
@@ -363,9 +383,11 @@ fn render_linked_scrollable(
         .mx_auto()
         .px(theme::md_min_margin())
         .pt(theme::md_top_inset(line_height_px))
-        .pb(theme::md_bottom_inset(line_height_px))
         .scrollable(true)
         .selectable(true);
+    if bottom_inset {
+        document = document.pb(theme::md_bottom_inset(line_height_px));
+    }
     if let Some(measure) = measure {
         document = document.max_w(measure);
     }

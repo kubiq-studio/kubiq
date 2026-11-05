@@ -10,6 +10,7 @@
 
 pub mod a2ui;
 pub mod about;
+pub mod agent_setup;
 pub mod agents;
 pub mod archify;
 pub mod ask;

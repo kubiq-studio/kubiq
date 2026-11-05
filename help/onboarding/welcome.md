@@ -18,4 +18,5 @@ opencode, Copilot CLI — side by side under one window, each in a real terminal
   Git, the agents, tasks and more — each a different view of the same project.
 
 The next few pages set your colours and point out where things are. You can leave at any time
-with **Skip**, and come back through **Show onboarding** in the titlebar's overflow menu.
+with **Skip**, and come back through **Show onboarding** in the title bar's **More** menu — the
+chevron drawn below.

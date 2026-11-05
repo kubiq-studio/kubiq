@@ -5,8 +5,8 @@ kind: wip
 status: draft
 summary: An inspector-style help mode — point at any part of the window and read what it is — and the element identity scheme underneath it, which exists to serve personalisation and extensions as much as help. Phases 1 and 2 are built — the `UiId` grammar, a static catalogue of names with a label and a sentence each, a `.ui_id()` element extension feeding a per-frame bounds registry, the deepest-hit lookup, and the targeting mode itself — ⇧F1, a full-window layer, a highlight and a balloon, closed by Escape or its own Done. Phase 3a — marking the rail and the titlebar, every name the catalogue currently holds — is built too, proven by headless render tests against the real elements. The help pages behind the sentences (phase 3b) are still designed here and not written.
 read_when: you are marking up a screen area with a `UiId`, working on the in-place help overlay, or keying anything durable to a place on the screen
-updated: 2026-09-29
-verified: 2026-09-29
+updated: 2026-11-05
+verified: 2026-11-05
 code_anchors: [crates/kubiq/src/state/ui_id.rs, crates/kubiq/src/ui/ident.rs, crates/kubiq/src/ui/help_target.rs, crates/kubiq/src/ui/rail.rs, crates/kubiq/src/ui/titlebar.rs, crates/kubiq/tests/ui_id.rs]
 depends_on: [wip-help, feat-workbench, tech-ui, inbox-ui-id]
 ---
@@ -28,7 +28,8 @@ phases are kept together so they compose.
 Chrome's element inspector is the model. A user presses a key or a titlebar control; the interface
 stops responding normally; whatever the cursor is over is drawn with a translucent bordered rectangle
 and a balloon saying what it is and what it does. Moving the mouse moves the highlight. Nothing
-clicks through. The mode persists until it is explicitly closed.
+clicks through. The mode persists until it is explicitly closed. Its user-facing name is **Click
+for instant help**.
 
 That is a different shape from the help Kubiq already has. [`help.md`](./help.md) describes a panel
 that answers *where am I* — a five-rung ladder from the focused panel, the destination and the rail
@@ -342,17 +343,23 @@ exactly where it was.
 **Three ways in, and F1 keeps its job.** ⇧F1 — beside F1 because it is the same question asked the
 other way round, distinct from it because the answers are different sizes — bound in both the
 `Workbench` and the `Input` contexts the way F1 is, so it works with the caret in a field. A
-**Point at something** button now sits on the titlebar strip beside Help (`ui_id::TITLEBAR_POINT_AT`),
-and **Point at something…** stays in the overflow menu too, directly under **Help**. The `?`
+**Click for instant help** button — the mode's user-facing name; the code keeps `point-at` and
+`PointAtSomething` — sits on the titlebar strip beside Help (`ui_id::TITLEBAR_POINT_AT`), its
+tooltip saying how to use it and how to leave, and **Click for instant help** stays in the overflow
+menu too, directly under **Help**. The `?`
 control and F1 are untouched: `reveal_help` opens a page about where you are standing,
 `open_help_target` waits for you to point.
 
-**Two ways out, and a click is neither.** Escape, and a **Done** button in a small bar at the
-bottom right of the overlay — bottom right because the titlebar and the rail are the two areas a
+**Three ways out, and a stray click is none of them.** Escape, a **Done** button in a small bar at
+the bottom right of the overlay — bottom right because the titlebar and the rail are the two areas a
 reader most wants to point at, and a bar across either would be furniture standing on its own
-subject. The catcher `.occlude()`s and binds no press at all, so a click anywhere is inert: the
-brief is that the mode persists until it is explicitly closed, and a mode that ends on a stray
-click is a mode the reader loses by trying to point precisely. Opening the target's page on a click
+subject — and a second click on the titlebar button, which makes it a toggle. The catcher
+`.occlude()`s, so the button underneath never receives that click: the catcher's one press handler
+hit-tests the point and closes the mode only when the deepest mark there is
+`ui_id::TITLEBAR_POINT_AT` (`AppState::toggle_help_target` is the button's own listener, so it only
+ever turns the mode on). A click anywhere else is inert: the brief is that the mode persists until
+it is explicitly closed, and a mode that ends on a stray click is a mode the reader loses by trying
+to point precisely. Opening the target's page on a click
 is the obvious next gesture and is `G319` — it needs a page to open.
 
 **An unmarked region reads as nothing, and a nameless one says so.** No hit means no rectangle and

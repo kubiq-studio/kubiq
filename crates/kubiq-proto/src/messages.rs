@@ -658,6 +658,19 @@ pub enum Message {
         id: String,
         project: Option<ProjectId>,
     },
+    /// Make `agent_type` and `model` the default agent — the onboarding's **Default agent** step.
+    /// The host records it as [`crate::settings::HostSettings::default_agent`] and re-points the
+    /// definitions it seeds on a fresh install at it (writing them first when the global root
+    /// holds none); every other definition is left alone. `model: None` is the harness's own
+    /// default.
+    ///
+    /// Answered with [`Message::AgentDefinitions`] to the asker and the host [`Message::Settings`]
+    /// to every window, or [`Message::AccountError`] when `agent_type` is not a harness this
+    /// machine can start.
+    SetDefaultAgent {
+        agent_type: String,
+        model: Option<String>,
+    },
     /// Host → UI: project-layer settings this machine does not trust (`D230`) — a project's own
     /// agent definition or catalog MCP server whose content no longer matches what Kubiq last
     /// wrote or the user last approved, or one this machine has never seen. Sent to the window

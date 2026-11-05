@@ -1085,6 +1085,7 @@ fn refusal(message: &Message) -> Option<Message> {
         | SaveAgentDefinition { .. }
         | CloneAgentDefinition { .. }
         | DeleteAgentDefinition { .. }
+        | SetDefaultAgent { .. }
         | ListMcps
         | ListTools { .. }
         | RunTool { .. }

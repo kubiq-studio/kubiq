@@ -5,8 +5,8 @@ kind: tech
 status: draft
 summary: The complete message set the UI and the coordinator exchange — the pane, session, project, file, git, work, conversation, search, account, quota, agent definition (with its skills and MCP catalog), command-line, host browse, database, browser, remote-tool, connector, repository, task-source, assist, notification, web asset, drone-mode and carrier families, the tunnel channel beside the bus, the framing rules, and the procedure for adding a variant.
 read_when: you are adding, changing or removing a message, or wiring either half to the bus
-updated: 2026-11-02
-verified: 2026-11-02
+updated: 2026-11-05
+verified: 2026-11-05
 code_anchors: [crates/kubiq-proto/src/messages.rs, crates/kubiq-proto/src/ask.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/armed.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/quota.rs, crates/kubiq-host/src/quota.rs, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/ids.rs, crates/kubiq-proto/src/browser.rs, crates/kubiq-proto/src/remote_tools.rs, crates/kubiq-proto/src/tunnel.rs, crates/kubiq-tunnel/src/mux.rs, crates/kubiq-tunnel/src/registry.rs, crates/kubiq-tunnel/src/pin.rs, crates/kubiq-tunnel/src/tls.rs, crates/kubiq-tunnel/src/duplex.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/src/mcp/remote.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/feedback.rs, crates/kubiq-host/src/feedback/mod.rs, crates/kubiq-host/src/feedback/api.rs, crates/kubiq-host/src/feedback/issues.rs, crates/kubiq-host/src/feedback/keychain.rs, crates/kubiq-proto/src/update.rs, crates/kubiq-host/src/updates/mod.rs, crates/kubiq-host/src/updates/feed.rs, crates/kubiq-host/src/updates/apply.rs, crates/kubiq-proto/src/files.rs, crates/kubiq-proto/src/git.rs, crates/kubiq-proto/src/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-proto/src/conversation.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-proto/src/tasksrc.rs, crates/kubiq-proto/src/stats.rs, crates/kubiq-proto/src/assist.rs, crates/kubiq-proto/src/notifications.rs, crates/kubiq-proto/src/tools.rs, crates/kubiq-host/src/notifications/mod.rs, crates/kubiq-host/src/assist/mod.rs, crates/kubiq-host/src/assist/api.rs, crates/kubiq-host/src/assist/providers.rs, crates/kubiq-host/src/assist/subject.rs, crates/kubiq-host/src/assist/stub.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-proto/src/mcp.rs, crates/kubiq-proto/src/catalog.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-proto/src/mission.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/drone_modes.rs]
 depends_on: [tech-architecture]
 review_cycle: monthly
@@ -2563,6 +2563,7 @@ saved recipe one may be started from, and the two never share a word in prose (`
 | `SaveAgentDefinition` | UI → host | `definition`, `replaces?` | `AgentDefinitions`, or `AccountError` |
 | `CloneAgentDefinition` | UI → host | `id`, `new_id`, `project?` | `AgentDefinitions`, or `AccountError` |
 | `DeleteAgentDefinition` | UI → host | `id`, `project?` | `AgentDefinitions`, or `AccountError` |
+| `SetDefaultAgent` | UI → host | `agent_type`, `model?` | `AgentDefinitions` and host `Settings` (to everyone), or `AccountError` |
 | `UntrustedProjectSettings` | host → UI | `project_id`, `items: [UntrustedItem]` | — |
 | `TrustProjectItems` | UI → host | `project_id`, `items: [TrustItem]` (with `fingerprint`) | `UntrustedProjectSettings` |
 | `ListMcps` | UI → host | — | `Mcps` |
@@ -2615,9 +2616,21 @@ replace-by-default rule crossing the bus intact.
 
 **Three defaults exist before anyone writes one.** A config root holding no definition at all is
 seeded, once, with `Coordinator`, `Kubiq helper` and `Worker` — the roles Kubiq's own MCP servers are
-split along (the first is the mission planner's) — pinned to whichever harness this machine has. `Coordinator` carries the tags
+split along (the first is the mission planner's) — pinned to the default agent
+(`HostSettings::default_agent`) when it names a harness this machine can start, else to the first
+harness it has. `Coordinator` carries the tags
 `coordinator` and `planner`, `Worker` carries `worker`, and `Kubiq helper` carries none. A root that holds one is left alone,
 so deleting back to nothing is not an invitation to write them again.
+
+**The default agent re-points the three.** `SetDefaultAgent` (the onboarding's Default agent step)
+is refused with `AccountError` (`Default agent not set: …`) when `agent_type` is not an available
+harness. Otherwise the host seeds the three on it when the global root is empty, or rewrites
+whichever of the three still exist globally — harness and model; a harness change also clears the
+mode and thinking level, which were the old harness's words — and touches no other definition
+(`Agents::set_default_agent`, `DEFAULT_DEFINITIONS`). It then records
+`HostSettings::default_agent` (`{ agent_type, model? }`), host-mutated only, and answers the host
+`Settings` to every window and `AgentDefinitions` to the asker. The setting being set is what
+"configured" means to the onboarding.
 
 **No harness, no new definition.** With no harness binary found and no command override set there
 is nothing a definition could name, so `SaveAgentDefinition` is refused for an id that does not

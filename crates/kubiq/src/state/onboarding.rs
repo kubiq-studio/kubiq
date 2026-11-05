@@ -48,6 +48,9 @@ pub enum Trigger {
 pub enum FormKind {
     /// Pick the palette the window wears.
     Palette,
+    /// Pick the default agent's harness and model (`crate::state::agent_setup`). Passing the step
+    /// confirms the pick; Skip leaves it unset.
+    DefaultAgent,
 }
 
 /// What a step shows.
@@ -94,6 +97,10 @@ pub struct Step {
     pub back: Gate,
     pub next: Gate,
     pub on_enter: Option<StepAction>,
+    /// The controls the step's words name, beyond a highlight's own target. The dialog draws
+    /// each with its real icon, its name and its sentence, so a reader sees the button the text
+    /// talks about; a highlight's card draws their icons beside its title.
+    pub controls: Vec<UiId>,
 }
 
 impl Step {
@@ -140,6 +147,12 @@ impl Step {
         self
     }
 
+    /// The controls this step's words name — see [`Step::controls`].
+    pub fn naming(mut self, controls: impl IntoIterator<Item = UiId>) -> Self {
+        self.controls.extend(controls);
+        self
+    }
+
     fn with(title: impl Into<SharedString>, body: StepBody) -> Self {
         Self {
             title: title.into(),
@@ -147,6 +160,7 @@ impl Step {
             back: Gate::On,
             next: Gate::On,
             on_enter: None,
+            controls: Vec::new(),
         }
     }
 

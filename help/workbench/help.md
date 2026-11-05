@@ -2,7 +2,7 @@
 id: workbench-help
 title: The help panel
 summary: How to open the manual inside the window, find the page for the screen you are on, and point at a control for its one-line help.
-keywords: [help, manual, F1, point at, contents, follow mode, documentation, balloon]
+keywords: [help, manual, F1, instant help, point at, contents, follow mode, documentation, balloon]
 context: [panel.kubiq.help]
 order: 130
 status: current
@@ -10,7 +10,7 @@ related: [workbench-titlebar, getting-started, workbench-panels, troubleshooting
 ---
 
 The help panel is this manual, inside the window. Press **F1** on any screen and it opens on the page
-for that screen, in the right region, without leaving your work. **Point at something** is the other
+for that screen, in the right region, without leaving your work. **Click for instant help** is the other
 way in: it tells you about one control instead of the whole screen.
 
 ## The parts
@@ -18,7 +18,7 @@ way in: it tells you about one control instead of the whole screen.
 | Part | What it does |
 |---|---|
 | **Help** ![Help](../img/ui/titlebar-help.png) | In the [title bar](workbench-titlebar), and **F1**: opens the page for where you are |
-| **Point at something** ![Point at something](../img/ui/titlebar-point-at.png) | **⇧F1**: waits for you to point at a control and says what it is |
+| **Click for instant help** ![Click for instant help](../img/ui/titlebar-point-at.png) | **⇧F1**: waits for you to point at a control and says what it does; click it again to leave |
 | **Back**, **Forward** | Step through the pages you have read, as a browser does |
 | **Contents** ![Contents](../img/ui/view-tree.png) | Shows or hides the list of every page, grouped in folds; click a page to open it |
 | Page title | Names the page you are reading |
@@ -28,12 +28,13 @@ way in: it tells you about one control instead of the whole screen.
 A page marked as a draft carries a note at the top saying it may trail the build you are running. A
 page listed greyed in **Contents** has not been written, and opens a notice saying so.
 
-**Point at something** draws a box around whatever the pointer is over and a balloon beside it with the control's name and one or two sentences. Move the pointer to read another.
-Clicks do nothing in this mode, so you can point at a button without pressing it. Press **Esc** or
-**Done** to leave. A control Kubiq has named but not yet described says `This place has a name but no
-description yet.`; an unnamed area shows nothing.
+**Click for instant help** draws a box around whatever the pointer is over and a balloon beside it with the control's name and one or two sentences. Move the pointer to read another.
+Clicks on other controls do nothing in this mode, so you can point at a button without pressing it.
+Click the instant-help button again, press **Esc** or press **Done** to leave. A control Kubiq has
+named but not yet described says `This place has a name but no description yet.`; an unnamed area
+shows nothing.
 
-The title bar's **More** menu, beside **Settings**, has **Help** and **Point at something…** too.
+The title bar's **More** menu, beside **Settings**, has **Help** and **Click for instant help** too.
 
 ## What you can do here
 

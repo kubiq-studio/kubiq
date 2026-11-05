@@ -1454,6 +1454,7 @@ pub struct AppState {
 // The screen-sized halves of `AppState`. Each is one `impl AppState` block; the struct,
 // its companions and the free window functions stay here.
 mod about;
+mod agent_setup;
 mod agents;
 mod ask;
 mod board;

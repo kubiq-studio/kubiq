@@ -267,12 +267,18 @@ pub fn help_balloon_gap() -> f32 {
 /// target. `ONBOARDING_CALLOUT_ROOM` is, like `HELP_BALLOON_ROOM`, the height the placement
 /// arithmetic assumes rather than one the card is given. `ONBOARDING_DOT` is a progress dot's side,
 /// and `ONBOARDING_GLOW` the width of the pulsing ring around a highlight's outline.
+/// `ONBOARDING_GLYPH` is the side of the box a named control's icon is drawn in, beside the words.
 pub const ONBOARDING_WIDTH: f32 = 560.0;
 pub const ONBOARDING_HEIGHT: f32 = 440.0;
 pub const ONBOARDING_CALLOUT_WIDTH: f32 = 360.0;
 pub const ONBOARDING_CALLOUT_ROOM: f32 = 190.0;
 pub const ONBOARDING_DOT: f32 = 7.0;
 pub const ONBOARDING_GLOW: f32 = 4.0;
+pub const ONBOARDING_GLYPH: f32 = 24.0;
+
+pub fn onboarding_glyph() -> f32 {
+    scaled(ONBOARDING_GLYPH)
+}
 
 pub fn onboarding_width() -> f32 {
     scaled(ONBOARDING_WIDTH)

@@ -13,24 +13,27 @@
 //! complete frame's `ui::ident` record — a frame behind, which a still target never shows — and a
 //! target not on screen leaves the card centred with nothing outlined.
 
+pub mod agent_setup;
 pub mod flows;
 
 use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnimationExt as _, AnyElement, Context, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement as _, Styled as _, Window, anchored, deferred, div, point, pulsating_between, px,
+    AnimationExt as _, AnyElement, Context, ElementId, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, SharedString, Styled as _, Window, anchored, deferred, div,
+    point, pulsating_between, px,
 };
+use gpui_component::{Sizable as _, Size};
 
 use crate::app::AppState;
 use crate::state::onboarding::{FormKind, OnboardingRun, StepBody};
-use crate::state::ui_id::MarkRect;
+use crate::state::ui_id::{MarkRect, UiId, describe};
 use crate::theme::{self, Family, Role};
 use crate::ui::kit::{
     choice_pill, ghost_button, modal_locked, modal_note, primary_button, pulse_animation,
 };
-use crate::ui::{ident, viewer};
+use crate::ui::{ident, titlebar, viewer};
 
 /// The wizard, or nothing while no run is open. Called from the window root.
 pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> AnyElement {
@@ -74,8 +77,10 @@ fn dialog(
             )
             .into_any_element(),
         StepBody::Form(FormKind::Palette) => palette_form(app, cx),
+        StepBody::Form(FormKind::DefaultAgent) => agent_setup::form(app, cx),
         StepBody::Highlight { .. } => div().into_any_element(),
     };
+    let body = with_legend(app, &step.controls, body);
     modal_locked(
         "onboarding",
         theme::accent(),
@@ -91,10 +96,10 @@ fn dialog(
 /// A step's markdown, its frontmatter dropped (the page is authored in `help/onboarding/`), filling
 /// the room it is given and scrolling inside it.
 ///
-/// The scrollable text view takes its height from its parent as a percentage, and a flex item's
-/// height is not one it can resolve against: inside the modal it fell back to the document's own
-/// height measured at the wrong width, and the body was clipped at about half the dialog. An
-/// absolutely positioned box pinned to all four edges has a definite size, so the view gets it.
+/// The text view is `render_fitted`, without the eight-line bottom inset a pane's preview wears:
+/// that inset is padding outside the scrolling list, and in this body it took half the height, so
+/// the page was cut off mid-line over an empty half. The absolutely positioned box pinned to all
+/// four edges hands the view a definite size to scroll inside.
 fn markdown_body(
     app: &AppState,
     run: &OnboardingRun,
@@ -114,9 +119,82 @@ fn markdown_body(
                 .inset_0()
                 .flex()
                 .flex_col()
-                .child(viewer::markdown::render_linked(
-                    app, &key, source, false, follow, cx,
+                .child(viewer::markdown::render_fitted(
+                    app, &key, source, follow, cx,
                 )),
+        )
+        .into_any_element()
+}
+
+/// The controls a step's words name, under its body: each with the icon it wears on screen, its
+/// name and its sentence — the same ones in-place help shows. The body keeps the rest of the height
+/// and scrolls; the legend does not.
+fn with_legend(app: &AppState, controls: &[UiId], body: AnyElement) -> AnyElement {
+    if controls.is_empty() {
+        return body;
+    }
+    let dark = app.workbench.theme_id.mode() == theme::Mode::Dark;
+    let rows = controls.iter().map(|id| {
+        let (label, blurb): (SharedString, &str) = match describe(id) {
+            Some(info) => (info.label.into(), info.blurb),
+            None => (id.leaf().to_string().into(), ""),
+        };
+        div()
+            .flex()
+            .items_start()
+            .gap_2()
+            .child(control_glyph(id, dark))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .text_size(theme::font(Family::Chrome, Role::Body))
+                    .text_color(theme::text_muted())
+                    .child(
+                        div()
+                            .text_color(theme::text())
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(label),
+                    )
+                    .child(blurb),
+            )
+            .into_any_element()
+    });
+    div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h(px(0.))
+        .gap_3()
+        .child(body)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_none()
+                .gap_2()
+                .pt_2()
+                .border_t_1()
+                .border_color(theme::border())
+                .children(rows),
+        )
+        .into_any_element()
+}
+
+/// One control's icon as the titlebar draws it, in a box the size of the strip's own button so a
+/// reader recognises it; an empty box of the same size for a control with no single icon.
+fn control_glyph(id: &UiId, dark: bool) -> AnyElement {
+    div()
+        .size(px(theme::onboarding_glyph()))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .border_1()
+        .border_color(theme::border())
+        .children(
+            titlebar::control_icon(id, dark)
+                .map(|icon| icon.with_size(Size::Small).text_color(theme::text())),
         )
         .into_any_element()
 }
@@ -245,6 +323,7 @@ fn callout_layer(
     let gap = theme::help_balloon_gap();
     let width = theme::onboarding_callout_width().min(vw - 2. * gap);
     let (left, top) = place_callout(rect, width, vw, vh);
+    let dark = app.workbench.theme_id.mode() == theme::Mode::Dark;
 
     let card = div()
         .id("onboarding-callout")
@@ -264,9 +343,23 @@ fn callout_layer(
         .occlude()
         .child(
             div()
-                .text_size(theme::font(Family::Chrome, Role::Label))
-                .text_color(theme::text())
-                .child(step.title.clone()),
+                .flex()
+                .items_center()
+                .gap_1()
+                // The target's icon and those of the controls the words name, as on screen.
+                .children(
+                    std::iter::once(target)
+                        .chain(step.controls.iter())
+                        .filter(|id| titlebar::control_icon(id, dark).is_some())
+                        .map(|id| control_glyph(id, dark)),
+                )
+                .child(
+                    div()
+                        .pl_1()
+                        .text_size(theme::font(Family::Chrome, Role::Label))
+                        .text_color(theme::text())
+                        .child(step.title.clone()),
+                ),
         )
         .child(
             div()

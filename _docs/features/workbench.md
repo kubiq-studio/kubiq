@@ -852,9 +852,12 @@ agent: such a pane carries no `AgentId`, and `PaneState` names none, so it is ne
 opening empty. Then **New terminal**
 (`IconName::SquareTerminal`) opens the bottom region if it is shut and
 spawns exactly one pane, never two, whether the region was already open or had to be opened onto
-panes still in it. Then the notification bell, feedback, help, and **Point at something**
-(`KubiqIcon::TitlebarPointAt`, the ⇧F1 gesture given a control of its own) — help asks about the
-screen you are standing on, this one waits for you to point at a part of it, so they are neighbours.
+panes still in it. Then the notification bell, feedback, help, and **Click for instant help**
+(`KubiqIcon::TitlebarPointAt`, the ⇧F1 gesture given a control of its own, and a toggle: a second
+click turns the mode off, its tooltip `ui::titlebar::INSTANT_HELP_TIP` says so) — help asks about
+the screen you are standing on, this one waits for you to point at a part of it, so they are
+neighbours. `ui::titlebar::control_icon` maps each button's `UiId` to the icon it draws, for the
+onboarding that shows them.
 Then **Settings**, and the overflow chevron flush against it as the fifth split button in the row:
 settings is the one thing in that menu reached often enough to stand on the strip, and the chevron
 keeps the rest — Explore the project in browser (needing

@@ -2987,6 +2987,7 @@ impl AppState {
             // a harness that has been uninstalled has to leave the menu, or read as unavailable.
             Message::AgentTypes { agent_types } => {
                 self.workbench.agent_types = agent_types;
+                self.agent_setup_types_changed(cx);
                 // Which harnesses speak ACP is a fact this list carries, so it is the earliest
                 // moment the capabilities question can be put at all — and the Harnesses page
                 // draws a block per harness that wants the answer. Asked once per harness.
@@ -3045,6 +3046,12 @@ impl AppState {
                 last_model,
                 last_thinking,
             } => {
+                // The onboarding's Default agent step asks with no account; it takes its own.
+                self.workbench.agent_setup.apply_catalogue(
+                    &agent_type,
+                    account.as_deref(),
+                    &models,
+                );
                 let definition_model = self
                     .new_agent_form()
                     .and_then(|form| form.model.clone())

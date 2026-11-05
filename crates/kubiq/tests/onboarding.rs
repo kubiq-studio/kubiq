@@ -283,3 +283,58 @@ fn the_callout_stays_on_screen() {
     let (left, top) = place_callout(Some(MarkRect::new(0., 0., vw, vh)), width, vw, vh);
     assert!(left >= gap && left + width <= vw && top >= gap && top + room <= vh);
 }
+
+/// The tour visits every titlebar button, by name or as a control its words name, and each one it
+/// names has an icon to show and a sentence to read.
+#[gpui::test]
+fn the_tour_names_every_titlebar_button(cx: &mut TestAppContext) {
+    use kubiq::state::onboarding::StepBody;
+    use kubiq::state::ui_id::{self, describe};
+    use kubiq::ui::titlebar::control_icon;
+
+    let (state, _handle) = window(cx);
+    let tour = state.read_with(cx, |state, cx| {
+        kubiq::ui::onboarding::flows::all(state, cx)
+            .into_iter()
+            .find(|flow| flow.id == TOUR)
+            .expect("the tour is registered")
+    });
+    let named: Vec<_> = tour
+        .steps
+        .iter()
+        .flat_map(|step| {
+            let target = match &step.body {
+                StepBody::Highlight { target, .. } => Some(target.clone()),
+                _ => None,
+            };
+            target.into_iter().chain(step.controls.iter().cloned())
+        })
+        .collect();
+    for id in ui_id::CATALOGUE
+        .iter()
+        .filter(|id| control_icon(id, true).is_some())
+    {
+        assert!(named.contains(id), "the tour skips {id:?}");
+        assert!(describe(id).is_some(), "{id:?} has no sentence");
+    }
+}
+
+/// The closing page names the instant-help button, and shows it.
+#[gpui::test]
+fn the_closing_page_shows_instant_help(cx: &mut TestAppContext) {
+    use kubiq::state::ui_id::TITLEBAR_POINT_AT;
+
+    let (state, _handle) = window(cx);
+    let welcome = state.read_with(cx, |state, cx| {
+        kubiq::ui::onboarding::flows::all(state, cx)
+            .into_iter()
+            .find(|flow| flow.id == WELCOME)
+            .expect("the welcome is registered")
+    });
+    assert!(
+        welcome
+            .steps
+            .iter()
+            .any(|step| step.controls.contains(&TITLEBAR_POINT_AT))
+    );
+}

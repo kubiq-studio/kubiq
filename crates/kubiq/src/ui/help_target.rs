@@ -1,10 +1,11 @@
-//! In-place help: point at anything in the window and read what it is.
+//! In-place help — **Click for instant help** — point at anything in the window and read what it
+//! is.
 //!
-//! Chrome's element inspector is the model. The mode is switched on (⇧F1, or **Point at
-//! something…** in the titlebar's overflow menu), a layer takes the whole window, and whatever the
-//! cursor is over is drawn with a translucent bordered rectangle and a balloon saying what it is.
-//! Moving the mouse moves the highlight; the mode persists until Escape or the overlay's own
-//! **Done**.
+//! Chrome's element inspector is the model. The mode is switched on (⇧F1, the titlebar's button,
+//! or **Click for instant help** in its overflow menu), a layer takes the whole window, and
+//! whatever the cursor is over is drawn with a translucent bordered rectangle and a balloon saying
+//! what it is. Moving the mouse moves the highlight; the mode persists until Escape, the overlay's
+//! own **Done**, or a second click on the titlebar button.
 //!
 //! **Nothing here knows where a sentence comes from.** The overlay asks
 //! [`crate::state::ui_id::describe`] for a label and a blurb and that is the whole of its
@@ -19,19 +20,20 @@
 //! this overlay included, is built before layout runs. On a highlight that follows the mouse that
 //! is not visible.
 //!
-//! **No click does anything.** The catcher occludes the mouse so the window underneath cannot be
-//! operated, and it binds no press of its own, so a click on a target is inert rather than
-//! dismissing the mode or falling through to the control. That is the brief: the mode persists
-//! until it is explicitly closed. Opening the target's full help page on a click is the obvious
+//! **One click does something.** The catcher occludes the mouse so the window underneath cannot be
+//! operated, so a click on a target is inert rather than dismissing the mode or falling through to
+//! the control. That is the brief: the mode persists until it is explicitly closed. The one press
+//! it answers is on the mode's own titlebar button — hit-tested here, since the button underneath
+//! never receives it — which turns the mode off, so the button reads as a toggle. Opening the target's full help page on a click is the obvious
 //! next thing and is `G319` — it needs a page to open, and `ui.*` keys are phase 3's.
 
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, Styled, Window, anchored,
-    deferred, div, point, px,
+    AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled,
+    Window, anchored, deferred, div, point, px,
 };
 
 use crate::app::AppState;
-use crate::state::ui_id::{MarkRect, TargetInfo, UiId, describe};
+use crate::state::ui_id::{self, MarkRect, TargetInfo, UiId, describe};
 use crate::theme;
 use crate::theme::{Family, Role};
 use crate::ui::{ident, kit};
@@ -52,6 +54,7 @@ pub fn overlay(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) 
 
     let entity = cx.entity();
     let moved = entity.clone();
+    let toggled = entity.clone();
     let done = entity;
 
     let mut catcher = div()
@@ -59,12 +62,19 @@ pub fn overlay(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) 
         .w(px(vw))
         .h(px(vh))
         .relative()
-        // Everything under this is unreachable while the mode is up — which is the point. No
-        // press is bound here, so a click on a target does nothing at all.
+        // Everything under this is unreachable while the mode is up — which is the point. A click
+        // on a target does nothing at all, except on the mode's own button, which turns it off.
         .occlude()
         .on_mouse_move(move |event, _, cx| {
             let at = (f32::from(event.position.x), f32::from(event.position.y));
             moved.update(cx, |this, cx| this.move_help_target(at.0, at.1, cx));
+        })
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            let on_button = ident::hit_mark_at(window, event.position)
+                .is_some_and(|mark| mark.id == ui_id::TITLEBAR_POINT_AT);
+            if on_button {
+                toggled.update(cx, |this, cx| this.close_help_target(cx));
+            }
         });
 
     if let Some(mark) = &hit {
@@ -177,7 +187,8 @@ pub fn place(rect: MarkRect, width: f32, vw: f32, vh: f32) -> (f32, f32) {
 /// standing on its own subject.
 fn chrome(hit: bool, entity: gpui::Entity<AppState>) -> AnyElement {
     let note = if hit {
-        "Point at anything to read what it is."
+        "Instant help: point at any control to read what it does. Click the button again or \
+         press Esc to leave."
     } else {
         "Move the pointer over the window. Unnamed areas have nothing to say yet."
     };

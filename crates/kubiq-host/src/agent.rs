@@ -39,12 +39,16 @@ use kubiq_proto::messages::{
     TAG_PLANNER, TAG_WORKER,
 };
 use kubiq_proto::projects::{TrustKind, UntrustedItem};
-use kubiq_proto::settings::{AgentHome, Grant};
+use kubiq_proto::settings::{AgentHome, DefaultAgent, Grant};
 use kubiq_proto::work::AgentId;
 
 use crate::catalog::Catalog;
 use crate::environment::Environment;
 use crate::mcp::catalogue;
+
+/// The ids of the definitions a fresh install is seeded with
+/// ([`Agents::ensure_default_definitions`]) — the ones [`Agents::set_default_agent`] re-points.
+pub const DEFAULT_DEFINITIONS: [&str; 3] = ["Coordinator", "Kubiq helper", "Worker"];
 
 /// Where agent definitions live, under the config root and under a project's own folder.
 pub const DEFINITIONS_DIR: &str = "agent-definitions";
@@ -1286,18 +1290,25 @@ impl Agents {
     /// working agent for each without anyone assembling a server list by hand. Only ever a
     /// seeding: once one definition exists, the user's list is theirs, and deleting all three
     /// back to nothing is not an invitation to write them again on the next start.
-    pub fn ensure_default_definitions(&self) -> Result<bool> {
+    ///
+    /// They are pinned to `default` — the user's default agent ([`HostSettings::default_agent`]) —
+    /// when it names a harness this machine can start, and otherwise to the first one it can.
+    ///
+    /// [`HostSettings::default_agent`]: kubiq_proto::settings::HostSettings::default_agent
+    pub fn ensure_default_definitions(&self, default: Option<&DefaultAgent>) -> Result<bool> {
         let store = self.definition_store();
         if !store.profiles().unwrap_or_default().is_empty() {
             return Ok(false);
         }
-        let Some(harness) = self
-            .types()
-            .into_iter()
-            .find(|it| it.available)
-            .map(|it| it.id)
-        else {
-            return Ok(false);
+        let types = self.types();
+        let (harness, model) = match default
+            .filter(|it| types.iter().any(|t| t.available && t.id == it.agent_type))
+        {
+            Some(it) => (it.agent_type.clone(), it.model.clone()),
+            None => match types.into_iter().find(|it| it.available) {
+                Some(it) => (it.id, None),
+                None => return Ok(false),
+            },
         };
         for (id, description, tags, mcps) in [
             (
@@ -1331,7 +1342,7 @@ impl Agents {
                 description: Some(description.to_string()),
                 agent_type: harness.clone(),
                 account: None,
-                model: None,
+                model: model.clone(),
                 mode: None,
                 thinking: None,
                 max_subagents: None,
@@ -1347,6 +1358,40 @@ impl Agents {
             .with_context(|| format!("writing the default agent definition '{id}'"))?;
         }
         Ok(true)
+    }
+
+    /// Point the definitions [`Self::ensure_default_definitions`] seeds at `default` — the
+    /// onboarding's **Default agent** step. Seeds them first when the global root holds none;
+    /// otherwise rewrites whichever of [`DEFAULT_DEFINITIONS`] still exist globally, and nothing
+    /// else. A harness change drops the mode and thinking level, which are that harness's own
+    /// words. Refused when `default` names no harness this machine can start.
+    pub fn set_default_agent(&self, default: &DefaultAgent) -> Result<()> {
+        if !self
+            .types()
+            .iter()
+            .any(|it| it.available && it.id == default.agent_type)
+        {
+            bail!("harness '{}' is not installed", default.agent_type);
+        }
+        if self.ensure_default_definitions(Some(default))? {
+            return Ok(());
+        }
+        for mut definition in self
+            .definitions()?
+            .into_iter()
+            .filter(|it| DEFAULT_DEFINITIONS.contains(&it.id.as_str()))
+        {
+            if definition.agent_type != default.agent_type {
+                definition.agent_type = default.agent_type.clone();
+                definition.mode = None;
+                definition.thinking = None;
+            }
+            definition.model = default.model.clone();
+            let id = definition.id.clone();
+            self.save_definition(definition)
+                .with_context(|| format!("re-pointing the default agent definition '{id}'"))?;
+        }
+        Ok(())
     }
 
     /// Rename an account, and move every harness home keyed by it (`D194`), so the logins stay
@@ -3470,7 +3515,7 @@ mod tests {
         let agents = with_a_harness(root.path());
 
         assert!(
-            agents.ensure_default_definitions().unwrap(),
+            agents.ensure_default_definitions(None).unwrap(),
             "a fresh root is seeded"
         );
         let mut names: Vec<String> = agents
@@ -3524,9 +3569,111 @@ mod tests {
         }
 
         assert!(
-            !agents.ensure_default_definitions().unwrap(),
+            !agents.ensure_default_definitions(None).unwrap(),
             "a root that holds one already is left alone"
         );
+        let mut seeded: Vec<&str> = names.iter().map(String::as_str).collect();
+        seeded.sort();
+        let mut expected = DEFAULT_DEFINITIONS.to_vec();
+        expected.sort();
+        assert_eq!(seeded, expected, "the re-pointed ids are the seeded ones");
+    }
+
+    fn with_two_harnesses(root: &Path) -> Agents {
+        let mut agents = Agents::new(root, false);
+        agents.set_commands(BTreeMap::from([
+            ("claude-code".to_string(), "echo".to_string()),
+            ("codex".to_string(), "echo".to_string()),
+        ]));
+        agents
+    }
+
+    /// The default agent pins the seeding when the root is empty: the three are written on the
+    /// harness and model it names, not the first harness found.
+    #[test]
+    fn the_default_agent_seeds_an_empty_root() {
+        let root = tempfile::TempDir::new().unwrap();
+        let agents = with_two_harnesses(root.path());
+        let default = DefaultAgent {
+            agent_type: "codex".to_string(),
+            model: Some("gpt-5-codex".to_string()),
+        };
+
+        agents.set_default_agent(&default).unwrap();
+        let definitions = agents.definitions().unwrap();
+        assert_eq!(definitions.len(), 3);
+        for it in definitions {
+            assert_eq!(it.agent_type, "codex", "{}", it.id);
+            assert_eq!(it.model.as_deref(), Some("gpt-5-codex"), "{}", it.id);
+        }
+    }
+
+    /// Over seeded definitions, the default agent re-points only the seeded ones: the user's own
+    /// is left as it was, and a harness change drops the old harness's mode.
+    #[test]
+    fn the_default_agent_re_points_only_the_seeded_definitions() {
+        let root = tempfile::TempDir::new().unwrap();
+        let agents = with_two_harnesses(root.path());
+        assert!(
+            agents
+                .ensure_default_definitions(Some(&DefaultAgent {
+                    agent_type: "claude-code".to_string(),
+                    model: None,
+                }))
+                .unwrap()
+        );
+        let worker = agents
+            .definitions()
+            .unwrap()
+            .into_iter()
+            .find(|it| it.id == "Worker")
+            .unwrap();
+        agents
+            .save_definition(AgentDefinition {
+                mode: Some("plan".to_string()),
+                ..worker
+            })
+            .unwrap();
+        agents.save_definition(a_definition("mine")).unwrap();
+
+        agents
+            .set_default_agent(&DefaultAgent {
+                agent_type: "codex".to_string(),
+                model: Some("gpt-5-codex".to_string()),
+            })
+            .unwrap();
+        let by_id = |id: &str| {
+            agents
+                .definitions()
+                .unwrap()
+                .into_iter()
+                .find(|it| it.id == id)
+                .unwrap()
+        };
+        for id in DEFAULT_DEFINITIONS {
+            assert_eq!(by_id(id).agent_type, "codex", "{id}");
+            assert_eq!(by_id(id).model.as_deref(), Some("gpt-5-codex"), "{id}");
+        }
+        assert_eq!(by_id("Worker").mode, None, "the old harness's mode is dropped");
+        assert_eq!(
+            by_id("mine").agent_type,
+            "claude-code",
+            "the user's own is untouched"
+        );
+        assert_eq!(by_id("mine").model, None);
+    }
+
+    /// A harness this machine cannot start is no default, and nothing is written.
+    #[test]
+    fn the_default_agent_refuses_a_harness_not_installed() {
+        let root = tempfile::TempDir::new().unwrap();
+        let agents = with_a_harness(root.path());
+        let refused = agents.set_default_agent(&DefaultAgent {
+            agent_type: "nonesuch".to_string(),
+            model: None,
+        });
+        assert!(refused.is_err());
+        assert!(agents.definitions().unwrap().is_empty());
     }
 
     /// With no harness on the machine there is nothing a definition could name, so writing a new

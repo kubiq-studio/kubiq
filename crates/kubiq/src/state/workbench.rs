@@ -797,6 +797,8 @@ pub struct WorkbenchState {
     /// The onboarding flows finished or skipped, by id. Read from and written to the interface's
     /// preferences (`InterfacePrefs::onboarding_done`).
     pub onboarding_done: std::collections::BTreeSet<String>,
+    /// The onboarding's Default agent step's picks. See `crate::state::agent_setup`.
+    pub agent_setup: crate::state::agent_setup::AgentSetup,
     /// Whether the interface's preferences have been answered — with a blob or with nothing. An
     /// onboarding flow never starts before this, or a returning user would see the welcome for
     /// the frames before the host replies.
@@ -1141,6 +1143,7 @@ impl Default for WorkbenchState {
             devtools: None,
             onboarding: None,
             onboarding_done: Default::default(),
+            agent_setup: Default::default(),
             prefs_loaded: false,
             ask: None,
             all_projects: None,

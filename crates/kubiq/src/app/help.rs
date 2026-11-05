@@ -35,7 +35,8 @@ impl AppState {
         self.open_help_page(&page, window, cx);
     }
 
-    /// Turn on in-place help: point at anything in the window and read what it is.
+    /// Turn on in-place help — **Click for instant help** — point at anything in the window and
+    /// read what it is.
     ///
     /// **The other help gesture, not a variant of the one above.** `reveal_help` answers *where am
     /// I* with a page about the screen; this answers *what is that* with a sentence about one
@@ -51,7 +52,18 @@ impl AppState {
         cx.notify();
     }
 
-    /// Turn it off — Escape, or the overlay's own Done.
+    /// The titlebar's **Click for instant help** button: on when the mode is down, off when it is
+    /// up. While it is up the overlay covers the button, so the click that turns it off arrives
+    /// through the overlay's own hit-test (`ui::help_target`) rather than through the button.
+    pub fn toggle_help_target(&mut self, cx: &mut Context<Self>) {
+        if self.workbench.help_target.is_some() {
+            self.close_help_target(cx);
+        } else {
+            self.open_help_target(cx);
+        }
+    }
+
+    /// Turn it off — Escape, the overlay's own Done, or a second click on its titlebar button.
     pub fn close_help_target(&mut self, cx: &mut Context<Self>) {
         self.workbench.help_target = None;
         cx.notify();

@@ -644,8 +644,9 @@ const DESCRIPTIONS: &[(UiId, TargetInfo)] = &[
     (
         TITLEBAR_POINT_AT,
         TargetInfo {
-            label: "Point at something",
-            blurb: "Point at any part of the window and read what it is (\u{21e7}F1).",
+            label: "Click for instant help",
+            blurb: "Click, then point at any control to see what it does. Click again or press \
+                    Esc to leave (\u{21e7}F1).",
         },
     ),
     (

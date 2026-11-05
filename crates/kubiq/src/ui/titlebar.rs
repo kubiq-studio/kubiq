@@ -21,6 +21,50 @@ use crate::ui::kit::{KubiqIcon, badge, field, icon_button, mono, pulse_animation
 use crate::ui::navigator;
 use crate::ui::project_menu;
 
+/// The instant-help button's tooltip: what the mode is, how to use it and how to leave it.
+pub const INSTANT_HELP_TIP: &str = "Click for instant help — then point at any control to see \
+                                    what it does. Click again or press Esc to leave (⇧F1).";
+
+/// The icon a titlebar control draws, by its name — what the onboarding shows beside the words
+/// that name the control. Kept beside the buttons so a new icon on the strip is changed in one
+/// file; `None` for a place with no single icon (the project, the command field, the clusters).
+pub fn control_icon(id: &UiId, dark: bool) -> Option<Icon> {
+    let icon: Icon = match id {
+        id if *id == ui_id::TITLEBAR_NEW_PROJECT => IconName::Plus.into(),
+        id if *id == ui_id::TITLEBAR_NAV_BACK => IconName::ChevronLeft.into(),
+        id if *id == ui_id::TITLEBAR_NAV_FORWARD => IconName::ChevronRight.into(),
+        id if *id == ui_id::TITLEBAR_NEW_PROJECT_MENU
+            || *id == ui_id::TITLEBAR_HIDDEN_AGENTS
+            || *id == ui_id::TITLEBAR_NEW_TERMINAL_MENU
+            || *id == ui_id::TITLEBAR_OVERFLOW =>
+        {
+            IconName::ChevronDown.into()
+        }
+        id if *id == ui_id::TITLEBAR_REGION_LEFT => KubiqIcon::TitlebarPanelLeft.into(),
+        id if *id == ui_id::TITLEBAR_REGION_BOTTOM => KubiqIcon::TitlebarPanelBottom.into(),
+        id if *id == ui_id::TITLEBAR_REGION_RIGHT => KubiqIcon::TitlebarPanelRight.into(),
+        id if *id == ui_id::TITLEBAR_NEW_AGENT => IconName::Bot.into(),
+        id if *id == ui_id::TITLEBAR_NEW_TERMINAL => IconName::SquareTerminal.into(),
+        id if *id == ui_id::TITLEBAR_SEARCH => KubiqIcon::TitlebarSearch.into(),
+        id if *id == ui_id::TITLEBAR_NOTIFICATIONS => KubiqIcon::TitlebarNotifications.into(),
+        id if *id == ui_id::TITLEBAR_FEEDBACK => KubiqIcon::BoardComment.into(),
+        id if *id == ui_id::TITLEBAR_HELP => KubiqIcon::TitlebarHelp.into(),
+        id if *id == ui_id::TITLEBAR_POINT_AT => KubiqIcon::TitlebarPointAt.into(),
+        id if *id == ui_id::TITLEBAR_TOOLS => KubiqIcon::TitlebarTools.into(),
+        id if *id == ui_id::TITLEBAR_SETTINGS => KubiqIcon::TitlebarSettings.into(),
+        id if *id == ui_id::TITLEBAR_ABOUT => KubiqIcon::TitlebarAbout.into(),
+        id if *id == ui_id::TITLEBAR_THEME => {
+            if dark {
+                KubiqIcon::TitlebarThemeLight.into()
+            } else {
+                KubiqIcon::TitlebarThemeDark.into()
+            }
+        }
+        _ => return None,
+    };
+    Some(icon)
+}
+
 pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> impl IntoElement {
     // The three switches report the dock's own regions rather than a flag beside it: a region the
     // user collapsed by dragging its last panel out has to read as closed here too.
@@ -416,21 +460,22 @@ pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> im
                         gpui_component::tooltip::Tooltip::new("Help").build(window, cx)
                     }),
                 )
-                // Point at something: the same question Help asks the other way round — Help opens
-                // the page for where you are standing, this waits for you to point. Beside it for
-                // that reason, and always offered, like Help itself.
+                // Click for instant help: the same question Help asks the other way round — Help
+                // opens the page for where you are standing, this waits for you to point. Beside
+                // it for that reason, and always offered, like Help itself. A toggle: while the
+                // mode is up its overlay takes the click on this button and turns it off
+                // (`ui::help_target`), so this listener only ever sees the mode down.
                 .child(
                     icon_button(
                         "point-at",
                         KubiqIcon::TitlebarPointAt,
                         app.workbench.help_target.is_some(),
-                        cx.listener(|this, _, _, cx| this.open_help_target(cx)),
+                        cx.listener(|this, _, _, cx| this.toggle_help_target(cx)),
                     )
                     .h_full()
                     .ui_id(ui_id::TITLEBAR_POINT_AT)
                     .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new("Point at something (⇧F1)")
-                            .build(window, cx)
+                        gpui_component::tooltip::Tooltip::new(INSTANT_HELP_TIP).build(window, cx)
                     }),
                 )
                 // Tools: encoders, decoders, converters and a diff, in a dialog laid out like

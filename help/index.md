@@ -36,4 +36,4 @@ New to Kubiq? Read [Getting started](getting-started): it takes you from the fir
 
 Press **F1** on any screen and the [help panel](workbench-help) opens on the page for that screen. When F1 brings you here instead, the screen you were on has no page of its own; pick its area from the list above or from **Contents** in the panel.
 
-Press **⇧F1** or **Point at something** ![Point at something](img/ui/titlebar-point-at.png) in the title bar, then move the pointer over a control: a balloon names it and says what it does. Clicks do nothing in this mode. Press **Esc** to leave it.
+Press **⇧F1** or **Click for instant help** ![Click for instant help](img/ui/titlebar-point-at.png) in the title bar, then move the pointer over a control: a balloon names it and says what it does. Clicks on other controls do nothing in this mode. Click the button again or press **Esc** to leave it.

@@ -83,6 +83,10 @@ impl AppState {
         if !self.onboarding_next_open(cx) {
             return;
         }
+        // Passing the Default agent step is its confirm.
+        if self.on_agent_setup_step() {
+            self.commit_agent_setup();
+        }
         let Some(run) = self.workbench.onboarding.as_mut() else {
             return;
         };
@@ -204,6 +208,9 @@ impl AppState {
             .and_then(|run| run.current().on_enter);
         if let Some(StepAction::EnterMode(mode)) = action {
             self.onboarding_enter_mode(mode, cx);
+        }
+        if self.on_agent_setup_step() {
+            self.enter_agent_setup(cx);
         }
     }
 

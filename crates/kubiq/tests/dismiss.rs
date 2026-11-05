@@ -1008,3 +1008,82 @@ fn open_as_tab_moves_the_mission_into_the_centre(cx: &mut gpui::TestAppContext) 
         "the full view is a centre-region document"
     );
 }
+
+/// **Click for instant help** is a toggle: the titlebar button turns the mode on, and a second click
+/// on it turns it off — even though the mode's overlay covers the button, so that click is the
+/// overlay's to answer. A click anywhere else stays inert.
+#[gpui::test]
+fn the_instant_help_button_toggles_the_mode(cx: &mut gpui::TestAppContext) {
+    use gpui::AppContext as _;
+    use kubiq::state::ui_id;
+
+    let (hub, _host) = kubiq_proto::bus::hub();
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        kubiq::theme::set_mode(kubiq::app::boot_theme(), cx);
+        BusHub::install(hub, cx);
+        WindowRegistry::install(cx);
+        kubiq::app::install_key_bindings(cx);
+    });
+    let held: std::rc::Rc<std::cell::RefCell<Option<gpui::Entity<AppState>>>> = Default::default();
+    let taken = held.clone();
+    let handle = cx.add_window(move |window, cx| {
+        let state = cx.new(|cx| AppState::for_project(None, 'A', window, cx));
+        *taken.borrow_mut() = Some(state.clone());
+        gpui_component::Root::new(state, window, cx)
+    });
+    cx.run_until_parked();
+    let state = held
+        .borrow_mut()
+        .take()
+        .expect("the window built its state");
+
+    // The state-level toggle.
+    state.update(cx, |state, cx| state.toggle_help_target(cx));
+    state.read_with(cx, |state, _| {
+        assert!(state.workbench.help_target.is_some())
+    });
+    state.update(cx, |state, cx| state.toggle_help_target(cx));
+    state.read_with(cx, |state, _| {
+        assert!(state.workbench.help_target.is_none())
+    });
+
+    // Through the window: on, then a click on the button under the overlay.
+    state.update(cx, |state, cx| state.toggle_help_target(cx));
+    let mut vcx = gpui::VisualTestContext::from_window(handle.into(), cx);
+    vcx.run_until_parked();
+    let centre = |id: &ui_id::UiId, vcx: &mut gpui::VisualTestContext| {
+        vcx.update(|window, _| {
+            let rect = kubiq::ui::ident::recorded(window)
+                .into_iter()
+                .rev()
+                .find(|mark| &mark.id == id)
+                .expect("the control is on screen")
+                .rect;
+            gpui::point(
+                gpui::px(rect.x + rect.width / 2.),
+                gpui::px(rect.y + rect.height / 2.),
+            )
+        })
+    };
+
+    let help = centre(&ui_id::TITLEBAR_HELP, &mut vcx);
+    vcx.simulate_click(help, gpui::Modifiers::none());
+    vcx.run_until_parked();
+    state.read_with(&vcx, |state, _| {
+        assert!(
+            state.workbench.help_target.is_some(),
+            "a click on another control is inert while the mode is up"
+        );
+    });
+
+    let button = centre(&ui_id::TITLEBAR_POINT_AT, &mut vcx);
+    vcx.simulate_click(button, gpui::Modifiers::none());
+    vcx.run_until_parked();
+    state.read_with(&vcx, |state, _| {
+        assert!(
+            state.workbench.help_target.is_none(),
+            "the second click on the button turned the mode off"
+        );
+    });
+}

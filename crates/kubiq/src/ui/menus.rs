@@ -455,7 +455,7 @@ pub fn overflow(app: &AppState, cx: &App) -> Vec<MenuEntry> {
             .on(|this, window, cx| this.reveal_help(window, cx)),
         // Under Help, because it is the same question the other way round: Help opens the page
         // for where you are standing, this one waits for you to point at something.
-        MenuEntry::new("Point at something\u{2026}")
+        MenuEntry::new("Click for instant help")
             .icon(kit::KubiqIcon::TitlebarPointAt)
             .on(|this, _, cx| this.open_help_target(cx)),
         // The welcome and the tour again, whether or not they were finished.

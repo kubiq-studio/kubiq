@@ -1074,7 +1074,10 @@ impl Coordinator {
         agents.sweep();
         // A fresh install gets its three agent definitions here, once, before any window asks
         // for the list — and only when the root holds none, so nobody's own list is added to.
-        if let Err(error) = agents.ensure_default_definitions() {
+        // Pinned to the default agent when one was chosen.
+        if let Err(error) =
+            agents.ensure_default_definitions(settings.host().default_agent.as_ref())
+        {
             tracing::warn!("the default agent definitions could not be written: {error:#}");
         }
         let connectors = Connectors::new(settings.clone(), &root.path);
@@ -2150,6 +2153,29 @@ impl Coordinator {
                     },
                 ),
             },
+            // The onboarding's Default agent step: the definitions first, so a refusal records
+            // nothing; then the setting, to every window.
+            Message::SetDefaultAgent { agent_type, model } => {
+                let default = kubiq_proto::settings::DefaultAgent { agent_type, model };
+                if let Err(error) = self.agents.set_default_agent(&default) {
+                    self.host.send(
+                        To::Client(client),
+                        Message::AccountError {
+                            error: format!("Default agent not set: {error:#}"),
+                        },
+                    );
+                    return;
+                }
+                let written = self
+                    .settings
+                    .update_host(|host| host.default_agent = Some(default));
+                let replies = match written {
+                    Ok(host) => vec![host_settings(&host)],
+                    Err(reason) => vec![settings_error(reason)],
+                };
+                self.answer(client, replies);
+                self.send_definitions(client);
+            }
             Message::DeleteAgentDefinition { id, project } => {
                 match self.agents.delete_definition(&id, project) {
                     Ok(()) => self.send_definitions(client),
