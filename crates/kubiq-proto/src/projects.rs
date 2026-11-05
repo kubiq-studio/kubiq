@@ -130,6 +130,31 @@ pub struct ProjectRecord {
     /// is not silently on offer here, which is the answer a narrowed project meant.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub definitions_allowed: Vec<String>,
+    /// What this project does with the agent files its harnesses read from inside its folder
+    /// (`D233`). Both off by default, and for every record written before the field existed.
+    #[serde(default, skip_serializing_if = "HarnessAgents::is_off")]
+    pub harness_agents: HarnessAgents,
+}
+
+/// A project's two answers about **harness agents** — the subagent files each harness reads from
+/// its own folder inside the project, which `agent-manager` knows the list and formats of (`D233`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessAgents {
+    /// The project's agent definitions also list the agents found in those folders, each marked
+    /// with the folders it is in ([`crate::messages::AgentDefinition::local`]).
+    #[serde(default)]
+    pub show: bool,
+    /// The host keeps every agent aligned across those folders: one present in one is written
+    /// into the others, and the newest copy wins where they differ.
+    #[serde(default)]
+    pub sync: bool,
+}
+
+impl HarnessAgents {
+    /// Both off — what a record says by leaving the field out.
+    pub fn is_off(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// The default for [`ProjectRecord::definitions_use_global`] — a bare `true` serde can name.
@@ -572,6 +597,7 @@ mod tests {
             storage: StorageMode::default(),
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
         }
     }
 

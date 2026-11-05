@@ -3399,6 +3399,19 @@ fn definition_marks(definition: &AgentDefinition) -> Vec<AnyElement> {
     if definition.disabled {
         marks.push(badge("Off", theme::warning()).into_any_element());
     }
+    // A harness agent says so, and where its copies are — the folders as the host named them.
+    if let Some(local) = &definition.local {
+        marks.push(badge("Local", theme::info()).into_any_element());
+        if !local.folders.is_empty() {
+            marks.push(
+                div()
+                    .text_size(theme::font(Family::Chrome, Role::Meta))
+                    .text_color(theme::text_faint())
+                    .child(SharedString::from(local.folders.join(", ")))
+                    .into_any_element(),
+            );
+        }
+    }
     marks
 }
 
@@ -4012,7 +4025,20 @@ pub fn account_dialog(
         Some(AccountDialog::DeleteDefinition { id, project }) => confirm_modal(
             "definition-delete",
             "Delete agent",
-            &if project.is_some() {
+            &if let Some(folders) = app
+                .workbench
+                .settings
+                .project_definitions
+                .iter()
+                .find(|it| it.id == id && it.project == project)
+                .and_then(|it| it.local.as_ref())
+            {
+                format!(
+                    "Delete the local agent {id}? Its file is removed from {} \u{2014} every \
+                     harness that reads it loses it.",
+                    folders.folders.join(", ")
+                )
+            } else if project.is_some() {
                 format!(
                     "Delete {id} from this project? The setup is gone for good; the \
                      application's own agents are not touched."

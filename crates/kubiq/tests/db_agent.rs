@@ -193,6 +193,7 @@ fn a_project() -> ProjectSnapshot {
             initials: String::new(),
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
         },
         health: ProjectHealth::Ok,
         open_panes: 0,

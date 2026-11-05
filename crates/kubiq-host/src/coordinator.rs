@@ -1985,6 +1985,16 @@ impl Coordinator {
                 let replies = self.projects.set_initials(project_id, &initials);
                 self.answer(client, replies);
             }
+            // The definitions list follows, because it is what the answer changes: it gains or
+            // loses the harness agents, and turning sync on aligns the folders on the way.
+            Message::SetProjectHarnessAgents {
+                project_id,
+                harness_agents,
+            } => {
+                let replies = self.projects.set_harness_agents(project_id, harness_agents);
+                self.answer(client, replies);
+                self.send_definitions(client);
+            }
             Message::SetProjectStorage {
                 project_id,
                 storage,
@@ -2020,6 +2030,11 @@ impl Coordinator {
                 let replies = self.projects.opened(project_id);
                 self.answer(client, replies);
                 self.watch_project(client, project_id);
+                if let Some((root, flags)) = self.harness_agents_of(project_id)
+                    && flags.sync
+                {
+                    crate::harness_agents::sync(&root);
+                }
                 // Project-layer settings this machine does not trust are said once, on open, so
                 // the window can ask about them before a launch is refused (`D230`).
                 if !crate::trust::untrusted(&self.root.path, project_id).is_empty() {
@@ -2114,6 +2129,18 @@ impl Coordinator {
                 definition,
                 replaces,
             } => {
+                if let Some(outcome) = self.save_harness_agent(&definition, replaces.as_deref()) {
+                    match outcome {
+                        Ok(()) => self.send_definitions(client),
+                        Err(error) => self.host.send(
+                            To::Client(client),
+                            Message::AccountError {
+                                error: format!("Agent not saved: {error:#}"),
+                            },
+                        ),
+                    }
+                    return;
+                }
                 let renamed = replaces
                     .clone()
                     .filter(|old| *old != definition.id)
@@ -2144,7 +2171,10 @@ impl Coordinator {
                 id,
                 new_id,
                 project,
-            } => match self.agents.clone_definition(&id, &new_id, project) {
+            } => match self
+                .clone_harness_agent(&id, &new_id, project)
+                .unwrap_or_else(|| self.agents.clone_definition(&id, &new_id, project))
+            {
                 Ok(()) => self.send_definitions(client),
                 Err(error) => self.host.send(
                     To::Client(client),
@@ -2177,7 +2207,17 @@ impl Coordinator {
                 self.send_definitions(client);
             }
             Message::DeleteAgentDefinition { id, project } => {
-                match self.agents.delete_definition(&id, project) {
+                // A harness agent is the project's files, not a record: deleting it removes
+                // every copy. A stored definition of the same id is the one listed, and goes first.
+                let local = project
+                    .filter(|project| !self.stores_definition(*project, &id))
+                    .and_then(|project| self.harness_agents_of(project))
+                    .filter(|(root, _)| crate::harness_agents::holds(root, &id));
+                let deleted = match local {
+                    Some((root, _)) => crate::harness_agents::delete(&root, &id),
+                    None => self.agents.delete_definition(&id, project),
+                };
+                match deleted {
                     Ok(()) => self.send_definitions(client),
                     Err(error) => self.host.send(
                         To::Client(client),
@@ -8160,6 +8200,128 @@ impl Coordinator {
         }
     }
 
+    /// `project`'s folder and what it says about its harness agents (`D233`). `None` for a
+    /// project not in the catalogue, or one behind a drone: its folder is not on this machine.
+    fn harness_agents_of(
+        &self,
+        project: ProjectId,
+    ) -> Option<(PathBuf, kubiq_proto::projects::HarnessAgents)> {
+        let record = self.projects.record(project)?;
+        if record.runs_on.is_some() {
+            return None;
+        }
+        Some((PathBuf::from(&record.path), record.harness_agents))
+    }
+
+    /// Whether `project`'s own store holds a definition `id` — the one listed when a harness
+    /// agent has the same name.
+    fn stores_definition(&self, project: ProjectId, id: &str) -> bool {
+        self.agents
+            .project_definitions(project, None)
+            .is_ok_and(|own| own.iter().any(|it| it.id == id))
+    }
+
+    /// `project`'s harness agents as definitions, when it shows them — aligned first when it
+    /// syncs them, so the list is what the folders hold after the sync. One whose name a stored
+    /// definition of the project already has is left out: the stored one is what that id means.
+    fn harness_agent_definitions(
+        &self,
+        project: ProjectId,
+        stored: &[kubiq_proto::messages::AgentDefinition],
+    ) -> Vec<kubiq_proto::messages::AgentDefinition> {
+        let Some((root, flags)) = self.harness_agents_of(project) else {
+            return Vec::new();
+        };
+        if flags.sync {
+            crate::harness_agents::sync(&root);
+        }
+        if !flags.show {
+            return Vec::new();
+        }
+        let fallback = self
+            .settings
+            .host()
+            .default_agent
+            .as_ref()
+            .map(|it| it.agent_type.clone())
+            .unwrap_or_default();
+        crate::harness_agents::definitions(&root, project, &fallback)
+            .into_iter()
+            .filter(|it| !stored.iter().any(|own| own.id == it.id))
+            .collect()
+    }
+
+    /// A save that concerns a harness agent, done; `None` when it does not and the store takes
+    /// it. Three cases: a definition marked local is written as files (and, when it was a stored
+    /// definition, leaves the store); one that was a harness agent and is no longer marked moves
+    /// into the store and its files go.
+    fn save_harness_agent(
+        &mut self,
+        definition: &kubiq_proto::messages::AgentDefinition,
+        replaces: Option<&str>,
+    ) -> Option<anyhow::Result<()>> {
+        let project = definition.project?;
+        let (root, flags) = self.harness_agents_of(project)?;
+        let old = replaces.unwrap_or(&definition.id).to_string();
+        let stored = self.stores_definition(project, &old);
+        let was_local = !stored && crate::harness_agents::holds(&root, &old);
+        if definition.local.is_some() {
+            let result = crate::harness_agents::save(
+                &root,
+                definition,
+                was_local.then_some(old.as_str()),
+                flags.sync,
+            )
+            .and_then(|()| {
+                if stored {
+                    self.agents.delete_definition(&old, Some(project))
+                } else {
+                    Ok(())
+                }
+            });
+            return Some(result);
+        }
+        if !was_local {
+            return None;
+        }
+        let mut moved = definition.clone();
+        moved.local = None;
+        let result = self
+            .agents
+            .save_definition_replacing(moved, None, Some(&root))
+            .and_then(|()| crate::harness_agents::delete(&root, &old));
+        Some(result)
+    }
+
+    /// A clone whose source is a harness agent, done as a stored copy in the project; `None`
+    /// when the source is a stored definition.
+    fn clone_harness_agent(
+        &self,
+        id: &str,
+        new_id: &str,
+        project: Option<ProjectId>,
+    ) -> Option<anyhow::Result<()>> {
+        let project = project?;
+        if self.stores_definition(project, id) {
+            return None;
+        }
+        let (root, _) = self.harness_agents_of(project)?;
+        let mut copy = crate::harness_agents::definitions(&root, project, "")
+            .into_iter()
+            .find(|it| it.id == id)?;
+        if self.stores_definition(project, new_id) || crate::harness_agents::holds(&root, new_id) {
+            return Some(Err(anyhow::anyhow!(
+                "an agent definition called '{new_id}' already exists"
+            )));
+        }
+        copy.id = new_id.to_string();
+        copy.local = None;
+        Some(
+            self.agents
+                .save_definition_replacing(copy, None, Some(&root)),
+        )
+    }
+
     /// Tell one window which definitions exist. References only, the same rule as
     /// [`Self::send_accounts`] — a definition names an account, it never carries one.
     ///
@@ -8179,7 +8341,11 @@ impl Coordinator {
                         .agents
                         .project_definitions(project, self.project_root(project).as_deref())
                     {
-                        Ok(scoped) => definitions.extend(scoped),
+                        Ok(scoped) => {
+                            let local = self.harness_agent_definitions(project, &scoped);
+                            definitions.extend(scoped);
+                            definitions.extend(local);
+                        }
                         Err(error) => {
                             tracing::warn!(
                                 "the definitions of project {project} could not be read: {error:#}"

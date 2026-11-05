@@ -1057,6 +1057,8 @@ pub struct DefinitionScope {
     pub use_global: bool,
     /// The ids of the globals inherited while `use_global` is `false`.
     pub allowed: Vec<String>,
+    /// What the project does with its harness agent files (`D233`) — off by default.
+    pub harness_agents: kubiq_proto::projects::HarnessAgents,
 }
 
 impl Default for DefinitionScope {
@@ -1064,6 +1066,7 @@ impl Default for DefinitionScope {
         Self {
             use_global: true,
             allowed: Vec::new(),
+            harness_agents: Default::default(),
         }
     }
 }
@@ -1130,10 +1133,14 @@ impl SettingsState {
     /// simply not offered anywhere a run begins ([`AgentDefinition::disabled`]), which is why the
     /// filter lives here rather than in `definitions_in`: the two questions have different
     /// answers, and a screen that lists setups must keep showing the switched-off one.
+    ///
+    /// A harness agent ([`AgentDefinition::local`]) is not offered either: it is a file the
+    /// harnesses read as their own subagent, and the host composes a run only from its own store
+    /// (`G467`).
     pub fn startable_definitions_in(&self, project: Option<ProjectId>) -> Vec<AgentDefinition> {
         self.definitions_in(project)
             .into_iter()
-            .filter(|it| !it.disabled)
+            .filter(|it| !it.disabled && it.local.is_none())
             .collect()
     }
 

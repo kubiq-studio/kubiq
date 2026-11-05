@@ -2593,3 +2593,60 @@ fn a_named_board_is_announced_to_every_window_and_its_task_edits_come_back_in_it
     let (_, error) = expect_work_error(&ui);
     assert!(error.contains("still has"), "said {error:?}");
 }
+
+/// A project's harness agents join its definitions once it shows them, a sync copies them into
+/// the cross-harness folder, and a delete takes every copy (`D233`).
+#[test]
+fn a_projects_harness_agents_are_listed_synced_and_deleted() {
+    use agent_manager::harness_agents::{NEUTRAL_DIR, home_folder};
+    use kubiq_proto::projects::HarnessAgents;
+
+    let (_hub, ui) = coordinator();
+    let (project_id, path) = a_project(&ui);
+    let own = path.join(home_folder(Some("claude-code")).dir);
+    std::fs::create_dir_all(&own).unwrap();
+    std::fs::write(
+        own.join("helper.md"),
+        "---\nname: helper\ndescription: Helps\ntools: Read\n---\nHelp.\n",
+    )
+    .unwrap();
+
+    ui.send(Message::SetProjectHarnessAgents {
+        project_id,
+        harness_agents: HarnessAgents {
+            show: true,
+            sync: true,
+        },
+    });
+    let listed = expect(&ui, |message| match message {
+        Message::AgentDefinitions { definitions } => Some(definitions),
+        _ => None,
+    });
+    let helper = listed
+        .iter()
+        .find(|it| it.id == "helper" && it.project == Some(project_id))
+        .expect("the harness agent is listed in its project");
+    let folders = &helper.local.as_ref().expect("marked as local").folders;
+    assert!(folders.iter().any(|it| it == NEUTRAL_DIR), "{folders:?}");
+    assert_eq!(helper.agent_type, "claude-code");
+    let copy = std::fs::read_to_string(path.join(NEUTRAL_DIR).join("helper.md")).unwrap();
+    assert!(copy.contains("kubiq-id: helper"), "{copy}");
+    // The harness's own key stays where it was written, and only there.
+    assert!(
+        std::fs::read_to_string(own.join("helper.md"))
+            .unwrap()
+            .contains("tools: Read")
+    );
+
+    ui.send(Message::DeleteAgentDefinition {
+        id: "helper".into(),
+        project: Some(project_id),
+    });
+    let listed = expect(&ui, |message| match message {
+        Message::AgentDefinitions { definitions } => Some(definitions),
+        _ => None,
+    });
+    assert!(!listed.iter().any(|it| it.id == "helper"));
+    assert!(!own.join("helper.md").exists());
+    assert!(!path.join(NEUTRAL_DIR).join("helper.md").exists());
+}

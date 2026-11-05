@@ -986,6 +986,36 @@ pub fn body(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> 
         // `worker` each imply MCP servers the host re-adds on every save, so the checklist below
         // draws them ticked and takes no click on them — see `NewAgentForm::implies_mcp`.
         rows = rows.child(tags_block(app, &form, live, window, cx));
+        // A harness agent is a file in a project's folders, so only a project-scoped form offers
+        // it, and only while that project lists them (`D233`). An agent already local can always
+        // be unticked, which moves it back into Kubiq's store.
+        if let Some(project) = form.project {
+            let shows = app
+                .workbench
+                .settings
+                .definition_scope(project)
+                .harness_agents
+                .show;
+            let takes = live && (shows || form.local);
+            rows = rows.child(flag_row(
+                "new-agent-local",
+                "Local agent",
+                if shows {
+                    "Saved as a file in the project's harness agent folders instead of Kubiq's \
+                     settings: every folder while the project syncs its agents, else the \
+                     harness's own folder."
+                } else {
+                    "Turn on Use harness agents in this project's Agent definitions to save one."
+                },
+                form.local,
+                takes,
+                cx.listener(move |this, _, _, cx| {
+                    if takes {
+                        this.toggle_new_agent_local(cx);
+                    }
+                }),
+            ));
+        }
         rows = rows.child(flag_row(
             "new-agent-disabled",
             "Disabled",

@@ -246,7 +246,8 @@ crates/kubiq-host/src/
 ├── .DS_Store
 ├── browser.rs
 ├── drone_modes.rs
-└── trust.rs
+├── trust.rs
+└── harness_agents.rs
 
 crates/kubiq/src/
 ├── state/
@@ -694,6 +695,7 @@ the documents in its row.
 | `crates/agent-manager/src/harness/claude.rs` | [`agent-manager.md`](./agent-manager.md), [`wip/agent-setup.md`](../wip/agent-setup.md), [`wip/claude-auth-problem.md`](../wip/claude-auth-problem.md) |
 | `crates/agent-manager/src/harness/mod.rs` | [`agent-manager.md`](./agent-manager.md), [`wip/agent-setup.md`](../wip/agent-setup.md), [`wip/agent-vocabulary.md`](../wip/agent-vocabulary.md), [`wip/claude-auth-problem.md`](../wip/claude-auth-problem.md) |
 | `crates/agent-manager/src/harness/registry.rs` | [`agent-manager.md`](./agent-manager.md) |
+| `crates/agent-manager/src/harness_agents.rs` | [`agent-manager.md`](./agent-manager.md) |
 | `crates/agent-manager/src/io/acp.rs` | [`agent-manager.md`](./agent-manager.md) |
 | `crates/agent-manager/src/io/acp_caps.rs` | [`agent-manager.md`](./agent-manager.md) |
 | `crates/agent-manager/src/io/acp_client.rs` | [`inbox/hitl-registered-dialogs.md`](../inbox/hitl-registered-dialogs.md), [`agent-manager.md`](./agent-manager.md) |
@@ -783,6 +785,7 @@ the documents in its row.
 | `crates/kubiq-host/src/git/nested.rs` | [`version-control.md`](./version-control.md) |
 | `crates/kubiq-host/src/git/observe.rs` | [`architecture.md`](./architecture.md), [`version-control.md`](./version-control.md) |
 | `crates/kubiq-host/src/git/write.rs` | [`version-control.md`](./version-control.md) |
+| `crates/kubiq-host/src/harness_agents.rs` | [`agent-manager.md`](./agent-manager.md) |
 | `crates/kubiq-host/src/index/ceiling.rs` | [`wip/indexing.md`](../wip/indexing.md) |
 | `crates/kubiq-host/src/index/mod.rs` | [`wip/indexing.md`](../wip/indexing.md) |
 | `crates/kubiq-host/src/index/text.rs` | [`wip/indexing.md`](../wip/indexing.md) |

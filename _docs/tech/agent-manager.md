@@ -5,9 +5,9 @@ kind: tech
 status: draft
 summary: What the embedded harness-management library owns, what Kubiq owns, how the application consumes it, and the rule that keeps the two from growing into each other.
 read_when: you are about to write code that launches a harness, drives one as a conversation, names a harness config path, or touches accounts, skills or MCP servers
-updated: 2026-11-01
+updated: 2026-11-05
 verified: 2026-11-01
-code_anchors: [crates/kubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/kubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/ask.rs]
+code_anchors: [crates/agent-manager/src/harness_agents.rs, crates/kubiq-host/src/harness_agents.rs, crates/kubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/kubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/ask.rs]
 depends_on: [tech-structure]
 review_cycle: monthly
 ---
@@ -38,6 +38,8 @@ Its full documentation lives with the crate, starting at `crates/agent-manager/_
 | The permission modes a harness has (`Harness::modes`), and how `Profile.mode` reaches a policy | the library |
 | Which executable this machine runs for a harness, when it is not the harness's own name | Kubiq |
 | Which definition a conversation starts from, and the form that writes one | Kubiq |
+| Which project folders hold harness agent files, their formats, a parse that keeps every key, and how copies are matched and reconciled (`harness_agents`) | the library |
+| Whether a project lists or syncs its harness agents, and how a file's fields map onto an agent definition (`kubiq-*` keys) | Kubiq |
 | Which accounts exist and how credentials are referenced | the library |
 | Session history and resume, as the *harness* understands it | the library |
 | Which files are a harness's own record of a conversation, and the on-disk shape a record is written in | the library |
@@ -592,6 +594,19 @@ launch passes. `StartConversation.mcps` / `.skills` and `AgentDefinition.mcps` /
 own built-in MCP servers and the catalog's skills and MCP servers. What a composition can still not name
 from the interface — hooks, instructions, isolation and the `extends` chain — is tracked in
 [`../backlog.md`](../backlog.md).
+
+**A project's harness agents are the library's files and Kubiq's definitions** (`D233`).
+`agent_manager::harness_agents` keeps the only list of the project folders harnesses read subagent
+files from (`FOLDERS`: the cross-harness one first, then each harness's own, each with its format,
+suffix and the harness ids that read it), parses a file into its own keys and body so a write
+changes only the name, the description, the instructions and the `kubiq-*` keys, groups copies by
+`kubiq-id` or name, and implements `list`, `save`, `delete` and `sync`.
+`crates/kubiq-host/src/harness_agents.rs` is the whole of the consumption: an `AgentDefinition`'s id
+is the agent's name, its agent prompt the body, and every other field a harness format has no key
+for rides a `kubiq-*` key (`kubiq-harness`, `kubiq-model`, `kubiq-mode`, `kubiq-thinking`,
+`kubiq-account`, `kubiq-max-subagents`, `kubiq-mcps`, `kubiq-skills`, `kubiq-tags`,
+`kubiq-mission-assistant`, `kubiq-disabled`); grants are not written, being paths on this machine.
+The coordinator decides when — listing, saving, deleting, the project's flags — and names no folder.
 
 ## The rules
 

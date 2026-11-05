@@ -2205,6 +2205,7 @@ fn agent_definitions(
             )
             .into_any_element(),
         ))
+        .children(harness_agent_rows(app, form, cx))
         .children(project_definitions(app, form, window, cx))
         // The fixture has no project behind it, so there is no list to draw: the page shows the
         // question, and the live dialog is where the answer has rows.
@@ -2218,6 +2219,53 @@ fn agent_definitions(
                 )
         }))
         .into_any_element()
+}
+
+/// The two harness agent answers (`D233`), for a project the catalogue holds — the record is
+/// where they are kept, so a folder not yet a project has nowhere to put them.
+fn harness_agent_rows(app: &AppState, form: Form, cx: &mut Context<AppState>) -> Vec<AnyElement> {
+    let Some(project) = form_project(app, form, cx) else {
+        return Vec::new();
+    };
+    let current = app
+        .workbench
+        .settings
+        .definition_scope(project)
+        .harness_agents;
+    let prefix = form.prefix();
+    vec![
+        setting_row(
+            "Use harness agents",
+            "Also list the agents the harnesses read from this project's own folders, marked \
+             Local with the folders they are in. A local agent is edited here and saved back to \
+             its files.",
+            check_box(
+                ElementId::Name(format!("{prefix}-harness-agents-show").into()),
+                current.show,
+                cx.listener(move |this, _, _, cx| {
+                    let mut next = current;
+                    next.show = !next.show;
+                    this.set_project_harness_agents(project, next, cx);
+                }),
+            )
+            .into_any_element(),
+        ),
+        setting_row(
+            "Sync agents between harnesses",
+            "Keep every agent in every harness folder this project has: one found in one is \
+             written into the others, and where copies differ the newest wins.",
+            check_box(
+                ElementId::Name(format!("{prefix}-harness-agents-sync").into()),
+                current.sync,
+                cx.listener(move |this, _, _, cx| {
+                    let mut next = current;
+                    next.sync = !next.sync;
+                    this.set_project_harness_agents(project, next, cx);
+                }),
+            )
+            .into_any_element(),
+        ),
+    ]
 }
 
 /// Which of the two catalog pages a project section is.

@@ -45,6 +45,7 @@ fn record(name: &str, path: &str) -> ProjectRecord {
         initials: String::new(),
         definitions_use_global: true,
         definitions_allowed: Vec::new(),
+        harness_agents: Default::default(),
         storage: StorageMode::KubiqManaged,
     }
 }

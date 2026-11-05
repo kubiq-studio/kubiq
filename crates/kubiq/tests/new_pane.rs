@@ -199,6 +199,7 @@ fn a_project() -> ProjectSnapshot {
             initials: String::new(),
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
         },
         health: ProjectHealth::Ok,
         open_panes: 0,
@@ -955,6 +956,7 @@ fn picking_a_harness_on_a_definition_form_keeps_its_scope_and_words(cx: &mut Tes
         disabled: false,
         project: Some(project),
         grants: Vec::new(),
+        local: None,
     };
 
     fixture

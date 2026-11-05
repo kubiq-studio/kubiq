@@ -978,6 +978,7 @@ mod tests {
             initials: String::new(),
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
             storage: StorageMode::ProjectManaged,
         }
     }

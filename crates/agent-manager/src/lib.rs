@@ -18,6 +18,8 @@
 //! - [`registry`]  — the catalog (trait + filesystem-backed implementation).
 //! - [`harness`]   — the [`harness::Harness`] trait + per-harness impls
 //!   (how to identify, provision, and launch each supported harness).
+//! - [`harness_agents`] — a project's harness agent files (`.claude/agents`, `.agents/agents`,
+//!   …): the folder list, a parse that keeps unknown keys, and the cross-folder sync.
 //! - [`home`]      — [`home::HomeStore`], the persistent harness config home keyed by
 //!   `(account, harness)` (`D194`): where a login is performed into and every run that names
 //!   that account reads from. Core (no feature gate).
@@ -58,6 +60,7 @@ pub mod cli;
 pub mod config;
 pub mod credentials;
 pub mod harness;
+pub mod harness_agents;
 pub mod home;
 pub mod io;
 pub mod isolate;

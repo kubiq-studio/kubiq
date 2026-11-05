@@ -5,7 +5,7 @@ kind: tech
 status: current
 summary: One entry per structural decision — what was chosen, why, and what it costs — cited as `Dnn` across this library.
 read_when: you are about to argue with a rule, reverse a design choice, or make one a reasonable person might later reverse
-updated: 2026-11-02
+updated: 2026-11-05
 verified: 2026-10-08
 depends_on: [tech-architecture]
 review_cycle: quarterly
@@ -5761,6 +5761,42 @@ through the mode, and with it their panes. The coordinator holds a strong `Hub`,
 never closes on its own — as was true of every desktop and `--serve` run before it. A mode on the same port
 as `--serve` races it at boot and one of them fails. `HOST_SETTINGS_SCHEMA` 27: an older build drops
 every mode on its next write.
+
+### D233 — A project's harness agent files are definitions the project lists and syncs, keyed by `kubiq-id`
+
+Every harness reads subagent files from its own folder inside a project, each in its own format,
+and none reads another's. A project opts in with two flags on its record
+(`ProjectRecord::harness_agents`): `show` lists those agents among the project's definitions,
+marked `Local` with the folders holding a copy; `sync` keeps every agent in every folder.
+`agent_manager::harness_agents` owns the folder list, the formats and the reconciliation; Kubiq
+owns the mapping onto `AgentDefinition` and when it runs.
+
+- **Keys.** A write changes only the name, the description, the instructions (the body, or
+  Codex's `developer_instructions`) and keys prefixed `kubiq-`; every other key, the harness's own
+  and unknown ones, is kept, and an aligned copy is not written. `kubiq-id` ties copies
+  together — assigned on first sync as the name, lowercased and hyphenated, so it is deterministic
+  and survives a later rename; `kubiq-updated` (RFC 3339, UTC) stamps a Kubiq write. Every other
+  definition property is a `kubiq-*` key, lists comma-joined; grants are not written.
+- **Where a new one goes.** With sync on, every folder `sync` aligns; with it off, its harness's
+  own folder, else the library's cross-harness one. `sync` aligns the cross-harness folder
+  always, and a harness's folder when it, or the harness's own parent folder, exists — so
+  a project that has never used a harness does not grow its folder.
+- **Matching and conflicts.** Copies match by `kubiq-id`, else by name or file stem. Where their
+  name, description, instructions or `kubiq-*` keys differ, the newest wins — the latest
+  `kubiq-updated`, or the file time where there is none, ties broken by file time — and is written
+  to the others with its stamp, so the copies converge.
+- **When.** On project open, on the flag, every time the host sends the definitions list, and after
+  a local agent is saved. No watcher: a file edited by a harness is picked up the next time the list
+  is asked for.
+
+**Why not translate on every launch, or import once:** the harnesses read these files natively as
+their own subagents, so keeping the files themselves aligned is what makes one agent usable in
+every harness; a one-shot import would drift the moment either side was edited. **Why the files
+and not the store:** they are committed with the project and read by harnesses outside Kubiq.
+
+**Cost:** a hand edit that leaves an older `kubiq-updated` than another copy's loses to it; YAML
+comments and quoting in a rewritten frontmatter are not kept; a sync reads every folder each time
+the list is sent. A local agent is not startable from Kubiq (`G467`).
 
 ## Related docs
 

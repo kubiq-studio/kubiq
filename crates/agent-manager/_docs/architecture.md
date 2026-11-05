@@ -168,6 +168,7 @@ src/
 │   ├── claude.rs     #   Claude Code (P1)
 │   ├── codex.rs      #   Codex (P2); also provisions `codex-acp`, its ACP-speaking sibling
 │   └── opencode.rs   #   opencode (P2)
+├── harness_agents.rs # a project's subagent files: FOLDERS (.agents/agents, .claude/agents, .codex/agents, .gemini/agents, .opencode/agents, .github/agents), key-preserving parse, kubiq-id grouping, list/save/delete/sync (core)
 ├── provision.rs      # RunSpec -> ephemeral config dir + argv + env (per harness)
 ├── quota.rs          # what a subscription has LEFT: QuotaSnapshot/Gauge/Reading + the Claude probe (core)
 ├── run.rs            # spawn + supervise the child; owns the process lifecycle

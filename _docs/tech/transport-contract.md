@@ -140,6 +140,7 @@ recolour and a move on disk.
 | `ForgetProject` | UI → host | `project_id` | `ProjectForgotten` |
 | `UpdateProject` | UI → host | `project_id`, `name?`, `colour?`, `custom_colour?`, `search_excludes?`, `index?`, `mission_term?`, `tools?`, `managed_repos?`, `lanes?`, `runs_on?`, `definitions_use_global?`, `definitions_allowed?` | `ProjectChanged` |
 | `SetProjectInitials` | UI → host | `project_id`, `initials` | `ProjectChanged` |
+| `SetProjectHarnessAgents` | UI → host | `project_id`, `harness_agents: { show, sync }` | `ProjectChanged` (to everyone) and `AgentDefinitions` |
 | `LocateProject` | UI → host | `project_id`, `path` | `ProjectChanged` or `ProjectError` |
 | `SetProjectStorage` | UI → host | `project_id`, `storage` | `ProjectStorageMoved` + `ProjectChanged`, or `ProjectStorageError` |
 | `OpenedProject` | UI → host | `project_id` | `ProjectChanged` |
@@ -378,6 +379,13 @@ deny-list, so a global added after a project narrowed itself is not silently on 
 project's own definitions are in scope either way and shadow a global of the same id either way —
 neither field says anything about them. `AddProject` carries neither: a new project is on the
 globals, and narrowing it is a settings gesture.
+
+**What a project does with its harness agent files is `ProjectRecord::harness_agents`, set by its
+own message** (`D233`). `HarnessAgents { show, sync }`, both off by default and left out of a record
+while they are. `show` adds the agents found in the project's harness agent folders to the
+project's `AgentDefinitions`; `sync` makes the host keep those folders aligned. `SetProjectHarnessAgents`
+is its own message on `SetProjectInitials`'s reasoning and because it is not filesystem-free: the
+host syncs on the way to answering, then sends the asker the definitions list.
 
 **`AddProject` never creates a folder.** A path that does not exist is a `ProjectError`. A folder
 already in the catalogue answers with the project that is there, so no duplicate appears. **With
@@ -1989,7 +1997,7 @@ Forty-seven records travel inside payloads.
 | `ToolRun` | `scope`, `id` |
 | `ListedTool` | `scope`, `tool`, `applicable`, `origin` |
 | `ToolOrigin` | `Defined`, or `Discovered { runner }` |
-| `ProjectRecord` | `id`, `name`, `path`, `colour`, `custom_colour?`, `temporary`, `created_at`, `last_opened_at?`, `search_excludes[]`, `index?`, `mission_term?`, `tools[]`, `managed_repos[]`, `initials`, `definitions_use_global`, `definitions_allowed[]` |
+| `ProjectRecord` | `id`, `name`, `path`, `colour`, `custom_colour?`, `temporary`, `created_at`, `last_opened_at?`, `search_excludes[]`, `index?`, `mission_term?`, `tools[]`, `managed_repos[]`, `initials`, `definitions_use_global`, `definitions_allowed[]`, `harness_agents?` |
 | `ProjectSnapshot` | a `ProjectRecord`, flattened, plus `health`, `open_panes`, `workarea` and `ephemeral` |
 | `DirEntry` | `name`, `rel_path`, `kind`, `size?`, `symlink` |
 | `DirListing` | `rel_path`, `entries[]`, `truncated` |
@@ -2038,7 +2046,7 @@ Forty-seven records travel inside payloads.
 | `McpDraftInfo` | `label`, `server` (a `CatalogMcp`), `params[]` |
 | `RegistryMcpInfo` | `name`, `title?`, `description?`, `version?`, `repository?`, `options[]` (`McpDraftInfo`) |
 | `SkillAdd` | one of: `Link{path, id?}`, `Folder{path}`, `Remote{source, path, id?}` |
-| `AgentDefinition` | `id`, `description?`, `agent_type`, `account?`, `model?`, `mode?`, `thinking?`, `max_subagents?`, `prompt?`, `mcps`, `skills`, `grants`, `mission_assistant?`, `tags`, `disabled`, `project?` |
+| `AgentDefinition` | `id`, `description?`, `agent_type`, `account?`, `model?`, `mode?`, `thinking?`, `max_subagents?`, `prompt?`, `mcps`, `skills`, `grants`, `mission_assistant?`, `tags`, `disabled`, `project?`, `local?` (`{ folders[] }`) |
 | `PermissionOption` | `option_id`, `name`, `kind` |
 | `CliDir` | `path`, `exists`, `on_path` |
 | `PlanEntry` | `content`, `priority`, `status` |
@@ -2588,6 +2596,16 @@ for; and in answer to `TrustProjectItems`. The host trusts each listed item whos
 the fingerprint sent and leaves any other untrusted, so it reappears in the answer with its new
 fingerprint — an empty `items` means everything is trusted. Global definitions and the
 application's catalog layer are never listed.
+
+**A harness agent is a project definition whose `local` is set** (`D233`). The host lists one in
+`AgentDefinitions` only for a project with `harness_agents.show`, its `local.folders` naming the
+project folders holding a copy, as `agent-manager` spells them; a stored project definition of the
+same id is listed instead. `SaveAgentDefinition` with `local` present writes the definition as
+those files (the folders are the host's choice; what the interface sends in them is ignored), and
+removes a stored definition it was until then; `local` absent on one that was a harness agent moves
+it into the store and removes its files. `DeleteAgentDefinition` removes every copy;
+`CloneAgentDefinition` of one writes a stored copy. A harness agent is not started from — the
+interface leaves it out of every start picker (`G467`).
 
 **Global and project definitions are both deleted one by one.** `DeleteAgentDefinition` takes an
 optional `project` — `None` for a global definition, `Some` for a project's own — and removes that

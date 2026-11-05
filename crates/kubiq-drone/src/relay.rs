@@ -1028,6 +1028,7 @@ fn record_for(root: &Root) -> ProjectRecord {
         initials: String::new(),
         definitions_use_global: true,
         definitions_allowed: Vec::new(),
+        harness_agents: Default::default(),
         // A drone writes nothing down at all, so the mode that decides *where* it would is the
         // plain one — there is no `.kubiq/` to make on the far machine and nobody to make it.
         storage: kubiq_proto::projects::StorageMode::KubiqManaged,

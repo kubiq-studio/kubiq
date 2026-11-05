@@ -590,6 +590,7 @@ mod tests {
             disabled: false,
             project,
             grants: Vec::new(),
+            local: None,
         }
     }
 
@@ -895,6 +896,7 @@ mod tests {
             initials: String::new(),
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
             storage: StorageMode::KubiqManaged,
         };
         change_mode(root.path(), &record, StorageMode::ProjectManaged).unwrap();

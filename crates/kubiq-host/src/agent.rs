@@ -951,6 +951,7 @@ impl Agents {
                         })
                         .collect(),
                     project,
+                    local: None,
                 })
             })
             .collect())
@@ -1354,6 +1355,7 @@ impl Agents {
                 disabled: false,
                 project: None,
                 grants: Vec::new(),
+                local: None,
             })
             .with_context(|| format!("writing the default agent definition '{id}'"))?;
         }
@@ -3805,6 +3807,7 @@ mod tests {
             disabled: false,
             project: None,
             grants: Vec::new(),
+            local: None,
         }
     }
 

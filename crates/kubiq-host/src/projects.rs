@@ -492,6 +492,7 @@ impl Projects {
             // existed; narrowing it is a settings gesture, not a creation one.
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
         };
 
         // Before the record exists anywhere, so a refusal leaves no half-made project behind.
@@ -574,6 +575,7 @@ impl Projects {
             storage: StorageMode::KubiqManaged,
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
         };
         let snapshot = self.snapshot(&record);
         let mut replies = vec![Reply::Everyone(
@@ -820,6 +822,26 @@ impl Projects {
         let mut record = record.clone();
         record.initials = initials.trim().chars().take(3).collect();
 
+        let snapshot = self.snapshot(&record);
+        let mut replies = vec![Reply::Everyone(
+            kubiq_proto::messages::Message::ProjectChanged { project: snapshot },
+        )];
+        replies.extend(self.keep(record));
+        replies
+    }
+
+    /// Record what the project does with its harness agent files (`D233`). Display-free like
+    /// [`Self::set_initials`]; the coordinator runs the sync the new answer asks for.
+    pub fn set_harness_agents(
+        &mut self,
+        id: ProjectId,
+        harness_agents: kubiq_proto::projects::HarnessAgents,
+    ) -> Vec<Reply> {
+        let Some(record) = self.find(id) else {
+            return vec![Reply::Asker(message_error(Some(id), "no such project"))];
+        };
+        let mut record = record.clone();
+        record.harness_agents = harness_agents;
         let snapshot = self.snapshot(&record);
         let mut replies = vec![Reply::Everyone(
             kubiq_proto::messages::Message::ProjectChanged { project: snapshot },

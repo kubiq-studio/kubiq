@@ -1313,6 +1313,17 @@ pub enum Message {
         project_id: ProjectId,
         initials: String,
     },
+    /// Set what this project does with its harness agent files (`D233`) — see
+    /// [`crate::projects::ProjectRecord::harness_agents`]. Its own message on
+    /// [`Message::SetProjectInitials`]'s reasoning, and because turning `sync` on is not
+    /// filesystem-free: the host aligns the folders before it answers.
+    ///
+    /// Answered with a [`Message::ProjectChanged`] to every window and the
+    /// [`Message::AgentDefinitions`] list to the asker.
+    SetProjectHarnessAgents {
+        project_id: ProjectId,
+        harness_agents: crate::projects::HarnessAgents,
+    },
     /// Move this project's own data between the two storage modes (`D173`) — out of
     /// `<config root>/projects/<ulid>/` into the project's own `.kubiq/`, or back.
     ///
@@ -3833,6 +3844,7 @@ impl Message {
             | Message::ForgetProject { project_id, .. }
             | Message::UpdateProject { project_id, .. }
             | Message::SetProjectInitials { project_id, .. }
+            | Message::SetProjectHarnessAgents { project_id, .. }
             | Message::LocateProject { project_id, .. }
             | Message::SetProjectStorage { project_id, .. }
             | Message::ProjectStorageMoved { project_id, .. }
@@ -4419,6 +4431,23 @@ pub struct AgentDefinition {
     /// screen lists only the global ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectId>,
+    /// Present when this is a **harness agent** — a file in the project's harness agent folders
+    /// rather than a record in Kubiq's own store (`D233`). Only ever on a project definition.
+    ///
+    /// From the host it names the folders the agent has a copy in. On
+    /// [`Message::SaveAgentDefinition`] its presence asks for the definition to be written as
+    /// such a file (the folders are the host's to pick, and ignored here), and its absence on a
+    /// definition that was one moves it back into Kubiq's store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<LocalAgent>,
+}
+
+/// Where a harness agent lives: the project folders, relative to the project root and as
+/// `agent-manager` names them (`.claude/agents`, `.agents/agents`, …), holding a copy of it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalAgent {
+    #[serde(default)]
+    pub folders: Vec<String>,
 }
 
 /// The tag a definition carries to run the coordinator side of a mission or a task.

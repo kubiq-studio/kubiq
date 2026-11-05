@@ -54,6 +54,7 @@ fn snapshot(id: ProjectId, name: &str, path: &str, opened: Option<u32>) -> Proje
             initials: String::new(),
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
         },
         health: ProjectHealth::Ok,
         open_panes: 0,

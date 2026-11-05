@@ -242,6 +242,7 @@ fn a_project() -> ProjectSnapshot {
             initials: String::new(),
             definitions_use_global: true,
             definitions_allowed: Vec::new(),
+            harness_agents: Default::default(),
         },
         health: ProjectHealth::Ok,
         open_panes: 0,
@@ -982,6 +983,7 @@ fn a_definition(id: &str, project: Option<ProjectId>) -> kubiq_proto::messages::
         disabled: false,
         project,
         grants: Vec::new(),
+        local: None,
     }
 }
 
@@ -1368,6 +1370,107 @@ fn the_definition_form_carries_the_scope_it_was_opened_from(cx: &mut TestAppCont
         edited,
         Some(project),
         "an edit saves the definition back where it came from"
+    );
+}
+
+/// The harness agents flag is the project's: it is sent as it is ticked and mirrored at once; the
+/// form's Local agent tick only takes while the project shows its harness agents, and a local
+/// agent the host lists is offered in the project's list and nowhere a run begins (`D233`).
+#[gpui::test]
+fn the_harness_agents_flag_gates_local_agents(cx: &mut TestAppContext) {
+    use kubiq_proto::projects::HarnessAgents;
+
+    let fixture = Fixture::open(cx);
+    let project = fixture
+        .state
+        .read_with(cx, |state, cx| state.project(cx))
+        .expect("the window holds a project");
+    let _ = fixture.said();
+
+    // Off: the form's tick does not take.
+    fixture.with(cx, |state, window, cx| {
+        state.open_definition_form(None, Some(project), window, cx);
+        state.toggle_new_agent_local(cx);
+    });
+    let local = fixture.state.read_with(cx, |state, _| {
+        state
+            .workbench
+            .settings
+            .definition_form
+            .as_ref()
+            .unwrap()
+            .local
+    });
+    assert!(
+        !local,
+        "a project that lists no harness agents takes no local agent"
+    );
+
+    let on = HarnessAgents {
+        show: true,
+        sync: false,
+    };
+    fixture.with(cx, |state, _, cx| {
+        state.set_project_harness_agents(project, on, cx)
+    });
+    let sent = fixture
+        .said()
+        .into_iter()
+        .find_map(|message| match message {
+            Message::SetProjectHarnessAgents {
+                project_id,
+                harness_agents,
+            } if project_id == project => Some(harness_agents),
+            _ => None,
+        });
+    assert_eq!(sent, Some(on), "the tick reached the host");
+    let mirrored = fixture.state.read_with(cx, |state, _| {
+        state
+            .workbench
+            .settings
+            .definition_scope(project)
+            .harness_agents
+    });
+    assert_eq!(mirrored, on, "and is mirrored before the host answers");
+
+    fixture.with(cx, |state, _, cx| state.toggle_new_agent_local(cx));
+    let written = fixture.state.read_with(cx, |state, _| {
+        state
+            .workbench
+            .settings
+            .definition_form
+            .as_ref()
+            .unwrap()
+            .as_definition("helper".to_string())
+    });
+    assert!(written.local.is_some(), "now the form saves a local agent");
+
+    let mut helper = a_definition("helper", Some(project));
+    helper.local = Some(kubiq_proto::messages::LocalAgent {
+        folders: vec!["one".to_string()],
+    });
+    fixture.host.send(
+        To::Everyone,
+        Message::AgentDefinitions {
+            definitions: vec![a_definition("standard", None), helper],
+        },
+    );
+    cx.run_until_parked();
+    let (listed, startable) = fixture.state.read_with(cx, |state, _| {
+        let settings = &state.workbench.settings;
+        let ids = |list: Vec<kubiq_proto::messages::AgentDefinition>| {
+            list.into_iter().map(|it| it.id).collect::<Vec<_>>()
+        };
+        (
+            ids(settings.definitions_in(Some(project))),
+            ids(settings.startable_definitions_in(Some(project))),
+        )
+    });
+    assert_eq!(listed, vec!["helper".to_string(), "standard".to_string()]);
+    assert_eq!(
+        startable,
+        vec!["standard".to_string()],
+        "a harness agent is not something a run starts from"
     );
 }
 

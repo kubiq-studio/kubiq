@@ -497,6 +497,25 @@ on, every global is inherited; with it off, only the ids on `definitions_allowed
 project's own setups are in scope either way — narrowing the inheritance never takes away a setup
 the project wrote itself — and shadowing by id is unchanged.
 
+**Two more ticks, `Use harness agents` and `Sync agents between harnesses`, are about the agent
+files the harnesses read from inside the project** (`D233`) — the folders, their formats and the
+sync rule are `agent-manager`'s (`crates/agent-manager/src/harness_agents.rs`, linked from
+[`../tech/agent-manager.md`](../tech/agent-manager.md)). Both off by default,
+both drawn only for a project already in the catalogue, both `ProjectRecord.harness_agents` written
+by `SetProjectHarnessAgents` on the click (`AppState::set_project_harness_agents`, mirrored at once
+into `DefinitionScope::harness_agents`). With `Use harness agents` on, every agent found in those
+folders is listed among this project's own setups with a `Local` badge and the folders it has a
+copy in; Edit opens it in the same form and saves back to its files, Delete removes every copy
+behind a confirm that names the folders, Clone writes a stored copy, and a stored setup of the same
+name hides it. A local agent is **not offered at a start** (`SettingsState::startable_definitions_in`,
+`G467`). With `Sync agents between harnesses` on, the host keeps every agent in every harness folder
+the project has, the newest copy winning where they differ — on project open, on the tick, every
+time the definitions list is sent, and after a local agent is saved. The definition form, opened
+for a project, carries a `Local agent` tick: it takes only while the project shows its harness
+agents (an agent already local can always be unticked, which moves it back into Kubiq's store),
+and a ticked save writes the agent as a file — into every synced folder while sync is on, else
+into its harness's own folder, else the library's cross-harness one.
+
 An agent definition saved here belongs to the
 project, which is a fact about where it is stored and not a field it carries (`D158`): the host
 keeps it under that project's own directory, offers it when an agent starts in that project, and

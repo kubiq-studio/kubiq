@@ -1487,6 +1487,7 @@ mod tests {
             disabled: false,
             project: None,
             grants: Vec::new(),
+            local: None,
         }
     }
 

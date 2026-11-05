@@ -120,6 +120,8 @@ pub mod files;
 pub mod gc;
 #[cfg(feature = "git")]
 pub mod git;
+#[cfg(feature = "harness")]
+pub mod harness_agents;
 pub mod health;
 pub mod help;
 pub mod host_meta;

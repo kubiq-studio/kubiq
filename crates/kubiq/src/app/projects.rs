@@ -287,8 +287,31 @@ impl AppState {
             crate::state::settings::DefinitionScope {
                 use_global: record.definitions_use_global,
                 allowed: record.definitions_allowed.clone(),
+                harness_agents: record.harness_agents,
             },
         );
+    }
+
+    /// Set what this project does with its harness agent files (`D233`). Mirrored at once, the
+    /// way [`Self::set_project_definitions_use_global`] is; the host answers with the record and
+    /// the definitions list, which now carries — or drops — the harness agents.
+    pub fn set_project_harness_agents(
+        &mut self,
+        project: ProjectId,
+        harness_agents: kubiq_proto::projects::HarnessAgents,
+        cx: &mut Context<Self>,
+    ) {
+        let mut scope = self.workbench.settings.definition_scope(project);
+        scope.harness_agents = harness_agents;
+        self.workbench
+            .settings
+            .definition_scopes
+            .insert(project, scope);
+        self.bus.send(Message::SetProjectHarnessAgents {
+            project_id: project,
+            harness_agents,
+        });
+        cx.notify();
     }
 
     /// Whether this project is on every global definition or only on the ones it named.

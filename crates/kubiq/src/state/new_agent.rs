@@ -188,6 +188,10 @@ pub struct NewAgentForm {
     /// is settled by where the user asked for it, and a saved definition is edited in the scope it
     /// was written in ([`AgentDefinition::project`]).
     pub project: Option<ProjectId>,
+    /// The definition form's **Local agent** tick: save it as a harness agent file in the
+    /// project's folders rather than in Kubiq's store ([`AgentDefinition::local`], `D233`). Only a
+    /// project-scoped form draws it.
+    pub local: bool,
     /// The id the definition being edited was opened (or last saved) under. A Save whose name
     /// field now says something else is a rename of this one — `SaveAgentDefinition::replaces` —
     /// not a second definition. `None` for a form that is writing a new one.
@@ -359,6 +363,7 @@ impl NewAgentForm {
             models: Vec::new(),
             probing: false,
             project: None,
+            local: false,
             for_task: None,
             ask_for_feedback: true,
             plan_mode: false,
@@ -407,6 +412,7 @@ impl NewAgentForm {
             // project's settings goes back where it came from, and the global form never
             // acquires a project it was not opened with.
             project: definition.project,
+            local: definition.local.is_some(),
             original_id: (purpose == Purpose::AgentDefinition).then(|| definition.id.clone()),
             ..Self::new(purpose)
         }
@@ -441,6 +447,9 @@ impl NewAgentForm {
             // Which root the host writes it into. The scope is not a field the user picks; it
             // is the surface the form was opened from.
             project: self.project,
+            // The folders are the host's to pick; presence is the whole of the ask.
+            local: (self.local && self.project.is_some())
+                .then(kubiq_proto::messages::LocalAgent::default),
         }
     }
 
@@ -814,6 +823,7 @@ mod tests {
             disabled: false,
             project: None,
             grants: Vec::new(),
+            local: None,
         }
     }
 

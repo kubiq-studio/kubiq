@@ -649,6 +649,29 @@ impl AppState {
         cx.notify();
     }
 
+    /// Flip the definition form's **Local agent** tick (`D233`). Only a project-scoped form
+    /// whose project shows its harness agents takes it: anywhere else a local agent would be
+    /// written where nothing lists it.
+    pub fn toggle_new_agent_local(&mut self, cx: &mut Context<Self>) {
+        let shows = |project| {
+            self.workbench
+                .settings
+                .definition_scope(project)
+                .harness_agents
+                .show
+        };
+        let allowed = self
+            .new_agent_form()
+            .and_then(|form| form.project)
+            .is_some_and(shows);
+        if let Some(form) = self.new_agent_form_mut()
+            && (allowed || form.local)
+        {
+            form.local = !form.local;
+        }
+        cx.notify();
+    }
+
     /// Put one tag on the definition, or take it off. A role tag's MCP servers are ticked by the
     /// tag and shown as such; the host re-asserts them on save, so nothing here writes them onto
     /// the checklist.
