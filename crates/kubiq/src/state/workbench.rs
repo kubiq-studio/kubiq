@@ -642,6 +642,9 @@ pub enum FileDialog {
     /// a write that did not happen is not something a dot on a tab can report, and the buffer
     /// still holds every edit. `key` is the tab's key, `reason` what the host gave.
     SaveFailed { key: String, reason: String },
+    /// A gesture on a file that could not go ahead — a file opened as SQLite that is not one.
+    /// Nothing to answer; the button dismisses it. `message` is the whole `<what failed>: <cause>`.
+    Failed { title: String, message: String },
     /// A save onto a path that already holds a file, which the host refused rather than
     /// performed. The only place Kubiq offers to write over one, and it offers it only because the
     /// user is standing here saying where the buffer goes. `key` is the tab's key.

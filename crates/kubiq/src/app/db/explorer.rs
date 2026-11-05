@@ -7,8 +7,9 @@
 
 use super::*;
 use crate::state::MenuId;
-use crate::state::db::DbmlSink;
+use crate::state::db::open_file::{SQLITE_HEADER, has_sqlite_header};
 use crate::state::db::tree::{DbAction, DbKey, DbMenu, DbTreeState, NodeKind, Toggled};
+use crate::state::db::{DbmlSink, SqliteOpen, SqliteStage, SqliteStep};
 use gpui::ClipboardItem;
 use kubiq_proto::db::{DbConnState, DbKind, DbListing};
 use kubiq_proto::ids::DbExportId;
@@ -338,6 +339,137 @@ impl AppState {
                 )
                 .with_category("db-dbml"),
             ),
+        }
+        cx.notify();
+    }
+
+    // ── A project file opened as SQLite ─────────────────────────────
+
+    /// Open a project file as a SQLite connection — the IDE explorer's double-click on a `.db` /
+    /// `.sqlite*` row and its "Open as SQLite". The header is read first, through the file family
+    /// with `max_bytes` at the header's length; [`Self::sqlite_header_arrived`] takes it from there.
+    pub fn open_as_sqlite(&mut self, rel_path: String, cx: &mut Context<Self>) {
+        let Some(project) = self.project(cx) else {
+            return;
+        };
+        let Some(root) = self
+            .project_snapshot(cx)
+            .map(|snap| snap.record.path.clone())
+        else {
+            return;
+        };
+        let Some(open) = self.projects.get_mut(&project) else {
+            return;
+        };
+        let abs_path = absolute_path(&root, &rel_path);
+        open.db.sqlite_open = Some(SqliteOpen::new(rel_path.clone(), abs_path));
+        self.bus.send(Message::ReadProjectFile {
+            project_id: project,
+            rel_path,
+            max_bytes: Some(SQLITE_HEADER.len() as u64),
+        });
+        cx.notify();
+    }
+
+    /// A `ProjectFileContents` the SQLite open may be waiting on. Answers whether the arrival was
+    /// the header read alone — a prefix no editor tab wants, so the caller does not queue it. A
+    /// longer read of the same path is a tab's, and the probe keeps waiting for its own.
+    pub(crate) fn sqlite_header_arrived(
+        &mut self,
+        project: ProjectId,
+        rel_path: &str,
+        contents: &FileContents,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let on_screen = self.project(cx) == Some(project);
+        let Some(open) = self.projects.get_mut(&project) else {
+            return false;
+        };
+        let Some(probe) = open.db.sqlite_open.as_mut().filter(|probe| {
+            probe.stage == SqliteStage::Probing
+                && probe.rel_path == rel_path
+                && contents.bytes.len() <= SQLITE_HEADER.len()
+        }) else {
+            return false;
+        };
+        if !has_sqlite_header(&contents.bytes) {
+            open.db.sqlite_open = None;
+            self.workbench.file_dialog = Some(FileDialog::Failed {
+                title: "Not opened".to_string(),
+                message: format!("Not a SQLite database: {rel_path} has no SQLite header"),
+            });
+        } else if on_screen {
+            probe.stage = SqliteStage::Verified;
+            self.show_mode(RailMode::DB, cx);
+            self.set_rail_mode(RailMode::DB, cx);
+            self.settle_sqlite_open(project, cx);
+        } else {
+            // The window moved to another project while the header was on the wire.
+            open.db.sqlite_open = None;
+        }
+        cx.notify();
+        contents.truncated
+    }
+
+    /// A `ProjectFileError` for the file being opened as SQLite ends the open, said in a dialog.
+    pub(crate) fn sqlite_header_failed(
+        &mut self,
+        project: ProjectId,
+        rel_path: &str,
+        error: &FileError,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(open) = self.projects.get_mut(&project) else {
+            return;
+        };
+        if !open
+            .db
+            .sqlite_open
+            .as_ref()
+            .is_some_and(|probe| probe.stage == SqliteStage::Probing && probe.rel_path == rel_path)
+        {
+            return;
+        }
+        open.db.sqlite_open = None;
+        self.workbench.file_dialog = Some(FileDialog::Failed {
+            title: "Not opened".to_string(),
+            message: format!("Reading {rel_path} failed: {}", describe(error)),
+        });
+        cx.notify();
+    }
+
+    /// Take the SQLite open one step on, once the header is verified and whenever the
+    /// connection list lands: reveal the file's connection, or save one named after the file.
+    pub(super) fn settle_sqlite_open(&mut self, project: ProjectId, cx: &mut Context<Self>) {
+        let Some(open) = self.projects.get_mut(&project) else {
+            return;
+        };
+        match open.db.sqlite_step() {
+            SqliteStep::Wait => {}
+            SqliteStep::Create(config) => self.save_db_connection(
+                project,
+                None,
+                *config,
+                SecretEdit::Keep,
+                false,
+                Default::default(),
+                None,
+            ),
+            SqliteStep::Reveal(conn) => {
+                if self.project(cx) == Some(project) {
+                    if let Some(db) = self.db_mut(cx) {
+                        db.tree.selected = Some(conn.to_string());
+                    }
+                    self.connect_db(conn, cx);
+                    self.reveal_db_cursor(cx);
+                }
+            }
+            SqliteStep::Missing(rel_path) => {
+                self.workbench.file_dialog = Some(FileDialog::Failed {
+                    title: "Not opened".to_string(),
+                    message: format!("Connection not created: {rel_path} is not in the list"),
+                });
+            }
         }
         cx.notify();
     }

@@ -296,6 +296,8 @@ pub enum ExplorerAction {
     /// A markdown file, opened straight into its tab's `ViewLayout::Annotation` — collaboration
     /// mode, where threads are left for an agent.
     Annotate,
+    /// A `.db` / `.sqlite*` file, opened as a connection in DB mode once its header says SQLite.
+    OpenAsSqlite,
     CopyPath,
     CopyFullPath,
     /// The row as a `kubiq://` destination, which is what a link in a document wants.
@@ -354,6 +356,7 @@ impl ExplorerAction {
             ExplorerAction::OpenWith => "Open with \u{25b8}",
             ExplorerAction::OpenWithViewer(kind) => kind.label(),
             ExplorerAction::Annotate => "Open in annotation mode",
+            ExplorerAction::OpenAsSqlite => "Open as SQLite",
             ExplorerAction::CopyPath => "Copy path",
             ExplorerAction::CopyFullPath => "Copy full path",
             ExplorerAction::CopyLink => "Copy link",

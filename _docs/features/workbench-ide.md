@@ -107,7 +107,8 @@ host has never listed is asked for and opened when the answer lands. A reveal al
 reveal opens the way to one file, it does not tidy the rest of the tree away. It is never written
 down, so a window opens with it off.
 
-**A right-click on a row raises a menu at the pointer.** A file offers Open, Open diff vs HEAD, Copy
+**A right-click on a row raises a menu at the pointer.** A file offers Open (and, for a `.db` or
+`.sqlite*` file, Open as SQLite — [DB mode](./workbench-db.md)), Open diff vs HEAD, Copy
 path, Copy full path, Copy link, Open in Finder, Open in Web, New file, New folder, New Excalidraw,
 New draw.io, Copy, Cut, Paste, Duplicate, Rename and Delete; a folder offers Expand or Collapse, New
 file, New folder, New Excalidraw, New draw.io, Copy path, Copy full path, Copy link, Open in Finder,
@@ -299,7 +300,10 @@ saving, a failed save, or an unsaved edit. A clean, idle tab draws no dot.
 *Open files in previews* is on — which is the default, and a setting. Off, a single click and
 `enter` open permanently too. `shift-enter` opens permanently either way; `shift` or `cmd` with a
 click, and a double-click — on the explorer row *or on the tab itself* — open permanently. Only one
-preview tab exists at a time — opening another preview replaces it and closes its panel. A preview
+preview tab exists at a time — opening another preview replaces it and closes its panel. A
+double-click on a `.db` or `.sqlite*` file is the exception: it opens the file as a SQLite
+connection in [DB mode](./workbench-db.md), and a file without the SQLite header raises an error
+dialog instead. A preview
 is promoted to permanent by its first edit, or by the explicit gesture that opens it permanently; a
 single click that merely brings the tab to the front does not promote it. A preview tab is drawn in
 italics with a faint background so it reads as tentative at a glance.

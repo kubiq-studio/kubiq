@@ -1630,6 +1630,14 @@ impl AppState {
         }
     }
 
+    /// Put one rail mode on the rail if it is not — opted into, or no longer hidden — through
+    /// [`Self::toggle_mode`], so it is remembered exactly as the switch would remember it.
+    pub fn show_mode(&mut self, mode: RailMode, cx: &mut Context<Self>) {
+        if !self.mode_enabled(mode, cx) {
+            self.toggle_mode(mode, cx);
+        }
+    }
+
     /// Show or hide one rail mode. An app-group mode is the application's and needs no project;
     /// a project-group one is the active project's. The rail never empties: the last enabled
     /// `Always` app-group mode cannot be hidden (the only modes every project shows), nor the

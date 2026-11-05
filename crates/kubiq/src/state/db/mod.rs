@@ -8,7 +8,8 @@
 //!
 //! The pieces are split by who owns them: [`tree`] the explorer's rows and filter, [`table`] one
 //! table tab, [`pending`] the pure edit buffer a table tab keeps, [`sql`] one SQL tab, [`form`] the
-//! connection form. This file holds what they share — the list, the keystore, the connection
+//! connection form, [`open_file`] a project file opened as SQLite from the IDE explorer. This file
+//! holds what they share — the list, the keystore, the connection
 //! states, the open tabs and the password prompt — and the two tab-key spellings.
 //!
 //! **A tab is a session.** Each table or SQL tab mints a [`DbSessionId`] when it opens and sends it
@@ -21,12 +22,14 @@ use kubiq_proto::db::{DbConnState, DbConnection, DbFailure, DbKeystore, Password
 use kubiq_proto::ids::{DbConnId, DbExportId, DbProbeId, DbSessionId};
 
 pub mod form;
+pub mod open_file;
 pub mod pending;
 pub mod sql;
 pub mod table;
 pub mod tree;
 
 pub use form::DbConnForm;
+pub use open_file::{SqliteOpen, SqliteStage, SqliteStep};
 pub use sql::{AgentMark, DbSqlTab};
 pub use table::DbTableTab;
 pub use tree::{DbMenu, DbTreeState};
@@ -115,6 +118,9 @@ pub struct DbState {
     /// DBML exports asked for and not yet answered, by request: what to do with the text, and the
     /// file name it takes if it is opened.
     pub dbml_pending: HashMap<DbExportId, (DbmlSink, String)>,
+    /// A file the IDE explorer is opening as SQLite, until its connection is revealed. One at a
+    /// time: a second gesture replaces the first.
+    pub sqlite_open: Option<SqliteOpen>,
 }
 
 /// What a DBML export's text is for.

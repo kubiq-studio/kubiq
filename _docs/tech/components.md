@@ -5,7 +5,7 @@ kind: tech
 status: current
 summary: The reusable components Kubiq builds out of its own primitives — the floating popover, the multi-select dropdown a filter or a form narrows with, the activity bar a conversation heads with, the file picker any screen raises to choose a path, the viewer that draws one open file whole, the diff renderer two screens reach a change through, and the capabilities and tools panels each asked for by two surfaces — the state that drives them, and the discipline that keeps a compound a component rather than a one-off screen's decoration.
 read_when: you are building a control that floats above another, letting a screen choose several values at once, adding a second activity reading to a conversation's bar, wiring a screen to choose a path on the interface's or a host's filesystem, adding a file kind the viewer draws, reaching a diff or a harness's capabilities from a second screen, or reshaping something the kit's primitives are insufficient for and a one-off would have duplicated
-updated: 2026-10-04
+updated: 2026-11-05
 verified: 2026-10-02
 code_anchors: [crates/kubiq/src/ui/kit/popover.rs, crates/kubiq/src/ui/kit/menu.rs, crates/kubiq/src/ui/kit/mod.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/ui/file_picker.rs, crates/kubiq/src/state/file_picker.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/ui/file_dialog.rs, crates/kubiq/src/ui/teams/graph.rs, crates/kubiq/src/app/teams.rs, crates/kubiq/src/state/agents.rs, crates/kubiq/src/ui/viewer/mod.rs, crates/kubiq/src/ui/viewer/md_options.rs, crates/kubiq/src/ui/viewer/diff.rs, crates/kubiq/src/ui/editor.rs, crates/kubiq/src/ui/kb/mod.rs, crates/kubiq/src/ui/git/diff.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/ui/tools.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/state/editor.rs]
 depends_on: [tech-ui]
@@ -151,8 +151,9 @@ host is what it was built for, and the knowledge base's "Add source" form is the
 reach for it rather than for the platform dialog.
 
 `crates/kubiq/src/ui/file_dialog.rs` is a different thing entirely, despite the name: the name-and-
-confirm modals around a file operation — new file, rename, delete, the untitled buffer's save-as —
-answered from the window's one `file_name` field. Neither draws the other.
+confirm modals around a file operation — new file, rename, delete, the untitled buffer's save-as,
+and the `Failed` notice a gesture that could not go ahead raises (a file opened as SQLite that is
+not one) — answered from the window's one `file_name` field. Neither draws the other.
 
 **The standing gap.** The picker is raised by one screen only — the kitchen sink's picker page, over
 its fixture tree — so no screen has yet wired a real project's `ProjectTree` listings into

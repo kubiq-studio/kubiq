@@ -465,6 +465,18 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
                 window,
             )
         }
+        Some(FileDialog::Failed { title, message }) => confirm_modal(
+            "app-file-failed",
+            &title,
+            &message,
+            "OK",
+            false,
+            crate::ui::handler(&view, |this, window, cx| {
+                this.confirm_file_dialog(window, cx)
+            }),
+            crate::ui::handler(&view, |this, _, cx| this.close_file_dialog(cx)),
+            window,
+        ),
         // The one place Kubiq offers to write over a file. Danger-styled, like the delete: the
         // bytes that are there go, and only this click says so.
         Some(FileDialog::OverwriteFile { key }) => {

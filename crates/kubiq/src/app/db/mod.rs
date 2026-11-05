@@ -466,6 +466,8 @@ impl AppState {
                     self.close_db_tabs_of(project_id, conn);
                 }
                 self.ask_db_editors_once(project_id);
+                // A file being opened as SQLite was waiting on the list, or on its own save.
+                self.settle_sqlite_open(project_id, cx);
                 cx.notify();
             }
 

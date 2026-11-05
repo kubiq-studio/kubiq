@@ -97,6 +97,9 @@ pub fn menu_entries(
                     if path.to_ascii_lowercase().ends_with(".md") {
                         open.push(entry(ExplorerAction::Annotate));
                     }
+                    if crate::state::db::open_file::is_sqlite_name(path) {
+                        open.push(entry(ExplorerAction::OpenAsSqlite));
+                    }
                     open.push(entry(ExplorerAction::OpenDiff));
                     open
                 }

@@ -612,6 +612,11 @@ impl AppState {
                     self.set_view_layout(&key, ViewLayout::Annotation, cx);
                 }
             }
+            ExplorerAction::OpenAsSqlite => {
+                if let Some(path) = path {
+                    self.open_as_sqlite(path, cx);
+                }
+            }
             ExplorerAction::CopyPath
             | ExplorerAction::CopyFullPath
             | ExplorerAction::CopyLink
@@ -1105,7 +1110,7 @@ impl AppState {
             }
             // Nothing to answer: the modal exists so a save that did not happen is said out loud,
             // and its button only takes it away. The buffer keeps the edits either way.
-            FileDialog::SaveFailed { .. } => {
+            FileDialog::SaveFailed { .. } | FileDialog::Failed { .. } => {
                 self.close_file_dialog(cx);
                 return;
             }
@@ -1286,6 +1291,7 @@ impl AppState {
             FileDialog::DiscardChanges { .. }
             | FileDialog::ReloadChanges { .. }
             | FileDialog::SaveFailed { .. }
+            | FileDialog::Failed { .. }
             | FileDialog::OverwriteFile { .. }
             | FileDialog::CloseWindow { .. }
             | FileDialog::RestartForUpdate
@@ -1359,9 +1365,14 @@ impl AppState {
     }
 
     /// Open a file permanently (as opposed to temp preview). Double-click, Shift+click, or
-    /// Shift+Enter all reach here.
+    /// Shift+Enter all reach here. A `.db` / `.sqlite*` file opens as a SQLite connection in DB
+    /// mode instead (`open_as_sqlite`).
     pub fn double_click_explorer_row(&mut self, path: String, cx: &mut Context<Self>) {
-        self.select_file(path, cx);
+        if crate::state::db::open_file::is_sqlite_name(&path) {
+            self.open_as_sqlite(path, cx);
+        } else {
+            self.select_file(path, cx);
+        }
     }
 
     /// Open a file as a temporary preview tab. A single temp tab is kept at a time: opening

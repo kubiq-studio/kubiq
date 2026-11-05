@@ -980,11 +980,14 @@ impl AppState {
                 // file can be open in a tab and looked at in a panel at the same moment — so the
                 // panel is filled here and the arrival still queues for the tab.
                 self.fill_attachment_preview(project_id, &rel_path, &contents);
-                self.pending_files.push(FileArrival {
-                    project: project_id,
-                    path: rel_path,
-                    contents,
-                });
+                // The header read behind "Open as SQLite" is a prefix no tab wants.
+                if !self.sqlite_header_arrived(project_id, &rel_path, &contents, cx) {
+                    self.pending_files.push(FileArrival {
+                        project: project_id,
+                        path: rel_path,
+                        contents,
+                    });
+                }
                 cx.notify();
             }
 
@@ -1101,7 +1104,10 @@ impl AppState {
                 project_id,
                 rel_path,
                 error,
-            } => self.file_failed(project_id, rel_path, error, cx),
+            } => {
+                self.sqlite_header_failed(project_id, &rel_path, &error, cx);
+                self.file_failed(project_id, rel_path, error, cx)
+            }
 
             // A guest tab's write landed. There is no `project_id` to look the tab up by — a
             // guest file belongs to no project — so every open project's tabs are searched for

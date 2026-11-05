@@ -5,9 +5,9 @@ kind: feature
 status: draft
 summary: The rail's opt-in DB mode — the project's saved database connections (PostgreSQL, MySQL/MariaDB, SQLite, SQL Server) and the Databases section that edits them, the explorer tree, table tabs that page, filter and edit rows, SQL tabs with a timer, Stop, Explain and a read-only guard enforced in three layers by the host, the DBML export, where `db.toml` and the sealed passwords live, and the `kubiq-db` engine and host sessions behind it.
 read_when: you are changing the DB mode — the explorer, a table or SQL tab, the connection form, the Databases settings section, the host's database sessions, how a password is kept, or the `kubiq-db` engine
-updated: 2026-10-26
-verified: 2026-10-26
-code_anchors: [crates/kubiq-db/src/lib.rs, crates/kubiq-db/src/sql/readonly.rs, crates/kubiq-db/src/edit.rs, crates/kubiq-db/src/driver/mod.rs, crates/kubiq-db/src/dbml.rs, crates/kubiq-db/src/driver/structure.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-host/src/db/mod.rs, crates/kubiq-host/src/db/session.rs, crates/kubiq-host/src/db/jobs.rs, crates/kubiq-host/src/db/store.rs, crates/kubiq-host/src/db/secrets.rs, crates/kubiq-host/src/db/agent.rs, crates/kubiq-host/src/db/editors.rs, crates/kubiq-host/src/db/tunnel.rs, crates/kubiq/src/state/db/mod.rs, crates/kubiq/src/state/db/tree.rs, crates/kubiq/src/state/db/table.rs, crates/kubiq/src/state/db/sql.rs, crates/kubiq/src/state/db/pending.rs, crates/kubiq/src/app/db/mod.rs, crates/kubiq/src/app/db/table.rs, crates/kubiq/src/app/db/sql.rs, crates/kubiq/src/ui/db/mod.rs, crates/kubiq/src/ui/db/explorer.rs, crates/kubiq/src/ui/db/table.rs, crates/kubiq/src/ui/db/sql.rs, crates/kubiq/src/ui/db/conn_form.rs, crates/kubiq/src/ui/db/settings.rs]
+updated: 2026-11-05
+verified: 2026-11-05
+code_anchors: [crates/kubiq/src/state/db/open_file.rs, crates/kubiq/tests/db_open_file.rs, crates/kubiq-db/src/lib.rs, crates/kubiq-db/src/sql/readonly.rs, crates/kubiq-db/src/edit.rs, crates/kubiq-db/src/driver/mod.rs, crates/kubiq-db/src/dbml.rs, crates/kubiq-db/src/driver/structure.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-host/src/db/mod.rs, crates/kubiq-host/src/db/session.rs, crates/kubiq-host/src/db/jobs.rs, crates/kubiq-host/src/db/store.rs, crates/kubiq-host/src/db/secrets.rs, crates/kubiq-host/src/db/agent.rs, crates/kubiq-host/src/db/editors.rs, crates/kubiq-host/src/db/tunnel.rs, crates/kubiq/src/state/db/mod.rs, crates/kubiq/src/state/db/tree.rs, crates/kubiq/src/state/db/table.rs, crates/kubiq/src/state/db/sql.rs, crates/kubiq/src/state/db/pending.rs, crates/kubiq/src/app/db/mod.rs, crates/kubiq/src/app/db/table.rs, crates/kubiq/src/app/db/sql.rs, crates/kubiq/src/ui/db/mod.rs, crates/kubiq/src/ui/db/explorer.rs, crates/kubiq/src/ui/db/table.rs, crates/kubiq/src/ui/db/sql.rs, crates/kubiq/src/ui/db/conn_form.rs, crates/kubiq/src/ui/db/settings.rs]
 depends_on: [feat-workbench, tech-transport, tech-ui, tech-architecture]
 review_cycle: monthly
 ---
@@ -32,6 +32,17 @@ the engine, the TLS providers and the password key are `D199`, `D200`, `D201` an
 rail shows the mode once it is lit (`ViewPrefs::opted_in_modes`). The first visit opens the explorer
 on the left, the "No table open" page in the centre (where table and SQL tabs land), and an empty right and
 bottom. Opening a project in DB asks the host for its connection list once.
+
+**A SQLite file in the IDE explorer opens here.** A double-click on a `.db` or `.sqlite*` file
+(`.sqlite`, `.sqlite3`, `.sqlitedb`, any case), or that file's right-click **Open as SQLite**, reads
+the file's first 16 bytes through the file family (`ReadProjectFile`, `max_bytes` 16) and checks
+for `SQLite format 3\0`. Without it, a dialog says `Not a SQLite database: <file> has no SQLite
+header` and nothing else happens. With it, DB is switched on for the project if it was not
+(`show_mode`, the same switch the Modes tile flips), the window enters DB, and the connection list
+is searched for a SQLite connection whose path is the file — absolute, as the host lists a path
+inside the project. None is saved, named after the file, with no password and no agent access.
+The connection is then selected in the explorer and dialled. Every other double-click opens the file in the
+editor as before.
 
 **A connection is a name and an engine's fields.** PostgreSQL, MySQL/MariaDB and SQL Server take a
 host, port, database, user and password; SQLite takes a file. A connection may be flagged read-only,
@@ -208,7 +219,11 @@ the asker alone is told the editor as it stands; an accepted one is broadcast.
 **The interface.** `state/db/` holds the state on the open project: `mod.rs` (`DbState`, the list,
 keystore, connection states, the open tabs and the password prompt), `tree.rs` (nodes, `visible`,
 the filter and `db_menu_entries`, all pure), `table.rs`, `sql.rs` (including `pick`, the pure Run
-rule), `pending.rs` (the edit buffer) and `form.rs`. `app/db/` holds the handlers: `mod.rs` is
+rule), `pending.rs` (the edit buffer), `form.rs` and `open_file.rs` (a project file opened as
+SQLite: `is_sqlite_name`, the header, and `DbState::sqlite_step`, which answers wait, reveal,
+create or missing as the header and the list arrive; `app/db/explorer.rs` drives it from the
+`ProjectFileContents` and `DbConnectionsListed` arms, and a header read is not queued for an
+editor tab). `app/db/` holds the handlers: `mod.rs` is
 the only place a `Db*` message is built and `receive_db` the only place its replies arrive, called
 from `app/wire.rs`; `close_active_db_tab()` answers `⌘W` (`close_active_editor()` asks it first) and
 raises `FileDialog::DiscardChanges` for a tab with pending edits; `explorer.rs`, `table.rs`, `sql.rs` and `settings.rs` own their gestures.
@@ -313,7 +328,10 @@ Views, sequences, triggers and check constraints are never written. The DBML's r
 
 | Situation | What happens |
 |---|---|
-| The mode is not switched on for a project | The rail does not draw it |
+| The mode is not switched on for a project | The rail does not draw it — until a SQLite file is opened from the IDE explorer, which switches it on |
+| A file opened as SQLite lacks the header | A `Not opened` dialog: `Not a SQLite database: <file> has no SQLite header` |
+| A file opened as SQLite cannot be read | A `Not opened` dialog: `Reading <file> failed: <cause>` |
+| The list after the new connection's save does not hold the file | A `Not opened` dialog: `Connection not created: <file> is not in the list` |
 | The host is a drone, or built without the `db` feature | Every request is answered `Unavailable`; the keystore reads `Unavailable` and nothing is saved |
 | The keychain is unusable | Nothing is written to `db-secrets.toml`; a typed password is held in the host's memory for the run and lists as `session` |
 | The key is missing or a sealed password does not open | The connection lists `Missing`; its next use answers `NeedsPassword` and the explorer prompts |
