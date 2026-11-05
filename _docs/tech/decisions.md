@@ -5691,7 +5691,8 @@ record serialized canonically, and for a definition the content of the instructi
   its content still has that fingerprint; one edited since stays untrusted and is listed again.
 
 The global layer is not checked; skills are not covered (`G466`). The rule applies to the project
-layer uniformly, whatever its storage mode.
+layer uniformly, whatever its storage mode, and to a project's harness agent files while it lists
+them (`D233`).
 
 **Upgrade:** the first start after the upgrade seeds every project in the catalogue that has no
 store from what is on disk, logged, and writes a root-level marker (`<config root>/trust-seeded`).
@@ -5788,6 +5789,11 @@ owns the mapping onto `AgentDefinition` and when it runs.
 - **When.** On project open, on the flag, every time the host sends the definitions list, and after
   a local agent is saved. No watcher: a file edited by a harness is picked up the next time the list
   is asked for.
+- **Starting one.** While the project shows them, a local agent is a project definition to a
+  launch: read into the launch snapshot as a record (no grant, no `extends`, no instructions file),
+  resolved like a stored one, and checked under `D230` — fingerprinted in the same per-machine
+  store and map, by id, so one written or edited outside Kubiq is refused until approved, and Kubiq's
+  own save trusts the record it serialized. A stored definition of the same id is the one that runs.
 
 **Why not translate on every launch, or import once:** the harnesses read these files natively as
 their own subagents, so keeping the files themselves aligned is what makes one agent usable in
@@ -5796,7 +5802,9 @@ and not the store:** they are committed with the project and read by harnesses o
 
 **Cost:** a hand edit that leaves an older `kubiq-updated` than another copy's loses to it; YAML
 comments and quoting in a rewritten frontmatter are not kept; a sync reads every folder each time
-the list is sent. A local agent is not startable from Kubiq (`G467`).
+the list is sent. A file that names no harness runs on the host's default agent, chosen at listing
+time rather than by the file, so that choice is not fingerprinted; nor is which harness folder a
+copy sits in beyond the harness it implies.
 
 ## Related docs
 

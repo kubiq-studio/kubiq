@@ -1134,13 +1134,16 @@ impl SettingsState {
     /// filter lives here rather than in `definitions_in`: the two questions have different
     /// answers, and a screen that lists setups must keep showing the switched-off one.
     ///
-    /// A harness agent ([`AgentDefinition::local`]) is not offered either: it is a file the
-    /// harnesses read as their own subagent, and the host composes a run only from its own store
-    /// (`G467`).
+    /// A harness agent ([`AgentDefinition::local`]) is offered while its project lists them
+    /// (`D233`) — read from the mirrored flag, so a tick turned off hides them before the host's
+    /// next list arrives. The host composes it like a stored project definition and checks it the
+    /// same way (`D230`).
     pub fn startable_definitions_in(&self, project: Option<ProjectId>) -> Vec<AgentDefinition> {
+        let lists_local =
+            project.is_some_and(|project| self.definition_scope(project).harness_agents.show);
         self.definitions_in(project)
             .into_iter()
-            .filter(|it| !it.disabled && it.local.is_none())
+            .filter(|it| !it.disabled && (it.local.is_none() || lists_local))
             .collect()
     }
 

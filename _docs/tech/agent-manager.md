@@ -612,6 +612,10 @@ for rides a `kubiq-*` key (`kubiq-harness`, `kubiq-model`, `kubiq-mode`, `kubiq-
 `kubiq-account`, `kubiq-max-subagents`, `kubiq-mcps`, `kubiq-skills`, `kubiq-tags`,
 `kubiq-mission-assistant`, `kubiq-disabled`); grants are not written, being paths on this machine.
 The coordinator decides when — listing, saving, deleting, the project's flags — and names no folder.
+A run starts from one like a stored project definition: while the project lists them,
+`ConverseOptions::local_agents` carries its folder and `compose_run` reads every harness agent into
+the launch snapshot as a definition record (`harness_agents::records`; a stored definition of the
+same id wins), so the trust check (`D230`) and `resolve` see the same record.
 
 ## The rules
 

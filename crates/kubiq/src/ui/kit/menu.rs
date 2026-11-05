@@ -68,6 +68,8 @@ pub struct Picker {
     dots: Vec<Option<Rgba>>,
     /// A faint secondary text per row, parallel to `items` — see [`Self::details`].
     details: Vec<Option<SharedString>>,
+    /// Hover text per row, keyed by the row's label — see [`Self::row_tooltips`].
+    row_tooltips: Vec<(SharedString, SharedString)>,
     selected: Option<usize>,
     open: bool,
     anchor: Anchor,
@@ -96,6 +98,7 @@ impl Picker {
             dim: Vec::new(),
             dots: Vec::new(),
             details: Vec::new(),
+            row_tooltips: Vec::new(),
             selected: None,
             open: false,
             anchor: Anchor::TopLeft,
@@ -199,6 +202,19 @@ impl Picker {
         self
     }
 
+    /// Hover text for the rows whose label is the key — why a disabled row cannot be picked.
+    /// Keyed by label rather than index because a searched list renumbers its rows.
+    pub fn row_tooltips<L: Into<SharedString>, T: Into<SharedString>>(
+        mut self,
+        tooltips: impl IntoIterator<Item = (L, T)>,
+    ) -> Self {
+        self.row_tooltips = tooltips
+            .into_iter()
+            .map(|(label, text)| (label.into(), text.into()))
+            .collect();
+        self
+    }
+
     /// Draw a filter field at the top of the panel. The caller has already filtered `items`;
     /// this only draws the field and reports the focus ring — the same split `project_menu`'s
     /// hand-rolled search uses.
@@ -240,6 +256,7 @@ impl RenderOnce for Picker {
             dim,
             dots,
             details,
+            row_tooltips,
             selected,
             open,
             anchor,
@@ -279,7 +296,6 @@ impl RenderOnce for Picker {
                 .enumerate()
                 .map(|(ix, label)| PanelRow {
                     index: ix,
-                    label,
                     // A picker's own current value is never the row it disables, whatever the
                     // caller passed — the one row a picker cannot let you leave unpicked is the
                     // one already picked.
@@ -288,7 +304,12 @@ impl RenderOnce for Picker {
                     separator: separators.contains(&ix),
                     dim: dim.contains(&ix),
                     dot: dots.get(ix).copied().flatten(),
+                    tooltip: row_tooltips
+                        .iter()
+                        .find(|(row, _)| *row == label)
+                        .map(|(_, text)| text.clone()),
                     detail: details.get(ix).cloned().flatten(),
+                    label,
                 })
                 .collect();
             trigger = trigger.child(menu_panel(
@@ -388,6 +409,8 @@ struct PanelRow {
     dot: Option<Rgba>,
     /// Faint secondary text after the label, truncated before it.
     detail: Option<SharedString>,
+    /// What hovering the row says — why a disabled row cannot be picked, most of all.
+    tooltip: Option<SharedString>,
 }
 
 /// A row's text and its optional faint detail on one line. The label keeps its width; the detail
@@ -483,6 +506,11 @@ fn menu_panel(
                             .map(|colour| div().size(px(7.)).flex_none().rounded_full().bg(colour)),
                     )
                     .child(label_cell(item.label, item.detail));
+                if let Some(text) = item.tooltip {
+                    row = row.tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+                    });
+                }
                 if !is_disabled {
                     row = row
                         .cursor_pointer()
@@ -839,6 +867,7 @@ impl RenderOnce for MultiPicker {
                     dim: false,
                     dot: dots.get(ix).copied(),
                     detail: None,
+                    tooltip: None,
                 })
                 .collect();
             trigger = trigger.child(menu_panel(

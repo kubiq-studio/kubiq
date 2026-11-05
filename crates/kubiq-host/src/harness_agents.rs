@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use agent_manager::harness_agents::{self as files, AgentContent, LocalAgent as Found};
+use agent_manager::profile::{Profile, ProfileDefaults};
 use anyhow::{Result, bail};
 use kubiq_proto::ids::ProjectId;
 use kubiq_proto::messages::{AgentDefinition, LocalAgent};
@@ -112,6 +113,68 @@ pub fn to_definition(agent: &Found, project: ProjectId, fallback: &str) -> Agent
             folders: agent.folders().into_iter().map(str::to_string).collect(),
         }),
     }
+}
+
+/// One agent's portable fields as the definition record a run is composed from — what a stored
+/// definition's `profile.toml` would say. `folder_harness` is the harness of a folder holding a
+/// copy, used when `kubiq-harness` names none; with neither the record pins no harness and the
+/// run's own (the start's pick) stands. No grant, no `extends`, no instructions file: a harness
+/// agent carries none of them, so its trust fingerprint (`D230`) is this record alone.
+fn record_of(content: &AgentContent, folder_harness: Option<&str>) -> Profile {
+    let kubiq = &content.kubiq;
+    let text = |key: &str| {
+        kubiq
+            .get(key)
+            .map(|it| it.trim().to_string())
+            .filter(|it| !it.is_empty())
+    };
+    let list = |key: &str| Some(list_of(kubiq.get(key))).filter(|it| !it.is_empty());
+    Profile {
+        id: content.name.clone(),
+        description: content
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|it| !it.is_empty())
+            .map(str::to_string),
+        harness: text(HARNESS).or_else(|| folder_harness.map(str::to_string)),
+        account: text(ACCOUNT),
+        mode: text(MODE),
+        max_subagents: text(MAX_SUBAGENTS).and_then(|it| it.parse().ok()),
+        mission_assistant: (text(MISSION_ASSISTANT).as_deref() == Some("true")).then_some(true),
+        tags: list_of(kubiq.get(TAGS)),
+        disabled: (text(DISABLED).as_deref() == Some("true")).then_some(true),
+        defaults: ProfileDefaults {
+            model: text(MODEL),
+            thinking: text(THINKING),
+            prompt: Some(content.instructions.trim().to_string()).filter(|it| !it.is_empty()),
+            mcps: list(MCPS),
+            skills: list(SKILLS),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// The harness agents under `root` as definition records, read once — what a launch adds to the
+/// project's own snapshot, and what the trust store fingerprints them by.
+pub fn records(root: &Path) -> Vec<Profile> {
+    files::list(root)
+        .iter()
+        .map(|agent| {
+            let folder = agent
+                .files
+                .iter()
+                .find_map(|it| files::folder_harness(it.folder));
+            record_of(&agent.content, folder)
+        })
+        .collect()
+}
+
+/// The record `definition` is once Kubiq has written it as a harness agent — computed from what
+/// was serialized, not from a re-read, so a concurrent edit cannot decide what is trusted.
+pub fn written_record(definition: &AgentDefinition) -> Profile {
+    record_of(&to_content(definition), None)
 }
 
 /// The harness agents under `root`, as definitions of `project`.

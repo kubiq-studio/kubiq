@@ -679,10 +679,26 @@ pub fn body(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> 
         ),
     };
     let (offered, target_trigger) = target_control(app, &form, cx);
+    let target_tips = target_tooltips(app, &form, cx);
     // Nothing to choose from says so under the dropdown rather than opening an empty list: on this
     // tab that is a machine with no agent definition written yet, and the settings screen is where
     // one is.
     let empty = offered.iter().all(|(_, value)| value.is_none());
+    let target_picker = picker_of(
+        app,
+        &view,
+        &form,
+        "new-agent-target",
+        &target_trigger,
+        offered,
+        form.target.clone(),
+        OpenList::Target,
+        true,
+        window,
+        cx,
+        |this, target, window, cx| this.pick_new_agent_target(target, window, cx),
+    )
+    .row_tooltips(target_tips);
     rows = rows.child(
         div()
             .flex()
@@ -694,20 +710,7 @@ pub fn body(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> 
                 target_label,
                 target_note,
             ))
-            .child(picker_of(
-                app,
-                &view,
-                &form,
-                "new-agent-target",
-                &target_trigger,
-                offered,
-                form.target.clone(),
-                OpenList::Target,
-                true,
-                window,
-                cx,
-                |this, target, window, cx| this.pick_new_agent_target(target, window, cx),
-            ))
+            .child(target_picker)
             // What the chosen definition runs on, and the one control that turns it into rows.
             .children(on_agents.then(|| customize_row(app, &form, cx)))
             .children(empty.then(|| {
@@ -1476,13 +1479,44 @@ fn definition_row(
     // A project's own setup says so in the row: the same name may mean a different definition in
     // the next project, and "visible only in the project it was created in" is only readable if
     // the row admits which one it is.
-    if it.project.is_some() {
-        parts.push("this project".to_string());
+    // A harness agent (`D233`) says so, and where its copies are — as the settings list does.
+    match &it.local {
+        Some(local) if local.folders.is_empty() => parts.push("local".to_string()),
+        Some(local) => parts.push(format!("local {}", local.folders.join(", "))),
+        None if it.project.is_some() => parts.push("this project".to_string()),
+        None => {}
     }
+    // One with no harness to run on is drawn, not picked; [`target_tooltips`] says why.
+    let target = app
+        .workbench
+        .local_agent_unstartable(it)
+        .is_none()
+        .then(|| Target::AgentDefinition(it.id.clone()));
     (
         format!("{} \u{2014} {}", it.id, parts.join(" \u{b7} ")),
-        Some(Target::AgentDefinition(it.id.clone())),
+        target,
     )
+}
+
+/// Why each Agents-tab row that cannot be picked is drawn that way, keyed by its label — the
+/// hover on a harness agent with no usable harness.
+pub fn target_tooltips(app: &AppState, form: &NewAgentForm, cx: &App) -> Vec<(String, String)> {
+    if !on_agents_tab(form) {
+        return Vec::new();
+    }
+    let project = app
+        .new_agent_project
+        .filter(|id| app.window_projects(cx).contains(id))
+        .or_else(|| app.project(cx));
+    app.workbench
+        .settings
+        .startable_definitions_in(project)
+        .iter()
+        .filter_map(|it| {
+            let why = app.workbench.local_agent_unstartable(it)?;
+            Some((definition_row(app, it).0, why))
+        })
+        .collect()
 }
 
 /// A harness and the identity it runs as — the pair the first row offers, and the one thing the

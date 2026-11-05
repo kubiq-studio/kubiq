@@ -281,7 +281,9 @@ impl AppState {
             .settings
             .startable_definitions_in(scope)
             .into_iter()
-            .find(|it| it.has_any_tag(&filter))
+            .find(|it| {
+                it.has_any_tag(&filter) && self.workbench.local_agent_unstartable(it).is_none()
+            })
             .map(|it| (Target::AgentDefinition(it.id), None))
     }
 
@@ -304,6 +306,7 @@ impl AppState {
                 .into_iter()
                 .find(|it| it.id == *definition && it.project == last.definition_project)
             && (filter.is_empty() || found.has_any_tag(filter))
+            && self.workbench.local_agent_unstartable(&found).is_none()
         {
             return Some(Target::AgentDefinition(definition.clone()));
         }

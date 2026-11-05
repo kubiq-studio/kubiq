@@ -5,8 +5,8 @@ kind: feature
 status: draft
 summary: The rail's Agents mode — a row of parallel columns, each a transcript and a composer over one live conversation, tabs that group agents into a column, the bench of agents no column is showing, the sidebar that lists every conversation the window holds, the three-dots menu over a live agent, and the New agent form all three surfaces raise.
 read_when: you are changing the agents screen — its columns, its tabs, what a tab drag means, the bench, the sidebar, a column's composer or footer, or the New agent form
-updated: 2026-10-29
-verified: 2026-10-29
+updated: 2026-11-05
+verified: 2026-11-05
 code_anchors: [crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/agents.rs, crates/kubiq/src/app/agents.rs, crates/kubiq/src/state/new_agent.rs, crates/kubiq/src/app/new_agent.rs, crates/kubiq/src/ui/new_agent.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/tests/conversation.rs, crates/kubiq/src/ui/agents/mod.rs, crates/kubiq/src/ui/agents/sidebar.rs, crates/kubiq/src/ui/agents/column.rs, crates/kubiq/src/state/status.rs, crates/kubiq/src/ui/work.rs, crates/kubiq/src/ui/teams/status.rs, crates/kubiq/tests/agents.rs, crates/kubiq/src/app/mission.rs]
 depends_on: [feat-workbench, tech-ui, feat-chat]
 review_cycle: monthly
@@ -119,7 +119,10 @@ of the same name as a global one stands in its place here and in no other projec
 to the machine-wide last start when the project has none. **A disabled
 definition is not a row** (`AgentDefinition::disabled`, read through
 `SettingsState::startable_definitions_in`): it is listed on the settings screens and offered
-nowhere a run begins. Under the dropdown sits the line of what the chosen definition runs on and a
+nowhere a run begins. **A project's harness agent is a row while the project uses them** (`D233`),
+read `helper — Claude Code · local .claude/agents` in place of `this project`; one with no harness
+to run on is drawn faint, with `<id> not startable: <cause>` on hover
+(`WorkbenchState::local_agent_unstartable`), and the dialog never reopens on it. Under the dropdown sits the line of what the chosen definition runs on and a
 **Customize** button, which turns the harness, model, thinking-effort and mode rows back on so
 this one start can override them; until it is pressed those rows are not drawn, because the
 definition has already answered them.

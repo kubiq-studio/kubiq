@@ -728,7 +728,9 @@ instead of text, so a searchable picker can carry group headings — themselves 
 rows — in the one `items` list a caller builds and a pick indexes into, the way the agents screen's
 column `+` groups the bench from what is on screen elsewhere. `.tooltip(text)` is what a
 picker drawn with no label says on hover — the chat header's chevron is one, and with no words on
-the trigger the hover is the only place the question it asks can go. `.dots(colours)` gives a
+the trigger the hover is the only place the question it asks can go. `.row_tooltips(pairs)` is the
+same per row, keyed by the row's label so a searched list still finds it — why a disabled row
+cannot be picked, as on the New agent dialog's harness agent with no harness. `.dots(colours)` gives a
 single-select `Picker` the same per-row status colour `MultiPicker` always drew, `None` at an index
 leaving that row bare for a choice like "All tasks" that stands for no one colour; `.dim(indices)`
 mutes a row without disabling it — pickable, drawn faint, for a choice that still answers but is not

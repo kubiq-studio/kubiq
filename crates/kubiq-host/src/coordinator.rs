@@ -25,7 +25,7 @@ use kubiq_proto::ids::{
 };
 use kubiq_proto::messages::{AgentPicks, CatalogueModel, Message, Secret, TaskField, WorkspaceInfo};
 use kubiq_proto::notifications::{Family, NotificationRequest};
-use kubiq_proto::projects::{IndexLevel, ProjectHealth, Scope};
+use kubiq_proto::projects::{IndexLevel, ProjectHealth, Scope, TrustKind};
 use kubiq_proto::settings::{DroneModeKind, SettingsLayer, SshProfile};
 use kubiq_proto::stats::{HostStats, UsageRow};
 use kubiq_proto::tools::{ListedTool, ToolDef, ToolOrigin, ToolRun};
@@ -1994,6 +1994,9 @@ impl Coordinator {
                 let replies = self.projects.set_harness_agents(project_id, harness_agents);
                 self.answer(client, replies);
                 self.send_definitions(client);
+                // Listed, they are definitions the project runs, so the window hears which of
+                // them this machine does not trust yet (`D230`).
+                self.send_untrusted(client, project_id);
             }
             Message::SetProjectStorage {
                 project_id,
@@ -2037,13 +2040,16 @@ impl Coordinator {
                 }
                 // Project-layer settings this machine does not trust are said once, on open, so
                 // the window can ask about them before a launch is refused (`D230`).
-                if !crate::trust::untrusted(&self.root.path, project_id).is_empty() {
+                let local = self.local_agents(project_id);
+                let items = crate::trust::untrusted(&self.root.path, project_id, local.as_deref());
+                if !items.is_empty() {
                     self.send_untrusted(client, project_id);
                 }
             }
             Message::TrustProjectItems { project_id, items } => {
                 if self.projects.record(project_id).is_some() {
-                    crate::trust::approve(&self.root.path, project_id, &items);
+                    let local = self.local_agents(project_id);
+                    crate::trust::approve(&self.root.path, project_id, &items, local.as_deref());
                 }
                 self.send_untrusted(client, project_id);
             }
@@ -2213,9 +2219,18 @@ impl Coordinator {
                     .filter(|project| !self.stores_definition(*project, &id))
                     .and_then(|project| self.harness_agents_of(project))
                     .filter(|(root, _)| crate::harness_agents::holds(root, &id));
-                let deleted = match local {
-                    Some((root, _)) => crate::harness_agents::delete(&root, &id),
-                    None => self.agents.delete_definition(&id, project),
+                let deleted = match (local, project) {
+                    (Some((root, _)), Some(project)) => crate::harness_agents::delete(&root, &id)
+                        .inspect(|()| {
+                            crate::trust::record(
+                                &self.root.path,
+                                project,
+                                TrustKind::Definition,
+                                &id,
+                                None,
+                            )
+                        }),
+                    _ => self.agents.delete_definition(&id, project),
                 };
                 match deleted {
                     Ok(()) => self.send_definitions(client),
@@ -4723,6 +4738,7 @@ impl Coordinator {
                 // ones. A conversation always belongs to a project, so this is never absent.
                 project: Some(pending.project_id),
                 project_root: self.project_root(pending.project_id),
+                local_agents: self.local_agents(pending.project_id),
                 prompt: first_prompt,
                 resume: pending.resume.clone(),
                 fork: pending.fork,
@@ -6048,7 +6064,8 @@ impl Coordinator {
     /// Tell `client` which of a project's own settings this machine does not trust (`D230`) —
     /// always the project's whole list, read fresh, because the window replaces what it holds.
     fn send_untrusted(&self, client: ClientId, project_id: ProjectId) {
-        let items = crate::trust::untrusted(&self.root.path, project_id);
+        let local = self.local_agents(project_id);
+        let items = crate::trust::untrusted(&self.root.path, project_id, local.as_deref());
         self.host.send(
             To::Client(client),
             Message::UntrustedProjectSettings { project_id, items },
@@ -7647,6 +7664,7 @@ impl Coordinator {
             // resolves here exactly as it does for a conversation.
             project: Some(project_id),
             project_root: self.project_root(project_id),
+            local_agents: self.local_agents(project_id),
             mcps: picks.mcps,
             skills: picks.skills,
             extra_rw: rw_paths(picks.grants),
@@ -8213,6 +8231,14 @@ impl Coordinator {
         Some((PathBuf::from(&record.path), record.harness_agents))
     }
 
+    /// `project`'s folder when it lists its harness agents (`D233`) — what makes them definitions
+    /// a run in it can start from and the trust check covers (`D230`). `None` otherwise.
+    fn local_agents(&self, project: ProjectId) -> Option<PathBuf> {
+        self.harness_agents_of(project)
+            .filter(|(_, flags)| flags.show)
+            .map(|(root, _)| root)
+    }
+
     /// Whether `project`'s own store holds a definition `id` — the one listed when a harness
     /// agent has the same name.
     fn stores_definition(&self, project: ProjectId, id: &str) -> bool {
@@ -8278,6 +8304,12 @@ impl Coordinator {
                 } else {
                     Ok(())
                 }
+            })
+            // What Kubiq just wrote is trusted, as a stored definition's save is (`D230`); a
+            // rename takes the old id's standing away with the old name.
+            .inspect(|()| {
+                self.forget_renamed(project, &old, &definition.id);
+                crate::trust::record_local(&self.root.path, project, definition);
             });
             return Some(result);
         }
@@ -8289,8 +8321,16 @@ impl Coordinator {
         let result = self
             .agents
             .save_definition_replacing(moved, None, Some(&root))
-            .and_then(|()| crate::harness_agents::delete(&root, &old));
+            .and_then(|()| crate::harness_agents::delete(&root, &old))
+            .inspect(|()| self.forget_renamed(project, &old, &definition.id));
         Some(result)
+    }
+
+    /// A harness agent renamed from `old` takes the old id's trust standing away (`D230`).
+    fn forget_renamed(&self, project: ProjectId, old: &str, new: &str) {
+        if old != new {
+            crate::trust::record(&self.root.path, project, TrustKind::Definition, old, None);
+        }
     }
 
     /// A clone whose source is a harness agent, done as a stored copy in the project; `None`

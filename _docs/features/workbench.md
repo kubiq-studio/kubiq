@@ -507,8 +507,13 @@ into `DefinitionScope::harness_agents`). With `Use harness agents` on, every age
 folders is listed among this project's own setups with a `Local` badge and the folders it has a
 copy in; Edit opens it in the same form and saves back to its files, Delete removes every copy
 behind a confirm that names the folders, Clone writes a stored copy, and a stored setup of the same
-name hides it. A local agent is **not offered at a start** (`SettingsState::startable_definitions_in`,
-`G467`). With `Sync agents between harnesses` on, the host keeps every agent in every harness folder
+name hides it. A local agent is **offered at a start** while the tick is on
+(`SettingsState::startable_definitions_in`): the New agent dialog's row reads `local` and its
+folders, and one with no harness to run on — none in its file and no default agent, or a harness
+not installed — is drawn faint with the reason on hover
+(`WorkbenchState::local_agent_unstartable`). The host runs it like a stored project definition and
+under the same trust check (`D230`): one written or edited outside Kubiq is refused until approved,
+and Kubiq's own save of it trusts what it wrote. With `Sync agents between harnesses` on, the host keeps every agent in every harness folder
 the project has, the newest copy winning where they differ — on project open, on the tick, every
 time the definitions list is sent, and after a local agent is saved. The definition form, opened
 for a project, carries a `Local agent` tick: it takes only while the project shows its harness

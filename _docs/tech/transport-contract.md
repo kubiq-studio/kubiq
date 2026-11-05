@@ -2604,8 +2604,11 @@ same id is listed instead. `SaveAgentDefinition` with `local` present writes the
 those files (the folders are the host's choice; what the interface sends in them is ignored), and
 removes a stored definition it was until then; `local` absent on one that was a harness agent moves
 it into the store and removes its files. `DeleteAgentDefinition` removes every copy;
-`CloneAgentDefinition` of one writes a stored copy. A harness agent is not started from — the
-interface leaves it out of every start picker (`G467`).
+`CloneAgentDefinition` of one writes a stored copy. A start names one by id like any project
+definition — `StartConversation` / `SpawnWorkspace` with `definition` set and the listed
+`agent_type` — and it is trust-checked like one (`D230`): it is listed in `UntrustedProjectSettings`
+as a `Definition` item while the project shows its harness agents (also sent after
+`SetProjectHarnessAgents`), and `TrustProjectItems` approves it against its files.
 
 **Global and project definitions are both deleted one by one.** `DeleteAgentDefinition` takes an
 optional `project` — `None` for a global definition, `Some` for a project's own — and removes that

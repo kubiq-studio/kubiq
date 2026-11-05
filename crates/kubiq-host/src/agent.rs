@@ -397,6 +397,10 @@ pub struct ConverseOptions {
     /// That project's own folder, which a project definition's grants are saved relative to
     /// ([`Agents::save_definition_replacing`]). `None` leaves a relative grant as written.
     pub project_root: Option<PathBuf>,
+    /// That project's folder again, set only when the project lists its harness agents (`D233`):
+    /// they are then project definitions of this run, read into its snapshot beside the stored
+    /// ones (a stored one of the same id wins) and trust-checked exactly like them (`D230`).
+    pub local_agents: Option<PathBuf>,
     /// The first turn's text, for a **one-shot** harness whose prompt is argv rather than a frame
     /// on a pipe. Left `None` for a multi-turn harness, which is prompted over its bridge after
     /// it is running — putting a prompt here for one of those would run its first turn twice.
@@ -1731,11 +1735,13 @@ impl Agents {
             crate::trust::read_definitions(&global_store.records_root),
             &global_store,
         );
+        // A project that lists its harness agents (`D233`) runs them as its own definitions: read
+        // into the same snapshot, so the check below fingerprints what `resolve` is then fed.
         let project_definitions = project_store.as_ref().map(|store| {
-            crate::trust::SnapshotProfiles::new(
-                crate::trust::read_definitions(&store.records_root),
-                store,
-            )
+            let mut records = crate::trust::read_definitions(&store.records_root);
+            let local = crate::trust::local_records(options.local_agents.as_deref(), &records);
+            records.extend(local);
+            crate::trust::SnapshotProfiles::new(records, store)
         });
         let definitions = ScopedProfileStore::new(
             &global_definitions,

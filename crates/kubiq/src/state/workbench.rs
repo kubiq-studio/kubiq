@@ -1405,6 +1405,27 @@ impl WorkbenchState {
         self.agent_types.iter().find(|info| info.id == id)
     }
 
+    /// Why a harness agent (`D233`) cannot be started here, in "<what failed>: <cause>" form, or
+    /// `None` when it can. A stored definition always pins a harness and is not asked. One whose
+    /// file names no harness and whose host has no default agent is listed on an empty one.
+    pub fn local_agent_unstartable(&self, definition: &AgentDefinition) -> Option<String> {
+        definition.local.as_ref()?;
+        let what = format!("{} not startable", definition.id);
+        if definition.agent_type.is_empty() {
+            return Some(format!("{what}: no kubiq-harness set and no default agent"));
+        }
+        match self.agent_type(&definition.agent_type) {
+            None => Some(format!(
+                "{what}: harness '{}' is unknown here",
+                definition.agent_type
+            )),
+            Some(harness) if !harness.available => {
+                Some(format!("{what}: {} is not installed", harness.label))
+            }
+            Some(_) => None,
+        }
+    }
+
     /// One harness by its **display label**, which is all a `WorkAgent` carries: the host mints the
     /// label from the library and hands it to the work record, so a surface reading a record rather
     /// than a form has nothing else to match on. The inverse of what `ui::settings::harness_label`

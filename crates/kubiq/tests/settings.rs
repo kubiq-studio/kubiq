@@ -1375,7 +1375,8 @@ fn the_definition_form_carries_the_scope_it_was_opened_from(cx: &mut TestAppCont
 
 /// The harness agents flag is the project's: it is sent as it is ticked and mirrored at once; the
 /// form's Local agent tick only takes while the project shows its harness agents, and a local
-/// agent the host lists is offered in the project's list and nowhere a run begins (`D233`).
+/// agent the host lists is offered where a run begins while the flag is on — one with no harness
+/// to run on drawn but not pickable, with the reason — and hidden once it is off (`D233`).
 #[gpui::test]
 fn the_harness_agents_flag_gates_local_agents(cx: &mut TestAppContext) {
     use kubiq_proto::projects::HarnessAgents;
@@ -1449,28 +1450,50 @@ fn the_harness_agents_flag_gates_local_agents(cx: &mut TestAppContext) {
     helper.local = Some(kubiq_proto::messages::LocalAgent {
         folders: vec!["one".to_string()],
     });
+    let mut orphan = a_definition("orphan", Some(project));
+    orphan.agent_type = String::new();
+    orphan.local = Some(kubiq_proto::messages::LocalAgent::default());
     fixture.host.send(
         To::Everyone,
         Message::AgentDefinitions {
-            definitions: vec![a_definition("standard", None), helper],
+            definitions: vec![a_definition("standard", None), helper, orphan.clone()],
         },
     );
     cx.run_until_parked();
-    let (listed, startable) = fixture.state.read_with(cx, |state, _| {
+    let ids = |list: Vec<kubiq_proto::messages::AgentDefinition>| {
+        list.into_iter().map(|it| it.id).collect::<Vec<_>>()
+    };
+    let (listed, startable, why) = fixture.state.read_with(cx, |state, _| {
         let settings = &state.workbench.settings;
-        let ids = |list: Vec<kubiq_proto::messages::AgentDefinition>| {
-            list.into_iter().map(|it| it.id).collect::<Vec<_>>()
-        };
         (
             ids(settings.definitions_in(Some(project))),
             ids(settings.startable_definitions_in(Some(project))),
+            state.workbench.local_agent_unstartable(&orphan),
         )
     });
-    assert_eq!(listed, vec!["helper".to_string(), "standard".to_string()]);
+    assert_eq!(listed, vec!["helper", "orphan", "standard"]);
     assert_eq!(
         startable,
-        vec!["standard".to_string()],
-        "a harness agent is not something a run starts from"
+        vec!["helper", "orphan", "standard"],
+        "a listed harness agent is something a run starts from"
+    );
+    assert_eq!(
+        why.as_deref(),
+        Some("orphan not startable: no kubiq-harness set and no default agent"),
+        "one with no harness says why it cannot be picked"
+    );
+
+    fixture.with(cx, |state, _, cx| {
+        state.set_project_harness_agents(project, HarnessAgents::default(), cx)
+    });
+    let startable = fixture.state.read_with(cx, |state, _| {
+        let settings = &state.workbench.settings;
+        ids(settings.startable_definitions_in(Some(project)))
+    });
+    assert_eq!(
+        startable,
+        vec!["standard"],
+        "with the flag off no harness agent is offered"
     );
 }
 
