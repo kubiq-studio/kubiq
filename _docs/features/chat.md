@@ -5,8 +5,8 @@ kind: feature
 status: draft
 summary: Editor-like chat tabs — many, movable to any dockable region, each a view onto a host-owned conversation or onto none, drawn by the composer, transcript and tool blocks the whole window shares.
 read_when: you are changing a chat tab, the control that starts or attaches a conversation, or which conversation a tab shows
-updated: 2026-10-26
-verified: 2026-10-26
+updated: 2026-11-05
+verified: 2026-11-05
 code_anchors: [crates/kubiq/src/ui/chat/mod.rs, crates/kubiq/src/ui/chat/sidebar.rs, crates/kubiq/src/state/chat.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/app/chat.rs, crates/kubiq/src/app/clipboard.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/app/panels.rs, crates/kubiq/src/app/wire.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/boot.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/ui/conversation/info.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/state/work.rs, crates/kubiq/src/app/agents.rs, crates/kubiq/src/ui/agents/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/state/ask.rs, crates/kubiq/src/app/ask.rs, crates/kubiq/src/ui/ask.rs, crates/kubiq-proto/src/ask.rs]
 depends_on: [feat-workbench]
 review_cycle: monthly
@@ -103,9 +103,10 @@ ordinary state of a fresh one.
 **Every chat tab draws from the shared conversation view**, `crates/kubiq/src/ui/conversation`: the
 transcript, tool blocks, footer and composer every live-agent surface shares (run pill, context ring, quota
 ring, token cost, launch-time model and thinking pickers). **A link in a rendered reply or sent message
-goes where it points**: a relative path (resolved from the agent's project root) or a `kubiq://` link opens
-in the window, `http`, `https` and `mailto` reach the OS, anything else does nothing
-([`workbench.md`](./workbench.md)). The agent's project also supplies `kubiq://./` links, including when
+goes where it points**: a relative path (resolved from the agent's project root, `:line[:col]` or `#L12`
+naming a line), an absolute path or `file://` URL, or a `kubiq://` link opens in the window; `http` and
+`https` ask which browser (Kubiq's or the system's, remembered for an hour when ticked), `mailto` reaches
+the OS, anything else does nothing ([`workbench.md`](./workbench.md)). The agent's project also supplies `kubiq://./` links, including when
 the window displays another project. A deleted conversation supplies no project for relative links;
 web, mail and explicitly named project links still work. A path merely mentioned in prose is text.
 
@@ -543,8 +544,8 @@ and is filed as an `AskRecord` beside the conversation.
 
 **Transcript links** (`crates/kubiq/src/ui/conversation/mod.rs`, `on_agent_link`). Both user and agent
 `TextView` bodies call `AppState::follow_agent_link` in `crates/kubiq/src/app/editor.rs`. It resolves the
-conversation's owning project at click time, then uses the same destination routing and external-scheme
-policy as `follow_link`. `crates/kubiq/tests/chat.rs` covers cross-project, expired and project-less clicks.
+conversation's owning project at click time, then uses the same destination routing, file-path and
+web-link policy as `follow_link`; an absolute path needs no project. `crates/kubiq/tests/chat.rs` covers cross-project, expired and project-less clicks.
 
 **Dock** (`crates/kubiq/src/state/dock.rs`). `ChatId` is a locally minted counter, `Display` and `FromStr` so
 it round-trips through the dock's payload like a pane id. `PanelKind::Chat(ChatId)`'s `class` is `Free`,

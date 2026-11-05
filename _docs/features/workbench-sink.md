@@ -5,8 +5,8 @@ kind: feature
 status: draft
 summary: The rail's Sink mode — the application's own test bench, twelve pages of fixtures with nothing behind them — a buffer, one page per special viewer, the style reference, the file picker in each shape a screen can ask for, the two settings layouts, a live conversation beside its bus traffic, the A2UI surface, the script scratchpad and the teamsim testbed.
 read_when: you are changing the kitchen sink's pages or fixtures, the A2UI renderer, the script scratchpad, the teamsim testbed, or looking for a surface to try a primitive on
-updated: 2026-10-25
-verified: 2026-10-27
+updated: 2026-11-05
+verified: 2026-11-05
 code_anchors: [crates/kubiq/src/state/sink.rs, crates/kubiq/src/app/sink.rs, crates/kubiq/src/ui/sink/mod.rs, crates/kubiq/src/ui/sink/ext_demo.rs, crates/kubiq/src/ui/sink/docs.rs, crates/kubiq/src/ui/sink/style.rs, crates/kubiq/src/ui/sink/files.rs, crates/kubiq/src/ui/sink/settings.rs, crates/kubiq/src/ui/sink/script.rs, crates/kubiq/src/ui/sink/teamsim.rs, crates/kubiq/src/ui/sink/a2ui.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq/src/state/script.rs, crates/kubiq/src/state/teamsim.rs, crates/kubiq/src/state/a2ui.rs, crates/kubiq/src/state/a2ui/value.rs, crates/kubiq/src/state/a2ui/eval.rs, crates/kubiq/src/state/a2ui/action.rs, crates/kubiq/src/state/a2ui/live.rs, crates/kubiq/src/state/a2ui/svg.rs, crates/kubiq/src/state/a2ui/path.rs, crates/kubiq/src/state/a2ui/kubiq-catalog.json, crates/kubiq/src/ui/a2ui.rs, crates/kubiq/src/ui/a2ui/registry.rs, crates/kubiq/src/ui/a2ui/svg.rs, crates/kubiq/src/ui/a2ui/path.rs, crates/kubiq/src/ui/kit/blocks.rs, crates/kubiq/src/ui/kit/menu.rs, _tools/teamsim/FORMAT.md, crates/kubiq/tests/a2ui.rs, crates/kubiq/tests/script.rs, crates/kubiq/tests/sink.rs]
 depends_on: [feat-workbench, tech-ui]
 review_cycle: monthly
@@ -139,7 +139,8 @@ intent the script recorded (in the warning colour), then the completion value or
 then a footer with the milliseconds the run took and whether a panel was declared. Clear empties
 the console. `console.log`, `.info`, `.warn` and `.error` are captured; a `kubiq` global carries five
 core instructions — `version()`, `platform()`, `now()`, `log(...args)` and `echo(value)` — plus five
-namespaces documented in `script::API_DOC`, rendered as Markdown under the console: `kubiq.project`
+namespaces documented in `script::API_DOC`, rendered as Markdown under the console (its links, and
+those in an A2UI `Text`, follow the window's link policy — [`workbench.md`](./workbench.md)): `kubiq.project`
 (`info`/`root`/`list`), `kubiq.tasks` (`list`/`get`/`create`/`cancel`), `kubiq.ai`
 (`available`/`models`/`ask`), `kubiq.search` (`last`/`files`/`text`), and `kubiq.sink`
 (`ui`/`event`/`clear`).

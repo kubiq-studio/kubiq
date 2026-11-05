@@ -19,7 +19,7 @@ use gpui::{
 use gpui_component::Root;
 use gpui_component::input::InputEvent;
 use kubiq::app::{AppState, BusHub, CloseEditor};
-use kubiq::state::{FileDialog, WindowRegistry};
+use kubiq::state::{FileDialog, UrlTarget, WindowRegistry};
 use kubiq::ui::mdview::blockedit;
 use kubiq_proto::bus::{self, FromClient, To};
 use kubiq_proto::files::{DirEntry, DirListing, EntryKind, ImportMode, PathOp, RelatedFile};
@@ -829,6 +829,51 @@ fn a_dropped_file_moves_and_a_dropped_folder_asks_once(cx: &mut TestAppContext) 
             PathOp::Move
         )]
     );
+}
+
+/// A followed web link asks which browser opens it; the answer given with the box ticked is
+/// kept, and the next link opens without asking.
+#[gpui::test]
+fn a_web_link_asks_which_browser_and_remembers_a_ticked_answer(cx: &mut TestAppContext) {
+    let fixture = Fixture::open(cx);
+    let url = "https://example.com/a".to_string();
+
+    fixture.with(cx, |state, _, cx| state.follow_link("", &url, cx));
+    assert_eq!(
+        fixture.dialog(cx),
+        Some(FileDialog::OpenUrl {
+            url: url.clone(),
+            remember: false,
+        })
+    );
+
+    fixture.with(cx, |state, _, cx| {
+        state.toggle_url_remember(cx);
+        state.answer_open_url(UrlTarget::System, cx);
+    });
+    assert_eq!(fixture.dialog(cx), None);
+    let kept = fixture.with(cx, |state, _, _| state.workbench.url_choice.map(|(t, _)| t));
+    assert_eq!(kept, Some(UrlTarget::System));
+
+    fixture.with(cx, |state, _, cx| state.follow_link("", &url, cx));
+    assert_eq!(fixture.dialog(cx), None, "a remembered answer does not ask");
+
+    // Mail is never asked about.
+    fixture.with(cx, |state, _, cx| {
+        state.workbench.url_choice = None;
+        state.follow_link("", "mailto:a@example.com", cx);
+    });
+    assert_eq!(fixture.dialog(cx), None);
+}
+
+/// An absolute path inside the project opens its file there, at the line its suffix names.
+#[gpui::test]
+fn an_absolute_path_link_opens_the_project_file(cx: &mut TestAppContext) {
+    let fixture = Fixture::open(cx);
+    fixture.with(cx, |state, _, cx| {
+        state.follow_link("", "file:///tmp/kubiq/src/main.rs:2:4", cx)
+    });
+    assert_eq!(open_paths(&fixture, cx), vec!["src/main.rs".to_string()]);
 }
 
 /// A drop that would change nothing, or that would put a folder inside itself, is refused here —

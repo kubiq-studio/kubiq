@@ -1127,6 +1127,11 @@ impl AppState {
                 self.restart_to_update(cx);
                 return;
             }
+            // Enter means the primary button: Kubiq's own browser.
+            FileDialog::OpenUrl { .. } => {
+                self.answer_open_url(UrlTarget::Kubiq, cx);
+                return;
+            }
             FileDialog::CloseWindow { quitting } => {
                 self.close_file_dialog(cx);
                 if quitting {
@@ -1284,6 +1289,7 @@ impl AppState {
             | FileDialog::OverwriteFile { .. }
             | FileDialog::CloseWindow { .. }
             | FileDialog::RestartForUpdate
+            | FileDialog::OpenUrl { .. }
             | FileDialog::CloseProject { .. }
             | FileDialog::ImageText { .. }
             | FileDialog::RenameTab { .. } => {}

@@ -178,7 +178,7 @@ impl AppState {
     ///
     /// A file with no buffer yet has nothing to put a caret in, so the spot is stashed and the
     /// arriving bytes take it, through the same `set_restore` a reload's caret uses.
-    fn reveal_ide(&mut self, key: &str, locus: Option<&Locus>, cx: &mut Context<Self>) {
+    pub(super) fn reveal_ide(&mut self, key: &str, locus: Option<&Locus>, cx: &mut Context<Self>) {
         let held = self
             .editor(cx)
             .is_some_and(|editor| editor.index_of_key(key).is_some());

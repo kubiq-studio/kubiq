@@ -5,8 +5,8 @@ kind: feature
 status: draft
 summary: The rail's IDE mode — the project's file explorer and its right-click menu, the editor tabs each open file is a panel of, the viewer that draws one by kind, Markdown reading width and its minimap, diagrams and Excalidraw scenes, the image editor over any picture, and how a file is saved.
 read_when: you are changing the explorer tree, the editor tabs, what a file panel draws, which viewer draws it, how a diagram is rendered or cached, capturing the window, editing a picture, or saving a file
-updated: 2026-10-24
-verified: 2026-10-26
+updated: 2026-11-05
+verified: 2026-11-05
 code_anchors: [crates/kubiq/src/ui/explorer.rs, crates/kubiq/src/app/explorer.rs, crates/kubiq/src/state/explorer/mod.rs, crates/kubiq/src/state/explorer/tree.rs, crates/kubiq/src/state/explorer/rows.rs, crates/kubiq/src/state/explorer/menu.rs, crates/kubiq/tests/explorer.rs, crates/kubiq/tests/files_changed.rs, crates/kubiq/src/ui/kit/files.rs, crates/kubiq/src/ui/editor.rs, crates/kubiq/src/state/editor.rs, crates/kubiq/src/ui/mark.rs, crates/kubiq/src/app/mark.rs, crates/kubiq/src/ui/viewer/mod.rs, crates/kubiq/src/ui/viewer/diff.rs, crates/kubiq/src/ui/viewer/markdown.rs, crates/kubiq/src/ui/mdview/view.rs, crates/kubiq/src/ui/mdview/search.rs, crates/kubiq/src/ui/mdview/minimap.rs, crates/kubiq/src/ui/mdview/outline.rs, crates/kubiq/src/ui/mdview/blockedit.rs, crates/kubiq/src/ui/viewer/md_options.rs, crates/kubiq/src/ui/viewer/diagram.rs, crates/kubiq/src/ui/viewer/scene.rs, crates/kubiq/src/ui/viewer/viewport.rs, crates/kubiq/src/ui/viewer/image.rs, crates/kubiq/src/ui/viewer/image_edit.rs, crates/kubiq/src/ui/viewer/web.rs, crates/kubiq/src/app/capture.rs, crates/kubiq/src/app/feedback.rs, crates/kubiq/src/state/feedback.rs, crates/kubiq/src/ui/feedback.rs, crates/kubiq/src/app/image_edit.rs, crates/kubiq/src/state/image_edit.rs, crates/kubiq/tests/image_gestures.rs, crates/kubiq/src/app/clipboard.rs, crates/kubiq/src/state/diagrams.rs, crates/kubiq/src/state/viewport.rs, crates/kubiq/src/state/scene.rs, crates/kubiq-draw/src/model.rs, crates/kubiq-draw/src/excalidraw.rs, crates/kubiq-draw/src/drawio.rs, crates/kubiq/tests/diagrams.rs, crates/kubiq/tests/viewport.rs, crates/kubiq/tests/scene.rs, crates/kubiq/tests/viewer_kind.rs, crates/kubiq/src/ui/file_dialog.rs, crates/kubiq/src/ui/web_view.rs, crates/kubiq/src/app/web_panel.rs, crates/kubiq/src/state/web_panel.rs, crates/kubiq/src/ext/viewer.rs, crates/kubiq/tests/viewer_container.rs]
 depends_on: [feat-workbench, tech-ui]
 review_cycle: monthly
@@ -432,8 +432,9 @@ Cancel button. A commit writes the tab's buffer: it is an ordinary edit, so the 
 temporary tab is promoted, ⌘Z in the source undoes it, and ⌘S saves it. A commit against a block
 that changed underneath it is refused, and the editor stays open with what was typed. Turning the
 chip off commits an open editor first. A link clicked in the prose follows the same policy as a
-link in any other rendered document: a place in the project is navigated to, the web and mail go
-to the operating system.
+link in any other rendered document: a place in the project, or an absolute path (`:line[:col]`
+naming a line), is opened in the editor; the web asks which browser; mail goes to the operating
+system ([`workbench.md`](./workbench.md)).
 
 **A Markdown preview reads at a measured width, and the user picks how wide and how dense.** The
 text column is capped at a width preset — Readable (~75 characters, the default), Wide (~95) or

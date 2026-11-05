@@ -55,6 +55,11 @@ pub mod svg;
 /// an index alone would not say which one moved.
 pub type TabAction = Rc<dyn Fn(SharedString, usize, &mut Window, &mut App)>;
 
+/// A link in a `Text` component's Markdown was clicked. `Arc` and `Send` because that is what the
+/// markdown view's own handler is.
+pub type LinkAction =
+    std::sync::Arc<dyn Fn(&SharedString, &gpui::ClickEvent, &mut Window, &mut App) + Send + Sync>;
+
 /// A modal's trigger was clicked, naming the `Modal` to open or shut.
 pub type ModalAction = Rc<dyn Fn(SharedString, &mut Window, &mut App)>;
 
@@ -69,7 +74,7 @@ pub type WriteAction = Rc<dyn Fn(SharedString, Value, &mut Window, &mut App)>;
 
 /// Everything drawing a surface needs that is not in the surface.
 ///
-/// The data model and the field buffers are read; the four callbacks are how anything that happened
+/// The data model and the field buffers are read; the five callbacks are how anything that happened
 /// leaves. They are plain closures, in the kit's own shape, so nothing under `ui/` names `AppState`.
 pub struct Ctx<'a> {
     pub surface: &'a Surface,
@@ -89,6 +94,7 @@ pub struct Ctx<'a> {
     pub on_modal: ModalAction,
     pub on_action: FireAction,
     pub on_value: WriteAction,
+    pub on_link: LinkAction,
 }
 
 /// Draw a surface, from its root down.
@@ -175,10 +181,16 @@ fn draw(ctx: &Ctx, component: &Component, depth: u32, scope: Scope<'_>) -> AnyEl
                 true => div()
                     .text_size(theme::font(Family::Chrome, role))
                     .text_color(colour)
-                    .child(gpui_component::text::TextView::markdown(
-                        eid2("a2ui-md", id, scope.key()),
-                        body,
-                    ))
+                    .child(
+                        gpui_component::text::TextView::markdown(
+                            eid2("a2ui-md", id, scope.key()),
+                            body,
+                        )
+                        .on_link_click({
+                            let on_link = ctx.on_link.clone();
+                            move |target, event, window, cx| on_link(target, event, window, cx)
+                        }),
+                    )
                     .into_any_element(),
                 false => div()
                     .text_size(theme::font(Family::Chrome, role))

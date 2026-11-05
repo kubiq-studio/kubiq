@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use kubiq_proto::ids::{PaneId, ProjectId, TaskId};
 use kubiq_proto::work::AgentId;
 
-pub use text::{NotALink, parse_link, resolve_relative};
+pub use text::{NotALink, file_link, parse_link, resolve_relative, split_line_suffix};
 
 use crate::state::dock::ChatId;
 use crate::state::teams::{TeamsInspectorTab, TeamsSelection};

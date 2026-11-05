@@ -370,6 +370,67 @@ fn has_scheme(target: &str) -> bool {
         && target.contains(':')
 }
 
+/// Split the `:line` or `:line:col` a compiler or an agent writes after a path — `src/app.rs:42`,
+/// `src/app.rs:42:7`. The column is dropped: a line is the one place the editor is sent to. A
+/// path with no such suffix, or one that would be empty without it, comes back whole.
+pub fn split_line_suffix(path: &str) -> (&str, Option<Locus>) {
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    let Some((head, last)) = path.rsplit_once(':').filter(|(_, last)| digits(last)) else {
+        return (path, None);
+    };
+    let (head, at) = match head.rsplit_once(':') {
+        Some((rest, line)) if digits(line) => (rest, line),
+        _ => (head, last),
+    };
+    match line(at) {
+        Ok(line) if !head.is_empty() => (head, Some(Locus::Line { line })),
+        _ => (path, None),
+    }
+}
+
+/// A link that names a file by its absolute path — `/abs/path`, or `file:///abs/path` — with
+/// an optional `#L12` fragment or `:line[:col]` suffix. The path comes back unescaped, the place
+/// in it as a locus; anything else is `None`, and which project (if any) holds the path is the
+/// caller's question.
+pub fn file_link(target: &str) -> Option<(String, Option<Locus>)> {
+    let target = target.trim();
+    let rest = match target.get(..5) {
+        Some(head) if head.eq_ignore_ascii_case("file:") => {
+            let rest = &target[5..];
+            match rest.strip_prefix("//") {
+                // `file://host/path`: only the local host is a file this window can open.
+                Some(authority) => {
+                    let cut = authority.find('/')?;
+                    let host = &authority[..cut];
+                    if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") {
+                        return None;
+                    }
+                    &authority[cut..]
+                }
+                None => rest,
+            }
+        }
+        _ => target,
+    };
+    if !rest.starts_with('/') {
+        return None;
+    }
+    let (path, frag) = match rest.find('#') {
+        Some(cut) => (&rest[..cut], Some(&rest[cut + 1..])),
+        None => (rest, None),
+    };
+    let path = decode(path).ok()?;
+    if path.contains('\0') {
+        return None;
+    }
+    let (path, suffix) = split_line_suffix(&path);
+    let locus = match frag {
+        Some(frag) => parse_locus(&decode(frag).ok()?).ok()?,
+        None => suffix,
+    };
+    Some((path.to_string(), locus))
+}
+
 /// A link written *inside a document*, resolved against that document.
 ///
 /// **`..` pops here, where the host refuses it.** That is not an inconsistency: the host only ever
@@ -385,9 +446,18 @@ pub fn resolve_relative(project: ProjectId, doc_path: &str, target: &str) -> Opt
         return parse_link(target, Some(project)).ok();
     }
     // Any other URI scheme is somewhere else entirely, never a path in this project. The caller
-    // hands the web and mail to the operating system; `javascript:`, `file:` and the rest are nothing.
+    // hands the web and mail on and `file:` to `file_link`; `javascript:` and the rest are nothing.
+    // `app.rs:42` reads as a scheme too, and is the one shape that is a path after all — but only
+    // with a `.` or `/` in it: a bare `localhost:8080` is a host and port, not a file.
     if has_scheme(target) {
-        return None;
+        return match split_line_suffix(target) {
+            (path, Some(locus)) if !has_scheme(path) && path.contains(['.', '/']) => {
+                let mut dest = resolve_relative(project, doc_path, path)?;
+                dest.locus = Some(locus);
+                Some(dest)
+            }
+            _ => None,
+        };
     }
     if let Some(frag) = target.strip_prefix('#') {
         return Some(Destination {
@@ -407,6 +477,11 @@ pub fn resolve_relative(project: ProjectId, doc_path: &str, target: &str) -> Opt
     if path.is_empty() || path.contains('\0') {
         return None;
     }
+    // A `#` fragment says where; without one, a `:line[:col]` suffix may.
+    let (path, suffix) = match frag {
+        Some(_) => (path.as_str(), None),
+        None => split_line_suffix(&path),
+    };
 
     // From the document's folder, not the document.
     let mut stack: Vec<String> = Vec::new();
@@ -419,7 +494,7 @@ pub fn resolve_relative(project: ProjectId, doc_path: &str, target: &str) -> Opt
     }
     stack.pop();
 
-    for component in Path::new(&path).components() {
+    for component in Path::new(path).components() {
         match component {
             Component::Normal(name) => stack.push(name.to_string_lossy().to_string()),
             Component::CurDir => {}
@@ -439,7 +514,7 @@ pub fn resolve_relative(project: ProjectId, doc_path: &str, target: &str) -> Opt
         },
         locus: match frag {
             Some(frag) => parse_locus(&decode(frag).ok()?).ok()?,
-            None => None,
+            None => suffix,
         },
     })
 }

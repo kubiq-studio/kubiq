@@ -5,8 +5,9 @@
 //! other's. Which one is up is `WorkbenchState::file_dialog`, and what is typed into any of them
 //! is the window's one `file_name` field.
 //!
-//! Most of them are kit calls. The hand-rolled bodies are the folder move's — the one dialog with
-//! a control in it, a tick box that stops it asking again for ten minutes — and Rename's and
+//! Most of them are kit calls. The hand-rolled bodies are the folder move's — a tick box that
+//! stops it asking again for ten minutes — a followed web link's, whose tick box keeps the chosen
+//! browser for an hour, and Rename's and
 //! Remove's own tick box: whether to carry a path's related files
 //! (`kubiq_proto::files::RelatedFile`, resolved host-side by `kubiq-host`'s `files::related`) along
 //! with it. `prompt_modal` and `confirm_modal` have no room for a second control, so the two grow
@@ -20,7 +21,7 @@ use gpui_component::input::Input;
 use kubiq_proto::files::RelatedFile;
 
 use crate::app::AppState;
-use crate::state::FileDialog;
+use crate::state::{FileDialog, UrlTarget};
 use crate::theme;
 use crate::ui::kit::{
     check_box, confirm_modal, field, ghost_button, label_block, modal, modal_note, primary_button,
@@ -703,6 +704,61 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
                 "app-file-move",
                 theme::accent(),
                 "Move folder",
+                body,
+                footer,
+                crate::ui::handler(&view, |this, _, cx| this.close_file_dialog(cx)),
+                window,
+            )
+        }
+        Some(FileDialog::OpenUrl { url, remember }) => {
+            let body = div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .pt_3()
+                .child(modal_note(&url))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(check_box(
+                            "app-open-url-remember",
+                            remember,
+                            cx.listener(|this, _, _, cx| this.toggle_url_remember(cx)),
+                        ))
+                        .child(
+                            div()
+                                .w(relative(1.))
+                                .text_size(theme::font(theme::Family::Chrome, theme::Role::Body))
+                                .text_color(theme::text_muted())
+                                .child("Remember for 1 hour"),
+                        ),
+                )
+                .into_any_element();
+
+            let footer = div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(ghost_button(
+                    "app-open-url-system",
+                    None,
+                    "Default browser",
+                    cx.listener(|this, _, _, cx| this.answer_open_url(UrlTarget::System, cx)),
+                ))
+                .child(primary_button(
+                    "app-open-url-kubiq",
+                    None,
+                    "Kubiq browser",
+                    cx.listener(|this, _, _, cx| this.answer_open_url(UrlTarget::Kubiq, cx)),
+                ))
+                .into_any_element();
+
+            modal(
+                "app-open-url",
+                theme::accent(),
+                "Open link",
                 body,
                 footer,
                 crate::ui::handler(&view, |this, _, cx| this.close_file_dialog(cx)),

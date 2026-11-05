@@ -8,7 +8,9 @@ use std::str::FromStr;
 
 use kubiq::state::dock::ChatId;
 use kubiq::state::editor::{Subject, tab_key};
-use kubiq::state::nav::{Destination, Locus, View, parse_link, resolve_relative};
+use kubiq::state::nav::{
+    Destination, Locus, View, file_link, parse_link, resolve_relative, split_line_suffix,
+};
 use kubiq_proto::files::DiffBase;
 use kubiq_proto::ids::{PaneId, ProjectId, SessionId, TaskId};
 use kubiq_proto::work::AgentId;
@@ -395,4 +397,65 @@ fn a_document_may_link_to_a_help_page_without_naming_a_project() {
             page: "index".into()
         }
     );
+}
+
+// ── paths with a place in them, as a compiler or an agent writes them ──────
+
+#[test]
+fn a_line_suffix_names_a_line_and_drops_the_column() {
+    let line = |line| Some(Locus::Line { line });
+    assert_eq!(split_line_suffix("src/app.rs:42"), ("src/app.rs", line(42)));
+    assert_eq!(
+        split_line_suffix("src/app.rs:42:7"),
+        ("src/app.rs", line(42))
+    );
+    assert_eq!(split_line_suffix("src/app.rs"), ("src/app.rs", None));
+    // Line zero is not a line, and a suffix alone is not a path.
+    assert_eq!(split_line_suffix("src/app.rs:0"), ("src/app.rs:0", None));
+    assert_eq!(split_line_suffix(":12"), (":12", None));
+    assert_eq!(split_line_suffix("a:b"), ("a:b", None));
+}
+
+#[test]
+fn a_relative_link_may_carry_a_line_suffix() {
+    let deep = relative("../src/app.rs:12:3").unwrap();
+    assert_eq!(key_of(&deep), "src/app.rs");
+    assert_eq!(deep.locus, Some(Locus::Line { line: 12 }));
+    // A bare `name:12` reads as a URI scheme; it is a path after all.
+    let bare = relative("sibling.md:5").unwrap();
+    assert_eq!(key_of(&bare), "_docs/sibling.md");
+    assert_eq!(bare.locus, Some(Locus::Line { line: 5 }));
+    // A real scheme with a port stays somewhere else.
+    assert_eq!(relative("http://localhost:8080"), None);
+    // A bare `word:digits` is a host and port, not a file at a line.
+    assert_eq!(relative("localhost:8080"), None);
+}
+
+#[test]
+fn an_absolute_path_is_a_file_link() {
+    let line = |line| Some(Locus::Line { line });
+    assert_eq!(
+        file_link("/abs/src/app.rs"),
+        Some(("/abs/src/app.rs".to_string(), None))
+    );
+    assert_eq!(
+        file_link("/abs/src/app.rs:42:7"),
+        Some(("/abs/src/app.rs".to_string(), line(42)))
+    );
+    assert_eq!(
+        file_link("/abs/src/app.rs#L9"),
+        Some(("/abs/src/app.rs".to_string(), line(9)))
+    );
+    assert_eq!(
+        file_link("file:///abs/my%20file.md:3"),
+        Some(("/abs/my file.md".to_string(), line(3)))
+    );
+    assert_eq!(
+        file_link("file://localhost/abs/a.rs"),
+        Some(("/abs/a.rs".to_string(), None))
+    );
+    // Another host's file, a relative path, and the web are not.
+    assert_eq!(file_link("file://server/abs/a.rs"), None);
+    assert_eq!(file_link("src/app.rs:4"), None);
+    assert_eq!(file_link("https://example.com/a"), None);
 }

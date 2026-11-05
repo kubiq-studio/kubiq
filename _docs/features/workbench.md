@@ -5,8 +5,8 @@ kind: feature
 status: draft
 summary: The window's shell — the activity rail and the ten modes it selects between, the dock of movable panels the user arranges around the centre, the titlebar and its navigator, the projects a window holds and the empty state one with none shows, the picker that adds, clones and opens them, project and application settings, the Tools dialog, the file picker any screen raises, and the status bar that reports on all of it. Each mode's own screen has a document of its own.
 read_when: you are changing the window layout, the rail, the dock, where a panel may sit or when it is drawn, the titlebar, the navigator, the project picker, cloning a project, project or application settings, the Tools dialog, remote hosts, the file picker, vim mode, or the status bar
-updated: 2026-10-29
-verified: 2026-10-29
+updated: 2026-11-05
+verified: 2026-11-05
 code_anchors: [crates/kubiq/src/ui/trust.rs, crates/kubiq/src/app/browser.rs, crates/kubiq/src/state/browser.rs, crates/kubiq/src/ui/browser.rs, crates/kubiq/src/ui/web_view.rs, crates/kubiq/src/app/mod.rs, crates/kubiq/src/app/onboarding.rs, crates/kubiq/src/state/onboarding.rs, crates/kubiq/src/ui/search.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/panels.rs, crates/kubiq/src/state/mod.rs, crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/windows.rs, crates/kubiq/src/state/when.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/tests/prefs.rs, crates/kubiq-host/src/projects.rs, crates/kubiq/src/ui/shell.rs, crates/kubiq/src/ui/ribbon.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/ui/dock/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/ui/tab_menu.rs, crates/kubiq/src/ui/menus.rs, crates/kubiq/src/ext/menu.rs, crates/kubiq/src/ui/overflow_menu.rs, crates/kubiq/src/ui/new_project_menu.rs, crates/kubiq/src/ui/run_tool_menu.rs, crates/kubiq/src/ui/hidden_agents_menu.rs, crates/kubiq/tests/new_project.rs, crates/kubiq/tests/dock.rs, crates/kubiq/tests/mode_restore.rs, crates/kubiq/src/ui/terminal.rs, crates/kubiq/src/ui/logs.rs, crates/kubiq/src/ui/outline.rs, crates/kubiq/src/ui/rail.rs, crates/kubiq/src/ext/rail.rs, crates/kubiq/tests/rail_container.rs, crates/kubiq/src/ui/project_face.rs, crates/kubiq/src/ui/titlebar.rs, crates/kubiq/src/ui/project_menu.rs, crates/kubiq/src/ui/all_projects.rs, crates/kubiq/src/ui/empty.rs, crates/kubiq/src/ui/status_bar.rs, crates/kubiq/src/state/updates.rs, crates/kubiq/src/app/updates.rs, crates/kubiq/src/ui/size.rs, crates/kubiq/src/app/size.rs, crates/kubiq/src/ui/kit/controls.rs, crates/kubiq/src/state/work.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ext/settings.rs, crates/kubiq/src/ui/sink/ext_demo.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/app/settings.rs, crates/kubiq/src/state/settings.rs, crates/kubiq/src/ui/kit/settings.rs, crates/kubiq/tests/settings.rs, crates/kubiq/tests/settings_container.rs, crates/kubiq/src/state/catalog.rs, crates/kubiq/src/app/catalog.rs, crates/kubiq/src/ui/catalog.rs, crates/kubiq/tests/catalog.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq-host/src/cli_shortcut.rs, crates/kubiq-host/src/shell_integration.rs, crates/kubiq/src/state/file_picker.rs, crates/kubiq/src/ui/file_picker.rs, crates/kubiq/tests/file_picker.rs, crates/kubiq/src/state/vim/mod.rs, crates/kubiq/src/state/vim/step.rs, crates/kubiq/src/state/vim/motion.rs, crates/kubiq/src/state/vim/object.rs, crates/kubiq/src/state/vim/search.rs, crates/kubiq/src/app/vim.rs, crates/kubiq/tests/vim.rs, crates/kubiq/src/state/nav.rs, crates/kubiq/src/state/nav/text.rs, crates/kubiq/src/state/navigator.rs, crates/kubiq/src/app/nav.rs, crates/kubiq/src/ui/navigator.rs, crates/kubiq/tests/nav.rs, crates/kubiq/tests/nav_text.rs, crates/kubiq/tests/bookmarks.rs, crates/kubiq/tests/navigator.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/state/clone.rs, crates/kubiq/src/app/clone.rs, crates/kubiq/src/ui/clone.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-host/src/repos/mod.rs, crates/kubiq-host/src/repos/list.rs, crates/kubiq-host/src/repos/clone.rs, crates/kubiq/src/state/remote.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/app/unix_connect.rs, crates/kubiq/src/ui/remote_connect.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/state/run_picker.rs, crates/kubiq/src/state/about.rs, crates/kubiq/src/app/about.rs, crates/kubiq/src/ui/about.rs, crates/kubiq/src/state/devtools.rs, crates/kubiq/src/app/devtools.rs, crates/kubiq/src/ui/devtools.rs, crates/kubiq/src/devtools/mod.rs, crates/kubiq/src/devtools/codec.rs, crates/kubiq/src/devtools/detect.rs, crates/kubiq/src/devtools/diff.rs, crates/kubiq/src/devtools/hash.rs, crates/kubiq/src/devtools/jwt.rs, crates/kubiq/src/devtools/lorem.rs, crates/kubiq/src/devtools/time.rs, crates/kubiq/src/devtools/uuids.rs]
 depends_on: [tech-ui]
 review_cycle: monthly
@@ -677,9 +677,18 @@ commands in it: a command is not a place.
 
 **A link in rendered content is a destination.** A Markdown document's own relative links resolve
 against the document, so `../src/app.rs#L200` opens that file at that line, and a target that pops
-past the project root is not a link. `http`, `https` and `mailto` are handed to the operating
-system; anything else does nothing at all. The same handler is on the chat transcript's rendered
-replies and on a task's rendered description, both resolved from the project root. **Terminal
+past the project root is not a link. A path may end in `:line` or `:line:col` instead of `#L12`, the
+way a compiler or an agent writes one — `src/app.rs:42:7` opens that file at line 42, the column
+dropped. **An absolute path**, bare or as `file:///…` (a `file:` URL naming another host is not a
+link), opens in the editor too: under the project this window holds it in, as that project's file,
+or as a guest tab when no project here holds it. `mailto` is handed to the operating system. **`http`
+and `https` ask** *Open link*: *Default browser* hands the link to the operating system, *Kubiq
+browser* (the primary, and Enter) opens it in the internal browser's tab on screen — or the system's,
+with no project to hold a tab. Its *Remember for 1 hour* checkbox keeps the answer given with it
+ticked, so the next hour's web links open there without asking — per window and only in memory, the
+folder move's own reasoning. Anything else does nothing at all. The same handler is on the chat
+transcript's rendered replies, on a task's rendered description and on an A2UI surface's Markdown
+text, all resolved from the project root. **Terminal
 output is never scanned for links** — reading a harness's screen is the thing Kubiq does not do.
 
 **The window's body is a dock, and the user arranges it.** Everything between the chrome is a tree
@@ -2402,7 +2411,11 @@ text, so what keeps an old bookmark readable is the parser rather than a set of 
 and one that no longer parses is dropped alone rather than costing the blob — and `resolve_anchor()`.
 `state/nav/text.rs` is the `kubiq://` form: `Display`, `FromStr`, and `resolve_relative()` for a link
 written inside a document, where `..` pops because a document holds paths a human wrote while the
-host only ever holds paths it handed out. `app/nav.rs` is the router. `current_destination()` matches
+host only ever holds paths it handed out; `split_line_suffix()` reads a `:line[:col]` suffix and
+`file_link()` an absolute path or `file://` URL. `AppState::follow_link` (`app/editor.rs`) is the
+one link policy: a file link goes through `project_relative` to `navigate()`, or to
+`open_guest_file` plus `reveal_ide` for its line; a web link raises `FileDialog::OpenUrl` unless
+`WorkbenchState::url_choice` holds an unexpired answer (`BROWSER_REMEMBER`, an hour). `app/nav.rs` is the router. `current_destination()` matches
 the rail mode, reads the screen's own selection and asks `where_locus()`; `navigate()` resolves the
 project — handing the whole destination to another window's `AppState` and raising that window when
 it is the one holding the project — sets the rail mode, calls one `reveal_*`, and keeps the

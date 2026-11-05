@@ -579,6 +579,13 @@ pub enum HarnessChoice {
     Separator,
 }
 
+/// Where a followed web link opens: Kubiq's own browser tab, or the operating system's default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UrlTarget {
+    Kubiq,
+    System,
+}
+
 /// The question a file gesture is asking, while one is up. One at a time, the rule
 /// `AccountDialog` already follows.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -617,6 +624,9 @@ pub enum FileDialog {
     },
     /// A drag that would move `path` into the folder `into`. Only ever raised for a folder.
     Move { path: String, into: String },
+    /// A followed web link, asking which browser opens it. `remember` is the dialog's own tick
+    /// box: the answer given with it ticked is kept in `WorkbenchState::url_choice`.
+    OpenUrl { url: String, remember: bool },
     /// An untitled buffer asking where to be saved. `key` is its tab key.
     SaveAs { key: String },
     /// The image Text tool's click, waiting on its string. `key` is its tab key; the point
@@ -924,6 +934,10 @@ pub struct WorkbenchState {
     /// Until when a folder move skips its confirmation, from the dialog's checkbox. In memory and
     /// per window: ten minutes is not a preference, and there is nothing to migrate.
     pub move_unasked_until: Option<std::time::Instant>,
+    /// Which browser a followed web link opens in without asking, and until when — the answer
+    /// given to `FileDialog::OpenUrl` with its box ticked. In memory and per window, like
+    /// `move_unasked_until`.
+    pub url_choice: Option<(UrlTarget, std::time::Instant)>,
     /// The rename and delete questions' own checkbox — carry `FileDialog::Rename`'s or
     /// `FileDialog::Remove`'s `related` files along, default checked. Reset to `true` every time
     /// one of those two dialogs opens, which is what "default checked" means for a value that
@@ -1157,6 +1171,7 @@ impl Default for WorkbenchState {
             tab_menu: None,
             file_dialog: None,
             move_unasked_until: None,
+            url_choice: None,
             carry_related: true,
             help_target: None,
             new_pane_menu: None,

@@ -292,6 +292,9 @@ fn transcript_links_with_explicit_destinations_need_no_project(cx: &mut TestAppC
         state.close_project(fixture.project, true, cx);
         assert_eq!(state.project(cx), None);
         state.follow_agent_link(unknown, "https://example.com/docs", cx);
+        // The web asks which browser; with no project to hold a tab, either answer is the
+        // system's.
+        state.answer_open_url(kubiq::state::UrlTarget::Kubiq, cx);
     });
     assert_eq!(cx.opened_url().as_deref(), Some("https://example.com/docs"));
     fixture.state.update(cx, |state, cx| {

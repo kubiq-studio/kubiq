@@ -592,7 +592,7 @@ fn lower(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
                 })),
         )
         .child(match pane {
-            ScriptPane::Docs => reference(),
+            ScriptPane::Docs => reference(cx),
             ScriptPane::Panel => panel(app, cx),
         })
         .into_any_element()
@@ -603,7 +603,7 @@ fn lower(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
 /// A document rather than a table of pairs, because the surface has namespaces now and a namespace
 /// needs a paragraph and an example to be worth having. The string lives beside the bindings it
 /// describes, in `state::script`, so adding one is adding a row there and nothing here.
-fn reference() -> AnyElement {
+fn reference(cx: &mut Context<AppState>) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -615,7 +615,8 @@ fn reference() -> AnyElement {
                 .text_size(theme::font(Family::Content, Role::Meta))
                 .p_4()
                 .scrollable(true)
-                .selectable(true),
+                .selectable(true)
+                .on_link_click(crate::ui::on_link(cx.entity(), None)),
         )
         .into_any_element()
 }
@@ -719,6 +720,7 @@ fn panel(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
         on_modal,
         on_action,
         on_value,
+        on_link: std::sync::Arc::new(crate::ui::on_link(cx.entity(), None)),
     };
 
     div()

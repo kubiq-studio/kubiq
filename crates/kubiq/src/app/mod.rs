@@ -75,8 +75,8 @@ use crate::state::{
     ExplorerKey, ExplorerPressed, ExplorerState, ExplorerView, FileBody, FileDialog, FileLanguage,
     Follow, KbDocKey, KbPressed, KbState, LogState, MenuId, NewAgentMenu, NewAgentStage,
     NewAgentSurface, OpenFile, PanelKind, ProjectSettings, ProjectSettingsMode, RailMode, Region,
-    SearchState, TeamsCreateMenu, TeamsCreateStage, Toggle, WindowRegistry, WorkbenchState,
-    kb_parent_path, prefs,
+    SearchState, TeamsCreateMenu, TeamsCreateStage, Toggle, UrlTarget, WindowRegistry,
+    WorkbenchState, kb_parent_path, prefs,
 };
 use crate::theme::{self, Mode, ThemeId};
 use crate::ui;
@@ -145,6 +145,10 @@ const FILTER_DEBOUNCE: Duration = Duration::from_millis(100);
 /// How long a ticked "don't ask again" keeps a folder move from asking. In memory and per window,
 /// so it lapses on its own and there is nothing to migrate.
 const MOVE_UNASKED: Duration = Duration::from_secs(10 * 60);
+
+/// How long a ticked "remember" keeps a followed web link from asking which browser opens it. In
+/// memory and per window, like [`MOVE_UNASKED`].
+const BROWSER_REMEMBER: Duration = Duration::from_secs(60 * 60);
 
 /// How long after the last zoom a Markdown preview is rebuilt. The rebuild throws away a parsed
 /// document, so a held zoom key must not do it once per point.

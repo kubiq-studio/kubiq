@@ -118,6 +118,7 @@ fn preview(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
         on_modal,
         on_action,
         on_value,
+        on_link: std::sync::Arc::new(crate::ui::on_link(cx.entity(), None)),
     };
 
     div()

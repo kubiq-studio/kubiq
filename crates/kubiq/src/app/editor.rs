@@ -572,20 +572,98 @@ impl AppState {
         target: &str,
         cx: &mut Context<Self>,
     ) {
+        if let Some((path, locus)) = crate::state::nav::file_link(target) {
+            self.open_path_at(std::path::Path::new(&path), locus, cx);
+            return;
+        }
         let dest = project
             .and_then(|project| crate::state::nav::resolve_relative(project, base, target))
             .or_else(|| crate::state::nav::parse_link(target, None).ok());
-        match dest {
-            Some(dest) => self.navigate(dest, cx),
+        if let Some(dest) = dest {
+            self.navigate(dest, cx);
+            return;
+        }
+        let lower = target.trim().to_ascii_lowercase();
+        if lower.starts_with("mailto:") {
+            cx.open_url(target.trim());
+        } else if lower.starts_with("http:") || lower.starts_with("https:") {
+            self.open_web_link(target.trim().to_string(), cx);
+        }
+    }
+
+    /// An absolute path, followed: into the editor of the project this window holds it under,
+    /// or as a guest tab when no project does. `locus` is where the caret lands.
+    fn open_path_at(
+        &mut self,
+        abs: &std::path::Path,
+        locus: Option<crate::state::nav::Locus>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((project, rel)) = self.project_relative(abs, cx) {
+            self.navigate(
+                crate::state::nav::Destination {
+                    project,
+                    view: crate::state::nav::View::Ide { key: rel },
+                    locus,
+                },
+                cx,
+            );
+            return;
+        }
+        self.open_guest_file(abs, cx);
+        if let Some(locus) = locus {
+            // The guest tab's key is the absolute path itself (`open_guest_file`).
+            self.reveal_ide(&abs.to_string_lossy(), Some(&locus), cx);
+        }
+    }
+
+    /// A followed web link: opened where a remembered answer says, or asked about.
+    fn open_web_link(&mut self, url: String, cx: &mut Context<Self>) {
+        let remembered = self
+            .workbench
+            .url_choice
+            .filter(|(_, until)| *until > std::time::Instant::now())
+            .map(|(target, _)| target);
+        match remembered {
+            Some(target) => self.open_url_in(&url, target, cx),
             None => {
-                let lower = target.to_ascii_lowercase();
-                if ["http:", "https:", "mailto:"]
-                    .iter()
-                    .any(|scheme| lower.starts_with(scheme))
-                {
-                    cx.open_url(target);
-                }
+                self.workbench.file_dialog = Some(FileDialog::OpenUrl {
+                    url,
+                    remember: false,
+                });
+                cx.notify();
             }
+        }
+    }
+
+    /// The browser question's answer: `FileDialog::OpenUrl`'s two buttons. A ticked box keeps the
+    /// answer for [`BROWSER_REMEMBER`].
+    pub fn answer_open_url(&mut self, target: UrlTarget, cx: &mut Context<Self>) {
+        let Some(FileDialog::OpenUrl { url, remember }) = self.workbench.file_dialog.clone() else {
+            return;
+        };
+        self.close_file_dialog(cx);
+        if remember {
+            self.workbench.url_choice =
+                Some((target, std::time::Instant::now() + BROWSER_REMEMBER));
+        }
+        self.open_url_in(&url, target, cx);
+    }
+
+    /// The browser question's tick box.
+    pub fn toggle_url_remember(&mut self, cx: &mut Context<Self>) {
+        if let Some(FileDialog::OpenUrl { remember, .. }) = &mut self.workbench.file_dialog {
+            *remember = !*remember;
+            cx.notify();
+        }
+    }
+
+    /// Kubiq's own browser needs a project to hold its tab; with none on screen the system's
+    /// opens the link instead.
+    fn open_url_in(&mut self, url: &str, target: UrlTarget, cx: &mut Context<Self>) {
+        let opened = target == UrlTarget::Kubiq && self.open_browser(url, false, cx).is_some();
+        if !opened {
+            cx.open_url(url);
         }
     }
 
