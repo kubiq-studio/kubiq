@@ -6,7 +6,7 @@ status: draft
 summary: What the embedded harness-management library owns, what Kubiq owns, how the application consumes it, and the rule that keeps the two from growing into each other.
 read_when: you are about to write code that launches a harness, drives one as a conversation, names a harness config path, or touches accounts, skills or MCP servers
 updated: 2026-11-05
-verified: 2026-11-01
+verified: 2026-11-05
 code_anchors: [crates/agent-manager/src/harness_agents.rs, crates/kubiq-host/src/harness_agents.rs, crates/kubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/kubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/ask.rs]
 depends_on: [tech-structure]
 review_cycle: monthly
@@ -165,7 +165,10 @@ takes the same list and prints each line to stderr instead.
 `crates/kubiq-host/src/agent.rs` reads and writes them through an `FsProfileStore` rooted at
 `<root>/agent-definitions` — `definitions()` projects each into an `AgentDefinition` for the wire,
 skipping any that
-pins no harness, and `save_definition()` folds one back into a `Profile` and calls
+pins no harness. One bad entry never empties the list: an unparseable record, a second one claiming
+an id already taken (the one in the directory named after the id stays, else the first by name) and
+a harness agent file that cannot be read or repeats a name are skipped and logged, and a scope that
+cannot be read contributes none. `save_definition()` therefore never fails on an ignored duplicate, and `save_definition()` folds one back into a `Profile` and calls
 `FsProfileStore::save`. The store owns the on-disk shape, the id and the resolution; the host owns
 only where the root is. A delete goes through the library's `FsProfileStore::delete`, never a
 `remove_dir_all` here — that is exactly the shape rule 1 forbids — and `delete_definition()` offers

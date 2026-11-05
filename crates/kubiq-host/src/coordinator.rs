@@ -8333,41 +8333,28 @@ impl Coordinator {
         // Every save, clone and delete of a definition ends here, so this is where the mission
         // runner's cached definition ids go stale.
         self.missions.lock().definitions_changed();
-        match self.agents.definitions() {
-            Ok(mut definitions) => {
-                let ids: Vec<ProjectId> = self.projects.records().iter().map(|it| it.id).collect();
-                for project in ids {
-                    match self
-                        .agents
-                        .project_definitions(project, self.project_root(project).as_deref())
-                    {
-                        Ok(scoped) => {
-                            let local = self.harness_agent_definitions(project, &scoped);
-                            definitions.extend(scoped);
-                            definitions.extend(local);
-                        }
-                        Err(error) => {
-                            tracing::warn!(
-                                "the definitions of project {project} could not be read: {error:#}"
-                            );
-                        }
-                    }
-                }
-                self.host.send(
-                    To::Client(client),
-                    Message::AgentDefinitions { definitions },
-                )
-            }
-            Err(error) => {
-                tracing::warn!("the definitions could not be read: {error:#}");
-                self.host.send(
-                    To::Client(client),
-                    Message::AgentDefinitions {
-                        definitions: Vec::new(),
-                    },
-                );
-            }
+        // A scope that cannot be read contributes none; it never empties the other scopes.
+        let mut definitions = self.agents.definitions().unwrap_or_else(|error| {
+            tracing::warn!("Agent definitions not read: {error:#}");
+            Vec::new()
+        });
+        let ids: Vec<ProjectId> = self.projects.records().iter().map(|it| it.id).collect();
+        for project in ids {
+            let scoped = self
+                .agents
+                .project_definitions(project, self.project_root(project).as_deref())
+                .unwrap_or_else(|error| {
+                    tracing::warn!("Agent definitions of project {project} not read: {error:#}");
+                    Vec::new()
+                });
+            let local = self.harness_agent_definitions(project, &scoped);
+            definitions.extend(scoped);
+            definitions.extend(local);
         }
+        self.host.send(
+            To::Client(client),
+            Message::AgentDefinitions { definitions },
+        )
     }
 
     /// Open a pane running a harness's own sign-in into an account's config home

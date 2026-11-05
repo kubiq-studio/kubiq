@@ -562,14 +562,22 @@ pub fn group(files: Vec<AgentFile>) -> Vec<LocalAgent> {
             None => groups.push((id_for(&name), vec![file])),
         }
     }
-    groups
-        .into_iter()
-        .map(|(id, mut files)| {
-            files.sort_by_key(|it| std::cmp::Reverse(it.freshness()));
-            let content = files[0].content();
-            LocalAgent { id, content, files }
-        })
-        .collect()
+    let mut agents: Vec<LocalAgent> = Vec::new();
+    for (id, mut files) in groups {
+        files.sort_by_key(|it| std::cmp::Reverse(it.freshness()));
+        let content = files[0].content();
+        // Two agents of one name are one definition to the embedder: the first stays.
+        if agents.iter().any(|it| it.content.name == content.name) {
+            tracing::warn!(
+                "Agent definition skipped: duplicate name {} in {}",
+                content.name,
+                files[0].path.display()
+            );
+            continue;
+        }
+        agents.push(LocalAgent { id, content, files });
+    }
+    agents
 }
 
 /// Every agent under `root`, one per identity, the newest copy's content on each.
@@ -636,8 +644,10 @@ pub fn sync(root: &Path) -> Result<SyncReport> {
         let stamp = agent.stamp();
         let newest_name = agent.content.name.clone();
         for mut file in agent.files.clone() {
-            if put(&mut file, &agent.id, &agent.content, stamp)? {
-                report.written.push(file.path.clone());
+            match put(&mut file, &agent.id, &agent.content, stamp) {
+                Ok(true) => report.written.push(file.path.clone()),
+                Ok(false) => {}
+                Err(error) => tracing::warn!("Agent file not aligned: {error:#}"),
             }
         }
         for folder in &targets {
@@ -654,8 +664,10 @@ pub fn sync(root: &Path) -> Result<SyncReport> {
                 continue;
             }
             let mut file = AgentFile::empty(folder, path);
-            put(&mut file, &agent.id, &agent.content, stamp)?;
-            report.written.push(file.path.clone());
+            match put(&mut file, &agent.id, &agent.content, stamp) {
+                Ok(_) => report.written.push(file.path.clone()),
+                Err(error) => tracing::warn!("Agent file not aligned: {error:#}"),
+            }
         }
     }
     Ok(report)
@@ -1012,6 +1024,40 @@ mod tests {
         assert_eq!(agents[0].id, "writer", "the id survives a rename");
         delete(root, "author").unwrap();
         assert!(list(root).is_empty());
+    }
+
+    #[test]
+    fn a_duplicate_name_and_an_unparseable_file_leave_the_rest_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let now = SystemTime::now();
+        let agent =
+            |id: &str, name: &str| format!("---\nname: {name}\nkubiq-id: {id}\n---\n\nbody {id}\n");
+        write(
+            &root.join(".claude/agents/a.md"),
+            &agent("one", "twin"),
+            now,
+        );
+        // Another agent, another id, the same name: the first stays.
+        write(
+            &root.join(".claude/agents/b.md"),
+            &agent("two", "twin"),
+            now,
+        );
+        write(
+            &root.join(".claude/agents/c.md"),
+            &agent("three", "solo"),
+            now,
+        );
+        // A file that cannot be read as text at all.
+        std::fs::write(root.join(".claude/agents/d.md"), [0xff, 0xfe, 0x00]).unwrap();
+        let agents = list(root);
+        let names: Vec<&str> = agents.iter().map(|it| it.content.name.as_str()).collect();
+        assert_eq!(names, ["twin", "solo"]);
+        assert_eq!(agents[0].id, "one");
+        // Housekeeping neither fails nor drops anything.
+        sync(root).unwrap();
+        assert_eq!(list(root).len(), 2);
     }
 
     #[test]

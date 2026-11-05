@@ -349,10 +349,11 @@ impl ProfileStore for EmptyProfileStore {
 ///
 /// Each profile is a **subdirectory**: `<root>/<name>/profile.toml` (the `id`
 /// field defaults to `<name>` if absent) plus a per-harness `base/<harness>/`
-/// identity seed. Subdirectories without a `profile.toml` are skipped. Two
-/// profiles resolving to the same id (e.g. a `profile.toml` whose explicit `id`
-/// clashes with another dir) is a load-time error, mirroring
-/// [`crate::account::FsAccountStore`]'s collision rule.
+/// identity seed. Subdirectories without a `profile.toml` are skipped, and so —
+/// logged, never an error — are a record that cannot be read or parsed and a
+/// second one resolving to an id already taken (e.g. an explicit `id` clashing
+/// with another dir): the one in the directory named after the id is kept, else
+/// the first by directory name. One bad entry never empties the list.
 #[derive(Debug, Clone)]
 pub struct FsProfileStore {
     root: PathBuf,
@@ -440,11 +441,16 @@ impl ProfileStore for FsProfileStore {
             return Ok(entries);
         }
 
-        for entry in std::fs::read_dir(&self.root)
+        // One bad entry never empties the list: an unreadable or unparseable record, or a
+        // second one claiming an id already taken, is skipped and logged. Directories are
+        // visited in name order so "the first" is the same on every read.
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(&self.root)
             .with_context(|| format!("reading directory {}", self.root.display()))?
-        {
-            let entry = entry?;
-            let dir = entry.path();
+            .filter_map(|it| it.ok().map(|it| it.path()))
+            .collect();
+        dirs.sort();
+        let mut found: Vec<(bool, Profile)> = Vec::new();
+        for dir in dirs {
             if !dir.is_dir() {
                 continue;
             }
@@ -455,27 +461,45 @@ impl ProfileStore for FsProfileStore {
                 continue;
             }
 
-            let name = dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
-                .ok_or_else(|| anyhow!("invalid profile directory name: {}", dir.display()))?;
+            let Some(name) = dir.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+                tracing::warn!(
+                    "Agent definition skipped: invalid directory name {}",
+                    dir.display()
+                );
+                continue;
+            };
 
-            let content = std::fs::read_to_string(&toml_path)
-                .with_context(|| format!("reading {}", toml_path.display()))?;
-            let mut profile: Profile = toml::from_str(&content)
-                .with_context(|| format!("parsing {}", toml_path.display()))?;
+            let read = std::fs::read_to_string(&toml_path)
+                .with_context(|| format!("reading {}", toml_path.display()))
+                .and_then(|content| {
+                    toml::from_str::<Profile>(&content)
+                        .with_context(|| format!("parsing {}", toml_path.display()))
+                });
+            let mut profile = match read {
+                Ok(profile) => profile,
+                Err(error) => {
+                    tracing::warn!("Agent definition skipped: {error:#}");
+                    continue;
+                }
+            };
+            let named_by_dir = profile.id.is_empty() || profile.id == name;
             if profile.id.is_empty() {
                 profile.id = name;
             }
             profile.fold_legacy_roles();
-
+            found.push((named_by_dir, profile));
+        }
+        // The record in the directory named after its id (what `save` writes) outranks one that
+        // only claims the id.
+        found.sort_by_key(|(named_by_dir, _)| !named_by_dir);
+        for (_, profile) in found {
             if !seen_ids.insert(profile.id.clone()) {
-                bail!(
-                    "profile id collision: '{}' resolves from more than one directory under {}",
+                tracing::warn!(
+                    "Agent definition skipped: duplicate id {} under {}",
                     profile.id,
                     self.root.display()
                 );
+                continue;
             }
             entries.push(profile);
         }
@@ -792,16 +816,22 @@ instructions = "/etc/work-instructions.md"
     }
 
     #[test]
-    fn fs_profile_store_id_collision_is_an_error() -> Result<()> {
+    fn fs_profile_store_skips_a_duplicate_id_and_an_unparseable_record() -> Result<()> {
         let temp = tempfile::TempDir::new()?;
         let root = temp.path();
         // Two directories that both resolve to id "shared": one via explicit id.
         write_profile(root, "dir-a", "id = \"shared\"\n");
         write_profile(root, "shared", "account = \"x\"\n");
+        write_profile(root, "broken", "this is = = not toml\n");
+        write_profile(root, "fine", "account = \"y\"\n");
 
         let store = FsProfileStore::new(root);
-        let err = store.profiles().expect_err("should error on collision");
-        assert!(err.to_string().contains("collision"), "message was: {err}");
+        let all = store.profiles()?;
+        let ids: Vec<&str> = all.iter().map(|it| it.id.as_str()).collect();
+        assert_eq!(ids, ["fine", "shared"]);
+        // The one in the directory named after the id is kept.
+        let shared = all.iter().find(|it| it.id == "shared").unwrap();
+        assert_eq!(shared.account.as_deref(), Some("x"));
         temp.close()?;
         Ok(())
     }
