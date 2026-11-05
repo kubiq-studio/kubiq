@@ -974,6 +974,54 @@ fn a_thought_level_missing_from_the_new_options_is_forgotten(cx: &mut TestAppCon
     });
 }
 
+/// The full-request dialog the "needs you" strip and the inline prompt open when they cut the
+/// operation short. A request whose own patch has no title — a Bash permission, typically — reads
+/// its operation off the call it authorises, so the dialog shows the whole command and not a stock
+/// line. Escape takes it down without answering; the request is still waiting after.
+#[gpui::test]
+fn the_permission_dialog_reads_the_call_and_escape_closes_it_unanswered(cx: &mut TestAppContext) {
+    let fixture = Fixture::open(cx);
+    let id = AgentId::generate();
+    fixture.started(an_agent(id), cx);
+    let command = "cd /tmp && \\\n  for f in *.log; do\n    grep -c error \"$f\"\n  done\n".repeat(4);
+    fixture.update(id, 1, a_tool_call("bash-1", &command, None), cx);
+    fixture.update(id, 2, a_permission_request("r-1", "bash-1"), cx);
+
+    fixture.state.update(cx, |state, cx| {
+        state.open_permission_dialog(id, "r-1".to_string(), cx)
+    });
+    fixture.state.read_with(cx, |state, _| {
+        let (agent, pending, call) = state
+            .permission_dialog_target()
+            .expect("the dialog is up while the request is pending");
+        assert_eq!(agent, id);
+        assert_eq!(pending.request_id, "r-1");
+        assert_eq!(
+            call.map(|call| call.title.as_str()),
+            Some(command.as_str()),
+            "the dialog reads the whole operation off the call"
+        );
+    });
+
+    fixture
+        .window
+        .update(cx, |_, window, cx| {
+            fixture.state.update(cx, |state, cx| {
+                state.cancel_dialog(&kubiq::app::DialogCancel, window, cx)
+            })
+        })
+        .expect("the window is open");
+    cx.run_until_parked();
+    fixture.state.read_with(cx, |state, cx| {
+        assert!(state.permission_dialog_target().is_none());
+        assert_eq!(
+            state.conversation(id, cx).unwrap().pending.len(),
+            1,
+            "Escape answers nothing"
+        );
+    });
+}
+
 /// The three-dots menu's own rule, pulled out where it can be checked without rendering it: Stop
 /// only while a turn runs, Abort and Unload only while launched, Resume only while it is not, Fork
 /// only while nothing is in flight, Info and the accept-all and dump toggles always (they ask

@@ -236,11 +236,14 @@ changing or being answered re-measures the row, and past the clamp more text doe
 
 **A clamped prompt shows an expand button** (`Maximize`, tooltip *Show full request*) that opens a dialog
 (`WorkbenchState::permission_dialog`, `Layer::PermissionDialog`, drawn at the window root by
-`ui::conversation::permission_dialog`): the title, the full text in the modal's own scrolling body, and the
-same answer buttons (one builder, `permission_buttons`) plus Cancel. An answer goes through
-`answer_permission` as inline and closes the dialog; Escape and Cancel close it without answering. The
-dialog stores only the request id and is drawn only while `AppState::permission_dialog_target` still finds
-that request pending, so it closes by itself when the prompt is resolved elsewhere.
+`ui::conversation::permission_dialog`): the title, the full operation as a selectable monospace code block
+in the modal's own scrolling body, and the same answer buttons (one builder, `permission_buttons`) plus
+Cancel. An answer goes through `answer_permission` as inline and closes the dialog; Escape and Cancel close
+it without answering. The dialog stores only the request id and is drawn only while
+`AppState::permission_dialog_target` still finds that request pending (it returns the authorised call too,
+so a request with no title of its own shows the call's), so it closes by itself when the prompt is resolved
+elsewhere. Being an overlay, it is listed in `ui::shell::overlaid`, so a browser tab's webview is taken off
+screen under it.
 
 **A conversation set to accept everything is shown no ask.** The three-dots menu's *Accept all*
 (`SetConversationAcceptAll`, on the agents screen's menu) is answered in the host with the plain allow, so
@@ -264,6 +267,10 @@ allow would lie about lasting. Clicking the label goes to the question: `AppStat
 switches to whoever raised it and scrolls the call into view, both from `Conversation::pending_route`; a
 request naming an unheld call routes to the tail. Above one request, a count badge sits beside the `NEEDS
 YOU` mark, and a delegate's request carries the delegate's name. The rest are answered one strip at a time.
+The operation is a small box — monospace, cut to three lines with an ellipsis (`STRIP_CLAMP_LINES`), since a
+Bash call's title is the whole command — and the strip is top-aligned with the answers and the ⌘⌥Y / ⌘⌥N
+hint in their own group, so no length of operation moves them. When the estimate (`STRIP_COLS` columns)
+says it was cut, a `Maximize` button (*Show full request*) opens the same full-request dialog.
 
 **⌘⌥Y allows and ⌘⌥N rejects the oldest ask** of the conversation being read (the agents screen's focused
 column's active tab), with the first allow- or reject-kind option offered, and do nothing where none is.

@@ -2639,9 +2639,20 @@ fn prompt_what(
         .unwrap_or_else(|| "The agent is asking to go ahead".to_string())
 }
 
+/// How many lines the "needs you" strip shows of the operation before it is cut.
+const STRIP_CLAMP_LINES: usize = 3;
+
+/// Columns the strip's operation is assumed to wrap at: narrower than a prompt's, because the
+/// strip shares its row with the label and the answers.
+const STRIP_COLS: usize = 40;
+
 fn wrapped_lines(text: &str) -> usize {
+    wrapped_lines_at(text, PROMPT_COLS)
+}
+
+fn wrapped_lines_at(text: &str, cols: usize) -> usize {
     text.lines()
-        .map(|line| line.chars().count().div_ceil(PROMPT_COLS).max(1))
+        .map(|line| line.chars().count().div_ceil(cols).max(1))
         .sum::<usize>()
         .max(1)
 }
@@ -2720,10 +2731,11 @@ fn permission_buttons(
 pub fn permission_dialog(
     agent: AgentId,
     pending: &Pending,
+    call: Option<&kubiq_proto::conversation::ToolCallRecord>,
     window: &mut Window,
     cx: &mut Context<AppState>,
 ) -> AnyElement {
-    let what = prompt_what(pending, None);
+    let what = prompt_what(pending, call);
     // The header holds one line; the body holds the whole text.
     let first = what.lines().next().unwrap_or_default();
     let title = if first.chars().count() > 80 {
@@ -2736,12 +2748,14 @@ pub fn permission_dialog(
         .flex()
         .flex_col()
         .gap_2()
+        // Monospace and selectable: a command is read to be checked, and copied as often. A code
+        // block in a markdown view is the read-only selectable text the codebase already has; the
+        // modal's own body is what scrolls.
         .child(
-            div()
+            TextView::markdown("permission-dialog-what", fenced(&what))
                 .w_full()
-                .text_size(theme::font(theme::Family::Conversation, theme::Role::Body))
-                .text_color(theme::text())
-                .child(SharedString::from(what)),
+                .text_size(theme::font(theme::Family::Conversation, theme::Role::Label))
+                .selectable(true),
         )
         .children(items.iter().map(content).collect::<Vec<_>>())
         .into_any_element();
@@ -2775,6 +2789,18 @@ pub fn permission_dialog(
         ),
         window,
     )
+}
+
+/// `text` as one markdown code block, its fence longer than any backtick run inside it so nothing
+/// in the text can close it early.
+fn fenced(text: &str) -> String {
+    let longest = text
+        .split(|c| c != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(longest.max(2) + 1);
+    format!("{fence}text\n{text}\n{fence}")
 }
 
 /// That something is waiting, kept in view above the footer while the prompt itself is anywhere in
@@ -2875,7 +2901,7 @@ fn needs_you_strip(
         .py_1p5()
         .flex()
         .flex_none()
-        .items_center()
+        .items_start()
         .gap_2()
         .bg(theme::warning_soft())
         .border_l(px(theme::accent_edge()))
@@ -2883,10 +2909,12 @@ fn needs_you_strip(
         .child(
             Icon::new(IconName::TriangleAlert)
                 .with_size(Size::XSmall)
-                .text_color(theme::warning()),
+                .text_color(theme::warning())
+                .mt(px(2.)),
         )
         .child(
             mono("NEEDS YOU", theme::warning())
+                .flex_none()
                 .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
         );
 
@@ -2896,6 +2924,13 @@ fn needs_you_strip(
         strip = strip.child(waiting_count(waiting, view));
     }
 
+    // **The operation is a small box, never the strip's height.** A Bash call's title is the whole
+    // command, and drawn whole it wrapped into a column hundreds of pixels tall with the answers
+    // centred out of reach. Cut to `STRIP_CLAMP_LINES` with an ellipsis; when it may have been cut
+    // (estimated, like the inline prompt's clamp), the dialog holds the rest.
+    let cut = wrapped_lines_at(&what, STRIP_COLS) > STRIP_CLAMP_LINES;
+    let full = oldest.request_id.clone();
+
     strip
         .child(
             div()
@@ -2903,12 +2938,13 @@ fn needs_you_strip(
                 .flex()
                 .flex_1()
                 .min_w(px(0.))
-                .items_center()
+                .items_start()
                 .gap_1p5()
                 .cursor_pointer()
                 .when_some(whose, |this, whose| {
                     this.child(
                         mono(whose, theme::warning())
+                            .flex_none()
                             .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta)),
                     )
                 })
@@ -2916,6 +2952,9 @@ fn needs_you_strip(
                     mono(what, theme::text_muted())
                         .flex_1()
                         .min_w(px(0.))
+                        .overflow_hidden()
+                        .line_clamp(STRIP_CLAMP_LINES)
+                        .text_ellipsis()
                         .text_size(theme::font(theme::Family::Conversation, theme::Role::Label)),
                 )
                 .tooltip(|window, cx| {
@@ -2925,10 +2964,29 @@ fn needs_you_strip(
                     this.reveal_permission(agent, slot, request.clone(), cx)
                 })),
         )
-        .children(buttons)
+        .when(cut, |this| {
+            this.child(icon_button_tip(
+                view.eid("needs-you-full"),
+                IconName::Maximize,
+                "Show full request",
+                true,
+                cx.listener(move |this, _, _, cx| {
+                    this.open_permission_dialog(agent, full.clone(), cx);
+                }),
+            ))
+        })
+        // The answers keep their own top-aligned group, so no length of operation moves them.
         .child(
-            mono("⌘⌥Y / ⌘⌥N", theme::text_faint())
-                .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_2()
+                .children(buttons)
+                .child(
+                    mono("⌘⌥Y / ⌘⌥N", theme::text_faint())
+                        .text_size(theme::font(theme::Family::Conversation, theme::Role::Micro)),
+                ),
         )
         .into_any_element()
 }

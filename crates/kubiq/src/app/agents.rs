@@ -1230,20 +1230,34 @@ impl AppState {
     /// The request the dialog is showing — only while it is still pending. A request answered
     /// inline, or dropped because the agent moved on, makes this `None`, which is what closes the
     /// dialog: nothing is stored here that could outlive the question.
+    ///
+    /// The call the request authorises comes with it, where the transcript holds it: the request's
+    /// own patch names the operation only sometimes, and the call names it always.
     pub fn permission_dialog_target(
         &self,
-    ) -> Option<(AgentId, &crate::state::conversation::Pending)> {
+    ) -> Option<(
+        AgentId,
+        &crate::state::conversation::Pending,
+        Option<&kubiq_proto::conversation::ToolCallRecord>,
+    )> {
         let (agent, request_id) = self.workbench.permission_dialog.as_ref()?;
         self.projects
             .values()
             .filter_map(|open| open.conversations.get(agent))
             .find_map(|conversation| {
-                conversation
+                let pending = conversation
                     .pending
                     .iter()
-                    .find(|held| &held.request_id == request_id)
+                    .find(|held| &held.request_id == request_id)?;
+                let call = conversation
+                    .tool_block_index(&pending.tool_call.id)
+                    .and_then(|ix| conversation.blocks.get(ix))
+                    .and_then(|block| match block {
+                        crate::state::conversation::ConvBlock::Tool { call, .. } => Some(call),
+                        _ => None,
+                    });
+                Some((*agent, pending, call))
             })
-            .map(|pending| (*agent, pending))
     }
 
     /// Answer a permission the agent is waiting on, naming one of the options it offered.
