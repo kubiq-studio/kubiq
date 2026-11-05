@@ -11,7 +11,9 @@
 //! markdown body, or Codex's `developer_instructions`) and the embedder's own `kubiq-*` keys — and
 //! keeps every other key, the harness's own and any unknown one, as it was. A file whose portable
 //! fields already agree is not written at all. YAML comments and quoting style inside a
-//! frontmatter block are not kept on a rewrite; keys and values are.
+//! frontmatter block are not kept on a rewrite; keys and values are. A frontmatter block strict
+//! YAML refuses (an unquoted `description: a: b`, which the harnesses accept) is read line by
+//! line instead, and quoted on a rewrite.
 //!
 //! **One agent across folders** is recognised by its `kubiq-id` key, or — before it has one — by
 //! its name (the frontmatter `name`, else the file stem); [`sync`] assigns the id the first time
@@ -226,10 +228,17 @@ impl AgentFile {
             AgentFormat::Markdown => {
                 let (front, body) = split_frontmatter(text);
                 let keys = match front {
-                    Some(front) if !front.trim().is_empty() => serde_yaml::from_str(front)
-                        .with_context(|| {
-                            format!("reading the frontmatter of {}", path.display())
-                        })?,
+                    Some(front) if !front.trim().is_empty() => {
+                        match serde_yaml::from_str(front) {
+                            Ok(keys) => keys,
+                            // The harnesses read an unquoted `description: a: b` happily; so do we.
+                            Err(error) => {
+                                lenient_mapping(front).ok_or(error).with_context(|| {
+                                    format!("reading the frontmatter of {}", path.display())
+                                })?
+                            }
+                        }
+                    }
                     _ => serde_yaml::Mapping::new(),
                 };
                 (Keys::Yaml(keys), body.to_string())
@@ -445,6 +454,60 @@ impl AgentFile {
     }
 }
 
+/// A line-based read of a frontmatter block strict YAML refused: each top-level `key: value` line
+/// is a pair, split at the first `: `, the value the rest of the line verbatim. An indented line
+/// continues the previous value; a key with no value followed by `- item` lines is a list.
+/// `None` when no line is a pair. A value that needs quoting is quoted when the file is written.
+fn lenient_mapping(front: &str) -> Option<serde_yaml::Mapping> {
+    let mut pairs: Vec<(String, String, Vec<String>)> = Vec::new();
+    for line in front.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indented = line.starts_with(char::is_whitespace);
+        let item = trimmed
+            .strip_prefix("- ")
+            .or((trimmed == "-").then_some(""));
+        if let (Some(item), Some(last)) = (item, pairs.last_mut())
+            && last.1.is_empty()
+        {
+            last.2.push(item.trim().to_string());
+            continue;
+        }
+        if indented || item.is_some() {
+            if let Some(last) = pairs.last_mut() {
+                if !last.1.is_empty() {
+                    last.1.push(' ');
+                }
+                last.1.push_str(trimmed);
+            }
+            continue;
+        }
+        let (key, value) = match trimmed.split_once(": ") {
+            Some((key, value)) => (key, value),
+            None => match trimmed.strip_suffix(':') {
+                Some(key) => (key, ""),
+                None => continue,
+            },
+        };
+        pairs.push((key.trim().to_string(), value.trim().to_string(), Vec::new()));
+    }
+    if pairs.is_empty() {
+        return None;
+    }
+    let mut map = serde_yaml::Mapping::new();
+    for (key, value, items) in pairs {
+        let value = if items.is_empty() {
+            serde_yaml::Value::String(value)
+        } else {
+            serde_yaml::Value::Sequence(items.into_iter().map(Into::into).collect())
+        };
+        map.insert(key.into(), value);
+    }
+    Some(map)
+}
+
 /// Split a markdown text into its frontmatter block and its body. No block is `(None, text)`.
 fn split_frontmatter(text: &str) -> (Option<&str>, &str) {
     let rest = match text
@@ -529,7 +592,10 @@ pub fn scan(root: &Path) -> Vec<AgentFile> {
         for path in paths {
             match AgentFile::read(folder, &path) {
                 Ok(file) => files.push(file),
-                Err(error) => tracing::warn!("a harness agent file was skipped: {error:#}"),
+                Err(error) => tracing::warn!(
+                    "Agent definition skipped: {}: {error:#}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                ),
             }
         }
     }
@@ -1058,6 +1124,81 @@ mod tests {
         // Housekeeping neither fails nor drops anything.
         sync(root).unwrap();
         assert_eq!(list(root).len(), 2);
+    }
+
+    const LIBRARIAN_DESCRIPTION: &str = "The librarian of the Library (`_docs/`). Use it to run a pass, to file `inbox/` items. Not for an edit to one claim after a code change: the contributor does that per `_docs/_meta/authoring.md`.";
+
+    fn librarian() -> String {
+        format!(
+            "---\nname: librarian\ndescription: {LIBRARIAN_DESCRIPTION}\ntools: Read, Edit, Write\nmodel: sonnet\n---\n\n# Librarian\n"
+        )
+    }
+
+    #[test]
+    fn an_unquoted_description_with_a_colon_loads_like_the_harness_reads_it() {
+        let text = librarian();
+        let front = split_frontmatter(&text).0.unwrap();
+        assert!(serde_yaml::from_str::<serde_yaml::Mapping>(front).is_err());
+        let file = AgentFile::parse(claude(), PathBuf::from("librarian.md"), &text).unwrap();
+        assert_eq!(file.name(), "librarian");
+        assert_eq!(
+            file.get("description").as_deref(),
+            Some(LIBRARIAN_DESCRIPTION)
+        );
+        assert_eq!(file.get("tools").as_deref(), Some("Read, Edit, Write"));
+        assert_eq!(file.instructions(), "# Librarian");
+    }
+
+    #[test]
+    fn a_leniently_read_file_keeps_its_description_through_a_rewrite() {
+        let mut file =
+            AgentFile::parse(claude(), PathBuf::from("librarian.md"), &librarian()).unwrap();
+        let mut content = file.content();
+        content.kubiq.insert("harness".into(), "claude-code".into());
+        file.apply(&content);
+        let text = file.render().unwrap();
+        let back = AgentFile::parse(claude(), PathBuf::from("librarian.md"), &text).unwrap();
+        assert_eq!(
+            back.get("description").as_deref(),
+            Some(LIBRARIAN_DESCRIPTION)
+        );
+        assert_eq!(back.get("model").as_deref(), Some("sonnet"));
+        assert_eq!(back.content().kubiq.get("harness").unwrap(), "claude-code");
+    }
+
+    #[test]
+    fn a_lenient_file_is_listed_and_an_aligned_copy_is_not_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let path = root.join(".claude/agents/librarian.md");
+        // Already carrying its id: nothing Kubiq owns is missing, so nothing is written.
+        let text = librarian().replacen("model:", "kubiq-id: librarian\nmodel:", 1);
+        write(&path, &text, SystemTime::now());
+        let listed = list(root);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            listed[0].content.description.as_deref(),
+            Some(LIBRARIAN_DESCRIPTION)
+        );
+        let before = std::fs::read_to_string(&path).unwrap();
+        let report = sync(root).unwrap();
+        assert!(!report.written.contains(&path));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn lenient_lists_and_continuations() {
+        let map = lenient_mapping("name: x: y\ntools:\n  - Read\n  - Grep\ndescription: a\n  b\n")
+            .unwrap();
+        assert_eq!(map.get("name").and_then(yaml_text).as_deref(), Some("x: y"));
+        assert_eq!(
+            map.get("tools").and_then(yaml_text).as_deref(),
+            Some("Read, Grep")
+        );
+        assert_eq!(
+            map.get("description").and_then(yaml_text).as_deref(),
+            Some("a b")
+        );
     }
 
     #[test]

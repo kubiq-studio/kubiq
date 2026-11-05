@@ -602,7 +602,9 @@ from the interface â€” hooks, instructions, isolation and the `extends` chain â€
 `agent_manager::harness_agents` keeps the only list of the project folders harnesses read subagent
 files from (`FOLDERS`: the cross-harness one first, then each harness's own, each with its format,
 suffix and the harness ids that read it), parses a file into its own keys and body so a write
-changes only the name, the description, the instructions and the `kubiq-*` keys, groups copies by
+changes only the name, the description, the instructions and the `kubiq-*` keys (a frontmatter
+strict YAML refuses, such as an unquoted `description: a: b` the harnesses accept, is read line by
+line and quoted on a rewrite), groups copies by
 `kubiq-id` or name, and implements `list`, `save`, `delete` and `sync`.
 `crates/kubiq-host/src/harness_agents.rs` is the whole of the consumption: an `AgentDefinition`'s id
 is the agent's name, its agent prompt the body, and every other field a harness format has no key
