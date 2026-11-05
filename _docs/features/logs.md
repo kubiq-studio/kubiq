@@ -5,8 +5,8 @@ kind: feature
 status: current
 summary: One sink every subsystem writes its diagnostics to, and the console panel that reads it back with a subsystem selector and a level floor.
 read_when: you are adding a log event, adding or renaming a subsystem, changing what the console shows or where it sits, or chasing why something the application did left no trace
-updated: 2026-10-01
-verified: 2026-09-27
+updated: 2026-11-05
+verified: 2026-11-05
 code_anchors: [crates/kubiq-proto/src/log.rs, crates/kubiq/src/state/logs.rs, crates/kubiq/src/ui/logs.rs, crates/kubiq/src/state/dock.rs, crates/kubiq-app/src/lib.rs]
 depends_on: [tech-architecture, feat-panes]
 review_cycle: monthly
@@ -138,7 +138,17 @@ window's own state, so two windows can watch the same ring through different fil
 millisecond, the level as a coloured word, the subsystem, and the message with any structured fields
 appended as `key=value`. A warning or an error carries its status colour on the message as well as
 the level word, which is what makes one findable in a wall of debug. A message is one line and is
-cut off rather than wrapped, because uniform rows are what let the list draw only what is visible.
+cut off by default; the toolbar's **Wrap lines** toggle (an icon button with a tooltip, kept in the
+window's memory like the filter) lets it wrap to its full height instead.
+
+**Rows are selectable.** A click selects one row, shift-click extends from the last plain click to
+the clicked row, and cmd-click (Ctrl elsewhere) toggles one in or out; the selection is drawn with
+the selected surface token and is kept by sequence number, so the ring dropping its front does not
+slide it. Cmd+C (Ctrl+C elsewhere) copies the selected rows while the console holds the keyboard —
+it takes it on a click — as plain text, one row per line, in the displayed order `time level
+subsystem message`. A right-click on a row opens a menu: **Copy** (the selection if the row is in
+it, otherwise the clicked row), **Copy message** (the same rows, message text only) and **Select
+all** (every row the filter shows). Clearing the ring clears the selection.
 
 **Following keeps the tail in view.** With it on, an arriving record scrolls the list; with it off,
 the list stays where the reader put it. Records keep arriving either way.
@@ -155,8 +165,10 @@ recorded as a decision rather than left as an exception. When the coordinator be
 process, its records need the transport like everything else; that is filed in
 [`../backlog.md`](../backlog.md).
 
-State: `LogState` for the console's filter and its follow flag, `PanelKind::Logs` for the panel
-itself, and `MenuId::LogSubsystem` and `MenuId::LogLevel` for the two selectors. The arrangement the
+State: `LogState` for the console's filter, its follow and wrap flags, the selection and the row
+menu (`LogPress`, `LogAction`, `row_text`, `rows_text`), `PanelKind::Logs` for the panel
+itself, and `MenuId::LogSubsystem` and `MenuId::LogLevel` for the two selectors and `MenuId::LogRow` for the row
+menu. The arrangement the
 panel sits in, and the focus rule it takes part in, belong to
 [`panes-and-terminals.md`](./panes-and-terminals.md).
 
@@ -192,7 +204,10 @@ those belong to the sink, which is why the console's state is a default rather t
 
 `crates/kubiq/src/ui/logs.rs` draws the panel. `render()` is the whole of it, a toolbar row over the
 records; `actions()` is that toolbar — the two selectors, the record readout, the follow switch and
-`Clear` — and `body()` is a lazy uniform list of rows on a surface like a pane's. `level_colour()`
+`Clear` — and `body()` is a `gpui::list` of rows (variable height, so a wrapped row measures itself; it is reset
+when the first row, the filter or the wrap flag changes and spliced when rows only arrive) on a
+surface like a pane's, with the row menu as a child. Rows pad rather than margin, which the list
+cannot see. `level_colour()`
 is what a level is reported in, on a row and on the tab's dot alike.
 
 `AppState` owns the filter state, the list's scroll handle, and the task started in `for_project()`

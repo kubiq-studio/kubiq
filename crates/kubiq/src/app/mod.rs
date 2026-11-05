@@ -1426,7 +1426,13 @@ pub struct AppState {
     /// Bumped on every edit, so a debounce that lost the race does not install an outline for text
     /// the user has already typed past. The same device as `md_reflow_gen`.
     outline_gen: u64,
-    pub log_scroll: UniformListScrollHandle,
+    /// The console's rows. Variable height once lines wrap, so it is a `gpui::list`.
+    pub log_list: gpui::ListState,
+    /// What `log_list` was last sized for — the first drawn row's sequence number, the row count
+    /// and the wrap flag — so a change in any of them resets it exactly once.
+    pub log_list_key: std::cell::Cell<(Option<u64>, usize, bool)>,
+    /// Holds the keyboard while the console is clicked in, so Cmd+C reaches it.
+    pub log_focus: FocusHandle,
     /// Which task the panel's fields were last filled from, so a selection change refills them
     /// exactly once. Writing into the component library's state needs a window and a message does
     /// not come with one, which is why this is drained in `render` beside the arrived files.
@@ -1767,6 +1773,7 @@ pub fn install_key_bindings(cx: &mut App) {
     cx.bind_keys(crate::ui::browser::key_bindings());
     cx.bind_keys(crate::ui::run_tool_menu::key_bindings());
     cx.bind_keys(crate::ui::explorer::key_bindings());
+    cx.bind_keys(crate::ui::logs::key_bindings());
     cx.bind_keys(crate::ui::ask::key_bindings());
     cx.bind_keys(crate::ui::db::keys::key_bindings());
     cx.bind_keys(crate::ui::db::explorer::key_bindings());

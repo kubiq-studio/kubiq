@@ -1435,6 +1435,7 @@ impl AppState {
         self.drop_explorer_menu(cx);
         self.drop_kb_menu(cx);
         self.drop_db_menu(cx);
+        self.logs.menu = None;
         cx.notify();
     }
 

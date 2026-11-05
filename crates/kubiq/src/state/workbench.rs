@@ -309,6 +309,8 @@ pub enum MenuId {
     Project,
     LogSubsystem,
     LogLevel,
+    /// The log console's right-click menu. Where and on which row is `LogState::menu`.
+    LogRow,
     /// The task panel's session picker. Priority and shape are pill rows rather than menus, because
     /// three fixed values read better as the report and the control at once.
     TaskSession,

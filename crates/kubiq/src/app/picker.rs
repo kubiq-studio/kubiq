@@ -980,7 +980,101 @@ impl AppState {
     /// Empty the sink. The ring is the whole process's, so this clears every window's console.
     pub fn clear_logs(&mut self, cx: &mut Context<Self>) {
         kubiq_proto::log::logs().clear();
+        self.logs.clear_selection();
         cx.notify();
+    }
+
+    pub fn toggle_log_wrap(&mut self, cx: &mut Context<Self>) {
+        self.logs.wrap = !self.logs.wrap;
+        cx.notify();
+    }
+
+    /// The sequence numbers of the rows the console draws, top to bottom.
+    fn log_seqs(&self) -> Vec<u64> {
+        kubiq_proto::log::logs()
+            .snapshot(self.logs.filter())
+            .iter()
+            .map(|record| record.seq)
+            .collect()
+    }
+
+    /// A press on a row: change the selection, and take the keyboard so Cmd+C reaches the console.
+    pub fn press_log_row(
+        &mut self,
+        seq: u64,
+        how: crate::state::LogPress,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let seqs = self.log_seqs();
+        self.logs.press(&seqs, seq, how);
+        window.focus(&self.log_focus, cx);
+        self.close_menu(cx);
+    }
+
+    pub fn select_all_logs(&mut self, cx: &mut Context<Self>) {
+        let seqs = self.log_seqs();
+        self.logs.select_all(&seqs);
+        cx.notify();
+    }
+
+    /// Raise the row menu at the pointer.
+    pub fn open_log_menu(&mut self, seq: u64, at: (f32, f32), cx: &mut Context<Self>) {
+        self.logs.open_menu(seq, at.0, at.1);
+        self.workbench.open_menu = Some(MenuId::LogRow);
+        cx.notify();
+    }
+
+    /// The menu's outside click, carrying the menu it was drawn for.
+    pub fn dismiss_log_menu(&mut self, epoch: u64, cx: &mut Context<Self>) {
+        self.logs.close_menu(epoch);
+        if self.logs.menu.is_none() && self.workbench.open_menu == Some(MenuId::LogRow) {
+            self.workbench.open_menu = None;
+        }
+        cx.notify();
+    }
+
+    /// Write the selected rows to the clipboard, as displayed or message-only. Returns whether
+    /// there was anything to copy, so Cmd+C with no selection falls through.
+    pub fn copy_log_rows(
+        &mut self,
+        seqs: &std::collections::BTreeSet<u64>,
+        message_only: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if seqs.is_empty() {
+            return false;
+        }
+        let records = kubiq_proto::log::logs().snapshot(self.logs.filter());
+        let text = crate::state::rows_text(&records, seqs, message_only);
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        true
+    }
+
+    /// Cmd+C on the console.
+    pub fn copy_log_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        let seqs = self.logs.selected.clone();
+        self.copy_log_rows(&seqs, false, cx)
+    }
+
+    /// Act on the menu row drawn at `index`.
+    pub fn pick_log_action(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(menu) = self.logs.menu.clone() else {
+            return;
+        };
+        let targets = self.logs.targets(menu.seq);
+        use crate::state::LogAction;
+        match LogAction::ALL.get(index) {
+            Some(LogAction::Copy) => {
+                self.copy_log_rows(&targets, false, cx);
+            }
+            Some(LogAction::CopyMessage) => {
+                self.copy_log_rows(&targets, true, cx);
+            }
+            Some(LogAction::SelectAll) => self.select_all_logs(cx),
+            _ => {}
+        }
+        self.close_menu(cx);
     }
 
     // ── Projects ────────────────────────────────────────────────────
