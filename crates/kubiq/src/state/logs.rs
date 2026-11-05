@@ -1,10 +1,11 @@
-//! The log console's own state: which subsystem it is showing, the level it cuts off at, and
-//! whether it follows the tail.
+//! The log console's own state: which subsystem it is showing, the level it cuts off at, the text
+//! it searches for, and whether it follows the tail.
 //!
 //! The records are not here. They belong to the process-wide sink in [`kubiq_proto::log`], and this is
 //! only one window's view onto it — which is why nothing in this file is a fixture.
 
 use std::collections::BTreeSet;
+use std::ops::Range;
 use std::sync::Arc;
 
 use kubiq_proto::log::{Filter, LogLevel, LogRecord, Subsystem};
@@ -30,6 +31,12 @@ pub struct LogState {
     /// The right-click menu, while one is open.
     pub menu: Option<LogMenu>,
     menu_epoch: u64,
+    /// The search field's text: a row is drawn only if its message or subsystem contains it,
+    /// ignoring case. Empty passes every row the subsystem and level filter does.
+    query: String,
+    /// Bumped whenever [`Self::query`] changes, so the console's list knows its rows changed
+    /// identity and remeasures them.
+    pub query_gen: u64,
 }
 
 /// How a press on a row changes the selection.
@@ -116,8 +123,57 @@ impl Default for LogState {
             anchor: None,
             menu: None,
             menu_epoch: 0,
+            query: String::new(),
+            query_gen: 0,
         }
     }
+}
+
+/// Whether `record`'s message or subsystem contains `needle`, which is already lowercase.
+fn contains(record: &LogRecord, needle: &str) -> bool {
+    record.message.to_lowercase().contains(needle)
+        || record.subsystem.label().to_lowercase().contains(needle)
+}
+
+/// Where `query` occurs in `text`, ignoring case, as byte ranges of `text` that never overlap.
+/// Empty for an empty query. Compared a character's lowercase at a time, so a match's range lands
+/// on `text`'s own character boundaries even where lowercasing changes a character's length.
+pub fn match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
+    let needle: Vec<char> = query.chars().flat_map(char::to_lowercase).collect();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    let mut from = 0;
+    for (at, _) in text.char_indices() {
+        if at < from {
+            continue;
+        }
+        if let Some(end) = match_at(text, at, &needle) {
+            found.push(at..end);
+            from = end;
+        }
+    }
+    found
+}
+
+/// The byte end of a case-insensitive match of `needle` (already lowercased) starting at `at`.
+fn match_at(text: &str, at: usize, needle: &[char]) -> Option<usize> {
+    let mut want = needle.iter();
+    for (offset, c) in text[at..].char_indices() {
+        for lower in c.to_lowercase() {
+            match want.next() {
+                Some(w) if *w == lower => {}
+                Some(_) => return None,
+                // The needle ended inside this character's expansion: the match takes it whole.
+                None => return Some(at + offset + c.len_utf8()),
+            }
+        }
+        if want.as_slice().is_empty() {
+            return Some(at + offset + c.len_utf8());
+        }
+    }
+    None
 }
 
 impl LogState {
@@ -126,6 +182,40 @@ impl LogState {
             subsystem: self.subsystem,
             min_level: self.min_level,
         }
+    }
+
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    /// Take the search field's text. Returns whether it changed; a change bumps
+    /// [`Self::query_gen`].
+    pub fn set_query(&mut self, query: &str) -> bool {
+        if self.query == query {
+            return false;
+        }
+        self.query = query.to_owned();
+        self.query_gen = self.query_gen.wrapping_add(1);
+        true
+    }
+
+    /// Whether `record` passes the search: its message or its subsystem contains the query,
+    /// ignoring case.
+    pub fn matches(&self, record: &LogRecord) -> bool {
+        self.query.is_empty() || contains(record, &self.query.to_lowercase())
+    }
+
+    /// The rows the console draws out of what the sink's filter passed: those the search keeps,
+    /// in order.
+    pub fn search(&self, records: Vec<Arc<LogRecord>>) -> Vec<Arc<LogRecord>> {
+        if self.query.is_empty() {
+            return records;
+        }
+        let needle = self.query.to_lowercase();
+        records
+            .into_iter()
+            .filter(|record| contains(record, &needle))
+            .collect()
     }
 
     /// The subsystem selector's rows: `All`, then every subsystem in its own order.

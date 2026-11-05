@@ -11,29 +11,37 @@
 //!
 //! Rows are drawn lazily by `gpui::list`, because a full ring is thousands of them and only the
 //! visible ones are worth laying out. A row is one cut-off line, or wraps to its message's height
-//! when the toolbar's wrap toggle is on; rows are selectable and carry a right-click menu.
+//! when the toolbar's wrap toggle is on; rows are selectable and carry a right-click menu. The
+//! toolbar's search field narrows the rows to those containing its text and marks the matches.
 
 use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, Context, Entity, InteractiveElement, IntoElement, KeyBinding, MouseButton,
-    ParentElement, Rgba, SharedString, StatefulInteractiveElement, Styled, div, list, point, px,
+    AnyElement, App, Context, Div, Entity, Focusable, HighlightStyle, InteractiveElement,
+    IntoElement, KeyBinding, MouseButton, ParentElement, Rgba, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, StyledText, Window, div, list, point, px,
 };
-use gpui_component::IconName;
+use gpui_component::input::Input;
 use gpui_component::tooltip::Tooltip;
+use gpui_component::{Icon, IconName, Sizable, Size};
 
 use crate::app::AppState;
-use crate::state::{LogAction, LogPress, LogState, MenuId};
+use crate::state::{LogAction, LogPress, LogState, MenuId, match_ranges};
 use crate::theme;
-use crate::ui::kit::{ContextItem, Picker, context_menu, ghost_button, icon_button, mono};
+use crate::ui::kit::{
+    ContextItem, KubiqIcon, Picker, context_menu, field, ghost_button, icon_button, mono,
+};
 use crate::ui::{eid, handler, indexed};
 use kubiq_proto::log::{LogLevel, LogRecord};
 
 /// The key context the console's chords are bound in.
 const CONTEXT: &str = "Logs";
 
-gpui::actions!(kubiq_logs, [LogsCopy, LogsSelectAll]);
+/// The search field's context: the console's own, with the component library's field under it.
+const FIELD_CONTEXT: &str = "Logs > Input";
+
+gpui::actions!(kubiq_logs, [LogsCopy, LogsSelectAll, LogsClearSearch]);
 
 /// The height of one row, and the least a wrapped one takes.
 const ROW_HEIGHT: f32 = 22.0;
@@ -51,7 +59,7 @@ pub fn level_colour(level: LogLevel) -> Rgba {
 }
 
 /// The whole panel: its toolbar over its records.
-pub fn render(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
+pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> AnyElement {
     div()
         .id("logs")
         .key_context(CONTEXT)
@@ -62,6 +70,11 @@ pub fn render(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
             }
         }))
         .on_action(cx.listener(|this, _: &LogsSelectAll, _, cx| this.select_all_logs(cx)))
+        .on_action(cx.listener(|this, _: &LogsClearSearch, window, cx| {
+            if !this.clear_log_search(window, cx) {
+                cx.propagate();
+            }
+        }))
         .flex()
         .flex_col()
         .flex_1()
@@ -78,13 +91,21 @@ pub fn render(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
                 .justify_end()
                 .border_b_1()
                 .border_color(theme::border())
+                .gap_2()
+                .child(search_field(app, window, cx))
                 .child(actions(app, cx)),
         )
         .child(body(app, cx))
         .into_any_element()
 }
 
-/// The chords the console answers while it holds the keyboard: the platform's copy and select-all.
+/// The chords the console answers while it holds the keyboard: the platform's copy and select-all,
+/// and Escape in the search field.
+///
+/// Copy and select-all are bound in the console's context only, so with the keyboard in the
+/// search field the field's own `Input` bindings — one node deeper — win and copy its text. Escape
+/// is the other way round: the field binds it too, so it is bound at the field's depth and must be
+/// registered after the component library's (`app::install_key_bindings`).
 pub fn key_bindings() -> Vec<KeyBinding> {
     let (copy, all) = if cfg!(target_os = "macos") {
         ("cmd-c", "cmd-a")
@@ -94,7 +115,31 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     vec![
         KeyBinding::new(copy, LogsCopy, Some(CONTEXT)),
         KeyBinding::new(all, LogsSelectAll, Some(CONTEXT)),
+        KeyBinding::new("escape", LogsClearSearch, Some(FIELD_CONTEXT)),
     ]
+}
+
+/// The search field: rows whose message or subsystem contains its text, ignoring case.
+fn search_field(app: &AppState, window: &Window, cx: &App) -> impl IntoElement {
+    let focused = app.log_search.read(cx).focus_handle(cx).is_focused(window);
+    field(theme::border(), focused)
+        .w(px(220.))
+        .min_w(px(0.))
+        .h(px(26.))
+        .px_2()
+        .gap_2()
+        .child(
+            Icon::new(IconName::Search)
+                .with_size(Size::XSmall)
+                .text_color(theme::text_faint()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .text_size(theme::font(theme::Family::Chrome, theme::Role::Body))
+                .child(Input::new(&app.log_search).appearance(false)),
+        )
 }
 
 /// The console's toolbar: what it is showing, and the two selectors that decide.
@@ -146,7 +191,7 @@ pub fn actions(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
         .child(
             icon_button(
                 "log-wrap",
-                IconName::Menu,
+                KubiqIcon::ViewWrap,
                 logs.wrap,
                 cx.listener(|this, _, _, cx| this.toggle_log_wrap(cx)),
             )
@@ -172,17 +217,25 @@ pub fn actions(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
 
 /// The records themselves, in the space a pane's emulator would fill.
 pub fn body(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
-    let records = kubiq_proto::log::logs().snapshot(app.logs.filter());
+    let records = app.log_rows();
     let view = cx.entity();
     let wrap = app.logs.wrap;
+    let query = SharedString::from(app.logs.query().to_owned());
 
     // Rows measure themselves once they can wrap, so the list is told when the rows under it
-    // changed identity (the ring dropped its front, the filter moved, wrap flipped) and only
-    // otherwise grows by splice, which keeps what is already measured.
-    let key = (records.first().map(|r| r.seq), records.len(), wrap);
+    // changed identity (the ring dropped its front, the filter or the search moved, wrap flipped)
+    // and only otherwise grows by splice, which keeps what is already measured. A change of the
+    // list's width is the list's own business: it drops every measurement when its width moves.
+    let key = (
+        records.first().map(|r| r.seq),
+        records.len(),
+        wrap,
+        app.logs.query_gen,
+    );
     let last = app.log_list_key.replace(key);
-    if app.log_list.item_count() != records.len() || last.0 != key.0 || last.2 != key.2 {
-        if last.0 == key.0 && last.2 == key.2 && key.1 > app.log_list.item_count() {
+    let same = last.0 == key.0 && last.2 == key.2 && last.3 == key.3;
+    if app.log_list.item_count() != records.len() || !same {
+        if same && key.1 > app.log_list.item_count() {
             let old = app.log_list.item_count();
             app.log_list.splice(old..old, key.1 - old);
         } else {
@@ -218,7 +271,7 @@ pub fn body(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
             list(
                 app.log_list.clone(),
                 move |index, _window, cx| match records.get(index) {
-                    Some(record) => row(record, wrap, &rows_view, cx),
+                    Some(record) => row(record, wrap, &query, &rows_view, cx),
                     None => div().into_any_element(),
                 },
             )
@@ -250,38 +303,18 @@ pub fn body(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
     surface.into_any_element()
 }
 
-/// One record: when, how loud, from where, and what it said. Click selects, shift extends, cmd
-/// toggles, right-click raises the menu.
-///
-/// **Padding, not margin**, and a wrapped row is as tall as its message: `gpui::list` measures
-/// the border box.
-fn row(record: &Arc<LogRecord>, wrap: bool, view: &Entity<AppState>, cx: &App) -> AnyElement {
-    let colour = level_colour(record.level);
-    let warns = record.level >= LogLevel::Warn;
+/// One record with its pointer handling: click selects, shift extends, cmd toggles, right-click
+/// raises the menu.
+fn row(
+    record: &Arc<LogRecord>,
+    wrap: bool,
+    query: &str,
+    view: &Entity<AppState>,
+    cx: &App,
+) -> AnyElement {
     let seq = record.seq;
     let selected = view.read(cx).logs.selected.contains(&seq);
-    let meta = theme::font(theme::Family::Content, theme::Role::Meta);
-
-    let mut message = mono(
-        SharedString::from(record.message.clone()),
-        if warns { colour } else { theme::text() },
-    )
-    .flex_1()
-    .min_w(px(0.));
-    if !wrap {
-        message = message.overflow_hidden().whitespace_nowrap();
-    }
-
-    let line = div()
-        .id(eid("log-row", seq))
-        .min_h(px(ROW_HEIGHT))
-        .px_2()
-        .flex()
-        .flex_none()
-        .gap_3()
-        .overflow_hidden()
-        .when(selected, |this| this.bg(theme::selected()))
-        .when(!selected, |this| this.hover(|this| this.bg(theme::hover())))
+    line(record, wrap, selected, query)
         .on_mouse_down(MouseButton::Left, {
             let view = view.clone();
             move |event, window, cx| {
@@ -302,6 +335,47 @@ fn row(record: &Arc<LogRecord>, wrap: bool, view: &Entity<AppState>, cx: &App) -
                 view.update(cx, |this, cx| this.open_log_menu(seq, at, cx));
             }
         })
+        .into_any_element()
+}
+
+/// One record as drawn: when, how loud, from where, and what it said, with the search's matches
+/// marked. Public so a test can lay it out the way the list does.
+///
+/// **The row is as wide as the list.** `gpui::list` lays a row out as a root of its own
+/// (`layout_as_root`), with the list's width as *available* space only — and a flex row of auto
+/// width under a definite available width is sized by taffy to the sum of its children's bases,
+/// not to that width. Without `w_full` the message cell is never squeezed: the row grows past the
+/// panel's right edge and the message is clipped instead of wrapped. `w_full` resolves against the
+/// width the list offers, which leaves the message `flex_1` + `min_w(0)` the rest of it to wrap in.
+///
+/// **Padding, not margin**, and a wrapped row is as tall as its message: `gpui::list` measures
+/// the border box.
+pub fn line(record: &LogRecord, wrap: bool, selected: bool, query: &str) -> Stateful<Div> {
+    let colour = level_colour(record.level);
+    let warns = record.level >= LogLevel::Warn;
+    let meta = theme::font(theme::Family::Content, theme::Role::Meta);
+
+    let mut message = div()
+        .font_family(theme::MONO_FONT)
+        .text_size(theme::font(theme::Family::Chrome, theme::Role::Label))
+        .text_color(if warns { colour } else { theme::text() })
+        .flex_1()
+        .min_w(px(0.))
+        .child(highlighted(&record.message, query));
+    if !wrap {
+        message = message.overflow_hidden().whitespace_nowrap();
+    }
+
+    let line = div()
+        .id(eid("log-row", record.seq))
+        .w_full()
+        .min_h(px(ROW_HEIGHT))
+        .px_2()
+        .flex()
+        .gap_3()
+        .overflow_hidden()
+        .when(selected, |this| this.bg(theme::selected()))
+        .when(!selected, |this| this.hover(|this| this.bg(theme::hover())))
         .child(
             mono(record.time(), theme::text_faint())
                 .flex_none()
@@ -314,20 +388,40 @@ fn row(record: &Arc<LogRecord>, wrap: bool, view: &Entity<AppState>, cx: &App) -
                 .text_size(meta),
         )
         .child(
-            mono(record.subsystem.label(), theme::text_muted())
+            div()
+                .font_family(theme::MONO_FONT)
+                .text_color(theme::text_muted())
                 .w(px(88.))
                 .flex_none()
-                .text_size(meta),
+                .text_size(meta)
+                .child(highlighted(record.subsystem.label(), query)),
         )
         .child(message);
 
     // A single-line row is centred in its fixed height; a wrapped one hangs from its first line.
-    let line = if wrap {
+    if wrap {
         line.items_start().py(px(3.))
     } else {
         line.h(px(ROW_HEIGHT)).items_center()
+    }
+}
+
+/// `text` with every case-insensitive occurrence of `query` on the search-hit ground — the same
+/// marking the project search draws its hits with. Plain text when nothing matches.
+fn highlighted(text: &str, query: &str) -> AnyElement {
+    let text = SharedString::from(text.to_owned());
+    let ranges = match_ranges(&text, query);
+    if ranges.is_empty() {
+        return text.into_any_element();
+    }
+    let mark = HighlightStyle {
+        color: Some(theme::text().into()),
+        background_color: Some(theme::accent_soft().into()),
+        ..Default::default()
     };
-    line.into_any_element()
+    StyledText::new(text)
+        .with_highlights(ranges.into_iter().map(move |range| (range, mark)))
+        .into_any_element()
 }
 
 /// What the console shows when the filter matches nothing. It names the filter, because an empty

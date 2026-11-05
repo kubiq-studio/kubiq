@@ -812,7 +812,7 @@ fn body(
 ) -> AnyElement {
     match kind {
         PanelKind::Terminal(pane_id) => terminal::pane(app, *pane_id, cx),
-        PanelKind::Logs => logs::render(app, cx),
+        PanelKind::Logs => logs::render(app, window, cx),
         PanelKind::Search => search::render(app, window, cx),
         PanelKind::Outline => outline::render(app, window, cx),
         PanelKind::Explorer => explorer::render(app, window, cx),

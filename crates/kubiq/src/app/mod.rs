@@ -1428,9 +1428,12 @@ pub struct AppState {
     outline_gen: u64,
     /// The console's rows. Variable height once lines wrap, so it is a `gpui::list`.
     pub log_list: gpui::ListState,
-    /// What `log_list` was last sized for — the first drawn row's sequence number, the row count
-    /// and the wrap flag — so a change in any of them resets it exactly once.
-    pub log_list_key: std::cell::Cell<(Option<u64>, usize, bool)>,
+    /// What `log_list` was last sized for — the first drawn row's sequence number, the row count,
+    /// the wrap flag and the search's generation — so a change in any of them resets it exactly
+    /// once.
+    pub log_list_key: std::cell::Cell<(Option<u64>, usize, bool, u64)>,
+    /// The console's search field. Its text is mirrored into `logs` on every change.
+    pub log_search: Entity<InputState>,
     /// Holds the keyboard while the console is clicked in, so Cmd+C reaches it.
     pub log_focus: FocusHandle,
     /// Which task the panel's fields were last filled from, so a selection change refills them

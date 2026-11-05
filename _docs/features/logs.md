@@ -129,17 +129,23 @@ own colour on the console's tab and the same colour on the panel's left edge, so
 the console is a background tab; clearing the ring clears both. That is the whole notification
 surface — nothing steals the view from the agent the user is watching.
 
-**Two controls decide what is drawn.** The subsystem selector picks one subsystem or `All`; the level
-selector sets a floor, so `WARN` means warnings and errors. Both sit in the console's own toolbar
-row, above the records and beside the record count, the follow switch and `Clear`. Both are the
-window's own state, so two windows can watch the same ring through different filters.
+**Three controls decide what is drawn.** The subsystem selector picks one subsystem or `All`; the level
+selector sets a floor, so `WARN` means warnings and errors; the search field keeps only the rows whose
+message or subsystem contains its text, ignoring case, and marks every match in the row on the
+search-hit ground. The three compose. Escape in the field empties it (and, on an empty field, goes on
+to the window); Cmd+C and Cmd+A in the field are the field's, not the console's. All three sit in the
+console's own toolbar row, above the records and beside the record count, the follow switch and
+`Clear`, and all three are the window's own state, so two windows can watch the same ring through
+different filters.
 
 **A row states when, how loud, from where and what.** Time in the reader's own zone to the
 millisecond, the level as a coloured word, the subsystem, and the message with any structured fields
 appended as `key=value`. A warning or an error carries its status colour on the message as well as
 the level word, which is what makes one findable in a wall of debug. A message is one line and is
-cut off by default; the toolbar's **Wrap lines** toggle (an icon button with a tooltip, kept in the
-window's memory like the filter) lets it wrap to its full height instead.
+cut off by default; the toolbar's **Wrap lines** toggle (the `view-wrap` icon with a tooltip, kept in
+the window's memory like the filter) lets it wrap to its full height instead. A wrapped message
+breaks at the panel's width — time, level and subsystem keep their columns and the message takes
+the rest — and a row is measured again when the panel's width changes.
 
 **Rows are selectable.** A click selects one row, shift-click extends from the last plain click to
 the clicked row, and cmd-click (Ctrl elsewhere) toggles one in or out; the selection is drawn with
@@ -165,7 +171,8 @@ recorded as a decision rather than left as an exception. When the coordinator be
 process, its records need the transport like everything else; that is filed in
 [`../backlog.md`](../backlog.md).
 
-State: `LogState` for the console's filter, its follow and wrap flags, the selection and the row
+State: `LogState` for the console's filter, its search (`set_query`, `search`, `match_ranges`), its
+follow and wrap flags, the selection and the row
 menu (`LogPress`, `LogAction`, `row_text`, `rows_text`), `PanelKind::Logs` for the panel
 itself, and `MenuId::LogSubsystem` and `MenuId::LogLevel` for the two selectors and `MenuId::LogRow` for the row
 menu. The arrangement the
@@ -198,16 +205,25 @@ record readout and `loudest()` the tab's dot; `clear()` empties both; `subscribe
 channel a window is nudged through, and a listener whose window has gone is dropped on the next
 push.
 
-`crates/kubiq/src/state/logs.rs` holds `LogState`: the chosen subsystem, the level floor, the follow
-flag, and the index arithmetic the two selectors are drawn and answered with. It holds no records —
-those belong to the sink, which is why the console's state is a default rather than a fixture.
+`crates/kubiq/src/state/logs.rs` holds `LogState`: the chosen subsystem, the level floor, the search
+query and its generation, the follow flag, and the index arithmetic the two selectors are drawn and
+answered with. The search runs after the sink's own filter, in the window (`AppState::log_rows`),
+because the sink's `Filter` is shared by every reader and knows nothing about text. It holds no
+records — those belong to the sink, which is why the console's state is a default rather than a
+fixture.
 
 `crates/kubiq/src/ui/logs.rs` draws the panel. `render()` is the whole of it, a toolbar row over the
-records; `actions()` is that toolbar — the two selectors, the record readout, the follow switch and
+records; the toolbar is the search field (`AppState::log_search`, mirrored into `LogState` on every
+change) and `actions()` — the two selectors, the record readout, the wrap and follow switches and
 `Clear` — and `body()` is a `gpui::list` of rows (variable height, so a wrapped row measures itself; it is reset
-when the first row, the filter or the wrap flag changes and spliced when rows only arrive) on a
+when the first row, the filter, the search or the wrap flag changes and spliced when rows only
+arrive; the list itself drops every measurement when its width changes) on a
 surface like a pane's, with the row menu as a child. Rows pad rather than margin, which the list
-cannot see. `level_colour()`
+cannot see, and a row is `w_full`: the list lays each row out as a root with its width only as
+*available* space, and an auto-width flex row there is sized to the sum of its children rather than
+to that width — the message cell is then never squeezed and a long message is clipped at the
+panel's edge instead of wrapped. `line()` is a row as drawn, without its pointer handling, so a test
+can lay it out. `level_colour()`
 is what a level is reported in, on a row and on the tab's dot alike.
 
 `AppState` owns the filter state, the list's scroll handle, and the task started in `for_project()`
@@ -224,7 +240,9 @@ that arrived at the half that may only send it. The harness library's own are al
 `crates/kubiq-proto/tests/log_sink.rs` drives the sink the way a subsystem does — real `tracing`
 events, read back through `snapshot()` — and covers the classification, the two filters composing,
 the nudge and the clear. `crates/kubiq/tests/logs.rs` covers the two pickers on the indexing the
-console draws them with. No window is needed for either.
+console draws them with, the selection, the copied text and the search with its match ranges, none
+of which needs a window — and one layout test that does: it draws `line()` in a `gpui::list` and
+asserts a wrapped long message is several lines tall and grows when the list narrows.
 
 ## Failure
 
@@ -249,9 +267,7 @@ console draws them with. No window is needed for either.
 
 ## Next steps
 
-- Filter rows by text as well as by subsystem and level.
 - Open the console from the keyboard, and from a click on an error the status bar reports.
-- Copy a row, or the visible selection, to the clipboard.
 - Write the ring to a file on request, for a bug report that outlives the process.
 - Reach the raw harness frames from the console, rather than only from `RUST_LOG`.
 - Carry the coordinator's records over the transport once it is its own process.

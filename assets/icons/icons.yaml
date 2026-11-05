@@ -259,6 +259,9 @@ categories:
     tab-pin:
       goal: a tab protected from close, drawn before its label
       keywords: [pin, pinned, protect, lock, keep]
+    view-wrap:
+      goal: long lines wrap onto further lines instead of being cut off — a line turning back under itself
+      keywords: [wrap, word wrap, soft wrap, lines, overflow, fold]
     explorer-follow:
       goal: the explorer tracks the file in the active editor — a crosshair locating it
       keywords: [follow, locate, reveal, crosshair, target, sync]

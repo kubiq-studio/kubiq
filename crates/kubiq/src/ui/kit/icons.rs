@@ -128,12 +128,12 @@ pub enum KubiqIcon {
     RoleWorker,
     /// the tool is a `just` recipe — a lowercase j leading a run chevron
     RunnerJust,
+    /// the tool was defined by the user in Kubiq itself — a prompt with a spark of our own making
+    RunnerKubiq,
     /// the tool is a GNU Make target — a hammer, build by recipe
     RunnerMake,
     /// the tool is a mise task — mise-en-place, a bowl steaming and ready
     RunnerMise,
-    /// the tool was defined by the user in Kubiq itself — a prompt with a spark of our own making
-    RunnerKubiq,
     /// the UI-scale slider's high end — a roomy interface, fewer and larger regions
     SizeInterfaceLarge,
     /// the UI-scale slider's low end — a compact interface, tightly packed regions
@@ -184,6 +184,8 @@ pub enum KubiqIcon {
     ViewList,
     /// files arranged as a tree, told apart from toggling the left region
     ViewTree,
+    /// long lines wrap onto further lines instead of being cut off — a line turning back under itself
+    ViewWrap,
 }
 
 impl IconNamed for KubiqIcon {
@@ -246,9 +248,9 @@ impl IconNamed for KubiqIcon {
             Self::RoleVerifier => "icons/role-verifier.svg",
             Self::RoleWorker => "icons/role-worker.svg",
             Self::RunnerJust => "icons/runner-just.svg",
+            Self::RunnerKubiq => "icons/runner-kubiq.svg",
             Self::RunnerMake => "icons/runner-make.svg",
             Self::RunnerMise => "icons/runner-mise.svg",
-            Self::RunnerKubiq => "icons/runner-kubiq.svg",
             Self::SizeInterfaceLarge => "icons/size-interface-large.svg",
             Self::SizeInterfaceSmall => "icons/size-interface-small.svg",
             Self::SizeTextLarge => "icons/size-text-large.svg",
@@ -274,6 +276,7 @@ impl IconNamed for KubiqIcon {
             Self::ToolThink => "icons/tool-think.svg",
             Self::ViewList => "icons/view-list.svg",
             Self::ViewTree => "icons/view-tree.svg",
+            Self::ViewWrap => "icons/view-wrap.svg",
         })
     }
 }
@@ -337,9 +340,9 @@ pub const ALL: &[KubiqIcon] = &[
     KubiqIcon::RoleVerifier,
     KubiqIcon::RoleWorker,
     KubiqIcon::RunnerJust,
+    KubiqIcon::RunnerKubiq,
     KubiqIcon::RunnerMake,
     KubiqIcon::RunnerMise,
-    KubiqIcon::RunnerKubiq,
     KubiqIcon::SizeInterfaceLarge,
     KubiqIcon::SizeInterfaceSmall,
     KubiqIcon::SizeTextLarge,
@@ -365,6 +368,7 @@ pub const ALL: &[KubiqIcon] = &[
     KubiqIcon::ToolThink,
     KubiqIcon::ViewList,
     KubiqIcon::ViewTree,
+    KubiqIcon::ViewWrap,
 ];
 
 /// One row's file, embedded. A macro because the arm is otherwise the same long path fifty times
@@ -438,9 +442,9 @@ pub fn bytes(path: &str) -> Option<&'static [u8]> {
         "icons/role-verifier.svg" => ours!("role-verifier"),
         "icons/role-worker.svg" => ours!("role-worker"),
         "icons/runner-just.svg" => ours!("runner-just"),
+        "icons/runner-kubiq.svg" => ours!("runner-kubiq"),
         "icons/runner-make.svg" => ours!("runner-make"),
         "icons/runner-mise.svg" => ours!("runner-mise"),
-        "icons/runner-kubiq.svg" => ours!("runner-kubiq"),
         "icons/size-interface-large.svg" => ours!("size-interface-large"),
         "icons/size-interface-small.svg" => ours!("size-interface-small"),
         "icons/size-text-large.svg" => ours!("size-text-large"),
@@ -466,6 +470,7 @@ pub fn bytes(path: &str) -> Option<&'static [u8]> {
         "icons/tool-think.svg" => ours!("tool-think"),
         "icons/view-list.svg" => ours!("view-list"),
         "icons/view-tree.svg" => ours!("view-tree"),
+        "icons/view-wrap.svg" => ours!("view-wrap"),
         _ => return None,
     })
 }

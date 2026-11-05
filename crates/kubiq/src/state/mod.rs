@@ -100,7 +100,7 @@ pub use kb::{
     kb_parent_path, kb_password_problem, kb_tab_key,
 };
 pub use layout::Layout;
-pub use logs::{LogAction, LogMenu, LogPress, LogState, row_text, rows_text};
+pub use logs::{LogAction, LogMenu, LogPress, LogState, match_ranges, row_text, rows_text};
 pub use mission::{MissionTab, MissionView};
 pub use nav::{Destination, Locus, View};
 pub use new_agent::{NewAgentForm, OpenList, Purpose, Target};

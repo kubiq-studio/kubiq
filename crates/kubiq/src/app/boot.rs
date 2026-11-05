@@ -71,6 +71,8 @@ impl AppState {
 
         let task_filter =
             cx.new(|cx| InputState::new(window, cx).placeholder("Filter tasks\u{2026}"));
+        let log_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search logs\u{2026}"));
         let board_name_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("New board name\u{2026}"));
 
@@ -879,6 +881,17 @@ impl AppState {
                     && let Some(project) = shown
                 {
                     this.create_board(project, window, cx);
+                }
+            },
+        ));
+
+        subscriptions.push(cx.subscribe_in(
+            &log_search,
+            window,
+            |this, input, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let query = input.read(cx).value().to_string();
+                    this.set_log_query(&query, cx);
                 }
             },
         ));
@@ -2062,7 +2075,8 @@ impl AppState {
             outline_key: String::new(),
             outline_gen: 0,
             log_list: gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.)),
-            log_list_key: std::cell::Cell::new((None, 0, false)),
+            log_list_key: std::cell::Cell::new((None, 0, false, 0)),
+            log_search,
             log_focus: cx.focus_handle(),
             git_scroll: UniformListScrollHandle::new(),
             form_filled: None,

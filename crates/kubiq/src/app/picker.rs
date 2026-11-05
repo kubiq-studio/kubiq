@@ -989,13 +989,35 @@ impl AppState {
         cx.notify();
     }
 
+    /// The rows the console draws, top to bottom: the sink's filter, then the search.
+    pub fn log_rows(&self) -> Vec<std::sync::Arc<kubiq_proto::log::LogRecord>> {
+        self.logs
+            .search(kubiq_proto::log::logs().snapshot(self.logs.filter()))
+    }
+
     /// The sequence numbers of the rows the console draws, top to bottom.
     fn log_seqs(&self) -> Vec<u64> {
-        kubiq_proto::log::logs()
-            .snapshot(self.logs.filter())
-            .iter()
-            .map(|record| record.seq)
-            .collect()
+        self.log_rows().iter().map(|record| record.seq).collect()
+    }
+
+    /// The search field changed.
+    pub fn set_log_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        if self.logs.set_query(query) {
+            cx.notify();
+        }
+    }
+
+    /// Escape in the search field: empty it. Returns whether there was anything to clear, so an
+    /// Escape on an empty field falls through to the window.
+    pub fn clear_log_search(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.logs.query().is_empty() {
+            return false;
+        }
+        // `set_value` emits no change, so the state is told directly.
+        self.log_search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.set_log_query("", cx);
+        true
     }
 
     /// A press on a row: change the selection, and take the keyboard so Cmd+C reaches the console.
@@ -1045,7 +1067,7 @@ impl AppState {
         if seqs.is_empty() {
             return false;
         }
-        let records = kubiq_proto::log::logs().snapshot(self.logs.filter());
+        let records = self.log_rows();
         let text = crate::state::rows_text(&records, seqs, message_only);
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
         true
