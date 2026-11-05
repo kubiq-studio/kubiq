@@ -103,6 +103,13 @@ pub enum PickerOwner {
         agent: AgentId,
         slot: usize,
     },
+    /// The same composer, asked by a typed `@`: the answer is spelled into the field as
+    /// `@path` mentions at byte offset `at` (where the `@` was), not hung on it as tags.
+    ComposerMention {
+        agent: AgentId,
+        slot: usize,
+        at: usize,
+    },
     /// A folder chosen on a remote host's own filesystem, to be opened as a project there. Carries
     /// no host: the picker itself never learns a `HostId` — see `crate::app::host_browse`, whose
     /// `HostBrowseState` is what the app layer reads back on commit to know which host the picked

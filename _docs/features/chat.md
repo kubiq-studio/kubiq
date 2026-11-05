@@ -365,9 +365,11 @@ bar, footer and composer. Clicking a tag opens the file in the editor, its `×` 
 name; its tooltip shows the project-relative path and the size.
 
 **Typing `@` at the start of the field or after whitespace raises the same picker** (`app/picker.rs`
-`at_trigger`, `open_picker_from_at`, called from the composer's `Change` subscription in `app/boot.rs`). The
-`@` is consumed, since the picker has no query and a pick comes back as a tag that becomes `@path` at send
-time; `foo@bar` does not trigger. With no project tree the `@` stays. The field grows with its text up to
+`at_trigger`, `open_picker_from_at`, called from the composer's `Change` subscription in `app/boot.rs`), but
+the answer is **text, not tags**: the `@` is taken out and its offset remembered (`PickerOwner::ComposerMention`),
+and a commit spells every pick there as `@path ` (project-relative, space-separated, e.g. `@src/a.rs @src/b.rs `),
+leaving the caret after them and focus back in the field. Cancelling inserts nothing. `foo@bar` does not
+trigger. With no project tree the `@` stays. The field grows with its text up to
 `COMPOSER_ROWS_MAX_DEFAULT` (16) rows, then scrolls; the bottom block is bottom-anchored, so it grows upward.
 
 **A tag's colour is the file's size.** Over 300 KiB the warning tokens, over 500 KiB the danger ones, with

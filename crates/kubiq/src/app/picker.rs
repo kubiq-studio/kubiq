@@ -153,6 +153,11 @@ impl AppState {
                 let sized = picker.picked_with_sizes();
                 self.attach_files(agent, slot, &sized, window, cx);
             }
+            // A typed `@` is answered in the text: every pick becomes its own `@path`, space
+            // separated, spelled in at the remembered caret.
+            PickerOwner::ComposerMention { slot, at, .. } => {
+                self.insert_mentions(slot, at, &picked, window, cx);
+            }
             // The host this folder came from lives in `host_browse`, not in the owner itself — see
             // `state::file_picker::PickerOwner::HostProject`'s own doc.
             // The folder a knowledge base source reads from. Written into the "Add source" form
@@ -256,6 +261,18 @@ impl AppState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.raise_composer_picker_at(agent, slot, None, window, cx);
+    }
+
+    /// `at` is `Some` when a typed `@` raised it: the answer is then text at that offset.
+    fn raise_composer_picker_at(
+        &mut self,
+        agent: AgentId,
+        slot: usize,
+        at: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let forest = self
             .explorer(cx)
             .map(|explorer| crate::state::file_picker::forest_from_explorer(&explorer.root))
@@ -264,7 +281,10 @@ impl AppState {
             return;
         }
         let request = crate::state::file_picker::PickerRequest::new(
-            PickerOwner::Composer { agent, slot },
+            match at {
+                Some(at) => PickerOwner::ComposerMention { agent, slot, at },
+                None => PickerOwner::Composer { agent, slot },
+            },
             "Attach files or folders to the prompt",
         )
         .kind(PickKind::Either);
@@ -493,7 +513,45 @@ impl AppState {
                 cx,
             );
         });
-        self.raise_composer_picker(agent, slot, window, cx);
+        self.raise_composer_picker_at(agent, slot, Some(at), window, cx);
+    }
+
+    /// Spell `picked` into the composer at byte offset `at` as `@path ` mentions and leave the
+    /// caret after them. `at` is where the typed `@` was taken out; it is clamped to the text as it
+    /// is now, so a field edited meanwhile cannot make the splice panic.
+    fn insert_mentions(
+        &mut self,
+        slot: usize,
+        at: usize,
+        picked: &[String],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(input) = self.column_inputs.get(slot).cloned() else {
+            return;
+        };
+        let mut text = input.read(cx).value().to_string();
+        let mut at = at.min(text.len());
+        while !text.is_char_boundary(at) {
+            at -= 1;
+        }
+        let mentions: String = picked.iter().map(|path| format!("@{path} ")).collect();
+        text.insert_str(at, &mentions);
+        let before = &text[..at + mentions.len()];
+        let line = before.matches('\n').count() as u32;
+        let character = before
+            .rsplit('\n')
+            .next()
+            .map_or(0, |tail| tail.encode_utf16().count()) as u32;
+        input.update(cx, |state, cx| {
+            state.set_value(text, window, cx);
+            state.set_cursor_position(
+                gpui_component::input::Position { line, character },
+                window,
+                cx,
+            );
+            state.focus(window, cx);
+        });
     }
 
     /// Take one attachment back off — a tag's own dismiss control.
@@ -913,7 +971,7 @@ impl AppState {
             }
             // Nothing to write back: a composer that was not answered keeps what it already had.
             // The keyboard goes back to it, which is where it was before the dialog took it.
-            PickerOwner::Composer { slot, .. } => {
+            PickerOwner::Composer { slot, .. } | PickerOwner::ComposerMention { slot, .. } => {
                 if let Some(input) = self.column_inputs.get(slot).cloned() {
                     input.update(cx, |state, cx| state.focus(window, cx));
                 }
