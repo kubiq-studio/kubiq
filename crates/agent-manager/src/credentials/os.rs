@@ -271,20 +271,21 @@ impl OsSecretStore {
         if let Some(pw) = &self.test_password {
             return Ok(pw.clone());
         }
-        let account = self.keychain_path().to_string_lossy().into_owned();
-        let found = std::process::Command::new("security")
-            .args([
-                "find-generic-password",
-                "-s",
-                MAC_VAULT_PW_SERVICE,
-                "-a",
-                &account,
-                "-w",
-            ])
-            .output()
-            .context("running `security find-generic-password` for the vault password")?;
-        if found.status.success() {
-            return Ok(String::from_utf8_lossy(&found.stdout).trim().to_string());
+        let path = self.keychain_path();
+        let account = path.to_string_lossy().into_owned();
+        if let Some(pw) = Self::find_vault_password(&account)? {
+            return Ok(pw);
+        }
+        if path.exists() {
+            // The keychain file already has a password we no longer hold:
+            // generating a new one would overwrite the entry and lock the
+            // vault out for good. Try the pre-rename account, else fail.
+            if let Some(pw) = self.legacy_vault_password(&path, &account)? {
+                return Ok(pw);
+            }
+            anyhow::bail!(
+                "OS keychain vault password not found in the login keychain for {account} (service {MAC_VAULT_PW_SERVICE})"
+            );
         }
         if !create {
             anyhow::bail!(
@@ -292,6 +293,30 @@ impl OsSecretStore {
             );
         }
         let pw = Self::random_password()?;
+        Self::store_vault_password(&account, &pw)?;
+        Ok(pw)
+    }
+
+    /// The vault password stored under `account`, or `None` when the lookup fails.
+    fn find_vault_password(account: &str) -> Result<Option<String>> {
+        let found = std::process::Command::new("security")
+            .args([
+                "find-generic-password",
+                "-s",
+                MAC_VAULT_PW_SERVICE,
+                "-a",
+                account,
+                "-w",
+            ])
+            .output()
+            .context("running `security find-generic-password` for the vault password")?;
+        Ok(found
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&found.stdout).trim().to_string()))
+    }
+
+    fn store_vault_password(account: &str, pw: &str) -> Result<()> {
         let stored = std::process::Command::new("security")
             .args([
                 "add-generic-password",
@@ -299,9 +324,9 @@ impl OsSecretStore {
                 "-s",
                 MAC_VAULT_PW_SERVICE,
                 "-a",
-                &account,
+                account,
                 "-w",
-                &pw,
+                pw,
             ])
             .status()
             .context("storing the vault password in the login keychain")?;
@@ -309,7 +334,29 @@ impl OsSecretStore {
             stored.success(),
             "`security add-generic-password` (vault password) failed"
         );
-        Ok(pw)
+        Ok(())
+    }
+
+    /// Fallback for a config dir renamed `…/ubiq/…` → `…/kubiq/…`: the entry
+    /// may still sit under the old path. Adopted only if it unlocks the
+    /// keychain, then re-stored under the current account.
+    fn legacy_vault_password(&self, path: &std::path::Path, account: &str) -> Result<Option<String>> {
+        let Some(i) = account.rfind("/kubiq/") else {
+            return Ok(None);
+        };
+        let legacy = format!("{}/ubiq/{}", &account[..i], &account[i + "/kubiq/".len()..]);
+        let Some(pw) = Self::find_vault_password(&legacy)? else {
+            return Ok(None);
+        };
+        let unlocked = std::process::Command::new("security")
+            .args(["unlock-keychain", "-p", &pw, &path.to_string_lossy()])
+            .status()
+            .context("running `security unlock-keychain`")?;
+        if !unlocked.success() {
+            return Ok(None);
+        }
+        Self::store_vault_password(account, &pw)?;
+        Ok(Some(pw))
     }
 
     /// Ensure the custom keychain exists and is unlocked; return its path + pw.
