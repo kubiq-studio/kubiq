@@ -359,7 +359,6 @@ pub fn open_browser(
                 }
             });
         platform::open_with(key, builder, window, cx)?;
-        #[cfg(target_os = "macos")]
         if let Some(view) = platform::view(key) {
             auth::register(view.read(cx).raw(), key, profile.dir_name());
         }
@@ -661,10 +660,11 @@ pub fn current_url(key: &str, cx: &App) -> Option<String> {
 
 /// Close the one behind `key`. Silent when there is none — a tab may close before it ever had one.
 pub fn close(key: &str) {
-    #[cfg(target_os = "macos")]
-    auth::forget(key);
     #[cfg(any(target_os = "macos", target_os = "windows"))]
-    platform::close(key);
+    {
+        auth::forget(key);
+        platform::close(key);
+    }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = key;
 }
@@ -673,9 +673,9 @@ pub fn close(key: &str) {
 /// and password signs in, `None` lets the page load without them — the server's own 401 page.
 /// Silent when nothing is waiting.
 pub fn answer_auth(key: &str, credentials: Option<(String, String)>) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     auth::answer(key, credentials);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (key, credentials);
 }
 
@@ -683,10 +683,269 @@ pub fn answer_auth(key: &str, credentials: Option<(String, String)>) {
 /// challenge from `host:port`. The address itself is loaded without them, so they never reach the
 /// address field or the history.
 pub fn remember_url_credentials(key: &str, host: &str, port: u16, user: String, pass: String) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     auth::remember_url(key, host, port, user, pass);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = (key, host, port, user, pass);
+}
+
+// ── HTTP authentication (Windows) ───────────────────────────────────────
+//
+// WebView2 raises `BasicAuthenticationRequested` (`ICoreWebView2_10`) for a Basic challenge; with
+// no handler it shows its own dialog. [`auth::register`] adds a handler to each browser tab's
+// webview (web panels get none, so they keep WebView2's default): it answers from what it holds,
+// or takes the event's deferral, parks it, and asks the window through [`BrowserEvent::Auth`] —
+// the same modal and the same keying as macOS. A parked event is completed on the answer, on
+// Cancel (`SetCancel(true)`: the server's own 401 page), or when the tab closes.
+//
+// WebView2 says nothing like WebKit's `previousFailureCount`, so a second challenge for a space
+// this module already answered *is* the failure: the pair is forgotten and the user asked again,
+// rather than the same wrong answer being sent for ever.
+
+#[cfg(target_os = "windows")]
+mod auth {
+    use std::cell::RefCell;
+    use std::collections::{HashMap, HashSet};
+
+    use webview2_com::BasicAuthenticationRequestedEventHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_10, ICoreWebView2BasicAuthenticationRequestedEventArgs, ICoreWebView2Deferral,
+    };
+    use windows_core::{HSTRING, Interface as _, PWSTR};
+
+    use super::BrowserEvent;
+    use crate::state::browser;
+
+    /// What a credential answers for: the tab's profile, and the server's protection space.
+    #[derive(Clone, PartialEq, Eq, Hash)]
+    struct Space {
+        profile: String,
+        host: String,
+        port: u16,
+        realm: String,
+    }
+
+    /// One parked event. Dropped unanswered (Cancel, a closed tab, teardown) it cancels, and it
+    /// always completes its deferral — WebView2 holds the navigation until it does.
+    struct Parked {
+        args: ICoreWebView2BasicAuthenticationRequestedEventArgs,
+        deferral: ICoreWebView2Deferral,
+        answered: bool,
+    }
+
+    impl Parked {
+        fn answer(mut self, user: &str, pass: &str) {
+            // SAFETY: COM calls on the UI thread the event was raised on.
+            unsafe {
+                if let Ok(response) = self.args.Response() {
+                    let _ = response.SetUserName(&HSTRING::from(user));
+                    let _ = response.SetPassword(&HSTRING::from(pass));
+                    self.answered = true;
+                }
+            }
+        }
+    }
+
+    impl Drop for Parked {
+        fn drop(&mut self) {
+            // SAFETY: as above; a webview already gone only fails the calls, which are ignored.
+            unsafe {
+                if !self.answered {
+                    let _ = self.args.SetCancel(true);
+                }
+                let _ = self.deferral.Complete();
+            }
+        }
+    }
+
+    struct Waiting {
+        space: Space,
+        parked: Vec<Parked>,
+    }
+
+    #[derive(Default)]
+    struct Auth {
+        saved: HashMap<Space, (String, String)>,
+        /// Spaces answered since their last challenge: a second challenge means the answer failed.
+        answered: HashSet<Space>,
+        /// From an address's userinfo, by tab, host and port — the realm is not known yet.
+        from_url: HashMap<(String, String, u16), (String, String)>,
+        waiting: HashMap<String, Waiting>,
+    }
+
+    thread_local! {
+        static AUTH: RefCell<Auth> = RefCell::new(Auth::default());
+    }
+
+    /// Answer tab `key`'s challenges on this webview from here on.
+    pub(super) fn register(webview: &wry::WebView, key: &str, profile: String) {
+        use wry::WebViewExtWindows as _;
+        let Ok(webview) = webview.webview().cast::<ICoreWebView2_10>() else {
+            tracing::warn!(target: "kubiq::browser", "WebView2 older than ICoreWebView2_10; its own sign-in dialog stays");
+            return;
+        };
+        let key = key.to_string();
+        let handler = BasicAuthenticationRequestedEventHandler::create(Box::new(move |_, args| {
+            if let Some(args) = args {
+                challenge(&key, &profile, args);
+            }
+            Ok(())
+        }));
+        let mut token = 0i64;
+        // SAFETY: a COM registration on the UI thread; the handler lives as long as the webview.
+        if let Err(err) = unsafe { webview.add_BasicAuthenticationRequested(&handler, &mut token) }
+        {
+            tracing::warn!(target: "kubiq::browser", "sign-in handler not added: {err}");
+        }
+    }
+
+    pub(super) fn forget(key: &str) {
+        let waiting = AUTH.with_borrow_mut(|auth| {
+            auth.from_url.retain(|(tab, _, _), _| tab != key);
+            auth.waiting.remove(key)
+        });
+        // Outside the borrow: each `Parked` cancels and completes as it drops.
+        drop(waiting);
+    }
+
+    pub(super) fn remember_url(key: &str, host: &str, port: u16, user: String, pass: String) {
+        AUTH.with_borrow_mut(|auth| {
+            auth.from_url
+                .insert((key.to_string(), host.to_lowercase(), port), (user, pass))
+        });
+    }
+
+    pub(super) fn answer(key: &str, credentials: Option<(String, String)>) {
+        let Some(mut waiting) = AUTH.with_borrow_mut(|auth| {
+            let waiting = auth.waiting.remove(key)?;
+            if let Some(credentials) = &credentials {
+                auth.saved
+                    .insert(waiting.space.clone(), credentials.clone());
+                auth.answered.insert(waiting.space.clone());
+            }
+            Some(waiting)
+        }) else {
+            return;
+        };
+        for parked in waiting.parked.drain(..) {
+            match &credentials {
+                Some((user, pass)) => parked.answer(user, pass),
+                None => drop(parked),
+            }
+        }
+    }
+
+    fn read(get: impl FnOnce(*mut PWSTR) -> windows_core::Result<()>) -> String {
+        let mut value = PWSTR::null();
+        match get(&mut value) {
+            Ok(()) => webview2_com::take_pwstr(value),
+            Err(_) => String::new(),
+        }
+    }
+
+    enum Next {
+        Default,
+        Answer(String, String),
+        Wait,
+        Ask(Space, bool),
+    }
+
+    fn challenge(
+        key: &str,
+        profile: &str,
+        args: ICoreWebView2BasicAuthenticationRequestedEventArgs,
+    ) {
+        // SAFETY: COM getters on the UI thread the event was raised on.
+        let uri = read(|value| unsafe { args.Uri(value) });
+        let header = read(|value| unsafe { args.Challenge(value) });
+        let Some((host, port)) = browser::host_port(&uri) else {
+            return;
+        };
+        let space = Space {
+            profile: profile.to_string(),
+            host,
+            port,
+            realm: browser::challenge_realm(&header),
+        };
+        let next = AUTH.with_borrow_mut(|auth| {
+            let url_slot = (key.to_string(), space.host.clone(), port);
+            let failed = auth.answered.remove(&space);
+            if failed {
+                auth.saved.remove(&space);
+                auth.from_url.remove(&url_slot);
+            } else if let Some((user, pass)) = auth.saved.get(&space).cloned() {
+                auth.answered.insert(space.clone());
+                return Next::Answer(user, pass);
+            } else if let Some(found) = auth.from_url.remove(&url_slot) {
+                auth.saved.insert(space.clone(), found.clone());
+                auth.answered.insert(space.clone());
+                return Next::Answer(found.0, found.1);
+            }
+            match auth.waiting.get(key) {
+                Some(waiting) if waiting.space == space => Next::Wait,
+                // One question per tab: a second space while one is open gets WebView2's own.
+                Some(_) => Next::Default,
+                None => Next::Ask(space.clone(), failed),
+            }
+        });
+        let park = |args: ICoreWebView2BasicAuthenticationRequestedEventArgs| {
+            // SAFETY: as above.
+            unsafe { args.GetDeferral() }.ok().map(|deferral| Parked {
+                args,
+                deferral,
+                answered: false,
+            })
+        };
+        match next {
+            Next::Default => {}
+            Next::Answer(user, pass) => {
+                // SAFETY: as above.
+                if let Ok(response) = unsafe { args.Response() } {
+                    unsafe {
+                        let _ = response.SetUserName(&HSTRING::from(user));
+                        let _ = response.SetPassword(&HSTRING::from(pass));
+                    }
+                }
+            }
+            Next::Wait => {
+                if let Some(parked) = park(args) {
+                    AUTH.with_borrow_mut(|auth| {
+                        if let Some(waiting) = auth.waiting.get_mut(key) {
+                            waiting.parked.push(parked);
+                        }
+                    });
+                }
+            }
+            Next::Ask(space, failed) => {
+                let Some(parked) = park(args) else {
+                    return;
+                };
+                let host = if matches!(space.port, 80 | 443) {
+                    space.host.clone()
+                } else {
+                    format!("{}:{}", space.host, space.port)
+                };
+                let realm = space.realm.clone();
+                AUTH.with_borrow_mut(|auth| {
+                    auth.waiting.insert(
+                        key.to_string(),
+                        Waiting {
+                            space,
+                            parked: vec![parked],
+                        },
+                    )
+                });
+                super::push(
+                    key,
+                    BrowserEvent::Auth {
+                        host,
+                        realm,
+                        failed,
+                    },
+                );
+            }
+        }
+    }
 }
 
 // ── HTTP authentication (macOS) ─────────────────────────────────────────
@@ -701,7 +960,7 @@ pub fn remember_url_credentials(key: &str, host: &str, port: u16, user: String, 
 //
 // Credentials live in this thread-local only, keyed by profile, host, port and realm: never on
 // disk, never logged. `ForSession` hands them to WebKit for the life of its network session too,
-// which is memory as well. Windows needs none of this: WebView2 raises its own sign-in dialog.
+// which is memory as well. Windows has its own module of the same shape, above.
 
 #[cfg(target_os = "macos")]
 mod auth {

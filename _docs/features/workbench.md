@@ -205,8 +205,10 @@ question still open. An address typed as `user:pass@host` is loaded without its 
 the pair answers that tab's first challenge from the host. A challenge from a tab not on screen, or
 one an agent drives through `kubiq-browser`, raises the same modal in its window, and the
 navigation waits on it until it is answered. Web panels, proxies and every other
-challenge keep WebKit's default handling. Windows needs none of it: WebView2 raises its own sign-in
-dialog.
+challenge keep WebKit's default handling. On Windows the same modal, store and `user:pass@` rule
+answer WebView2's `BasicAuthenticationRequested` (`ICoreWebView2_10`) through the event's deferral,
+Cancel being `SetCancel(true)`; WebView2 reports no failure count, so a second challenge for a space
+already answered counts as a wrong pair. Web panels there keep WebView2's own sign-in dialog.
 An agent whose definition names the `kubiq-browser` MCP server drives the same tabs, in the one window
 the host picks — including `browser_screenshot` (the visible page as an MCP image, scaled to
 `max_dimension`, default 1568; macOS only) and `browser_set_viewport` (the same width setting;
@@ -911,7 +913,7 @@ a project), Capture this window (needing a project and captures offered on this 
 **Remote hosts** has its own pair between add-a-project and the back/forward arrows, a rule on each
 side (`Tier::Experimental`, so absent otherwise): a **Connect to a remote host** button
 (`KubiqIcon::HostRemote`) and a chevron whose menu (`ext::ids::MENU_REMOTE`) holds *Remote hosts*, the
-manager, *Configure drone mode…* (`D232`), and any block a second edition contributes — Studio's saved
+manager, *Configure drone mode…* (`D232`), the saved SSH profiles with the terminal toggle on (an `ssh` pane, as the new-pane menu offers; shown with a project open), and any block a second edition contributes — Studio's saved
 RDP targets, for one. **Configure drone mode** is a modal (`ui/drone_modes.rs`, `Layer::DroneModes`,
 Escape peels the form before the list) listing `HostSettings::drone_modes`: per mode an enabled tick,
 the kind, the host's last `DroneModeStatus` (serving address and client count, or the failure with

@@ -290,6 +290,11 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_DataExchange",
     "Win32_System_Memory",
 ] }
+# The browser tab's HTTP sign-in: WebView2's `BasicAuthenticationRequested` (`ui/web_view.rs`).
+# Both already in the graph behind `lb-wry`, at the versions it resolves, so these are the same
+# COM types as the `ICoreWebView2` `WebViewExtWindows` hands out.
+webview2-com = "=0.38.2"
+windows-core = "0.61"
 
 # An integration test that drives the interpreter is a target of the feature that compiles it in,
 # not of the crate: without this, `cargo test` on a build with `quickjs` off would try to run a

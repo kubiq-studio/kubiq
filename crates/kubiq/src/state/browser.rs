@@ -439,6 +439,51 @@ pub fn split_credentials(url: &str) -> (String, Option<UrlCredentials>) {
     (format!("{scheme}://{hostport}{tail}"), Some(credentials))
 }
 
+/// The host (lowercase, unbracketed) and port of an `http(s)` address, the port defaulted by
+/// scheme.
+pub fn host_port(url: &str) -> Option<(String, u16)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let default_port = match scheme.to_ascii_lowercase().as_str() {
+        "http" => 80,
+        "https" => 443,
+        _ => return None,
+    };
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let hostport = authority.rsplit('@').next()?;
+    let (host, port) = match hostport.rsplit_once(':') {
+        Some((host, port)) if !port.contains(']') => (host, port.parse().ok()),
+        _ => (hostport, None),
+    };
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_lowercase();
+    (!host.is_empty()).then(|| (host, port.unwrap_or(default_port)))
+}
+
+/// The `realm` of a `WWW-Authenticate` challenge (`Basic realm="Staff", charset="UTF-8"`), quoted
+/// or bare; empty when it names none.
+pub fn challenge_realm(header: &str) -> String {
+    let lower = header.to_ascii_lowercase();
+    let Some(at) = lower.find("realm=") else {
+        return String::new();
+    };
+    let value = &header[at + "realm=".len()..];
+    let Some(quoted) = value.strip_prefix('"') else {
+        return value.split([',', ' ']).next().unwrap_or("").to_string();
+    };
+    let mut realm = String::new();
+    let mut chars = quoted.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => break,
+            '\\' => realm.extend(chars.next()),
+            c => realm.push(c),
+        }
+    }
+    realm
+}
+
 /// What ⌘K's "Open in internal browser" row should open for a query — the raw text, which
 /// `AppState::open_browser` turns into a place with the chosen engine — or `None` when the query
 /// is not about the browser at all. `Some("")` is a blank tab.
@@ -563,5 +608,20 @@ mod tests {
         assert_eq!(creds.map(|c| (c.host, c.port)), Some(("::1".into(), 80)));
         assert_eq!(split_credentials("https://a.b/x@y").1, None);
         assert_eq!(split_credentials("about:blank").1, None);
+        assert_eq!(
+            host_port("https://Me@Example.com/x"),
+            Some(("example.com".into(), 443))
+        );
+        assert_eq!(host_port("http://[::1]:8080/"), Some(("::1".into(), 8080)));
+        assert_eq!(host_port("about:blank"), None);
+        assert_eq!(
+            challenge_realm(r#"Basic realm="Staff \"only\"", charset="UTF-8""#),
+            r#"Staff "only""#
+        );
+        assert_eq!(
+            challenge_realm("Basic Realm=intranet, charset=x"),
+            "intranet"
+        );
+        assert_eq!(challenge_realm("Basic"), "");
     }
 }
