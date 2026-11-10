@@ -71,7 +71,7 @@ the alias and every other field is ignored, which the form says by hiding them.
 
 A profile can also be **terminal-enabled**: an "Enable terminal" box on the form reveals an optional
 **initial command**. Unchecking hides the command without wiping it. A terminal-enabled profile gets
-an **Open terminal** button on its row and an entry in the "+" new-pane menu (after the local shells,
+an **Open terminal** icon button (the terminal glyph, tooltipped) on its row and an entry in the "+" new-pane menu (after the local shells,
 before Logs), and opens an interactive `ssh` pane in the bottom region — `ssh [-p] [-i] [-l] host`,
 or `-t host "<cmd>; exec $SHELL -l"` with a command, so the session stays at a login shell. A
 password or passphrase is asked for in the terminal itself; the askpass helper is not used. **Clone**

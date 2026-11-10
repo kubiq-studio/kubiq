@@ -276,11 +276,12 @@ pub fn icon_button_tip(
 
 /// A verb on one row of a settings list. Each has one icon and one tooltip, so the same action
 /// looks and names itself the same way in every list. Canonical order on a row: `Test`/`StopTest`,
-/// `Edit`, `Rename`, `Clone`, `Delete`.
+/// `Terminal`, `Edit`, `Rename`, `Clone`, `Delete`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowAction {
     Test,
     StopTest,
+    Terminal,
     Edit,
     Rename,
     Clone,
@@ -293,6 +294,7 @@ impl RowAction {
         match self {
             RowAction::Test => IconName::Play.into(),
             RowAction::StopTest => super::KubiqIcon::ActionStop.into(),
+            RowAction::Terminal => IconName::SquareTerminal.into(),
             RowAction::Edit => super::KubiqIcon::ActionEdit.into(),
             RowAction::Rename => super::KubiqIcon::ActionRename.into(),
             RowAction::Clone => super::KubiqIcon::ActionClone.into(),
@@ -306,6 +308,7 @@ impl RowAction {
         match self {
             RowAction::Test => "Test",
             RowAction::StopTest => "Stop test",
+            RowAction::Terminal => "Open terminal",
             RowAction::Edit => "Edit",
             RowAction::Rename => "Rename",
             RowAction::Clone => "Clone",

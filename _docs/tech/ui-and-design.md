@@ -917,12 +917,12 @@ region toggles and a handful of others draw no tooltip yet.
 **A list row's verbs are icons, one per verb, through `kit::row_action`.** A settings list whose
 rows can be tested, edited, renamed, cloned or deleted draws each of those as `row_action(id,
 RowAction::…, on_click)`: a 24px square sized for a one-line row, whose icon and tooltip are fixed
-by the `RowAction` — `Test` (Lucide `Play`), `StopTest` (`action-stop`), `Edit` (`action-edit`),
+by the `RowAction` — `Test` (Lucide `Play`), `StopTest` (`action-stop`), `Terminal` (Lucide `SquareTerminal`, tooltip "Open terminal"), `Edit` (`action-edit`),
 `Rename` (`action-rename`), `Clone` (`action-clone`), `Delete` (`action-delete`, the glyph turning
 `danger()` on hover). The same verb therefore looks the same in every list. A row that words a verb
 otherwise keeps the icon and changes only the tooltip — `.tip("Remove")`, `"Forget"`,
 `"Disconnect"` are all `Delete` — and `.enabled(false)` draws a verb that is unavailable faint
-and inert, tooltip kept. The order on a row is fixed: `Test`/`StopTest` · `Edit` · `Rename` ·
+and inert, tooltip kept. The order on a row is fixed: `Test`/`StopTest` · `Terminal` · `Edit` · `Rename` ·
 `Clone` · `Delete`, so `Delete` is always last. What stays a text button is what is not a row's
 verb: a section's `Add …`, and a one-off action a page offers once (`Save`, `Clear URL override`).
 

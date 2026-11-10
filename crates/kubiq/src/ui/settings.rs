@@ -5051,10 +5051,9 @@ fn ssh_profile_row(app: &AppState, profile: &SshProfile, cx: &mut Context<AppSta
             .gap_2()
             .children(chip.map(|(text, colour)| badge(text, colour)))
             .children(profile.terminal_enabled.then(|| {
-                ghost_button(
+                row_action(
                     ElementId::Name(format!("app-settings-ssh-{id}-terminal").into()),
-                    None,
-                    "Open terminal",
+                    RowAction::Terminal,
                     cx.listener(move |this, _, _, cx| this.open_ssh_terminal(id, cx)),
                 )
             }))
