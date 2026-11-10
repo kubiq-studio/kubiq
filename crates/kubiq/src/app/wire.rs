@@ -787,6 +787,14 @@ impl AppState {
                 if self.adding {
                     self.adding = false;
                     self.take_project(id, cx);
+                    // The rail the creation dialog chose belongs to this project alone.
+                    if let Some((hidden, opted_in)) = self.adding_modes.take()
+                        && let Some(open) = self.projects.get_mut(&id)
+                    {
+                        open.prefs.hidden_modes = hidden;
+                        open.prefs.opted_in_modes = opted_in;
+                        self.remember(id, cx);
+                    }
                     // A file dropped with no project open named this folder's leaf as what to
                     // show once the project it became was actually open.
                     if let Some(dropped) = self.adding_select.take()

@@ -1899,6 +1899,8 @@ impl AppState {
             adopt_on_list: false,
             adding: false,
             create_storage: kubiq_proto::projects::StorageMode::default(),
+            create_modes: (Vec::new(), Vec::new()),
+            adding_modes: None,
             adding_select: None,
             pending_files: Vec::new(),
             doc_notices: HashMap::new(),

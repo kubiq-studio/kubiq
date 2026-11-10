@@ -6,7 +6,7 @@ status: draft
 summary: The rail's opt-in DB mode — the project's saved database connections (PostgreSQL, MySQL/MariaDB, SQLite, SQL Server) and the Databases section that edits them, the explorer tree, table tabs that page, filter and edit rows, SQL tabs with a timer, Stop, Explain and a read-only guard enforced in three layers by the host, the DBML export, where `db.toml` and the sealed passwords live, and the `kubiq-db` engine and host sessions behind it.
 read_when: you are changing the DB mode — the explorer, a table or SQL tab, the connection form, the Databases settings section, the host's database sessions, how a password is kept, or the `kubiq-db` engine
 updated: 2026-11-05
-verified: 2026-11-05
+verified: 2026-11-10
 code_anchors: [crates/kubiq/src/state/db/open_file.rs, crates/kubiq/tests/db_open_file.rs, crates/kubiq-db/src/lib.rs, crates/kubiq-db/src/sql/readonly.rs, crates/kubiq-db/src/edit.rs, crates/kubiq-db/src/driver/mod.rs, crates/kubiq-db/src/dbml.rs, crates/kubiq-db/src/driver/structure.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-host/src/db/mod.rs, crates/kubiq-host/src/db/session.rs, crates/kubiq-host/src/db/jobs.rs, crates/kubiq-host/src/db/store.rs, crates/kubiq-host/src/db/secrets.rs, crates/kubiq-host/src/db/agent.rs, crates/kubiq-host/src/db/editors.rs, crates/kubiq-host/src/db/tunnel.rs, crates/kubiq/src/state/db/mod.rs, crates/kubiq/src/state/db/tree.rs, crates/kubiq/src/state/db/table.rs, crates/kubiq/src/state/db/sql.rs, crates/kubiq/src/state/db/pending.rs, crates/kubiq/src/app/db/mod.rs, crates/kubiq/src/app/db/table.rs, crates/kubiq/src/app/db/sql.rs, crates/kubiq/src/ui/db/mod.rs, crates/kubiq/src/ui/db/explorer.rs, crates/kubiq/src/ui/db/table.rs, crates/kubiq/src/ui/db/sql.rs, crates/kubiq/src/ui/db/conn_form.rs, crates/kubiq/src/ui/db/settings.rs]
 depends_on: [feat-workbench, tech-transport, tech-ui, tech-architecture]
 review_cycle: monthly
@@ -27,7 +27,7 @@ the engine, the TLS providers and the password key are `D199`, `D200`, `D201` an
 
 ## Behaviour
 
-**DB is a `PROJECT` mode directly after IDE, drawn only once a project switches it on.** Its
+**DB is a `PROJECT` mode directly after Git, drawn only once a project switches it on.** Its
 `Availability` is `OptIn`: the tile appears in project settings > General > Modes unlit, and the
 rail shows the mode once it is lit (`ViewPrefs::opted_in_modes`). The first visit opens the explorer
 on the left, the "No table open" page in the centre (where table and SQL tabs land), and an empty right and
@@ -232,7 +232,7 @@ with `results.rs` and `plan.rs`, `conn_form.rs`, `settings.rs`, and `keys.rs` fo
 bindings in the `DbTable` and `DbSql` key contexts. Widgets that need a `Window` are queued and built
 in `render`. A table or SQL tab mints a `DbSessionId` when it opens and every request carries it, so
 a reply for a closed tab is discarded by id; a run mints a `DbQueryId`, which is also what
-Stop cancels by. The mode is registered in `ui/rail.rs`'s `modes()` straight after IDE, with
+Stop cancels by. The mode is registered in `ui/rail.rs`'s `modes()` straight after Git, with
 `RailMode::DB` (`state/workbench.rs`), `View::Db` (`state/nav.rs`) and the three `PanelKind` arms in
 `state/dock.rs`. Its colours are seven `db_*` theme tokens, listed in
 [UI and design](../tech/ui-and-design.md).

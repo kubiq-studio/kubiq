@@ -912,6 +912,13 @@ pub struct AppState {
     /// the way in: only Create can choose it, and an existing project's panel shows what its
     /// record already says.
     pub(crate) create_storage: StorageMode,
+    /// The rail modes the creation dialog has chosen for the project it is making, as
+    /// `(hidden_modes, opted_in_modes)` — the draft of `ViewPrefs`'s two lists. Held here for
+    /// `create_storage`'s reason, and so the open project's own lists are never touched by it.
+    pub(crate) create_modes: (Vec<RailMode>, Vec<RailMode>),
+    /// `create_modes` as committed with the `AddProject`, written into the new project's prefs
+    /// when `ProjectAdded` opens it.
+    adding_modes: Option<(Vec<RailMode>, Vec<RailMode>)>,
     /// A file dropped with no project open: its folder is added as `adding` above, and this is the
     /// leaf to select once the project the host answers with is actually open.
     adding_select: Option<String>,

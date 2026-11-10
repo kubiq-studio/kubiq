@@ -1579,10 +1579,21 @@ pub(crate) fn modes_block(
     app_scope: bool,
     cx: &mut Context<AppState>,
 ) -> Option<AnyElement> {
+    // The creation dialog edits a draft that lands on the new project; the open project's own
+    // modes are not its to change.
+    let creating = !app_scope
+        && matches!(
+            app.workbench.project_settings.as_ref().map(|s| &s.mode),
+            Some(ProjectSettingsMode::Create { .. })
+        );
     let tiles: Vec<AnyElement> = RailMode::every()
         .filter(|mode| mode.spec().is_some() && mode.is_app() == app_scope)
         .map(|mode| {
-            let on = app.mode_enabled(mode, cx);
+            let on = if creating {
+                app.create_mode_enabled(mode, cx)
+            } else {
+                app.mode_enabled(mode, cx)
+            };
             let (fg, bg) = if on {
                 (theme::accent(), theme::accent_soft())
             } else {
@@ -1616,7 +1627,13 @@ pub(crate) fn modes_block(
                         .text_color(fg)
                         .child(SharedString::from(mode.label())),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| this.toggle_mode(mode, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if creating {
+                        this.toggle_create_mode(mode, cx)
+                    } else {
+                        this.toggle_mode(mode, cx)
+                    }
+                }))
                 .into_any_element()
         })
         .collect();
@@ -1638,8 +1655,9 @@ pub(crate) fn modes_block(
                     "Which of the application's destinations the rail shows, in every project and \
                      window. The last one on cannot be turned off."
                 } else {
-                    "Which destinations the rail shows for this project. Kept per project, so \
-                     this edits the open one; the last one on cannot be turned off."
+                    "Which destinations the rail shows for this project. Kept per project; \
+                     while creating one it is the new project's, and the last one on cannot be \
+                     turned off."
                 },
             ))
             .child(div().flex().flex_wrap().gap_2().children(tiles))

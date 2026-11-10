@@ -6,7 +6,7 @@ status: draft
 summary: The window's shell — the activity rail and the ten modes it selects between, the dock of movable panels the user arranges around the centre, the titlebar and its navigator, the projects a window holds and the empty state one with none shows, the picker that adds, clones and opens them, project and application settings, the Tools dialog, the file picker any screen raises, and the status bar that reports on all of it. Each mode's own screen has a document of its own.
 read_when: you are changing the window layout, the rail, the dock, where a panel may sit or when it is drawn, the titlebar, the navigator, the project picker, cloning a project, project or application settings, the Tools dialog, remote hosts, the file picker, vim mode, or the status bar
 updated: 2026-11-05
-verified: 2026-11-05
+verified: 2026-11-10
 code_anchors: [crates/kubiq/src/ui/trust.rs, crates/kubiq/src/app/browser.rs, crates/kubiq/src/state/browser.rs, crates/kubiq/src/ui/browser.rs, crates/kubiq/src/ui/web_view.rs, crates/kubiq/src/app/mod.rs, crates/kubiq/src/app/onboarding.rs, crates/kubiq/src/state/onboarding.rs, crates/kubiq/src/ui/search.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/panels.rs, crates/kubiq/src/state/mod.rs, crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/windows.rs, crates/kubiq/src/state/when.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/tests/prefs.rs, crates/kubiq-host/src/projects.rs, crates/kubiq/src/ui/shell.rs, crates/kubiq/src/ui/ribbon.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/ui/dock/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/ui/tab_menu.rs, crates/kubiq/src/ui/menus.rs, crates/kubiq/src/ext/menu.rs, crates/kubiq/src/ui/overflow_menu.rs, crates/kubiq/src/ui/new_project_menu.rs, crates/kubiq/src/ui/run_tool_menu.rs, crates/kubiq/src/ui/hidden_agents_menu.rs, crates/kubiq/tests/new_project.rs, crates/kubiq/tests/dock.rs, crates/kubiq/tests/mode_restore.rs, crates/kubiq/src/ui/terminal.rs, crates/kubiq/src/ui/logs.rs, crates/kubiq/src/ui/outline.rs, crates/kubiq/src/ui/rail.rs, crates/kubiq/src/ext/rail.rs, crates/kubiq/tests/rail_container.rs, crates/kubiq/src/ui/project_face.rs, crates/kubiq/src/ui/titlebar.rs, crates/kubiq/src/ui/project_menu.rs, crates/kubiq/src/ui/all_projects.rs, crates/kubiq/src/ui/empty.rs, crates/kubiq/src/ui/status_bar.rs, crates/kubiq/src/state/updates.rs, crates/kubiq/src/app/updates.rs, crates/kubiq/src/ui/size.rs, crates/kubiq/src/app/size.rs, crates/kubiq/src/ui/kit/controls.rs, crates/kubiq/src/state/work.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ext/settings.rs, crates/kubiq/src/ui/sink/ext_demo.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/app/settings.rs, crates/kubiq/src/state/settings.rs, crates/kubiq/src/ui/kit/settings.rs, crates/kubiq/tests/settings.rs, crates/kubiq/tests/settings_container.rs, crates/kubiq/src/state/catalog.rs, crates/kubiq/src/app/catalog.rs, crates/kubiq/src/ui/catalog.rs, crates/kubiq/tests/catalog.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq-host/src/cli_shortcut.rs, crates/kubiq-host/src/shell_integration.rs, crates/kubiq/src/state/file_picker.rs, crates/kubiq/src/ui/file_picker.rs, crates/kubiq/tests/file_picker.rs, crates/kubiq/src/state/vim/mod.rs, crates/kubiq/src/state/vim/step.rs, crates/kubiq/src/state/vim/motion.rs, crates/kubiq/src/state/vim/object.rs, crates/kubiq/src/state/vim/search.rs, crates/kubiq/src/app/vim.rs, crates/kubiq/tests/vim.rs, crates/kubiq/src/state/nav.rs, crates/kubiq/src/state/nav/text.rs, crates/kubiq/src/state/navigator.rs, crates/kubiq/src/app/nav.rs, crates/kubiq/src/ui/navigator.rs, crates/kubiq/tests/nav.rs, crates/kubiq/tests/nav_text.rs, crates/kubiq/tests/bookmarks.rs, crates/kubiq/tests/navigator.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/state/clone.rs, crates/kubiq/src/app/clone.rs, crates/kubiq/src/ui/clone.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-host/src/repos/mod.rs, crates/kubiq-host/src/repos/list.rs, crates/kubiq-host/src/repos/clone.rs, crates/kubiq/src/state/remote.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/app/unix_connect.rs, crates/kubiq/src/ui/remote_connect.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/state/run_picker.rs, crates/kubiq/src/state/about.rs, crates/kubiq/src/app/about.rs, crates/kubiq/src/ui/about.rs, crates/kubiq/src/state/devtools.rs, crates/kubiq/src/app/devtools.rs, crates/kubiq/src/ui/devtools.rs, crates/kubiq/src/devtools/mod.rs, crates/kubiq/src/devtools/codec.rs, crates/kubiq/src/devtools/detect.rs, crates/kubiq/src/devtools/diff.rs, crates/kubiq/src/devtools/hash.rs, crates/kubiq/src/devtools/jwt.rs, crates/kubiq/src/devtools/lorem.rs, crates/kubiq/src/devtools/time.rs, crates/kubiq/src/devtools/uuids.rs]
 depends_on: [tech-ui]
 review_cycle: monthly
@@ -25,9 +25,9 @@ seen through, and it is built against [`../design/kubiq-layout.png`](../design/k
 
 **The rail selects what the middle of the window is for.** Ten destinations in two groups, less
 whichever ones the project has hidden in project settings:
-`Control`, `All Teams` and `Sink` under `APP`, and `IDE`, `DB`, `Git`, `Agents`, `Teams`, `KB` and
+`Control`, `All Teams` and `Sink` under `APP`, and `IDE`, `Git`, `DB`, `Agents`, `Teams`, `KB` and
 `Tasks` under `PROJECT`. `DB` is the one destination a project has to ask for: it is absent until
-Project settings > General > Modes lights it, and then sits directly after `IDE`
+Project settings > General > Modes lights it, and then sits directly after `Git`
 ([DB mode](./workbench-db.md)). `Teams` and `All Teams` are one graph screen over two spans, sharing
 an icon. Exactly one
 is active, and the active one is shown by the accent colour on both its icon and its label. The
@@ -46,9 +46,9 @@ never moves**: badges stay in the order the window holds them, whichever of them
 leave out. The switch is Appearance settings, on by default. **`cmd-1`..`cmd-9` jump straight to the
 Nth badge**, in that same order, including the least-recently-opened trim — a badge the rail had no
 room for is a digit that does nothing. **`ctrl-1`..`ctrl-9` jump to the Nth mode in the `PROJECT`
-group** — `IDE`, `DB`, `Git`, `Agents`, `Teams`, `KB`, `Tasks`, counting only the ones
+group** — `IDE`, `Git`, `DB`, `Agents`, `Teams`, `KB`, `Tasks`, counting only the ones
 the project has not hidden and has opted into — never the `APP` group above it. Either chord is a no-op past the last
-badge or the last enabled mode.
+badge or the last enabled mode. In the creation dialog the Modes tiles edit a draft (`AppState::create_modes`) that rides on the `AddProject` and is written into the new project's prefs when it opens; the open project is untouched, and cancelling discards it.
 
 **The rail is a container, and a mode is a registration in it** (`D184`). Its icon, its label, its
 note, its `UiId`, the screen it draws, the arrangement it opens on and the panels it calls
@@ -230,6 +230,7 @@ rail selects between, in rail order:
 | `Sink` | The application's own test bench — twelve pages of fixtures with nothing behind them | [Sink mode](./workbench-sink.md) |
 | `IDE` | The project's files: the explorer, one editor tab per open file, and a viewer per kind | [IDE mode](./workbench-ide.md) |
 | `Git` | What version control knows, whole — refs, history, change lists and a diff | [Git mode](./workbench-git.md) |
+| `DB` | The project's databases: a connection explorer, table and SQL tabs | [DB mode](./workbench-db.md) |
 | `Agents` | A row of columns, each a transcript and a composer over one live conversation | [Agents mode](./workbench-agents.md) |
 | `Teams` | The graph, scoped by a window span, drawing its cards' conversations in the dock | [The Teams graph modes](./workbench-teams.md) |
 | `KB` | A knowledge-base document, over the sources explorer described above | [`../wip/kb.md`](../wip/kb.md) |

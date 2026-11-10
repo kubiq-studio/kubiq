@@ -1631,6 +1631,47 @@ impl AppState {
         }
     }
 
+    /// [`Self::mode_enabled`] for a project-group mode as the creation dialog's draft has it —
+    /// the same three answers over `create_modes` instead of the open project's prefs.
+    pub fn create_mode_enabled(&self, mode: RailMode, cx: &App) -> bool {
+        let Some(spec) = mode.spec() else {
+            return false;
+        };
+        let (hidden, opted_in) = &self.create_modes;
+        match spec.availability {
+            Availability::Always => !hidden.contains(&mode),
+            Availability::OptIn => opted_in.contains(&mode),
+            Availability::When(pred) => pred(self, cx) && !hidden.contains(&mode),
+        }
+    }
+
+    /// Switch one rail mode in the creation dialog's draft. Nothing is applied to any project: the
+    /// draft rides on the `AddProject` and lands on the new project when it opens. The last
+    /// enabled mode cannot be turned off, as in [`Self::toggle_mode`].
+    pub fn toggle_create_mode(&mut self, mode: RailMode, cx: &mut Context<Self>) {
+        let Some(spec) = mode.spec() else {
+            return;
+        };
+        let enabled_now = RailMode::every()
+            .filter(|m| !m.is_app() && self.create_mode_enabled(*m, cx))
+            .count();
+        let list = if matches!(spec.availability, Availability::OptIn) {
+            &mut self.create_modes.1
+        } else {
+            if enabled_now <= 1 && self.create_mode_enabled(mode, cx) {
+                return;
+            }
+            &mut self.create_modes.0
+        };
+        match list.iter().position(|m| *m == mode) {
+            Some(at) => {
+                list.remove(at);
+            }
+            None => list.push(mode),
+        }
+        cx.notify();
+    }
+
     /// Put one rail mode on the rail if it is not — opted into, or no longer hidden — through
     /// [`Self::toggle_mode`], so it is remembered exactly as the switch would remember it.
     pub fn show_mode(&mut self, mode: RailMode, cx: &mut Context<Self>) {

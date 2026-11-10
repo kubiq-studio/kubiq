@@ -1079,6 +1079,8 @@ impl AppState {
         // Every creation starts from the default, so a folder the user once made project-managed
         // does not silently decide for the next one.
         self.create_storage = StorageMode::default();
+        self.create_modes = (Vec::new(), Vec::new());
+        self.adding_modes = None;
         self.workbench.open_menu = None;
         self.workbench.settings.open = false;
         self.workbench.project_settings = Some(ProjectSettings {
@@ -1181,6 +1183,7 @@ impl AppState {
                 // during creation has nowhere to be sent yet — the same reason `fill_project_form`
                 // never seeds this field for Create.
                 let storage = self.create_storage;
+                self.adding_modes = Some(std::mem::take(&mut self.create_modes));
                 self.add_project(path, Some(name), Some(colour), custom, false, storage, cx);
             }
             ProjectSettingsMode::Edit { project } => {
