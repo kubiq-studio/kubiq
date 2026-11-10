@@ -34,7 +34,7 @@ use gpui::{
 };
 use gpui_component::IconName;
 use gpui_component::input::Input;
-use kubiq_proto::git::{GitCounts, GitHead, RepoOverview};
+use kubiq_proto::git::{GitHead, RepoOverview};
 
 use crate::app::AppState;
 use crate::state::MenuId;
@@ -129,7 +129,6 @@ pub fn toolbar(app: &AppState, cx: &mut Context<AppState>) -> impl IntoElement {
                 .and_then(|git| git.in_progress())
                 .map(|label| mono(label, theme::warning())),
         )
-        .children(changed_label(overview).map(|label| mono(label, theme::text_muted())))
 }
 
 /// What HEAD is, and what it is doing: the operation first, because a repository mid-rebase is the
@@ -160,24 +159,6 @@ fn head_pill(overview: &RepoOverview) -> AnyElement {
         .child(mono(head, theme::text()))
         .children(tracking.map(|text| mono(text, theme::text_muted())))
         .into_any_element()
-}
-
-/// How many paths the working tree has something to say about, or nothing at all when no walk has
-/// answered yet. Absent rather than zero, on the rule the status bar follows.
-fn changed_label(overview: Option<&RepoOverview>) -> Option<String> {
-    let counts = overview?.counts?;
-    let GitCounts {
-        staged,
-        modified,
-        untracked,
-        conflicted,
-    } = counts;
-    let total = staged + modified + untracked + conflicted;
-    Some(match total {
-        0 => "nothing changed".to_string(),
-        1 => "1 changed".to_string(),
-        n => format!("{n} changed"),
-    })
 }
 
 /// How wide the `Branch` popover is.

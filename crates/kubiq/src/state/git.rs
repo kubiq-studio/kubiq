@@ -1219,6 +1219,10 @@ impl GitView {
             self.compare_commit = None;
             return false;
         }
+        // A third pick replaces the oldest pick: the first end drops, the second becomes it.
+        if self.compare_commit.is_some() {
+            self.selected_commit = self.compare_commit;
+        }
         self.compare_commit = Some(index);
         true
     }

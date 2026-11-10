@@ -277,7 +277,7 @@ fn uncommitted_row(app: &AppState, lanes: usize, cx: &mut Context<AppState>) -> 
 }
 
 /// One commit: its lane graph, whatever points at it, its summary, who wrote it, when, and its
-/// abbreviated id. A plain click selects it; cmd/ctrl-click makes it the other end of a two-commit
+/// abbreviated id. A plain click selects it; cmd/ctrl/shift-click makes it the other end of a two-commit
 /// comparison, drawn under the history once both ends are set. A right-click raises the row's
 /// context menu.
 fn commit_row(
@@ -335,7 +335,8 @@ fn commit_row(
         )
         .on_click(
             window.listener_for(view, move |this, event: &ClickEvent, _, cx| {
-                if event.modifiers().platform {
+                let modifiers = event.modifiers();
+                if modifiers.platform || modifiers.control || modifiers.shift {
                     this.toggle_git_compare(index, cx);
                 } else {
                     this.select_git_commit(Some(index), cx);

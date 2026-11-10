@@ -111,7 +111,7 @@ and re-asks when it is flipped; diff tabs always ask with it on.
 
 **A selected commit's panel lists the files it changed** (its first parent against it, asked with `ProjectGitChanged` and answered into the same list a comparison uses) under its summary.
 
-**Cmd/ctrl-click a second commit to compare it against the first.** The panel beside the history
+**Cmd/ctrl/shift-click a second commit to compare it against the first; a third pick drops the oldest pick.** The panel beside the history
 lists the paths that differ between the two — oldest to newest, no `+` / `-`, because a range is a
 read — and picking one asks `ProjectGitChanged` for the diff between those two revisions rather
 than against the working tree. A plain click on any row, including the uncommitted one, drops the
@@ -134,7 +134,7 @@ names a rev this screen checks out.
 
 **Whatever the screen is waiting on is named, not just spun.** `GitView::in_progress()` reads
 whichever of a write, a history page or a two-commit comparison is still in flight and the toolbar
-prints its word — `Staging…`, `Committing…`, `Loading history…` — beside the changed-paths count,
+prints its word — `Staging…`, `Committing…`, `Loading history…` — beside the branch strip,
 so a click that has not answered yet is a state the user can read rather than a guess.
 
 **A diff's rows are one height, so a long line is scrolled to rather than wrapped.** The body is a
