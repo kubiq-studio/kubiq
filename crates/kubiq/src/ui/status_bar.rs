@@ -22,6 +22,7 @@ use crate::state::editor::ViewerKind;
 use crate::state::navigator::subsequence;
 use crate::state::ui_id;
 use crate::state::vim::VimMode;
+use crate::state::dock::PanelKind;
 use crate::state::{MenuId, RailMode};
 use crate::theme;
 use crate::ui::board::status_colour;
@@ -218,6 +219,7 @@ pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> im
         .children(is_ide.then(|| mono(where_it_is, theme::text_muted())))
         .children(is_ide.then(|| viewer_picker(app, window, cx)).flatten())
         .child(div().flex_1().min_w(px(0.)))
+        .children(caret_item(app, cx))
         .children(git_readout(app, cx))
         .child(vim_chip(app, cx))
         .children(update_item(app, cx))
@@ -418,4 +420,23 @@ fn counts_label(counts: GitCounts) -> String {
         parts.push(format!("{}U", counts.untracked));
     }
     parts.join(" ")
+}
+
+/// "Ln 12, Col 5" — the caret of the editor on screen: the IDE's file, the KB's document or the SQL
+/// tab, whichever the rail mode and the active panel make the one being typed in. Absent when the
+/// active panel is not a text editor, the way every other value in this strip is.
+fn caret_item(app: &AppState, cx: &App) -> Option<impl IntoElement> {
+    let (line, column) = if app.workbench.rail_mode == RailMode::IDE {
+        app.cursor_line_column(cx)?
+    } else {
+        let open = app.open_project(cx)?;
+        let buffer = match app.workbench.active_panel.as_ref()? {
+            PanelKind::Kb(key) => open.kb.doc(key)?.buffer()?.clone(),
+            PanelKind::DbSql(key) => open.db.sql_tab(key)?.editor.clone()?,
+            _ => return None,
+        };
+        let position = buffer.read(cx).cursor_position();
+        (position.line + 1, position.character + 1)
+    };
+    Some(mono(format!("Ln {line}, Col {column}"), theme::text_muted()))
 }

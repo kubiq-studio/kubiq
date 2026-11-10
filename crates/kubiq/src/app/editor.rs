@@ -2522,6 +2522,9 @@ impl AppState {
             },
         );
 
+        // The status bar reports the caret, so a caret move redraws it.
+        cx.observe(&buffer, |_, _, cx| cx.notify()).detach();
+
         // A destination that named a spot in this file arrived before its bytes did. It outranks
         // a reload's saved caret: the reload is where the tab was, the goto is where the user
         // asked to be.

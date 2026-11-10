@@ -116,13 +116,6 @@ pub fn toolbar(app: &AppState, cx: &mut Context<AppState>) -> impl IntoElement {
             live,
             cx.listener(|this, _, _, cx| this.undo_git_commit(cx)),
         ))
-        .child(div().flex_1().min_w(px(0.)))
-        .children(
-            app.git_view(cx)
-                .and_then(|git| git.in_progress())
-                .map(|label| mono(label, theme::warning())),
-        )
-        .children(changed_label(overview).map(|label| mono(label, theme::text_muted())))
         .child(icon_button_tip(
             "git-refresh",
             IconName::RotateCw,
@@ -130,6 +123,13 @@ pub fn toolbar(app: &AppState, cx: &mut Context<AppState>) -> impl IntoElement {
             true,
             cx.listener(|this, _, _, cx| this.refresh_git(cx)),
         ))
+        .child(div().flex_1().min_w(px(0.)))
+        .children(
+            app.git_view(cx)
+                .and_then(|git| git.in_progress())
+                .map(|label| mono(label, theme::warning())),
+        )
+        .children(changed_label(overview).map(|label| mono(label, theme::text_muted())))
 }
 
 /// What HEAD is, and what it is doing: the operation first, because a repository mid-rebase is the

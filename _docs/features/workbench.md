@@ -1625,7 +1625,7 @@ before the size control, only while the updater has a release to take; it opens 
 on whatever is on screen, so the rail mode decides which set of facts it has. In IDE mode with a
 project open: the active file's project-relative path, what its save is doing when that is worth a
 word, the project's branch (or detached short id, or unborn name) with ahead/behind and working-tree
-totals when those exist, the vim chip, the caret's real one-based line and column, the file's
+totals when those exist, the vim chip, the caret's real one-based position as `Ln 12, Col 5` (KB mode and a SQL tab report theirs the same way), the file's
 language, encoding and line ending, the harness and mode the composer is set to, and the active
 file's text size. The vim chip is the one thing in the strip that is not only a readout: it reads
 `VIM` faint when modal editing is off and the mode — or the command being half-typed over it, or

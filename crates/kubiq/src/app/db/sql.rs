@@ -351,6 +351,8 @@ impl AppState {
     /// The caret or the selection moved.
     fn db_sql_moved(&mut self, project: ProjectId, session: DbSessionId, cx: &mut Context<Self>) {
         self.refresh_db_sql_highlight(project, session, cx);
+        // The status bar reports the caret.
+        cx.notify();
     }
 
     /// Background the statement a plain Run would take. Cheap when nothing moved.

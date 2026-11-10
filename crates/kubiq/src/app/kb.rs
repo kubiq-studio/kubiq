@@ -276,6 +276,9 @@ impl AppState {
             },
         );
 
+        // The status bar reports the caret, so a caret move redraws it.
+        cx.observe(&buffer, |_, _, cx| cx.notify()).detach();
+
         let config = self.md_view_config();
         if let Some(doc) = self
             .projects

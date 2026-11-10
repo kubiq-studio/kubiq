@@ -225,8 +225,8 @@ absent when that returns nothing, and capped in height so a project of many clon
 `git::toolbar()` is the strip itself,
 painted by `ui/shell.rs` above the dock while the rail is on Git; it carries the HEAD pill, the
 icon buttons — each a `kit::icon_button_tip`, an icon button that names itself in a tooltip and
-draws faint and inert when disabled — checkout / fetch all / pull / push / branch / stash / undo, the
-working-tree count and a refresh. `branch_button()` owns the `Branch` popover (`MenuId::GitNewBranch`):
+draws faint and inert when disabled — checkout / fetch all / pull / push / branch / stash / undo / refresh, the
+in-progress label and the working-tree count. `branch_button()` owns the `Branch` popover (`MenuId::GitNewBranch`):
 a text field and a `Create` button, submitted by `submit_git_branch()`. `AppState::write_git()` sends `WriteProjectGit`
 against `git_repo_of()`'s repository; commit, fetch, pull, push, branch, stash, undo, checkout,
 merge, delete-ref, cherry-pick, revert-commit and reset also ask for refs and a fresh log page,
