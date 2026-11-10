@@ -45,9 +45,9 @@ pub fn row_height(font_size: f32) -> f32 {
 /// How far each level of the tree indents, at a given text size. It scales with the row for the
 /// same reason the height does — an indent is read against the text beside it.
 pub fn row_indent(font_size: f32) -> f32 {
-    (font_size * 0.85 * theme::ui_scale())
+    (font_size * 1.85 * theme::ui_scale())
         .round()
-        .clamp(8.0, 24.0)
+        .clamp(16.0, 48.0)
 }
 
 /// The two-arrangement toggle: tree on the left, list on the right, lit when it is the one on
