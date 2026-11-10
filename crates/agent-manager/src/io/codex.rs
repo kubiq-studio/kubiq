@@ -216,6 +216,8 @@ pub struct CodexBridge {
     model: Arc<OnceLock<String>>,
     /// The mapper's rate-limit reading, shared so the handshake can seed it before any push.
     limits: Arc<Mutex<Limits>>,
+    /// The thread was resumed or forked, so its history arrives ahead of `SessionStarted`.
+    replays: bool,
 }
 
 /// The detached input side of a [`CodexBridge`], for a caller pumping events
@@ -283,7 +285,8 @@ impl CodexBridge {
         );
         let mut mapper = mapper;
         let limits = Arc::clone(&mapper.limits);
-        mapper.replayed = !matches!(open, ThreadOpen::Start);
+        let replays = !matches!(open, ThreadOpen::Start);
+        mapper.replayed = replays;
         let reader_wire = wire.clone();
         let reader = std::thread::spawn(move || read_loop(stdout, reader_wire, tx, mapper));
 
@@ -294,6 +297,7 @@ impl CodexBridge {
             wire,
             model,
             limits,
+            replays,
         };
 
         bridge.handshake(cwd, open)?;
@@ -319,17 +323,12 @@ impl CodexBridge {
         self.notify("initialized", json!({}))?;
 
         let cwd = cwd.display().to_string();
+        // A resume or fork asks for its turns: Kubiq keeps no Codex transcript of its own, so the
+        // history the response carries is what the reopened conversation draws.
         let (method, params) = match &open {
             ThreadOpen::Start => ("thread/start", json!({"cwd": cwd})),
-            // `excludeTurns`: the transcript is Kubiq's own record; the history is not replayed.
-            ThreadOpen::Resume(id) => (
-                "thread/resume",
-                json!({"threadId": id, "cwd": cwd, "excludeTurns": true}),
-            ),
-            ThreadOpen::Fork(id) => (
-                "thread/fork",
-                json!({"threadId": id, "cwd": cwd, "excludeTurns": true}),
-            ),
+            ThreadOpen::Resume(id) => ("thread/resume", json!({"threadId": id, "cwd": cwd})),
+            ThreadOpen::Fork(id) => ("thread/fork", json!({"threadId": id, "cwd": cwd})),
         };
         let thread_resp = self.request(method, params)?;
         let thread_id = thread_resp
@@ -362,6 +361,22 @@ impl CodexBridge {
             .get("reasoningEffort")
             .and_then(Value::as_str)
             .map(str::to_string);
+        // The history, ahead of `SessionStarted` — which is where the host stops treating what
+        // arrives as replayed. Mapped on a mapper of its own: the reader's is never touched.
+        if !matches!(open, ThreadOpen::Start)
+            && let Some(thread) = thread_resp.get("thread")
+        {
+            let mut history = Mapper::new(
+                Arc::clone(&self.wire.thread_id),
+                Arc::clone(&self.model),
+                Arc::clone(&self.wire.turn_id),
+            );
+            history.replayed = true;
+            for event in history.map_history(thread) {
+                self.wire.emit(event);
+            }
+        }
+
         // Codex names no tool or subagent list up front, so those stay empty rather than guessed.
         let mode_name = mode.clone();
         self.wire.emit(AgentEvent::SessionStarted {
@@ -615,6 +630,16 @@ impl IoBridge for CodexBridge {
         Some(Arc::new(CodexInputSink {
             wire: self.wire.clone(),
         }))
+    }
+
+    /// A resumed or forked thread's turns are replayed ahead of `SessionStarted`.
+    fn replays_history(&self) -> bool {
+        self.replays
+    }
+
+    /// A prompt into a live turn goes out as `turn/steer` — see [`TurnState::merged`].
+    fn steers(&self) -> bool {
+        true
     }
 
     /// Kill-by-pid over the child this bridge owns; see [`crate::io::ProcessKill`].
@@ -1768,6 +1793,43 @@ impl Mapper {
         events
     }
 
+    /// A resumed or forked thread's history — the `thread.turns[].items[]` its `thread/resume` or
+    /// `thread/fork` response carries — as the events the live notifications would have produced,
+    /// so a reopened conversation draws its transcript again. Each item goes through
+    /// [`Self::map_item`] as a `started` then a `completed`; the user's own turns, which the live
+    /// path synthesizes in `write_input` instead, come from the `userMessage` items. Item ids are
+    /// prefixed with their turn's, so no two history items share a message or call id. No turn ends
+    /// and no usage: this is a record, not a run.
+    fn map_history(&mut self, thread: &Value) -> Vec<AgentEvent> {
+        let mut events = Vec::new();
+        let root = Origin::default();
+        let turns = thread.get("turns").and_then(Value::as_array);
+        for turn in turns.into_iter().flatten() {
+            let turn_id = turn.get("id").and_then(Value::as_str).unwrap_or_default();
+            let items = turn.get("items").and_then(Value::as_array);
+            for item in items.into_iter().flatten() {
+                let mut item = item.clone();
+                let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+                let id = format!("{turn_id}/{id}");
+                if item.get("type").and_then(Value::as_str) == Some("userMessage") {
+                    let text = user_message_text(&item);
+                    if !text.is_empty() {
+                        events.push(AgentEvent::UserMessageChunk {
+                            content: Content::text(text),
+                            message_id: Some(id),
+                        });
+                    }
+                    continue;
+                }
+                item["id"] = json!(id);
+                let params = json!({ "item": item });
+                events.extend(self.map_item(&params, true, &root));
+                events.extend(self.map_item(&params, false, &root));
+            }
+        }
+        events
+    }
+
     /// One item's events, before they are stamped with whose they are.
     fn map_item_kind(
         &mut self,
@@ -2279,6 +2341,18 @@ fn diff_content(changes: Option<&Value>) -> Vec<ToolContent> {
             content: Content::text(diff),
         })
         .collect()
+}
+
+/// A `userMessage` item's text: its `text` inputs, one per line. Images are not drawn back.
+fn user_message_text(item: &Value) -> String {
+    item.get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A completed `reasoning` item's text: the summary where there is one, else the raw content.
@@ -3400,6 +3474,82 @@ mod tests {
         let mut mapper = Mapper::new(root, Arc::new(OnceLock::new()), Arc::clone(&turn));
         mapper.replayed = open_replayed;
         (mapper, turn)
+    }
+
+    /// A resumed thread's `thread.turns[].items[]` (shape per `codex app-server
+    /// generate-json-schema`, 0.166.0) come back as the transcript: the user's turns, the
+    /// replies, the reasoning and the steps, each with an id no other history item shares.
+    #[test]
+    fn a_resumed_threads_turns_are_drawn_again() {
+        let (mut mapper, _) = mapper_with_turn(true);
+        let thread = json!({"id": "t-1", "turns": [
+            {"id": "u1", "status": "completed", "itemsView": "full", "items": [
+                {"type": "userMessage", "id": "i1", "content": [
+                    {"type": "text", "text": "list files", "text_elements": []},
+                    {"type": "localImage", "path": "/tmp/x.png"}]},
+                {"type": "reasoning", "id": "i2", "summary": ["Looking"], "content": []},
+                {"type": "commandExecution", "id": "i3", "command": "ls", "commandActions": [],
+                 "status": "completed", "exitCode": 0, "aggregatedOutput": "a\nb"},
+                {"type": "fileChange", "id": "i4", "status": "completed",
+                 "changes": [{"path": "a.rs", "kind": {"type": "update"}, "diff": "@@"}]},
+                {"type": "mcpToolCall", "id": "i5", "server": "docs", "tool": "read",
+                 "arguments": {}, "status": "completed"},
+                {"type": "agentMessage", "id": "i6", "text": "Two files."}]},
+            {"id": "u2", "status": "completed", "items": [
+                {"type": "userMessage", "id": "i1", "content": [{"type": "text", "text": "thanks"}]},
+                {"type": "agentMessage", "id": "i2", "text": "Welcome."}]}
+        ]});
+        let events = mapper.map_history(&thread);
+
+        let users: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::UserMessageChunk {
+                    content,
+                    message_id,
+                } => Some((content.clone(), message_id.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            users,
+            vec![
+                (Content::text("list files"), Some("u1/i1".to_string())),
+                (Content::text("thanks"), Some("u2/i1".to_string())),
+            ]
+        );
+        let replies: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::AgentMessageChunk { message_id, .. } => message_id.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(replies, ["u1/i6", "u2/i2"]);
+        assert!(events.iter().any(|e| matches!(e,
+            AgentEvent::AgentThoughtChunk { message_id: Some(id), .. } if id == "u1/i2")));
+        for (id, kind) in [
+            ("u1/i3", ToolKind::Execute),
+            ("u1/i4", ToolKind::Edit),
+            ("u1/i5", ToolKind::default()),
+        ] {
+            assert!(
+                events.iter().any(|e| matches!(e,
+                    AgentEvent::ToolCall { call } if call.id == id && call.kind == kind)),
+                "no call {id}: {events:?}"
+            );
+            assert!(
+                events.iter().any(|e| matches!(e,
+                    AgentEvent::ToolCallUpdate { update }
+                        if update.id == id && update.status == Some(ToolStatus::Completed))),
+                "{id} not finished: {events:?}"
+            );
+        }
+        // A record, not a run: no turn ends, no usage.
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            AgentEvent::TurnEnded { .. } | AgentEvent::UsageUpdate { .. }
+        )));
     }
 
     fn completed(turn: &str) -> Value {

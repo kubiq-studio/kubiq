@@ -5,7 +5,7 @@ kind: feature
 status: draft
 summary: Editor-like chat tabs — many, movable to any dockable region, each a view onto a host-owned conversation or onto none, drawn by the composer, transcript and tool blocks the whole window shares.
 read_when: you are changing a chat tab, the control that starts or attaches a conversation, or which conversation a tab shows
-updated: 2026-11-05
+updated: 2026-11-10
 verified: 2026-11-05
 code_anchors: [crates/kubiq/src/ui/chat/mod.rs, crates/kubiq/src/ui/chat/sidebar.rs, crates/kubiq/src/state/chat.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/app/chat.rs, crates/kubiq/src/app/clipboard.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/app/panels.rs, crates/kubiq/src/app/wire.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/boot.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/src/ui/conversation/info.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/state/work.rs, crates/kubiq/src/app/agents.rs, crates/kubiq/src/ui/agents/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/state/ask.rs, crates/kubiq/src/app/ask.rs, crates/kubiq/src/ui/ask.rs, crates/kubiq-proto/src/ask.rs]
 depends_on: [feat-workbench]
@@ -425,7 +425,7 @@ line breaks stay visible; Copy still copies the raw text.
 **A message shows its time on hover, beside Copy.** A user turn and an agent message (`ConvBlock::User`,
 `ConvBlock::Agent`) keep the `at` their first chunk arrived with, and `copyable` draws it left of the copy
 button in the same hover — local `HH:MM`, muted, whose own tooltip is the full local
-`YYYY-MM-DD HH:MM:SS ±HH:MM` (`message_time`). A message the host left undated — an ACP history replay —
+`YYYY-MM-DD HH:MM:SS ±HH:MM` (`message_time`). A message the host left undated — a resume's history replay —
 shows no time rather than a guessed one; a thinking block has none. Where `at` comes from is the
 transport contract's.
 
@@ -495,7 +495,17 @@ report repeats the *parent's* occupancy, so the ring is dropped rather than borr
 the conversation and harness stay, and the next message goes to the same agent — a square, as a cross would
 read *close this*. With something typed, Enqueue sits beside Stop (typing does not interrupt; the text goes
 when the turn ends); an idle conversation has the one Send. All three are what Enter answers through
-`AppState::send_or_enqueue`.
+`AppState::send_or_enqueue`. **Whether a running turn takes a prompt is the run's own answer** (`D234`):
+`AppState::steers` reads `Conversation::steers` — `ConvUpdate::Started::steers`, the bridge's word, which
+is how an ACP agent advertising `_session/steering` steers — or else `AgentTypeInfo::steers` (native
+Claude Code and Codex). Where it steers, the button reads *Steer* and a queue row's **Send now** puts the
+entry on the wire. Where it cannot (`AppState::holds_prompts`), the row reads **Interrupt & send**: the
+entry moves to the front of the queue and `Conversation::arm_interrupt` either cancels at once — nothing
+in flight — or arms the cancel for the end of the step: the wire's `settle_interrupt` sends `CancelTurn`
+once the main agent's tool call in flight settles or a question comes up, and meanwhile the row reads
+*Interrupting after current step…* with its button disabled, so a second press adds nothing. The
+turn-end flush then sends the entry first. A mission's or the board's prompt to a running agent that
+cannot steer is held on the same queue (`AppState::prompt_or_hold`).
 
 **A cancelled turn's own echo is not a message.** Claude Code's synthetic user chunk (`[Request interrupted
 by user]`, or the tool-use variant) is dropped by `Conversation::apply` rather than pushed as a
@@ -507,10 +517,11 @@ first. `AppState::send_prompt` counts each send on the conversation (`Conversati
 real echo spends one. A clean `TurnEnded` that has not seen the echo of a counted send leaves one echo owed:
 that late echo is drawn but leaves `run` idle. A failed end owes nothing, and no end owes more than one, so
 a turn end nobody's send waits on — Codex's extra one per steered prompt — cannot shift later turns. The
-interrupt marker opens nothing either — it trails the cancelled turn. An ACP `session/load` replays the
-history ahead of its handshake with no `TurnEnded`: agent output, or a user chunk no send accounts for,
+interrupt marker opens nothing either — it trails the cancelled turn. A resume replays the history ahead
+of its handshake with no `TurnEnded` — an ACP `session/load`, and the native Claude Code and Codex bridges,
+which close their replay with a `Started` of their own: agent output, or a user chunk no send accounts for,
 before the launch's `Started` marks a replay, and that `Started` sets `run` back to idle. Claude Code's
-first echo also precedes its `Started`, but its send accounts for it, so it stays a live turn. A prompt the
+first echo on a fresh run also precedes its `Started`, but its send accounts for it, so it stays a live turn. A prompt the
 host sends itself is not counted: its late echo still reopens, and a Claude Code agent the host
 autostarts reads idle from its `Started` until its first output.
 

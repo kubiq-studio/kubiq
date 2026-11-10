@@ -41,6 +41,7 @@ pub use structured::{ProcessKill, run_structured, spawn_piped};
 
 mod jsonl;
 pub use jsonl::JsonlBridge;
+pub(crate) use jsonl::read_history;
 
 pub mod codex;
 pub use codex::CodexBridge;

@@ -5,7 +5,7 @@ kind: tech
 status: draft
 summary: The complete message set the UI and the coordinator exchange — the pane, session, project, file, git, work, conversation, search, account, quota, agent definition (with its skills and MCP catalog), command-line, host browse, database, browser, remote-tool, connector, repository, task-source, assist, notification, web asset, drone-mode and carrier families, the tunnel channel beside the bus, the framing rules, and the procedure for adding a variant.
 read_when: you are adding, changing or removing a message, or wiring either half to the bus
-updated: 2026-11-05
+updated: 2026-11-10
 verified: 2026-11-05
 code_anchors: [crates/kubiq-proto/src/messages.rs, crates/kubiq-proto/src/ask.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/armed.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/quota.rs, crates/kubiq-host/src/quota.rs, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/ids.rs, crates/kubiq-proto/src/browser.rs, crates/kubiq-proto/src/remote_tools.rs, crates/kubiq-proto/src/tunnel.rs, crates/kubiq-tunnel/src/mux.rs, crates/kubiq-tunnel/src/registry.rs, crates/kubiq-tunnel/src/pin.rs, crates/kubiq-tunnel/src/tls.rs, crates/kubiq-tunnel/src/duplex.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/src/mcp/remote.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/feedback.rs, crates/kubiq-host/src/feedback/mod.rs, crates/kubiq-host/src/feedback/api.rs, crates/kubiq-host/src/feedback/issues.rs, crates/kubiq-host/src/feedback/keychain.rs, crates/kubiq-proto/src/update.rs, crates/kubiq-host/src/updates/mod.rs, crates/kubiq-host/src/updates/feed.rs, crates/kubiq-host/src/updates/apply.rs, crates/kubiq-proto/src/files.rs, crates/kubiq-proto/src/git.rs, crates/kubiq-proto/src/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-proto/src/conversation.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-proto/src/tasksrc.rs, crates/kubiq-proto/src/stats.rs, crates/kubiq-proto/src/assist.rs, crates/kubiq-proto/src/notifications.rs, crates/kubiq-proto/src/tools.rs, crates/kubiq-host/src/notifications/mod.rs, crates/kubiq-host/src/assist/mod.rs, crates/kubiq-host/src/assist/api.rs, crates/kubiq-host/src/assist/providers.rs, crates/kubiq-host/src/assist/subject.rs, crates/kubiq-host/src/assist/stub.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-proto/src/mcp.rs, crates/kubiq-proto/src/catalog.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-proto/src/mission.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/drone_modes.rs]
 depends_on: [tech-architecture]
@@ -1765,13 +1765,15 @@ none — the same rule that keeps a context ring off a harness that names no win
 
 **`UserChunk` and `AgentChunk` carry `at?`, when the message was said — unix milliseconds, UTC,
 `#[serde(default)]`.** `agent_manager::io::AgentEvent` dates nothing — no bridge parses a
-per-line time (Claude Code's on-disk transcript has one, and nothing reads that file) — so the
+per-line time (Claude Code's on-disk transcript has one, and its replay does not read it) — so the
 pump stamps a live chunk with the moment it hears it (`stamp` in
 `kubiq-host/src/conversation.rs`); a message's time is its first chunk's, which is the window's to
-keep. **A replay is never dated with now.** An ACP `session/load` replays the history ahead of
-the handshake's `Started`, so on an ACP bridge every chunk before that event goes out with `at`
-absent; the saved prompts a failed or id-less ACP restore draws (`replay_saved_prompts`) carry the
-time each was written down. Claude Code and Codex replay nothing on resume. `ThoughtChunk` is undated: reasoning is not something a reader asks the time of.
+keep. **A replay is never dated with now.** A bridge whose `IoBridge::replays_history` is true —
+an ACP `session/load`, Claude Code's native resume reading its transcript file, Codex's resume
+taking `thread.turns` — emits the history ahead of its `Started`, and every chunk before that event
+goes out with `at` absent; the saved prompts a failed or id-less ACP restore draws
+(`replay_saved_prompts`) carry the time each was written down. A relaunch in the same run drops
+the replayed transcript instead (`conversation::without_history`): its window still holds it. `ThoughtChunk` is undated: reasoning is not something a reader asks the time of.
 
 **Kubiq's own naming of a conversation is an `AgentChanged`, not a message of its own and not a
 `ConvUpdate`.** It takes no place in the sequence an interface checks for gaps: the naming is not
@@ -2017,7 +2019,7 @@ Forty-seven records travel inside payloads.
 | `WorkAgent` | `id`, `session`, `task?`, `parent?`, `name`, `title?`, `definition?`, `summary?`, `activity`, `branch`, `tokens`, `harness`, `model`, `context_pct`, `persistent`, `restorable`, `accept_all`, `debug_dump?`, `run_dir?`, `config_dir?`, `thread[]` |
 | `Turn` | `from`, `text` |
 
-| `ConvUpdate` | one of: `Started`, `UserChunk` (`content`, `message_id?`, `at?`), `AgentChunk` (`content`, `message_id?`, `subagent?`, `at?`), `ThoughtChunk`, `ToolCall`, `ToolCallUpdate`, `Plan`, `ConfigOptions`, `ModeChanged`, `Title`, `Usage`, `RateLimit`, `PermissionRequest`, `TurnEnded`, `Compacted` |
+| `ConvUpdate` | one of: `Started` (`session_id?`, `model?`, `mode?`, `tools[]`, `agents[]`, `steers` — `serde(default)`: a prompt mid-turn steers this run, the bridge's runtime answer beside `AgentTypeInfo::steers`, `D234`), `UserChunk` (`content`, `message_id?`, `at?`), `AgentChunk` (`content`, `message_id?`, `subagent?`, `at?`), `ThoughtChunk`, `ToolCall`, `ToolCallUpdate`, `Plan`, `ConfigOptions`, `ModeChanged`, `Title`, `Usage`, `RateLimit`, `PermissionRequest`, `TurnEnded`, `Compacted` |
 | `ToolCallRecord` | `id`, `title`, `kind`, `status`, `content[]`, `locations[]` |
 | `ToolCallPatch` | `id`, and `title?`, `kind?`, `status?`, `content?`, `locations?` — absent is unchanged |
 | `ToolLocation` | `path`, `line?` |

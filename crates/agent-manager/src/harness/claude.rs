@@ -84,6 +84,38 @@ impl Claude {
         Claude { acp: true }
     }
 
+    /// The history of the session a structured run resumes, read from its transcript under the
+    /// config dir the launch names (`CLAUDE_CONFIG_DIR`, or Claude Code's own default for a native
+    /// run). `None` — replay nothing — when no transcript is found or it cannot be read; the
+    /// resume itself goes ahead either way.
+    fn history(
+        &self,
+        provisioned: &crate::provision::Provisioned,
+        cwd: &Path,
+        session_id: &str,
+    ) -> Option<Vec<crate::io::AgentEvent>> {
+        let config_dir = provisioned
+            .launch
+            .env
+            .iter()
+            .find(|(name, _)| name == "CLAUDE_CONFIG_DIR")
+            .map(|(_, dir)| PathBuf::from(dir))
+            .or_else(|| provisioned.home.clone());
+        let transcript = self
+            .session_transcripts(config_dir.as_deref(), cwd, session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|path| path.extension().is_some_and(|ext| ext == "jsonl"));
+        let Some(transcript) = transcript else {
+            warn!(
+                session = session_id,
+                "no transcript for the resumed claude session; it redraws nothing"
+            );
+            return None;
+        };
+        crate::io::read_history(&transcript, session_id)
+    }
+
     /// The launch shared by [`Harness::provision`] and [`Harness::provision_home`]:
     /// `config_dir` becomes `CLAUDE_CONFIG_DIR` (none is set for `None`, a native run), and
     /// `config_args` — the flags naming this run's own files — go right after the headless flags.
@@ -304,7 +336,10 @@ impl Harness for Claude {
             structured: true,
             multi_turn: true,
             acp: self.acp,
-            steer: false,
+            // The native bridge writes a prompt into a live turn as another stdin line, which
+            // Claude Code takes up at its next step. `claude-code-acp` steers only where its
+            // `initialize` says so — a runtime fact, `IoBridge::steers`.
+            steer: !self.acp,
             // One headless `/usage` run, so the answer needs no *conversation* — which is
             // exactly the case that matters, since the question is asked *before* a long run.
             // The live bridge's own `RateLimitUpdate` is a fresher reading of the same fact,
@@ -659,7 +694,15 @@ impl Harness for Claude {
                 &provisioned.mcp_servers,
             )?));
         }
-        Ok(Box::new(crate::io::JsonlBridge::new(child)?))
+        // `--resume` gives Claude its memory back and redraws nothing, so a resumed conversation's
+        // history is read out of the transcript this run's config dir keeps for it.
+        let history = provisioned
+            .resume
+            .as_deref()
+            .and_then(|id| self.history(provisioned, cwd, id));
+        Ok(Box::new(crate::io::JsonlBridge::with_history(
+            child, history,
+        )?))
     }
 
     /// User-editable preference defaults, merged into the run by

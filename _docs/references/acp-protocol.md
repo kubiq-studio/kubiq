@@ -5,7 +5,7 @@ kind: reference
 status: current
 summary: The JSON-RPC wire reference for the Agent Client Protocol — initialisation, session setup and loading, the streaming update vocabulary, tool-call reporting, permission prompts, the client-side filesystem and terminal callbacks, and the Rust SDK Kubiq reads.
 read_when: you are wiring a harness that speaks ACP, adding a session update variant, asking what a client may send while a turn is running, or checking what the protocol says before assuming it
-updated: 2026-09-14
+updated: 2026-11-10
 verified: 2026-09-03
 ---
 
@@ -251,8 +251,12 @@ consequences for a client:
 
 Kubiq's client takes the first move and refuses the second: the ACP bridge holds one turn id per
 session and errors on a `Prompt` arriving while it is occupied, and the prompt is held in the
-interface instead. [`../inbox/message-queue-and-steering.md`](../inbox/message-queue-and-steering.md)
-is where that sits and what changing it would cost.
+interface instead. **The one extension it speaks is `_session/steering`** (`{sessionId, prompt}` →
+`{outcome}`, `injected` or `startedNewTurn` meaning delivered), which claude-agent-acp and codex-acp
+advertise in `initialize` as `_meta.steering.supported`: where advertised, the prompt goes out on it
+instead of being refused. It is read off that advertisement and never probed — codex-acp answers an
+unknown method with a bare `{}` (`D234`).
+[`../inbox/message-queue-and-steering.md`](../inbox/message-queue-and-steering.md) is the history.
 
 ### What v2 relaxes
 

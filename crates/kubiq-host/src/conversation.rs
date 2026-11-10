@@ -352,6 +352,9 @@ pub struct Conversation {
     /// How many turns were prompted and how many have ended — what the doc queue (`D207`) waits
     /// on before delivering, so a prompt never lands mid-turn. See [`Turns`].
     turns: Arc<Turns>,
+    /// Whether a prompt sent mid-turn steers that turn on this run — [`IoBridge::steers`], read
+    /// once at start: the bridge's handshake is already over by then (`D234`).
+    steers: bool,
 }
 
 /// Turns prompted against turns ended, shared by [`Conversation::prompt`] and the pump.
@@ -442,6 +445,7 @@ impl Conversation {
     ) -> Self {
         let input = bridge.input();
         let kill = bridge.killer();
+        let steers = bridge.steers();
         let ended = Arc::new(AtomicBool::new(false));
         let seq = Arc::new(AtomicU64::new(start_seq));
         let quiet = Arc::new(AtomicBool::new(quiet));
@@ -501,6 +505,7 @@ impl Conversation {
             harness_title,
             flags,
             turns,
+            steers,
         }
     }
 
@@ -513,6 +518,18 @@ impl Conversation {
     /// Whether a turn is in flight — prompted and not yet ended.
     pub fn busy(&self) -> bool {
         self.turns.busy()
+    }
+
+    /// Whether a prompt sent while [`Self::busy`] steers the turn rather than being refused or
+    /// lost behind it — see [`IoBridge::steers`].
+    pub fn steers(&self) -> bool {
+        self.steers
+    }
+
+    /// Whether a prompt has to wait for the turn in flight to end: one is running and this
+    /// harness cannot take a prompt into it.
+    pub fn holds_prompts(&self) -> bool {
+        self.busy() && !self.steers
     }
 
     /// Kubiq's own two overrides, for the coordinator to flip one on a running conversation.
@@ -750,6 +767,81 @@ fn allowing_option(options: &[agent_manager::io::PermissionOption]) -> Option<St
         .map(|option| option.option_id.clone())
 }
 
+/// `bridge`, minus the history it replays, for a relaunch whose window still holds the transcript
+/// — an unload and a resume in the same run. A bridge that replays nothing is handed back as it is.
+///
+/// Only the transcript is dropped: what the bridge says before its `SessionStarted` that is not a
+/// message, a thought, a tool call or a plan — a mode, the commands, the config options — still
+/// goes through, and so does the `SessionStarted` itself.
+pub fn without_history(bridge: Box<dyn IoBridge>) -> Box<dyn IoBridge> {
+    if !bridge.replays_history() {
+        return bridge;
+    }
+    Box::new(HeldHistory {
+        inner: bridge,
+        replaying: true,
+    })
+}
+
+/// See [`without_history`].
+struct HeldHistory {
+    inner: Box<dyn IoBridge>,
+    replaying: bool,
+}
+
+impl IoBridge for HeldHistory {
+    fn send(&mut self, input: AgentInput) -> agent_manager::Result<()> {
+        self.inner.send(input)
+    }
+
+    fn next_event(&mut self) -> agent_manager::Result<Option<AgentEvent>> {
+        Ok(self.next_event_raw()?.map(|(event, _)| event))
+    }
+
+    fn next_event_raw(&mut self) -> agent_manager::Result<Option<(AgentEvent, Option<String>)>> {
+        loop {
+            let Some((event, raw)) = self.inner.next_event_raw()? else {
+                return Ok(None);
+            };
+            if self.replaying {
+                match event {
+                    AgentEvent::SessionStarted { .. } => self.replaying = false,
+                    AgentEvent::UserMessageChunk { .. }
+                    | AgentEvent::AgentMessageChunk { .. }
+                    | AgentEvent::AgentThoughtChunk { .. }
+                    | AgentEvent::ToolCall { .. }
+                    | AgentEvent::ToolCallUpdate { .. }
+                    | AgentEvent::Plan { .. }
+                    | AgentEvent::Compacted => continue,
+                    _ => {}
+                }
+            }
+            return Ok(Some((event, raw)));
+        }
+    }
+
+    fn input(&self) -> Option<Arc<dyn AgentInputSink>> {
+        self.inner.input()
+    }
+
+    fn killer(&self) -> Option<Arc<dyn AgentKill>> {
+        self.inner.killer()
+    }
+
+    fn acp_capabilities(&self) -> Option<agent_manager::io::AcpCapabilities> {
+        self.inner.acp_capabilities()
+    }
+
+    fn steers(&self) -> bool {
+        self.inner.steers()
+    }
+
+    /// Nothing it lets through is history.
+    fn replays_history(&self) -> bool {
+        false
+    }
+}
+
 /// The pump thread: read the bridge until it ends, and put everything it says
 /// on the bus.
 // One thread entry point called from exactly one place; a struct to carry its arguments would be
@@ -780,12 +872,13 @@ fn pump(
     // which is also what it is for every turn after the first: this pass runs once.
     let mut gathering: Option<Gathering> = None;
     let mut gathered = false;
-    // Whether what arrives is history rather than speech. An ACP `session/load` (or fork) replays
-    // the whole conversation *before* the handshake's `SessionStarted`, and ACP's updates carry no
-    // time of their own — so until that event, a message is left undated rather than dated to the
-    // moment it was reloaded. Every other wire replays nothing: Claude Code's synthesised prompt
-    // can precede its `SessionStarted` and is live.
-    let mut replaying = bridge.acp_capabilities().is_some();
+    // Whether what arrives is history rather than speech. A bridge that resumes by replaying — an
+    // ACP `session/load` (or fork), Claude Code's native bridge reading its transcript file —
+    // emits the whole conversation *before* its `SessionStarted`, and none of it carries a time
+    // the window should trust — so until that event, a message is left undated rather than dated
+    // to the moment it was reloaded. A bridge that replays nothing is live from the first event:
+    // Claude Code's synthesised prompt on a fresh run can precede its `SessionStarted`.
+    let mut replaying = bridge.replays_history();
 
     loop {
         let (event, raw) = match bridge.next_event_raw() {
@@ -936,6 +1029,11 @@ fn pump(
             continue;
         };
         stamp(&mut update, (!replaying).then(crate::coordinator::now_ms));
+        // What this run steers is the bridge's to say (`D234`) — an ACP agent states it only in
+        // the `initialize` the bridge already finished.
+        if let ConvUpdate::Started { steers, .. } = &mut update {
+            *steers = bridge.steers();
+        }
 
         // Read before the send, which takes the update; recorded after it, so the window is
         // never made to wait on the meter.
@@ -1126,6 +1224,8 @@ fn map_event(event: AgentEvent) -> Option<ConvUpdate> {
             mode,
             tools,
             agents,
+            // The bridge's answer, not the event's: the pump writes it in.
+            steers: false,
         },
 
         AgentEvent::UserMessageChunk {
@@ -1995,6 +2095,7 @@ mod tests {
             harness_title: Arc::new(Mutex::new(None)),
             flags: ConvFlags::new(id, false, false),
             turns: Arc::new(Turns::default()),
+            steers: false,
         };
         (conversation, seen)
     }

@@ -5,7 +5,7 @@ kind: feature
 status: draft
 summary: The rail's Agents mode — a row of parallel columns, each a transcript and a composer over one live conversation, tabs that group agents into a column, the bench of agents no column is showing, the sidebar that lists every conversation the window holds, the three-dots menu over a live agent, and the New agent form all three surfaces raise.
 read_when: you are changing the agents screen — its columns, its tabs, what a tab drag means, the bench, the sidebar, a column's composer or footer, or the New agent form
-updated: 2026-11-05
+updated: 2026-11-10
 verified: 2026-11-05
 code_anchors: [crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/agents.rs, crates/kubiq/src/app/agents.rs, crates/kubiq/src/state/new_agent.rs, crates/kubiq/src/app/new_agent.rs, crates/kubiq/src/ui/new_agent.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/tests/conversation.rs, crates/kubiq/src/ui/agents/mod.rs, crates/kubiq/src/ui/agents/sidebar.rs, crates/kubiq/src/ui/agents/column.rs, crates/kubiq/src/state/status.rs, crates/kubiq/src/ui/work.rs, crates/kubiq/src/ui/teams/status.rs, crates/kubiq/tests/agents.rs, crates/kubiq/src/app/mission.rs]
 depends_on: [feat-workbench, tech-ui, feat-chat]
@@ -458,18 +458,19 @@ caret instead, and the draft is stashed, never overwritten.
 `prompt_agent` always has. A turn already running with the draft empty offers Stop, which cancels
 it. A turn already running with something typed offers Enqueue instead of writing into a harness
 mid-turn: the draft is held on the conversation's own `queued` list and the composer clears, the
-same way a send clears it — unless the harness **steers** (`AgentTypeInfo::steers`, native Codex):
-then the button reads *Steer* and the prompt goes out at once, folded into the running turn by the
-bridge's `turn/steer` (`WorkbenchState::steers` is the one answer both read). `AppState::send_or_enqueue` is the one function behind all three — the
+same way a send clears it — unless the run **steers** (`AppState::steers`: the run's
+`ConvUpdate::Started::steers`, or `AgentTypeInfo::steers` — native Claude Code and Codex, and an ACP
+agent advertising `_session/steering`, `D234`): then the button reads *Steer* and the prompt goes out
+at once, folded into the running turn by the bridge. `AppState::send_or_enqueue` is the one function behind all three — the
 button's click and the Enter key both call it — and it is what a queued row's turn ending drains:
 `Message::ConversationUpdate`'s handler pops the front of the queue and sends it as a plain
 `PromptAgent` the instant `apply` leaves the conversation `Idle`. A queued prompt is drawn as its own
 row at the top of the bottom block — above the activity bar, the footer and the composer, because
 what is queued is not part of the turn being written — oldest first, each with a send-now (Send
-ASAP), an edit and a delete. Send ASAP is the one way out of waiting for that flush: `AppState::
-send_queued_message_now` takes the entry back out of the queue and calls `send_prompt` directly, the
-same wire call a live turn's own send uses, instead of holding it for `Run::Idle`; nothing about the
-turn already in flight is touched, and the harness picks the prompt up at its next step. Edit loads
+ASAP), an edit and a delete. Send ASAP is the one way out of waiting for that flush
+(`AppState::send_queued_message_now`): where the run steers it reads *Send now* and calls
+`send_prompt` directly; where it cannot, it reads *Interrupt & send*, moves the entry to the front and
+cancels the turn at the end of the step in flight — [`chat.md`](./chat.md) owns that rule. Edit loads
 the row back into the composer and delete drops it outright; the block draws nothing when the queue
 is empty. Files attached to the turn are a second such block, drawn directly above the field instead
 — it belongs to the turn being written, not to what is waiting — and the chat panel's own document

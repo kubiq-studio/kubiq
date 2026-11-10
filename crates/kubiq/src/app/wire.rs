@@ -2688,6 +2688,9 @@ impl AppState {
                 let next_prompt = (conversation.run == Run::Idle)
                     .then(|| conversation.dequeue_front())
                     .flatten();
+                // An Interrupt & send waiting for the operation in flight: this update may be the
+                // one that settled it, and the cancel goes out now (`arm_interrupt`).
+                let interrupt = conversation.settle_interrupt();
                 refresh_agent_record(open, agent_id);
                 // Whether anything on screen is drawing this conversation: the tab a column has
                 // up, or a chat tab attached to it. A delegate nobody is looking at still folds
@@ -2745,6 +2748,9 @@ impl AppState {
                 }
                 if let Some(queued) = next_prompt {
                     self.send_prompt(agent_id, queued.text);
+                }
+                if interrupt {
+                    self.bus.send(Message::CancelTurn { agent_id });
                 }
             }
 

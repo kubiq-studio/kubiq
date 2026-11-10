@@ -364,6 +364,10 @@ struct Coordinator {
     /// When each agent whose doc prompt was refused may be tried again, and the wait after that —
     /// doubled per refusal, so a broken input is not retried, logged and broadcast every poll.
     doc_backoff: HashMap<AgentId, (Instant, Duration)>,
+    /// Ask answers that open a turn (`D175`) on a conversation whose turn in flight cannot take
+    /// one (`D234`), by agent, with the window that answered — sent as one turn by the run loop
+    /// once that turn ends, dropped if the conversation goes first.
+    held_answers: HashMap<AgentId, (ClientId, Vec<String>)>,
     /// Every question an agent has put to the user and not yet had an answer to. `Arc` because
     /// the MCP listener parks its tool calls on the same table this thread answers into — the two
     /// halves of an ask never meet anywhere else (`D138`, [`crate::ask`]).
@@ -488,6 +492,12 @@ struct PendingConversation {
     /// cleared the moment the fork's own harness names its session, so a relaunch after that
     /// continues the fork rather than forking the source again.
     fork: bool,
+    /// Whether the window holds none of this conversation's transcript, so the next launch's
+    /// replayed history is what draws it — set by a revive (a restart's re-attach, or a fork),
+    /// cleared by the launch that succeeds. Every other relaunch is an unload and a resume in the
+    /// same run, where the window still holds it all and the replay is dropped
+    /// ([`crate::conversation::without_history`]).
+    redraw: bool,
     /// The MCP servers this conversation asked for, from [`Message::StartConversation::mcps`],
     /// carried through to [`ConverseOptions::mcps`] on every launch and relaunch.
     mcps: Vec<String>,
@@ -1191,6 +1201,8 @@ impl Coordinator {
                         harness_title: None,
                         resume: None,
                         fork: false,
+                        // A revive sets it: this row is only what one reads.
+                        redraw: false,
                         // Not part of the persisted row yet: an mcp or skill pick made before a
                         // restart does not survive one, same as `catalogue` above.
                         mcps: Vec::new(),
@@ -1281,6 +1293,7 @@ impl Coordinator {
             conversation_owners: HashMap::new(),
             doc_queue: Default::default(),
             doc_backoff: HashMap::new(),
+            held_answers: HashMap::new(),
             asks,
             armed,
             browser_commands,
@@ -1382,6 +1395,7 @@ impl Coordinator {
             self.adopt_harness_titles();
             self.reap_conversations();
             self.flush_doc_queue();
+            self.flush_held_answers();
             self.flush_mission_feedback();
             self.register_clones();
             self.projects.flush_due(Instant::now());
@@ -3915,7 +3929,7 @@ impl Coordinator {
                 match self.armed.answer(ask_id, &outcome) {
                     crate::armed::Answering::Settled(settled) => {
                         if let Some(text) = crate::armed::prose(&settled) {
-                            self.drive(client, agent_id, |conversation| conversation.prompt(text));
+                            self.answer_as_turn(client, agent_id, text);
                         }
                     }
                     crate::armed::Answering::Waiting { .. } => {}
@@ -3948,7 +3962,7 @@ impl Coordinator {
                     if let crate::armed::Answering::Settled(settled) = self.armed.close(ask_id)
                         && let Some(text) = crate::armed::prose(&settled)
                     {
-                        self.drive(client, agent_id, |conversation| conversation.prompt(text));
+                        self.answer_as_turn(client, agent_id, text);
                     }
                 }
                 Some((owner, _)) => self.host.send(
@@ -4568,6 +4582,8 @@ impl Coordinator {
                 // Nothing has run, so there is no harness session to continue.
                 resume: None,
                 fork: false,
+                // A revive sets it once this start has registered the recipe.
+                redraw: false,
                 mcps,
                 skills,
                 extra_rw,
@@ -4862,6 +4878,18 @@ impl Coordinator {
         // The capture the launch just opened, so the window can say where it is. Nothing else
         // reports it: the flag was set while the conversation had no process to open a file.
         let dump_path = flags.dump_path();
+        // A resume replays the history (an ACP `session/load`, Claude Code's transcript), and only
+        // a revived window is missing it: one that unloaded and resumed in this run still holds
+        // every block, and drawing them again would show the conversation twice. Once drawn, it is
+        // held, so the flag is spent here.
+        let bridge = if pending.redraw {
+            bridge
+        } else {
+            crate::conversation::without_history(bridge)
+        };
+        if let Some(row) = self.pending_conversations.get_mut(&agent_id) {
+            row.redraw = false;
+        }
         let conversation = Conversation::start(
             agent_id,
             bridge,
@@ -5308,7 +5336,9 @@ impl Coordinator {
         };
 
         // Read before `agent_type` moves into the start: only an ACP conversation's user turns are
-        // drawn back from the saved prompts — the native bridges are left as they were.
+        // drawn back from the saved prompts. A native bridge draws its own history or none: Claude
+        // Code's replays its transcript file (`IoBridge::replays_history`), so saved prompts
+        // drawn as well would show every user turn twice.
         let acp = self.agents.speaks_acp(&agent_type);
         // A one-shot harness is not launched by a revive at all — its next prompt is — so whether
         // it loads is only known then; it is left to that launch, as before.
@@ -5394,6 +5424,9 @@ impl Coordinator {
             // id would put both conversations on one thread. A harness whose store *is* the
             // directory ignores it.
             pending.fork = forking;
+            // A revived conversation's window holds no transcript, re-attach or fork: the history
+            // a bridge replays on loading the session is what draws it.
+            pending.redraw = true;
         }
         if forking {
             let sessions = self.sessions();
@@ -6362,6 +6395,53 @@ impl Coordinator {
         };
         let effects = change(&mut self.missions.lock(), &ctx);
         self.apply_effects(Some(client), effects);
+    }
+
+    /// An answered ask's prose, as the turn it opens (`D175`) — now where the conversation can take
+    /// it, held in [`Self::held_answers`] while a turn that cannot be steered is running
+    /// (`D234`): sent into it, the prompt would be refused and the answer lost.
+    fn answer_as_turn(&mut self, client: ClientId, agent_id: AgentId, text: String) {
+        let holds = self
+            .conversations
+            .get(&agent_id)
+            .is_some_and(Conversation::holds_prompts);
+        if holds && self.drives(client, agent_id) {
+            self.held_answers
+                .entry(agent_id)
+                .or_insert_with(|| (client, Vec::new()))
+                .1
+                .push(text);
+            return;
+        }
+        self.drive(client, agent_id, |conversation| conversation.prompt(text));
+    }
+
+    /// The run loop's delivery of [`Self::held_answers`]: each conversation whose turn has ended
+    /// gets its held answers as one turn; one that has gone drops them.
+    fn flush_held_answers(&mut self) {
+        if self.held_answers.is_empty() {
+            return;
+        }
+        let ready: Vec<AgentId> = self
+            .held_answers
+            .keys()
+            .copied()
+            .filter(|agent| {
+                !self
+                    .conversations
+                    .get(agent)
+                    .is_some_and(Conversation::holds_prompts)
+            })
+            .collect();
+        for agent in ready {
+            let Some((client, answers)) = self.held_answers.remove(&agent) else {
+                continue;
+            };
+            if self.conversations.contains_key(&agent) {
+                let text = answers.join("\n\n");
+                self.drive(client, agent, |conversation| conversation.prompt(text));
+            }
+        }
     }
 
     /// The run loop's delivery of mission feedback and guidance (contract §3.4): an agent
@@ -9182,6 +9262,7 @@ mod tests {
                 harness_title: None,
                 resume: None,
                 fork: false,
+                redraw: false,
                 mcps: Vec::new(),
                 skills: Vec::new(),
                 extra_rw: Vec::new(),

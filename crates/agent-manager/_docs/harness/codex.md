@@ -856,6 +856,18 @@ with `thread/resume` from `Provisioned::resume`, and with `thread/fork` when `Pr
 forks by copying the run directory forks nothing here and has to say so. The new thread's id is the
 `SessionStarted` id, which is what a later resume of the fork carries. The first `thread/tokenUsage/updated` after either replays that history and is a baseline, billed nothing.
 
+Neither sends `excludeTurns`, so the response's `thread.turns[].items[]` hold the history (each
+`Turn` has an `itemsView`: `full`, `summary` or `notLoaded`; codex-cli 0.166.0 marks full hydration
+deprecated for paginated threads in favour of `thread/turns/list` + `thread/items/list`, which the
+bridge does not use yet). Kubiq keeps no Codex transcript of its own, so the bridge replays them,
+ahead of `SessionStarted`, as the events the live notifications produce (`Mapper::map_history`):
+each item through the same item mapper as a `started` then a `completed`, and each `userMessage`'s
+`text` inputs as a `UserMessageChunk` (the live path drops that item, because `write_input`
+synthesizes the user turn). Every id is prefixed with its turn's (`<turnId>/<itemId>`), so no two
+history items share a message or call id. The replay ends no turn and bills no usage; images in a
+user turn are not drawn back. A subagent's own thread is not replayed — only the parent's
+`collabAgentToolCall` / `subAgentActivity` card.
+
 **Accounts.** `account/read` → `{ account: { type: "chatgpt", email, planType } | { type: "apiKey" }
 | null, requiresOpenaiAuth }`; `account/rateLimits/read` refuses an API-key or signed-out home with
 `-32600 "codex account authentication required to read rate limits"` (observed).

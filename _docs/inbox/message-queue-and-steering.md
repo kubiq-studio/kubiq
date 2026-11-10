@@ -11,6 +11,10 @@ depends_on: [feat-chat, ref-acp-protocol, tech-agent-manager, tech-transport]
 
 # Problem — a turn in flight can only be queued behind or cancelled
 
+> **Decided as `D234`** ([`../tech/decisions.md`](../tech/decisions.md)): native Claude Code, native
+> Codex and ACP agents advertising `_session/steering` now steer; everything else waits, or
+> interrupts after the step. What follows is the analysis that led there; §1's table is current.
+
 A user watching an agent go the wrong way has two moves in Kubiq: **Stop**, which throws the turn
 away, or **Enqueue**, which waits politely for the wrong turn to finish. There is no third — no way
 to say "keep going, but use the existing helper" and have it reach the model before the next tool
@@ -26,8 +30,8 @@ prompt was held.
 
 | Layer | What it does with a prompt typed mid-turn |
 |---|---|
-| Composer | `AppState::send_or_enqueue` — `run != Working`, or a harness that `steers`, sends; otherwise text enqueues (`AppState::holds_prompts`); `Working` with nothing does nothing, because Stop is a separate control |
-| Queue row | Send now where the harness steers; otherwise **Interrupt & send** — the entry moves to the front and `CancelTurn` goes out, so the turn-end flush sends it. Mission and board prompts go through `AppState::prompt_or_hold`, held the same way |
+| Composer | `AppState::send_or_enqueue` — `run != Working`, or a run that steers (`AppState::steers`: `Started::steers` or `AgentTypeInfo::steers`), sends; otherwise text enqueues (`AppState::holds_prompts`); `Working` with nothing does nothing, because Stop is a separate control |
+| Queue row | Send now where the run steers; otherwise **Interrupt & send** — the entry moves to the front and `Conversation::arm_interrupt` cancels at once or after the tool call in flight settles, so the turn-end flush sends it. Mission and board prompts go through `AppState::prompt_or_hold`, held the same way; the host holds an answered ask's turn (`held_answers`) |
 | `Conversation` | `queued: Vec<QueuedMessage>` with `enqueue` / `dequeue_front` / `remove_queued`, beside `draft` and `attached` for the draft's reason |
 | `AppState::wire` | On every `ConversationUpdate`, once `run == Run::Idle`, `dequeue_front()` → `send_prompt`. One entry per turn end, oldest first |
 | Bus | `Message::PromptAgent { agent_id, text }` — a plain turn. There is no message that means "while you are working" |

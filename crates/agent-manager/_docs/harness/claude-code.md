@@ -623,10 +623,29 @@ against 2.1.259 (`io::jsonl::tests::live_two_turn_structured_session_when_claude
 `agent-manager`): `write_input` (`io/jsonl.rs`) now synthesizes the caller's own turn locally rather
 than mapping an echo that never comes. The same live session emitted no `thinking` content block
 (nothing in this argv skeleton requests extended thinking) and no `ai-title`/title-shaped event of
-any kind — a `{"type":"ai-title",...}` line exists in Claude Code's on-disk *interactive* session
-transcript, but headless `-p` runs write no such transcript at all, and stdout carried nothing like
-it across six turns of live checking. Treat title-on-stdout as unconfirmed, not assumed absent
+any kind — a `{"type":"ai-title",...}` line exists in Claude Code's on-disk session transcript, but
+stdout carried nothing like it across six turns of live checking. Treat title-on-stdout as unconfirmed, not assumed absent
 forever, if a future check finds otherwise.
+
+**A resume redraws nothing on stdout, so the bridge replays the transcript file.** `--resume <id>`
+gives Claude its own session back — it answers in context — but emits no line of the earlier
+conversation, and in `--input-format stream-json` mode not even `system`/`init` until the first
+prompt. When `Provisioned::resume` is set, `Claude::structured_bridge` finds the session's
+`<config dir>/projects/<slug>/<id>.jsonl` through `session_transcripts` (the config dir is the
+launch's `CLAUDE_CONFIG_DIR`, else Claude Code's default) and opens
+`JsonlBridge::with_history`, which queues the history ahead of the reader thread, so
+`IoBridge::replays_history` is true. The file's `user`/`assistant` lines are the stream's own
+shapes, so `io/jsonl.rs`'s `history` maps them through the same block mappers, with these
+differences: `isSidechain`, `isMeta`, `isCompactSummary` and `isVisibleInTranscriptOnly` lines are
+skipped, and so is every type the stream never sends (`attachment`, `queue-operation`, `ai-title`,
+…); a user line Claude wrote itself (`<command-…`, `<local-command-…`, `<task-notification>`) is
+dropped; a plain-string `content` is one text block, `toolUseResult` is read as `tool_use_result`,
+and a user line takes its `uuid` as message id. A `compact_boundary` is `Compacted`. No usage, rate
+limit or turn end is emitted — nothing replayed is billed — and no call is left running: a
+background launch is completed and a call with no result failed. The replay closes with a
+`SessionStarted` for the resumed id, naming the last answer's model; the live `init` that follows
+the first prompt is announced again with what the process really runs. A missing or unreadable file
+replays nothing, with a warning, and the resume goes ahead.
 
 ### Model & reasoning at launch
 
@@ -803,7 +822,9 @@ prompt line goes to the same process.** `reason` is an open set forwarded to the
 `AbortSignal.reason`; tool implementations branch on it, and `interrupt` is the value that means
 "the human pressed stop", which suppresses the error output a generic abort prints. `cancel_queued:
 true` additionally cancels every uuid-stamped message still queued, listing them on the response's
-`cancelled` field; `am` leaves it off, having nothing queued behind the turn it is stopping.
+`cancelled` field; `am` leaves it off. Since the native bridge steers (`IoBridge::steers`: a prompt
+mid-turn is another stdin line), a prompt written into the turn may still be queued behind it — a
+stop leaves it to run.
 *(Verified against the installed 2.1.258 bundle: the request's own Zod schema — `subtype:
 x("interrupt")`, `reason`, `cancel_queued`, described as "Interrupts the currently running
 conversation turn" — the `interrupt` arm of the stdin dispatch that answers `subtype:"success"`,

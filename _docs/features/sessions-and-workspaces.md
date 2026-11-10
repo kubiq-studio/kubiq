@@ -5,8 +5,8 @@ kind: feature
 status: draft
 summary: A session is a named piece of work that owns a folder and outlives the agents inside it; a workspace is one running agent within it, and the two have separate lifecycles.
 read_when: you are changing how sessions are created, attached to, persisted, or how an agent is spawned into one
-updated: 2026-10-12
-verified: 2026-10-12
+updated: 2026-11-07
+verified: 2026-11-07
 code_anchors: [crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/agent-manager/src/session.rs]
 depends_on: [tech-transport]
 review_cycle: monthly
@@ -93,9 +93,7 @@ agent. `D97` is the decision and its costs.
 
 Nothing is kept for a conversation nobody marked: it is retired exactly as before, which is what
 stops the run root growing without bound. The archived transcript beside the metadata is still data
-rather than a resume — the resume is the store in the run directory, not the copy of it — and the
-one thing it is still owed is a redraw for Claude Code's native bridge, which restores its memory
-and replays no transcript. Old records for unmarked conversations are collected after
+rather than a resume — the resume is the store in the run directory, not the copy of it. Old records for unmarked conversations are collected after
 `HostSettings.retain_conversations_days`; a marked one is never collected on a timer, only by an
 explicit delete. The sweep runs once per start on a thread of its own, and an age is the later of
 `finished_at` and `created_at`, both milliseconds.
@@ -110,6 +108,17 @@ waiting on the Restore page. **The user's prompts are written down** to `session
 as they are sent. When an ACP agent could not load its session, or refused the handshake, the host
 replays them into the transcript so the user's side is not lost; an agent that loaded its session
 replays its own history, and a non-ACP harness is never given the file's replay (`D215`).
+
+**A resumed conversation redraws its transcript from the harness's own record.** An ACP agent
+replays it through `session/load`; Claude Code's native bridge reads the session's transcript file
+(located by the library's `Harness::session_transcripts`, never by a path Kubiq names) and Codex's
+takes `thread.turns` from its resume — each ahead of the bridge's `SessionStarted`, which is what
+`IoBridge::replays_history` says. Claude Code's replay draws the conversation's own messages,
+thoughts and tool calls with their results, a compaction as its divider, bills nothing and leaves
+no call running. **Only a revived window draws it** (`PendingConversation::redraw`, set by
+`revive_conversation`): an unload and a resume in the same run relaunch into a window that still
+holds every block, so the launch wraps the bridge in `conversation::without_history`, which drops
+the replayed transcript and lets the rest of the handshake through.
 
 **The row carries every flag that is Kubiq's rather than the harness's**, and persistence is one of
 three. `ConversationRecord` in `crates/kubiq-host/src/conversation_record.rs` holds `persistent`

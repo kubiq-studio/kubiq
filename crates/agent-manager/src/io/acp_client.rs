@@ -95,6 +95,24 @@
 //! the slot would strand the first turn's response with nothing to match, and
 //! its caller would wait for a [`AgentEvent::TurnEnded`] that can never come.
 //!
+//! ### Steering a turn in flight
+//!
+//! ACP v1 has no method that carries a message into a running turn, but
+//! claude-agent-acp and codex-acp ship one as an extension, `_session/steering`
+//! (`{sessionId, prompt}` → `{outcome}`), and advertise it in `initialize` as
+//! `_meta.steering.supported`. Where that is advertised, a prompt arriving
+//! while the slot is occupied goes out as `_session/steering` instead of being
+//! refused, and the bridge [`IoBridge::steers`]. **Read off the advertisement,
+//! never probed**: codex-acp answers an unknown method with a bare `{}`, which
+//! is a JSON-RPC success. `injected` and `startedNewTurn` both mean delivered:
+//! the prompt is drawn as a user chunk and owed one extra
+//! [`AgentEvent::TurnEnded`] when the live turn's response arrives
+//! (`Shared::merged`), so the host's count of prompts and ends still pairs up —
+//! the shape Codex's native `turn/steer` has. Any other outcome is a refusal
+//! and surfaces as an error. A `startedNewTurn` turn has no response of its
+//! own to end it; its agent output reopens the interface's turn with nothing
+//! to close it until the next one ends.
+//!
 //! ### Request/response correlation
 //!
 //! Every outbound request that *does* block (`initialize`, `authenticate`,
@@ -192,7 +210,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
@@ -376,6 +394,13 @@ struct Shared {
     /// (or the id we resumed). Written once, at the end of the handshake.
     session_id: Arc<OnceLock<String>>,
     turn: TurnSlot,
+    /// Prompts steered into the turn in [`Self::turn`], each owed one extra
+    /// [`AgentEvent::TurnEnded`] when that turn's response arrives — see
+    /// §"Steering a turn in flight".
+    merged: AtomicU32,
+    /// Written once, from `initialize`: whether the agent advertised the
+    /// `_session/steering` extension (`_meta.steering.supported`).
+    steering: OnceLock<bool>,
     /// Written once, from `initialize`'s `agentCapabilities`.
     prompt_caps: Arc<OnceLock<PromptCaps>>,
     /// The session's `cwd`, absolute and lexically normalized: the one
@@ -494,6 +519,8 @@ impl AcpBridge {
             next_id: Arc::new(AtomicI64::new(1)),
             session_id: Arc::new(OnceLock::new()),
             turn: Arc::new(Mutex::new(None)),
+            merged: AtomicU32::new(0),
+            steering: OnceLock::new(),
             prompt_caps: Arc::new(OnceLock::new()),
             root,
             tx,
@@ -557,6 +584,9 @@ impl AcpBridge {
             .shared
             .prompt_caps
             .set(prompt_caps(&self.agent_capabilities));
+        // Read off the advertisement and nothing else: codex-acp answers an
+        // unknown method with a bare `{}`, so a probe would read as success.
+        let _ = self.shared.steering.set(advertises_steering(&init));
         let load_session = self
             .agent_capabilities
             .get("loadSession")
@@ -777,6 +807,11 @@ impl IoBridge for AcpBridge {
         Some(self.capabilities.clone())
     }
 
+    /// Where `initialize` advertised `_session/steering` — see §"Steering a turn in flight".
+    fn steers(&self) -> bool {
+        self.shared.steering.get().copied().unwrap_or(false)
+    }
+
     fn next_event_raw(&mut self) -> crate::Result<Option<(AgentEvent, Option<String>)>> {
         match self.events.recv() {
             Ok(Some((ev, raw))) => Ok(Some((ev, raw.map(|line| line.to_string())))),
@@ -978,6 +1013,82 @@ fn auth_method_ids(init: &Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The interface's user block for a prompt that reached the agent, synthesised
+/// because most ACP agents never echo a live prompt back.
+fn emit_prompt_echo(shared: &Shared, content: &[Content]) {
+    for text in content.iter().filter_map(Content::as_text) {
+        if !emit(
+            &shared.tx,
+            AgentEvent::UserMessageChunk {
+                content: Content::text(text),
+                message_id: None,
+            },
+            None,
+        ) {
+            break;
+        }
+    }
+}
+
+/// Carry a prompt into the turn `live` names with `_session/steering`, an
+/// extension claude-agent-acp and codex-acp advertise in `initialize` — see
+/// §"Steering a turn in flight".
+///
+/// `injected` merged it into that turn and `startedNewTurn` opened one after
+/// it; both delivered it, so it is drawn, and owed the one extra `TurnEnded`
+/// the host counts against it. Anything else is a refusal, surfaced as one.
+fn steer(shared: &Shared, session_id: &str, content: &[Content], live: i64) -> crate::Result<()> {
+    let caps = shared.prompt_caps.get().copied().unwrap_or_default();
+    let params = json!({"sessionId": session_id, "prompt": prompt_blocks(content, caps)});
+    let answer = rpc_request(shared, "_session/steering", params, REQUEST_TIMEOUT)?;
+    let outcome = answer.get("outcome").and_then(Value::as_str).unwrap_or("");
+    if !matches!(outcome, "injected" | "startedNewTurn") {
+        anyhow::bail!(
+            "acp agent refused to steer the turn in flight (outcome {outcome:?}) — wait for \
+             `TurnEnded` or cancel it first"
+        );
+    }
+    // Drawn before its end can be paid, so the echo is never a turn behind it.
+    emit_prompt_echo(shared, content);
+    merge_into_live(shared, live);
+    Ok(())
+}
+
+/// Owe the turn `live` names one extra end for a prompt steered into it — or,
+/// when its response already arrived, pay that end now.
+fn merge_into_live(shared: &Shared, live: i64) {
+    let still_live = match shared.turn.lock() {
+        Ok(slot) if *slot == Some(live) => {
+            shared.merged.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+        _ => false,
+    };
+    if !still_live {
+        emit(&shared.tx, merged_turn_end(), None);
+    }
+}
+
+/// The end owed to a prompt steered into a turn that has ended.
+fn merged_turn_end() -> AgentEvent {
+    AgentEvent::TurnEnded {
+        stop_reason: StopReason::EndTurn,
+        error: None,
+    }
+}
+
+/// Whether an `initialize` result advertises the `_session/steering` extension —
+/// `_meta.steering.supported`, on the result itself or under its
+/// `agentCapabilities` (claude-agent-acp and codex-acp).
+fn advertises_steering(init: &Value) -> bool {
+    let flag = |root: Option<&Value>| {
+        root.and_then(|v| v.pointer("/_meta/steering/supported"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    flag(Some(init)) || flag(init.get("agentCapabilities"))
 }
 
 /// Which gated prompt content kinds the agent accepts.
@@ -1400,18 +1511,28 @@ fn write_input(shared: &Shared, input: AgentInput) -> crate::Result<()> {
                 // is one cell: a second prompt would overwrite the first id,
                 // the first response would then match nothing, and the caller
                 // would wait for a `TurnEnded` that can never come. An honest
-                // error beats a lost turn.
+                // error beats a lost turn — unless the agent advertised
+                // `_session/steering`, which carries it into the live turn.
                 if let Some(previous) = *slot {
-                    anyhow::bail!(
-                        "acp runs one turn at a time: the prompt with id {previous} is still in \
-                         flight — wait for `TurnEnded` or cancel it first"
-                    );
+                    if !shared.steering.get().copied().unwrap_or(false) {
+                        anyhow::bail!(
+                            "acp runs one turn at a time: the prompt with id {previous} is still \
+                             in flight — wait for `TurnEnded` or cancel it first"
+                        );
+                    }
+                    Err(previous)
+                } else {
+                    let id = shared.next_id.fetch_add(1, Ordering::SeqCst);
+                    // Recorded *before* the write, so the reader can never see
+                    // the response before the slot names it.
+                    *slot = Some(id);
+                    Ok(id)
                 }
-                let id = shared.next_id.fetch_add(1, Ordering::SeqCst);
-                // Recorded *before* the write, so the reader can never see
-                // the response before the slot names it.
-                *slot = Some(id);
-                id
+            };
+            // Steered outside the slot's lock: the request blocks on its answer.
+            let id = match id {
+                Ok(id) => id,
+                Err(live) => return steer(shared, &session_id, content, live),
             };
             // Owed before the write, so an echo can never outrun its record.
             let sent: Vec<&str> = content.iter().filter_map(Content::as_text).collect();
@@ -1449,18 +1570,7 @@ fn write_input(shared: &Shared, input: AgentInput) -> crate::Result<()> {
             // read as the agent muttering to itself. An agent that *does* echo
             // live (Mistral Vibe replays its own user entry) has that echo
             // dropped against `echo`, recorded above — see [`take_echo`].
-            for text in content.iter().filter_map(Content::as_text) {
-                if !emit(
-                    &shared.tx,
-                    AgentEvent::UserMessageChunk {
-                        content: Content::text(text),
-                        message_id: None,
-                    },
-                    None,
-                ) {
-                    break;
-                }
-            }
+            emit_prompt_echo(shared, content);
             Ok(())
         }
 
@@ -2105,7 +2215,17 @@ fn deliver_response(shared: &Shared, id: &Value, value: &Value, raw: &Arc<str>) 
         if let Some(ev) = turn_spend(shared, value) {
             emit(&shared.tx, ev, None);
         }
-        return emit(&shared.tx, turn_ended(value), Some(Arc::clone(raw)));
+        if !emit(&shared.tx, turn_ended(value), Some(Arc::clone(raw))) {
+            return false;
+        }
+        // Taken after the slot was cleared above, so a steer racing this end
+        // either counted here or saw the turn gone and paid its own.
+        for _ in 0..shared.merged.swap(0, Ordering::SeqCst) {
+            if !emit(&shared.tx, merged_turn_end(), None) {
+                return false;
+            }
+        }
+        return true;
     }
 
     let sender = match shared.pending.lock() {
@@ -3316,6 +3436,8 @@ mod tests {
             next_id: Arc::new(AtomicI64::new(1)),
             session_id: Arc::new(OnceLock::new()),
             turn: Arc::new(Mutex::new(None)),
+            merged: AtomicU32::new(0),
+            steering: OnceLock::new(),
             prompt_caps: Arc::new(OnceLock::new()),
             root: root.to_path_buf(),
             tx,
@@ -5105,6 +5227,99 @@ mod tests {
             "the in-flight turn survives the refusal"
         );
 
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ── steering ───────────────────────────────────────────────────────
+
+    #[test]
+    fn steering_is_read_off_the_initialize_advertisement() {
+        assert!(advertises_steering(&parse(
+            r#"{"protocolVersion":1,"_meta":{"steering":{"supported":true}}}"#
+        )));
+        assert!(advertises_steering(&parse(
+            r#"{"agentCapabilities":{"_meta":{"steering":{"supported":true}}}}"#
+        )));
+        assert!(!advertises_steering(&parse(r#"{"protocolVersion":1}"#)));
+        assert!(!advertises_steering(&parse(
+            r#"{"_meta":{"steering":{"supported":false}}}"#
+        )));
+    }
+
+    /// A prompt sent into a live turn on an agent that steers: one frame,
+    /// `_session/steering`, answered `outcome`; the next request off the queue.
+    fn steer_once(outcome: Value) -> (crate::Result<()>, Vec<Value>, Arc<Shared>, PathBuf) {
+        let root = temp_root("steer");
+        let (shared, written, _events) = test_shared(&root);
+        let _ = shared.steering.set(true);
+        write_input(
+            &shared,
+            AgentInput::Prompt {
+                content: vec![Content::text("one")],
+            },
+        )
+        .unwrap();
+        let _ = frames(&written);
+        let answering = Arc::clone(&shared);
+        let agent = std::thread::spawn(move || {
+            let Ok(Some(frame)) = written.recv_timeout(REQUEST_TIMEOUT) else {
+                return Vec::new();
+            };
+            let response = json!({"jsonrpc":"2.0","id":frame["id"].clone(),"result":outcome});
+            deliver_response(&answering, &frame["id"], &response, &raw_of(&response));
+            vec![frame]
+        });
+        let sent = write_input(
+            &shared,
+            AgentInput::Prompt {
+                content: vec![Content::text("two")],
+            },
+        );
+        (sent, agent.join().unwrap(), shared, root)
+    }
+
+    #[test]
+    fn a_prompt_mid_turn_steers_and_is_owed_a_turn_end() {
+        let (sent, asked, shared, root) = steer_once(json!({"outcome": "injected"}));
+        sent.unwrap();
+        assert_eq!(asked[0]["method"], "_session/steering");
+        assert_eq!(asked[0]["params"]["prompt"][0]["text"], "two");
+        assert_eq!(
+            *shared.turn.lock().unwrap(),
+            Some(1),
+            "the live turn is kept"
+        );
+        assert_eq!(shared.merged.load(Ordering::SeqCst), 1);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// codex-acp answers a method it does not know with `{}` — a success with
+    /// no outcome, which must read as a refusal rather than a delivery.
+    #[test]
+    fn a_steer_without_an_outcome_is_refused() {
+        let (sent, _, shared, root) = steer_once(json!({}));
+        assert!(sent.is_err());
+        assert_eq!(shared.merged.load(Ordering::SeqCst), 0);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_turn_end_pays_every_steered_prompt_its_own() {
+        let root = temp_root("steerend");
+        let (shared, _written, events) = test_shared(&root);
+        *shared.turn.lock().unwrap() = Some(4);
+        shared.merged.store(2, Ordering::SeqCst);
+        let response = parse(r#"{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}"#);
+        assert!(deliver_response(
+            &shared,
+            &json!(4),
+            &response,
+            &raw_of(&response)
+        ));
+        let ends = std::iter::from_fn(|| events.try_recv().ok().flatten())
+            .filter(|(ev, _)| matches!(ev, AgentEvent::TurnEnded { .. }))
+            .count();
+        assert_eq!(ends, 3, "the turn's own end and one per steered prompt");
         std::fs::remove_dir_all(&root).unwrap();
     }
 

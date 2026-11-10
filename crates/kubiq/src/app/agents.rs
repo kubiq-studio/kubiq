@@ -782,7 +782,14 @@ impl AppState {
     /// queue row and every programmatic send read, so none of them puts a second turn on a wire
     /// that runs one at a time — ACP refuses it outright.
     pub fn holds_prompts(&self, conversation: &crate::state::conversation::Conversation) -> bool {
-        conversation.run == Run::Working && !self.workbench.steers(&conversation.harness)
+        conversation.run == Run::Working && !self.steers(conversation)
+    }
+
+    /// Whether a prompt sent mid-turn steers this conversation's turn: what its run said
+    /// (`ConvUpdate::Started::steers` — an ACP agent's `_session/steering`), or else what its
+    /// harness declares (`AgentTypeInfo::steers`) — `D234`.
+    pub fn steers(&self, conversation: &crate::state::conversation::Conversation) -> bool {
+        conversation.steers || self.workbench.steers(&conversation.harness)
     }
 
     /// Send a prompt that did not come from a composer — a mission's, the board's — or hold it on
@@ -819,9 +826,11 @@ impl AppState {
     /// goes straight to [`Self::send_prompt`], and a steering harness folds it into the turn.
     ///
     /// **Where it cannot steer, the row interrupts instead** ("Interrupt & send"): the entry moves
-    /// to the front of the queue and the turn is cancelled, so the turn-end flush sends it the
-    /// moment the cancelled turn closes. Sending it now would be a second turn on a wire that runs
-    /// one at a time, and the message would be lost to the refusal.
+    /// to the front of the queue and the turn is cancelled — **at the end of the operation in
+    /// flight**, not mid-step: the interrupt is armed on the conversation and fired from the wire
+    /// when that tool call settles (`Conversation::arm_interrupt`), or at once where nothing is
+    /// running. The turn-end flush then sends the entry first. Sending it now would be a second
+    /// turn on a wire that runs one at a time, and the message would be lost to the refusal.
     pub fn send_queued_message_now(
         &mut self,
         agent_id: AgentId,
@@ -849,7 +858,10 @@ impl AppState {
             };
             let entry = conversation.queued.remove(ix);
             conversation.queued.insert(0, entry);
-            self.cancel_turn(agent_id, cx);
+            if conversation.arm_interrupt() {
+                self.cancel_turn(agent_id, cx);
+            }
+            cx.notify();
             return;
         }
         let Some(text) = conversation.remove_queued(queued_id) else {

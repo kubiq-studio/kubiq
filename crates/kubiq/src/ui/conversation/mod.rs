@@ -217,6 +217,7 @@ pub fn render(
                 &view,
                 &conversation.queued,
                 interrupts,
+                conversation.interrupt_armed,
                 cx,
             ));
         }
@@ -3698,7 +3699,7 @@ fn composer(
         if can_send {
             // A harness that steers takes the prompt into the turn in flight, so the button sends
             // rather than holds — `send_or_enqueue` reads the same `steers` answer.
-            let steers = app.workbench.steers(&conversation.harness);
+            let steers = app.steers(conversation);
             actions.push(action_button(
                 view.eid("send"),
                 if steers {
@@ -4282,12 +4283,17 @@ fn queue_list(
     view: &ConversationView,
     queued: &[QueuedMessage],
     interrupts: bool,
+    armed: bool,
     cx: &mut Context<AppState>,
 ) -> AnyElement {
     let rows: Vec<AnyElement> = queued
         .iter()
-        .map(|message| {
+        .enumerate()
+        .map(|(ix, message)| {
             let queued_id = message.id;
+            // An armed Interrupt & send is the front entry's: it goes first once the turn closes,
+            // and until the step in flight ends the row says so instead of offering it again.
+            let waiting = armed && ix == 0;
             // One line: newlines and runs of blanks fold to a single space so a multiline prompt
             // cannot break the row; `elided_with` cuts it to the width and carries the whole text
             // as its tooltip.
@@ -4320,6 +4326,15 @@ fn queue_list(
                     )
                     .font_family(theme::MONO_FONT),
                 )
+                .when(waiting, |row| {
+                    row.child(
+                        div()
+                            .flex_none()
+                            .text_size(theme::font(theme::Family::Conversation, theme::Role::Meta))
+                            .text_color(theme::text_muted())
+                            .child("Interrupting after current step…"),
+                    )
+                })
                 .child(icon_button_tip(
                     view.eid(&format!("queued-send-now-{queued_id}")),
                     IconName::ArrowUp,
@@ -4328,7 +4343,7 @@ fn queue_list(
                     } else {
                         "Send now"
                     },
-                    true,
+                    !waiting,
                     cx.listener(move |this, _, _, cx| {
                         this.send_queued_message_now(agent_id, queued_id, cx);
                     }),

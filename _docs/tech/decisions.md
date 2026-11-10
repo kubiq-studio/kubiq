@@ -5,7 +5,7 @@ kind: tech
 status: current
 summary: One entry per structural decision — what was chosen, why, and what it costs — cited as `Dnn` across this library.
 read_when: you are about to argue with a rule, reverse a design choice, or make one a reasonable person might later reverse
-updated: 2026-11-05
+updated: 2026-11-10
 verified: 2026-10-08
 depends_on: [tech-architecture]
 review_cycle: quarterly
@@ -5401,15 +5401,18 @@ be a third path to the same tool with none of the account, skill and MCP provisi
 
 The host writes each user prompt to `sessions/<agent id>/prompts.jsonl` and replays them into the
 transcript when an ACP agent could not load its session or refused the handshake. A harness with a
-wire of its own is never replayed from the file.
+wire of its own is never replayed from the file: native Claude Code and Codex resumes replay the
+harness's own history, as ACP `session/load` does — Claude Code's bridge from its transcript file,
+Codex's from `thread/resume`/`thread/fork`'s `thread.turns` — ahead of the bridge's
+`SessionStarted` (`IoBridge::replays_history`).
 
-**Why:** ACP agents replay their history on `session/load` themselves, so the file is the fallback for
-the cases where they cannot; a native harness restores its own memory, and a second source would
-duplicate turns it shows.
+**Why:** the file is the fallback for the cases where an ACP agent cannot load; a bridge that replays
+history draws every user turn itself, and a second source would duplicate them.
 
 **Cost:** the user's side only, never the agent's answers, so a revived conversation reads as a run
-of questions. An agent that loads a session and is then unloaded and resumed in the same run may show
-a transcript twice (`G427`).
+of questions. A replay is only drawn by a revived window: a relaunch in the same run (an unload and a
+resume) drops the replayed transcript (`conversation::without_history`), since the window still holds
+it.
 
 ### D216 — A conversation whose harness can load a session is kept and expires with retention
 
@@ -5810,6 +5813,40 @@ comments and quoting in a rewritten frontmatter are not kept; a sync reads every
 the list is sent. A file that names no harness runs on the host's default agent, chosen at listing
 time rather than by the file, so that choice is not fingerprinted; nor is which harness folder a
 copy sits in beyond the harness it implies.
+
+### D234 — A prompt mid-turn steers where the run says it can; otherwise it waits, or interrupts after the step
+
+A prompt sent while a turn is running had three fates depending on the path: queued in the window,
+written mid-turn by a queue row's send-now, or refused by the ACP bridge's one-turn slot and lost.
+The decision makes it one rule, keyed on whether **this run** steers:
+
+- **Steering is the bridge's runtime answer, `IoBridge::steers`.** Native Claude Code (`io/jsonl.rs`,
+  another stdin line Claude takes up at its next step) and native Codex (`turn/steer`) always do. An
+  ACP agent does where its `initialize` advertises `_meta.steering.supported`, and the bridge then
+  sends `_session/steering {sessionId, prompt}` instead of refusing (claude-agent-acp, codex-acp).
+  The flag is read, never probed: codex-acp answers an unknown method with a bare `{}`.
+- **It crosses the wire on `ConvUpdate::Started { steers }`** (`serde(default)`), written by the
+  host's pump from the bridge. The static `AgentTypeInfo::steers` cannot know an ACP agent's
+  answer, so the window reads either (`AppState::steers`); the host reads the bridge's directly
+  (`Conversation::steers`).
+- **Every steered prompt is owed one extra `TurnEnded`** when the turn it joined ends — the shape
+  Codex's bridge has for `turn/steer` — so the host's prompted/ended count (`Turns`, `D207`) and the
+  window's echo accounting still pair up.
+- **Where the run cannot steer, nothing is sent mid-turn.** The composer, mission and board prompts
+  queue on the conversation; the host holds an answered ask's turn (`D175`) until the turn ends
+  (`held_answers`); a queue row's **Interrupt & send** moves its entry first and arms a cancel that
+  fires when the main agent's tool call in flight settles (or a question comes up), or at once when
+  nothing is in flight — the turn-end flush then sends the entry.
+
+**Why on `Started` and not `ConversationStarted`:** `ConversationStarted` answers before any
+harness runs, and steering is a fact of the run, re-stated by each launch or resume.
+**Why not cancel at once:** a cancel mid-tool throws away the step's work; waiting for the step to
+settle keeps it.
+
+**Cost:** an ACP `startedNewTurn` turn has no response of its own, so the window reads it as working
+until the next turn ends. A Claude Code that runs a held prompt as a turn of its own rather than
+folding it in ends with a spare `TurnEnded`, read idle for that turn's length. The interrupt's
+boundary is a settled tool call, so a long reply with no tool runs to the turn's end.
 
 ## Related docs
 

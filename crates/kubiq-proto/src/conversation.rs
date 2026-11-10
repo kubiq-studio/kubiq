@@ -442,6 +442,12 @@ pub enum ConvUpdate {
         mode: Option<String>,
         tools: Vec<String>,
         agents: Vec<String>,
+        /// A prompt sent while a turn is running **steers** it on this run — the runtime half of
+        /// `AgentTypeInfo::steers`, which cannot know what an ACP agent advertises only in its
+        /// `initialize` (`D234`). A window holds a prompt for the turn's end only where neither
+        /// says so. Absent from an older host, which reads as `false`.
+        #[serde(default)]
+        steers: bool,
     },
 
     /// Something the user said, as the harness received it. The composer

@@ -68,6 +68,24 @@
 //! [`AgentEvent::UsageUpdate`]; this bridge fills all four, and emits a usage event only once a
 //! window is known for that model — a ratio with an invented denominator is worse than no ratio.
 //!
+//! ## A resume redraws itself from the transcript file
+//!
+//! `--resume` hands Claude its own session back and replays nothing on stdout, so a resumed
+//! conversation would come back live above an empty transcript. [`JsonlBridge::with_history`]
+//! takes the history [`read_history`] read out of the harness's own transcript file and emits it
+//! ahead of anything the process says, closed by a `SessionStarted` of its own — the same shape an
+//! ACP `session/load` has, which is what [`IoBridge::replays_history`] tells a consumer.
+//!
+//! ## A prompt mid-turn steers
+//!
+//! A prompt written while a turn is running is simply another `user` line on stdin: Claude Code
+//! holds it and takes it up at its next step, so this bridge [`IoBridge::steers`]. Claude closes
+//! the turn it was merged into with one `result`, while the host counts a turn per prompt — so,
+//! as Codex's bridge does, each prompt written into a live turn is recorded in [`TurnSlot`] and
+//! owed one extra [`AgentEvent::TurnEnded`] when that turn's `result` arrives. A Claude that runs
+//! the held prompt as a turn of its own afterwards ends it with a `result` of its own; the host
+//! never counts an end past its prompts, so that one is spare rather than wrong.
+//!
 //! ## Logging
 //!
 //! Every raw line, in either direction, is a `trace!`; every mapped event is
@@ -77,6 +95,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -103,6 +122,48 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// one, or denies all of them on a cancel).
 type Pending = Arc<Mutex<HashMap<String, Vec<Value>>>>;
 
+/// Whether a turn is running and how many prompts were written into it — shared between every
+/// writer (which opens a turn or merges into the live one) and the reader (which closes it on a
+/// `result`). See §"A prompt mid-turn steers".
+type TurnSlot = Arc<Mutex<TurnState>>;
+
+#[derive(Debug, Default)]
+struct TurnState {
+    /// A prompt went out and its turn's `result` has not come back.
+    live: bool,
+    /// Prompts written while `live`, each owed one extra `TurnEnded` when the turn ends.
+    merged: u32,
+}
+
+/// Record one prompt leaving: it opens a turn, or merges into the one running.
+fn open_or_merge(turn: &TurnSlot) {
+    if let Ok(mut state) = turn.lock() {
+        if state.live {
+            state.merged += 1;
+        } else {
+            state.live = true;
+        }
+    }
+}
+
+/// The turn has ended: how many merged prompts are owed an end of their own besides it.
+fn close_turn(turn: &TurnSlot) -> u32 {
+    turn.lock()
+        .map(|mut state| {
+            state.live = false;
+            std::mem::take(&mut state.merged)
+        })
+        .unwrap_or(0)
+}
+
+/// The end owed to a prompt merged into a turn that just ended — it ended with that turn.
+fn merged_turn_end() -> AgentEvent {
+    AgentEvent::TurnEnded {
+        stop_reason: StopReason::EndTurn,
+        error: None,
+    }
+}
+
 /// One event, and the stdout line that produced it where there was one.
 ///
 /// A line maps to several events, so the line is shared rather than copied — each event carries a
@@ -127,7 +188,12 @@ pub struct JsonlBridge {
     tx: mpsc::Sender<Option<Framed>>,
     /// Permission asks emitted and not yet answered — see [`Pending`].
     pending: Pending,
+    /// The running turn and the prompts merged into it — see [`TurnSlot`].
+    turn: TurnSlot,
     reader: Option<std::thread::JoinHandle<()>>,
+    /// Whether this bridge opened with a resumed conversation's history — see
+    /// [`Self::with_history`].
+    replays: bool,
 }
 
 /// The detached input side of a [`JsonlBridge`], for a caller pumping events
@@ -136,11 +202,12 @@ pub struct JsonlInput {
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     tx: mpsc::Sender<Option<Framed>>,
     pending: Pending,
+    turn: TurnSlot,
 }
 
 impl AgentInputSink for JsonlInput {
     fn send(&self, input: AgentInput) -> crate::Result<()> {
-        write_input(&self.stdin, &self.tx, &self.pending, input)
+        write_input(&self.stdin, &self.tx, &self.pending, &self.turn, input)
     }
 }
 
@@ -150,7 +217,14 @@ impl JsonlBridge {
     ///
     /// Errors if `child`'s stdin/stdout aren't piped (a programmer error —
     /// [`super::spawn_piped`] always pipes both).
-    pub fn new(mut child: Child) -> crate::Result<Self> {
+    pub fn new(child: Child) -> crate::Result<Self> {
+        Self::with_history(child, None)
+    }
+
+    /// [`Self::new`], opening with `history` — a resumed conversation's earlier messages, as
+    /// [`read_history`] read them — before anything the process itself says. `None` replays
+    /// nothing and is exactly [`Self::new`]; `Some` makes [`IoBridge::replays_history`] true.
+    pub fn with_history(mut child: Child, history: Option<Vec<AgentEvent>>) -> crate::Result<Self> {
         let stdin = child
             .stdin
             .take()
@@ -165,11 +239,20 @@ impl JsonlBridge {
 
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
 
+        // Queued before the reader exists, so nothing the process says can overtake it.
+        let replays = history.is_some();
+        for event in history.into_iter().flatten() {
+            let _ = tx.send(Some((event, None)));
+        }
+
+        let turn: TurnSlot = Arc::default();
         let reader_tx = tx.clone();
         let reader_pending = Arc::clone(&pending);
         let reader_stdin = Arc::clone(&stdin);
-        let reader =
-            std::thread::spawn(move || read_loop(stdout, reader_pending, reader_stdin, reader_tx));
+        let reader_turn = Arc::clone(&turn);
+        let reader = std::thread::spawn(move || {
+            read_loop(stdout, reader_pending, reader_stdin, reader_turn, reader_tx)
+        });
 
         Ok(Self {
             child,
@@ -177,14 +260,16 @@ impl JsonlBridge {
             events: rx,
             tx,
             pending,
+            turn,
             reader: Some(reader),
+            replays,
         })
     }
 }
 
 impl IoBridge for JsonlBridge {
     fn send(&mut self, input: AgentInput) -> crate::Result<()> {
-        write_input(&self.stdin, &self.tx, &self.pending, input)
+        write_input(&self.stdin, &self.tx, &self.pending, &self.turn, input)
     }
 
     fn next_event(&mut self) -> crate::Result<Option<AgentEvent>> {
@@ -208,12 +293,22 @@ impl IoBridge for JsonlBridge {
             stdin: Arc::clone(&self.stdin),
             tx: self.tx.clone(),
             pending: Arc::clone(&self.pending),
+            turn: Arc::clone(&self.turn),
         }))
     }
 
     /// Kill-by-pid over the child this bridge owns; see [`crate::io::ProcessKill`].
     fn killer(&self) -> Option<Arc<dyn crate::io::AgentKill>> {
         Some(Arc::new(crate::io::ProcessKill::new(&self.child)))
+    }
+
+    fn replays_history(&self) -> bool {
+        self.replays
+    }
+
+    /// See §"A prompt mid-turn steers".
+    fn steers(&self) -> bool {
+        true
     }
 }
 
@@ -258,6 +353,7 @@ fn write_input(
     stdin: &Arc<Mutex<Option<ChildStdin>>>,
     tx: &mpsc::Sender<Option<Framed>>,
     pending: &Pending,
+    turn: &TurnSlot,
     input: AgentInput,
 ) -> crate::Result<()> {
     match input {
@@ -272,6 +368,8 @@ fn write_input(
                 "message": { "role": "user", "content": blocks },
             });
             write_line(stdin, &line)?;
+            // Only a line that went out opens or joins a turn.
+            open_or_merge(turn);
             // A persistent, `--input-format stream-json` session never echoes
             // the prompt back on stdout — verified live against a real
             // `claude` process (`tests::live_two_turn_structured_session_
@@ -358,9 +456,10 @@ fn read_loop(
     stdout: ChildStdout,
     pending: Pending,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
+    turn: TurnSlot,
     tx: mpsc::Sender<Option<Framed>>,
 ) {
-    read_stream(stdout, &pending, &stdin, &tx);
+    read_stream(stdout, &pending, &stdin, &turn, &tx);
     // The reader thread is about to end no matter which path above got it
     // here — send the explicit "done" so `next_event` sees real EOF rather
     // than blocking on a channel `write_input`'s own clone keeps open.
@@ -371,6 +470,7 @@ fn read_stream(
     stdout: ChildStdout,
     pending: &Pending,
     stdin: &Arc<Mutex<Option<ChildStdin>>>,
+    turn: &TurnSlot,
     tx: &mpsc::Sender<Option<Framed>>,
 ) {
     let reader = BufReader::new(stdout);
@@ -416,9 +516,17 @@ fn read_stream(
         let raw: Arc<str> = Arc::from(line);
         for ev in mapper.map_event(&value) {
             tracing::debug!(event = ?ev, "claude event");
+            let ends = matches!(ev, AgentEvent::TurnEnded { .. });
             if tx.send(Some((ev, Some(Arc::clone(&raw))))).is_err() {
                 // No one is listening anymore.
                 return;
+            }
+            if ends {
+                for _ in 0..close_turn(turn) {
+                    if tx.send(Some((merged_turn_end(), None))).is_err() {
+                        return;
+                    }
+                }
             }
         }
     }
@@ -1111,6 +1219,147 @@ fn map_rate_limit(value: &Value) -> AgentEvent {
     }
 }
 
+/// A resumed session's history, read from the transcript Claude Code keeps for it (located by
+/// [`crate::harness::Harness::session_transcripts`]) — see [`history`].
+///
+/// `None` when the file cannot be read: the conversation resumes all the same, above an empty
+/// transcript, and a warning says why.
+pub(crate) fn read_history(path: &Path, session_id: &str) -> Option<Vec<AgentEvent>> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Some(history(&text, session_id)),
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "claude transcript unreadable; the resumed conversation redraws nothing"
+            );
+            None
+        }
+    }
+}
+
+/// The text a user line starts with when Claude Code wrote it rather than the user: a slash
+/// command's echo and its output, and a background task's report. Never typed, never drawn.
+const INJECTED: [&str; 3] = ["<command-", "<local-command-", "<task-notification>"];
+
+/// A transcript file's lines as the events the live session drew, closed by a `SessionStarted`
+/// for `session_id` naming the model the last answer came from.
+///
+/// The on-disk lines are the stream's own `user`/`assistant` shapes with bookkeeping around them,
+/// so they go through the same block mappers. What differs is handled here:
+///
+/// - **Only the conversation itself is drawn.** A sidechain (a subagent's own thread), an
+///   `isMeta` line, the compaction summary and anything `isVisibleInTranscriptOnly` are skipped,
+///   and so is every line type the stream never sends (`attachment`, `summary`, `ai-title`, …).
+///   A `compact_boundary` is the same [`AgentEvent::Compacted`] the live stream gives.
+/// - **Nothing is billed.** No usage, no rate limit, no turn end: a replayed message was paid for
+///   when it was said.
+/// - **Every message has its own id.** An assistant message keeps its API id; a user line, which
+///   has none, takes its line `uuid`. A plain-string `content` is read as one text block, and the
+///   file's `toolUseResult` as the stream's `tool_use_result`.
+/// - **Nothing is left running.** A call whose result came back as a background launch is
+///   completed, and one with no result at all — the process went mid-call — failed.
+fn history(text: &str, session_id: &str) -> Vec<AgentEvent> {
+    let mut events = Vec::new();
+    let mut model = None;
+    let mut open: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let Ok(mut value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let skipped = [
+            "isSidechain",
+            "isMeta",
+            "isCompactSummary",
+            "isVisibleInTranscriptOnly",
+        ]
+        .iter()
+        .any(|key| value.get(key).and_then(Value::as_bool) == Some(true));
+        if skipped {
+            continue;
+        }
+        let mapped = match value.get("type").and_then(Value::as_str) {
+            Some("system")
+                if value.get("subtype").and_then(Value::as_str) == Some("compact_boundary") =>
+            {
+                vec![AgentEvent::Compacted]
+            }
+            Some("user") => {
+                as_stream_line(&mut value);
+                map_user(&value)
+                    .into_iter()
+                    .filter(|event| match event {
+                        AgentEvent::UserMessageChunk { content, .. } => content
+                            .as_text()
+                            .is_none_or(|text| !INJECTED.iter().any(|tag| text.starts_with(tag))),
+                        _ => true,
+                    })
+                    .collect()
+            }
+            Some("assistant") => {
+                as_stream_line(&mut value);
+                if let Some(named) = value
+                    .get("message")
+                    .and_then(|m| m.get("model"))
+                    .and_then(Value::as_str)
+                    .filter(|named| *named != "<synthetic>")
+                {
+                    model = Some(named.to_string());
+                }
+                map_content_blocks(&value, false, &origin_of(&value))
+            }
+            _ => Vec::new(),
+        };
+        for mut event in mapped {
+            match &mut event {
+                AgentEvent::ToolCall { call } => open.push(call.id.clone()),
+                AgentEvent::ToolCallUpdate { update } => {
+                    open.retain(|id| *id != update.id);
+                    if update.status == Some(ToolStatus::InProgress) {
+                        update.status = Some(ToolStatus::Completed);
+                    }
+                }
+                _ => {}
+            }
+            events.push(event);
+        }
+    }
+    events.extend(open.into_iter().map(|id| AgentEvent::ToolCallUpdate {
+        update: ToolCallUpdate::finished(id, ToolStatus::Failed),
+    }));
+    events.push(AgentEvent::SessionStarted {
+        session_id: Some(session_id.to_string()),
+        model,
+        mode: None,
+        tools: Vec::new(),
+        agents: Vec::new(),
+    });
+    events
+}
+
+/// A transcript line in the shape the stream sends — see [`history`].
+fn as_stream_line(value: &mut Value) {
+    let uuid = value.get("uuid").cloned();
+    if let Some(result) = value
+        .as_object_mut()
+        .and_then(|line| line.remove("toolUseResult"))
+    {
+        value["tool_use_result"] = result;
+    }
+    let Some(message) = value.get_mut("message").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if !message.contains_key("id")
+        && let Some(uuid) = uuid
+    {
+        message.insert("id".to_string(), uuid);
+    }
+    if let Some(text) = message.get("content").and_then(Value::as_str) {
+        let blocks = json!([{"type": "text", "text": text}]);
+        message.insert("content".to_string(), blocks);
+    }
+}
+
 /// A `user` event: what the harness received from us, and any tool results
 /// carried back on the same turn.
 fn map_user(value: &Value) -> Vec<AgentEvent> {
@@ -1430,6 +1679,20 @@ fn map_control_request(value: &Value) -> Vec<AgentEvent> {
 mod tests {
     use super::*;
 
+    /// A prompt written into a live turn is owed one extra end when that turn closes, and the
+    /// next prompt after it opens a turn of its own rather than merging into a finished one.
+    #[test]
+    fn a_prompt_written_mid_turn_is_owed_a_turn_end() {
+        let turn: TurnSlot = Arc::default();
+        open_or_merge(&turn);
+        open_or_merge(&turn);
+        open_or_merge(&turn);
+        assert_eq!(close_turn(&turn), 2, "two prompts steered into the first");
+        open_or_merge(&turn);
+        assert_eq!(close_turn(&turn), 0, "a fresh turn owes nothing extra");
+        assert_eq!(close_turn(&turn), 0, "a spare result owes nothing");
+    }
+
     fn map(json: &str) -> Vec<AgentEvent> {
         let value: Value = serde_json::from_str(json).unwrap();
         Mapper::default().map_event(&value)
@@ -1463,6 +1726,102 @@ mod tests {
                 "compact_metadata":{"trigger":"auto","pre_tokens":152000}}"#,
         );
         assert_eq!(events, vec![AgentEvent::Compacted]);
+    }
+
+    /// A resumed session's transcript file, in the shape Claude Code writes it: its bookkeeping
+    /// lines, a sidechain, a meta line, a slash command's echo and a compaction among the
+    /// conversation itself.
+    #[test]
+    fn a_transcript_replays_as_the_conversation_and_closes_with_its_session() {
+        let transcript = [
+            r#"{"type":"queue-operation","operation":"enqueue"}"#,
+            r#"{"type":"user","uuid":"u1","isSidechain":false,"message":{"role":"user","content":"read it"}}"#,
+            r#"{"type":"attachment","uuid":"a1","isSidechain":false}"#,
+            r#"{"type":"assistant","uuid":"x1","isSidechain":false,"message":{"id":"msg_1","model":"claude-opus-5","content":[{"type":"thinking","thinking":"look first"}],"usage":{"input_tokens":9000}}}"#,
+            r#"{"type":"assistant","uuid":"x2","isSidechain":false,"message":{"id":"msg_1","model":"claude-opus-5","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/a.rs"}}]}}"#,
+            r#"{"type":"user","uuid":"u2","isSidechain":false,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"fn main() {}"}]},"toolUseResult":{"type":"text"}}"#,
+            r#"{"type":"assistant","uuid":"s1","isSidechain":true,"message":{"id":"msg_s","content":[{"type":"text","text":"a subagent"}]}}"#,
+            r#"{"type":"user","uuid":"m1","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>…"}}"#,
+            r#"{"type":"user","uuid":"c1","message":{"role":"user","content":"<command-name>/compact</command-name>"}}"#,
+            r#"{"type":"system","subtype":"compact_boundary","uuid":"b1","compactMetadata":{"trigger":"manual"}}"#,
+            r#"{"type":"user","uuid":"k1","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued"}}"#,
+            r#"{"type":"assistant","uuid":"x3","isSidechain":false,"message":{"id":"msg_2","model":"claude-sonnet-5","content":[{"type":"text","text":"done"},{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"ls"}}]}}"#,
+            "not json",
+        ]
+        .join("\n");
+
+        let events = history(&transcript, "abc");
+        let [
+            AgentEvent::UserMessageChunk {
+                content: asked,
+                message_id: asked_id,
+            },
+            AgentEvent::AgentThoughtChunk {
+                content: thought,
+                message_id: thought_id,
+                ..
+            },
+            AgentEvent::ToolCall { call },
+            AgentEvent::ToolCallUpdate { update: read },
+            AgentEvent::Compacted,
+            AgentEvent::AgentMessageChunk {
+                content: answer,
+                message_id: answer_id,
+                ..
+            },
+            AgentEvent::ToolCall { call: cut },
+            AgentEvent::ToolCallUpdate { update: unfinished },
+            AgentEvent::SessionStarted {
+                session_id, model, ..
+            },
+        ] = events.as_slice()
+        else {
+            panic!("unexpected replay: {events:#?}");
+        };
+        assert_eq!(asked, &Content::text("read it"));
+        assert_eq!(
+            asked_id.as_deref(),
+            Some("u1"),
+            "a user line takes its uuid"
+        );
+        assert_eq!(thought, &Content::text("look first"));
+        assert_eq!(thought_id.as_deref(), Some("msg_1"));
+        assert_eq!(call.id, "t1");
+        assert_eq!(read.id, "t1");
+        assert_eq!(read.status, Some(ToolStatus::Completed));
+        assert_eq!(answer, &Content::text("done"));
+        assert_eq!(answer_id.as_deref(), Some("msg_2"));
+        assert_eq!(cut.id, "t2");
+        assert_eq!(unfinished.id, "t2");
+        assert_eq!(unfinished.status, Some(ToolStatus::Failed));
+        assert_eq!(session_id.as_deref(), Some("abc"));
+        assert_eq!(model.as_deref(), Some("claude-sonnet-5"));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, AgentEvent::UsageUpdate { .. })),
+            "a replayed message is never billed again"
+        );
+    }
+
+    /// A background launch in the history is over: nothing replayed is left running.
+    #[test]
+    fn a_replayed_background_launch_is_completed() {
+        let transcript = [
+            r#"{"type":"assistant","uuid":"x1","message":{"id":"msg_1","content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"description":"look"}}]}}"#,
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"launched"}]},"toolUseResult":{"status":"async_launched"}}"#,
+        ]
+        .join("\n");
+        let events = history(&transcript, "abc");
+        assert!(matches!(
+            &events[1],
+            AgentEvent::ToolCallUpdate { update } if update.status == Some(ToolStatus::Completed)
+        ));
+        assert_eq!(
+            events.len(),
+            3,
+            "the call, its end and the session: {events:#?}"
+        );
     }
 
     #[test]

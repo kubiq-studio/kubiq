@@ -1025,6 +1025,28 @@ pub trait IoBridge: Send {
     fn acp_capabilities(&self) -> Option<crate::io::AcpCapabilities> {
         None
     }
+
+    /// Whether this bridge opens by replaying a resumed conversation's history: everything it
+    /// emits before its [`AgentEvent::SessionStarted`] was said in an earlier process, not now.
+    ///
+    /// The default is every ACP bridge, whose `session/load` re-emits the whole conversation ahead
+    /// of the handshake's answer. A native bridge that redraws a resume from somewhere else —
+    /// Claude Code's reads the harness's own transcript file — says so by overriding this.
+    fn replays_history(&self) -> bool {
+        self.acp_capabilities().is_some()
+    }
+
+    /// Whether a [`AgentInput::Prompt`] sent while a turn is running **steers** that turn on
+    /// this run — folded into it, or written behind it for the harness to pick up — rather than
+    /// being refused. The runtime half of [`crate::harness::IoSupport::steer`]: an ACP agent says
+    /// so only in its `initialize` answer, which the static declaration cannot know.
+    ///
+    /// A bridge that answers `true` keeps the host's count honest the way Codex's does: each
+    /// prompt merged into a live turn is owed one extra [`AgentEvent::TurnEnded`] when that turn
+    /// ends, so turns prompted and turns ended still pair up.
+    fn steers(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

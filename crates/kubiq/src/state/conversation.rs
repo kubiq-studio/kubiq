@@ -354,6 +354,13 @@ pub struct Conversation {
     pub error: Option<String>,
     /// Whether this harness takes a second turn at all.
     pub accepts_input: bool,
+    /// Whether a prompt sent mid-turn steers the turn on this run, as the host read it off the
+    /// bridge (`ConvUpdate::Started::steers`, `D234`). The static `AgentTypeInfo::steers` is the
+    /// answer until a `Started` says otherwise — `AppState::steers` reads both.
+    pub steers: bool,
+    /// A queue row's **Interrupt & send** is waiting for the operation in flight to finish before
+    /// it cancels the turn — see [`Self::arm_interrupt`].
+    pub interrupt_armed: bool,
     /// What the composer holds, unsent.
     pub draft: String,
     /// Everything the user has sent from the composer, oldest first — kept here and not read back
@@ -531,6 +538,8 @@ impl Conversation {
             open_groups: HashSet::new(),
             touched_thoughts: HashSet::new(),
             panel_open: None,
+            steers: false,
+            interrupt_armed: false,
             queued: Vec::new(),
             next_queued_id: 0,
             attached: Vec::new(),
@@ -897,9 +906,15 @@ impl Conversation {
         }
 
         match update {
-            ConvUpdate::Started { model, mode, .. } => {
+            ConvUpdate::Started {
+                model,
+                mode,
+                steers,
+                ..
+            } => {
                 self.model = model;
                 self.mode = mode;
+                self.steers = steers;
                 // An ACP `session/load` replays the whole history ahead of its handshake and
                 // closes it with this, not a `TurnEnded`: nothing it opened is running. Claude
                 // Code's first echo precedes its `Started` too, but a send of this window accounts
@@ -1130,6 +1145,7 @@ impl Conversation {
 
     /// Forget the turn bookkeeping, because no turn of this run can still end or echo.
     fn forget_turn(&mut self) {
+        self.interrupt_armed = false;
         self.sent_unechoed = 0;
         self.turn_echoed = false;
         self.echo_owed = false;
@@ -1309,6 +1325,58 @@ impl Conversation {
         self.next_queued_id += 1;
         self.queued.push(QueuedMessage { id, text });
         id
+    }
+
+    /// Whether the main agent is in the middle of an operation that an interrupt should let
+    /// finish: a message or thought still being written, or a tool call of its own not yet
+    /// settled. A question waiting on the user is no operation — nothing moves until it is
+    /// answered, so an interrupt does not wait on it.
+    fn operation_in_flight(&self) -> bool {
+        if !self.pending.is_empty() {
+            return false;
+        }
+        self.open.is_some()
+            || self.tools.values().any(|&ix| {
+                matches!(
+                    self.blocks.get(ix),
+                    Some(ConvBlock::Tool { call, .. })
+                        if call.subagent.is_none()
+                            && matches!(call.status, ToolStatus::Pending | ToolStatus::InProgress)
+                )
+            })
+    }
+
+    /// A queue row's **Interrupt & send**, on a turn that cannot be steered: `true` means cancel
+    /// the turn now — nothing is in flight — and `false` that the interrupt is armed and
+    /// [`Self::settle_interrupt`] fires it at the end of the operation in flight. Arming one
+    /// already armed does nothing more.
+    pub fn arm_interrupt(&mut self) -> bool {
+        if self.interrupt_armed {
+            return false;
+        }
+        if self.run != Run::Working || !self.operation_in_flight() {
+            return true;
+        }
+        self.interrupt_armed = true;
+        false
+    }
+
+    /// After each update: whether an armed interrupt is due — the operation it waited for is over
+    /// (a tool call settled, or a question came up). A turn that ended by itself disarms it: the
+    /// queue's turn-end flush sends the entry anyway.
+    pub fn settle_interrupt(&mut self) -> bool {
+        if !self.interrupt_armed {
+            return false;
+        }
+        if self.run != Run::Working {
+            self.interrupt_armed = false;
+            return false;
+        }
+        if self.operation_in_flight() {
+            return false;
+        }
+        self.interrupt_armed = false;
+        true
     }
 
     /// Pop the oldest queued prompt — what a turn ending sends automatically.
@@ -3201,6 +3269,7 @@ mod tests {
                 mode: None,
                 tools: Vec::new(),
                 agents: Vec::new(),
+                steers: false,
             },
         );
         c.apply(3, agent(Some(5_000)));
@@ -3493,6 +3562,7 @@ mod tests {
             mode: None,
             tools: Vec::new(),
             agents: Vec::new(),
+            steers: false,
         }
     }
 
@@ -3516,6 +3586,31 @@ mod tests {
         c.expect_turn();
         c.apply(4, user("the next question"));
         assert_eq!(c.run, Run::Working, "a real next turn still opens");
+    }
+
+    /// Interrupt & send waits for the tool call in flight to settle, fires once, and is not
+    /// re-armed by a second press; with nothing in flight it fires at once.
+    #[test]
+    fn an_armed_interrupt_fires_when_the_tool_in_flight_settles() {
+        let mut c = conversation();
+        c.launched = true;
+        c.expect_turn();
+        c.apply(1, user("go"));
+        c.apply(2, task_call("t1", "Bash", ToolStatus::InProgress));
+        assert!(!c.arm_interrupt(), "a tool is running: armed, not fired");
+        assert!(!c.arm_interrupt(), "a second press adds nothing");
+        assert!(!c.settle_interrupt(), "still running");
+        c.apply(
+            3,
+            ConvUpdate::ToolCallUpdate(ToolCallPatch {
+                id: "t1".to_string(),
+                status: Some(ToolStatus::Completed),
+                ..Default::default()
+            }),
+        );
+        assert!(c.settle_interrupt(), "the tool settled: fire");
+        assert!(!c.settle_interrupt(), "fires once");
+        assert!(c.arm_interrupt(), "nothing in flight now: cancel at once");
     }
 
     /// Codex ends a turn once more for each prompt steered into it. A turn end nobody's send is

@@ -316,8 +316,8 @@ Nothing on the wire changed — no message, no `kubiq-proto` type, no coordinato
 code. The record is a host-side file, and the surfaces that would read it are what comes next.
 
 **What this unblocks and does not deliver.** A conversation's record survives closing its pane,
-which is the precondition for per-session statistics and for resuming a stopped agent — but nothing
-replays it (`G120`), and nothing deletes one either, so the store grows one directory per
+which is the precondition for per-session statistics and for resuming a stopped agent — but a resume
+redraws from the harness's own store in the run directory, not this copy (`D215`), and nothing deletes one either, so the store grows one directory per
 conversation holding prompts, file contents and tool output (`G164`).
 
 ### P2d — The host stops building its own `RunSpec`, and one view draws every conversation — **landed**
@@ -570,7 +570,7 @@ clean. The rendered policy's home path is what the test asserts for both
 Instructions, hooks and isolation on the wire (`G89`); Kubiq's own MCP surface so a hosted agent can
 call back into the window (`G7`, with the library's in-process MCP as the mechanism); agents on
 remote hosts. None block P1 to P7. Resuming a conversation after a restart has its record — P2c
-wrote it — and waits only on the replay that hands it to a fresh harness (`G120`).
+wrote it — and a resumed harness redraws its transcript from its own record (`D215`).
 
 ## Traps
 
