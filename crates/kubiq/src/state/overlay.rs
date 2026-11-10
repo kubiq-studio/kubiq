@@ -130,6 +130,9 @@ pub enum Layer {
     SizeNaming,
     /// The browser tab's custom viewport width question, raised from its `⋯` menu.
     BrowserWidth,
+    /// A browser page's HTTP sign-in question, raised by the page itself — over the width
+    /// question, which only the `⋯` menu raises.
+    BrowserAuth,
     /// The theme editor. Above the settings page because the Appearance section raises it, and
     /// drawn at the window root for the same reason the size prompt is.
     ThemeEditor,

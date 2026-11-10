@@ -1891,6 +1891,8 @@ impl AppState {
             browser_pending: Default::default(),
             browser_more: None,
             browser_width_prompt: None,
+            browser_auth_prompt: None,
+            browser_auth_asks: Vec::new(),
             browser_claim_keyboard: false,
             logs: LogState::default(),
             search: SearchState::new(search_query.clone()),

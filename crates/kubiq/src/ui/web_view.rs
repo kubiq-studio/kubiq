@@ -204,6 +204,14 @@ pub enum BrowserEvent {
         png: Vec<u8>,
         size: (u32, u32),
     },
+    /// The server asked for a username and password (HTTP Basic or Digest), and the page waits
+    /// until [`answer_auth`]. `host` carries a port only when it is not the scheme's default;
+    /// `failed` is the second ask after a wrong answer.
+    Auth {
+        host: String,
+        realm: String,
+        failed: bool,
+    },
 }
 
 static EVENTS: std::sync::Mutex<Vec<(String, BrowserEvent)>> = std::sync::Mutex::new(Vec::new());
@@ -350,7 +358,12 @@ pub fn open_browser(
                     push(&k_ipc, BrowserEvent::NewTab(url.to_string()));
                 }
             });
-        platform::open_with(key, builder, window, cx)
+        platform::open_with(key, builder, window, cx)?;
+        #[cfg(target_os = "macos")]
+        if let Some(view) = platform::view(key) {
+            auth::register(view.read(cx).raw(), key, profile.dir_name());
+        }
+        Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
@@ -648,10 +661,307 @@ pub fn current_url(key: &str, cx: &App) -> Option<String> {
 
 /// Close the one behind `key`. Silent when there is none — a tab may close before it ever had one.
 pub fn close(key: &str) {
+    #[cfg(target_os = "macos")]
+    auth::forget(key);
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     platform::close(key);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = key;
+}
+
+/// Answer the HTTP authentication question tab `key` raised ([`BrowserEvent::Auth`]): a username
+/// and password signs in, `None` lets the page load without them — the server's own 401 page.
+/// Silent when nothing is waiting.
+pub fn answer_auth(key: &str, credentials: Option<(String, String)>) {
+    #[cfg(target_os = "macos")]
+    auth::answer(key, credentials);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (key, credentials);
+}
+
+/// Credentials typed into an address (`https://user:pass@host/`), held for tab `key`'s first
+/// challenge from `host:port`. The address itself is loaded without them, so they never reach the
+/// address field or the history.
+pub fn remember_url_credentials(key: &str, host: &str, port: u16, user: String, pass: String) {
+    #[cfg(target_os = "macos")]
+    auth::remember_url(key, host, port, user, pass);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (key, host, port, user, pass);
+}
+
+// ── HTTP authentication (macOS) ─────────────────────────────────────────
+//
+// `wry`'s `WryNavigationDelegate` does not implement
+// `webView:didReceiveAuthenticationChallenge:completionHandler:`, so WebKit falls back to default
+// handling and a Basic-protected page is only ever its 401. [`auth::install`] adds the method to
+// that class at runtime (once per process, like `quiet_host_input_context`). For a browser tab's
+// webview it answers a password challenge from what it already holds, or parks the completion
+// handler and asks the window through [`BrowserEvent::Auth`]; every other challenge, and every
+// webview that is not a browser tab (a web panel), gets WebKit's default handling unchanged.
+//
+// Credentials live in this thread-local only, keyed by profile, host, port and realm: never on
+// disk, never logged. `ForSession` hands them to WebKit for the life of its network session too,
+// which is memory as well. Windows needs none of this: WebView2 raises its own sign-in dialog.
+
+#[cfg(target_os = "macos")]
+mod auth {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    use block2::{DynBlock, RcBlock};
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyClass, AnyObject, Sel};
+    use objc2_foundation::{
+        NSInteger, NSString, NSURLAuthenticationChallenge, NSURLAuthenticationMethodHTTPBasic,
+        NSURLAuthenticationMethodHTTPDigest, NSURLCredential, NSURLCredentialPersistence,
+    };
+
+    use super::BrowserEvent;
+
+    /// `NSURLSessionAuthChallengeDisposition`'s values.
+    const USE_CREDENTIAL: NSInteger = 0;
+    const DEFAULT_HANDLING: NSInteger = 1;
+    const CANCEL: NSInteger = 2;
+
+    type Handler = DynBlock<dyn Fn(NSInteger, *mut NSURLCredential)>;
+
+    /// What a credential answers for: the tab's profile (a private tab never borrows the common
+    /// one's), and the server's protection space.
+    #[derive(Clone, PartialEq, Eq, Hash)]
+    struct Space {
+        profile: String,
+        host: String,
+        port: i64,
+        realm: String,
+    }
+
+    /// One tab's open question, and every handler waiting on the same space (a page's
+    /// subresources challenge alongside it).
+    struct Waiting {
+        space: Space,
+        handlers: Vec<RcBlock<dyn Fn(NSInteger, *mut NSURLCredential)>>,
+    }
+
+    /// A completion handler WebKit gave out must be called before it is released — a tab closed,
+    /// or the thread-local torn down at quit, would otherwise raise inside a Rust drop.
+    impl Drop for Waiting {
+        fn drop(&mut self) {
+            for handler in self.handlers.drain(..) {
+                handler.call((CANCEL, std::ptr::null_mut()));
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct Auth {
+        /// A browser tab's `WKWebView`, by address: its key and its profile.
+        tabs: HashMap<usize, (String, String)>,
+        saved: HashMap<Space, (String, String)>,
+        /// From an address's userinfo, by tab, host and port — the realm is not known yet.
+        from_url: HashMap<(String, String, i64), (String, String)>,
+        waiting: HashMap<String, Waiting>,
+    }
+
+    thread_local! {
+        static AUTH: RefCell<Auth> = RefCell::new(Auth::default());
+    }
+
+    /// Answer tab `key`'s challenges for this webview from here on.
+    pub(super) fn register(webview: &wry::WebView, key: &str, profile: String) {
+        use wry::WebViewExtMacOS as _;
+        install();
+        let wk = webview.webview();
+        // WebKit reads which optional methods its delegate answers when the delegate is set, and
+        // `wry` set this one before `install` could add the method — the first tab would never be
+        // asked. Setting the same delegate again makes WebKit look afresh.
+        // SAFETY: plain property accessors on the main thread; `wry` keeps the delegate alive.
+        unsafe {
+            let delegate: Option<Retained<AnyObject>> = objc2::msg_send![&*wk, navigationDelegate];
+            let _: () = objc2::msg_send![&*wk, setNavigationDelegate: delegate.as_deref()];
+        }
+        let ptr = Retained::as_ptr(&wk) as usize;
+        AUTH.with_borrow_mut(|auth| {
+            auth.tabs.retain(|_, (tab, _)| tab != key);
+            auth.tabs.insert(ptr, (key.to_string(), profile))
+        });
+    }
+
+    /// Drop tab `key`: its webview, its address credentials, and any question still open (whose
+    /// handlers `Waiting`'s drop cancels, outside the borrow).
+    pub(super) fn forget(key: &str) {
+        let waiting = AUTH.with_borrow_mut(|auth| {
+            auth.tabs.retain(|_, (tab, _)| tab != key);
+            auth.from_url.retain(|(tab, _, _), _| tab != key);
+            auth.waiting.remove(key)
+        });
+        drop(waiting);
+    }
+
+    pub(super) fn remember_url(key: &str, host: &str, port: u16, user: String, pass: String) {
+        AUTH.with_borrow_mut(|auth| {
+            auth.from_url.insert(
+                (key.to_string(), host.to_lowercase(), i64::from(port)),
+                (user, pass),
+            )
+        });
+    }
+
+    pub(super) fn answer(key: &str, credentials: Option<(String, String)>) {
+        let Some(mut waiting) = AUTH.with_borrow_mut(|auth| {
+            let waiting = auth.waiting.remove(key)?;
+            if let Some(credentials) = &credentials {
+                auth.saved
+                    .insert(waiting.space.clone(), credentials.clone());
+            }
+            Some(waiting)
+        }) else {
+            return;
+        };
+        let credential = credentials.map(|(user, pass)| credential(&user, &pass));
+        for handler in waiting.handlers.drain(..) {
+            match &credential {
+                Some(credential) => {
+                    handler.call((USE_CREDENTIAL, Retained::as_ptr(credential).cast_mut()))
+                }
+                None => handler.call((DEFAULT_HANDLING, std::ptr::null_mut())),
+            }
+        }
+    }
+
+    fn credential(user: &str, pass: &str) -> Retained<NSURLCredential> {
+        NSURLCredential::credentialWithUser_password_persistence(
+            &NSString::from_str(user),
+            &NSString::from_str(pass),
+            NSURLCredentialPersistence::ForSession,
+        )
+    }
+
+    enum Next {
+        Default,
+        Answer(String, String),
+        Wait,
+        Ask(String, Space, bool),
+    }
+
+    /// `-webView:didReceiveAuthenticationChallenge:completionHandler:` on `WryNavigationDelegate`.
+    unsafe extern "C-unwind" fn did_receive_challenge(
+        _this: *mut AnyObject,
+        _cmd: Sel,
+        webview: *mut AnyObject,
+        challenge: *mut NSURLAuthenticationChallenge,
+        handler: *mut Handler,
+    ) {
+        // SAFETY: WebKit passes a live challenge and handler, on the main thread.
+        let (challenge, handler) = unsafe { (&*challenge, &*handler) };
+        let space = challenge.protectionSpace();
+        let method = space.authenticationMethod();
+        // SAFETY: Foundation's own constant strings.
+        let password = unsafe {
+            *method == *NSURLAuthenticationMethodHTTPBasic
+                || *method == *NSURLAuthenticationMethodHTTPDigest
+        };
+        let next = if !password || space.isProxy() {
+            Next::Default
+        } else {
+            let host = space.host().to_string().to_lowercase();
+            let port = space.port() as i64;
+            let realm = space.realm().map(|r| r.to_string()).unwrap_or_default();
+            let failed = challenge.previousFailureCount() > 0;
+            AUTH.with_borrow_mut(|auth| {
+                let Some((key, profile)) = auth.tabs.get(&(webview as usize)).cloned() else {
+                    return Next::Default;
+                };
+                let space = Space {
+                    profile,
+                    host,
+                    port,
+                    realm,
+                };
+                let url_slot = (key.clone(), space.host.clone(), port);
+                if failed {
+                    // What was tried is wrong: forget it and ask again.
+                    auth.saved.remove(&space);
+                    auth.from_url.remove(&url_slot);
+                } else if let Some((user, pass)) = auth.saved.get(&space).cloned() {
+                    return Next::Answer(user, pass);
+                } else if let Some(found) = auth.from_url.remove(&url_slot) {
+                    auth.saved.insert(space, found.clone());
+                    return Next::Answer(found.0, found.1);
+                }
+                match auth.waiting.get_mut(&key) {
+                    Some(waiting) if waiting.space == space => {
+                        waiting.handlers.push(handler.copy());
+                        Next::Wait
+                    }
+                    // One question per tab: a second space while one is open loads without.
+                    Some(_) => Next::Default,
+                    None => {
+                        auth.waiting.insert(
+                            key.clone(),
+                            Waiting {
+                                space: space.clone(),
+                                handlers: vec![handler.copy()],
+                            },
+                        );
+                        Next::Ask(key, space, failed)
+                    }
+                }
+            })
+        };
+        match next {
+            Next::Default => handler.call((DEFAULT_HANDLING, std::ptr::null_mut())),
+            Next::Answer(user, pass) => {
+                let credential = credential(&user, &pass);
+                handler.call((USE_CREDENTIAL, Retained::as_ptr(&credential).cast_mut()));
+            }
+            Next::Wait => {}
+            Next::Ask(key, space, failed) => {
+                let default_port = matches!(space.port, 80 | 443);
+                let host = if default_port {
+                    space.host
+                } else {
+                    format!("{}:{}", space.host, space.port)
+                };
+                super::push(
+                    &key,
+                    BrowserEvent::Auth {
+                        host,
+                        realm: space.realm,
+                        failed,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Add [`did_receive_challenge`] to `wry`'s navigation delegate class, once per process.
+    fn install() {
+        static INSTALL: std::sync::Once = std::sync::Once::new();
+        INSTALL.call_once(|| {
+            let Some(class) = AnyClass::get(c"WryNavigationDelegate") else {
+                tracing::warn!(target: "kubiq::browser", "no WryNavigationDelegate class; HTTP authentication is not answered");
+                return;
+            };
+            let imp: unsafe extern "C-unwind" fn(
+                *mut AnyObject,
+                Sel,
+                *mut AnyObject,
+                *mut NSURLAuthenticationChallenge,
+                *mut Handler,
+            ) = did_receive_challenge;
+            // SAFETY: `wry` does not implement this optional `WKNavigationDelegate` method, so this
+            // adds it with the protocol's `v@:@@@?` signature, which `imp` matches.
+            let added = unsafe {
+                objc2::ffi::class_addMethod(
+                    class as *const _ as *mut _,
+                    objc2::sel!(webView:didReceiveAuthenticationChallenge:completionHandler:),
+                    std::mem::transmute::<_, objc2::runtime::Imp>(imp),
+                    c"v@:@@@?".as_ptr(),
+                )
+            };
+            tracing::debug!(target: "kubiq::browser", added = added.as_bool(), "browser answers HTTP authentication");
+        });
+    }
 }
 
 // ── The keyboard, when a page holds it (macOS) ──────────────────────────

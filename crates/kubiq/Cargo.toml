@@ -237,7 +237,17 @@ objc2-app-kit = { version = "0.3", features = [
     "NSView",
     "NSWindow",
 ] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSError", "NSString", "NSURL"] }
+# The `NSURL…` auth trio answers the browser tab's HTTP Basic/Digest challenges (`ui/web_view.rs`).
+objc2-foundation = { version = "0.3", features = [
+    "NSArray",
+    "NSData",
+    "NSError",
+    "NSString",
+    "NSURL",
+    "NSURLAuthenticationChallenge",
+    "NSURLCredential",
+    "NSURLProtectionSpace",
+] }
 # The browser tab's "Copy screenshot": `WKWebView takeSnapshotWithConfiguration:` hands back an
 # `NSImage` through a block. Both are already in the graph behind `lb-wry`; pinned to the versions
 # it resolves so these are the same types as `WryWebView`'s `WKWebView`.

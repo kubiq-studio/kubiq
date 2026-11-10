@@ -900,6 +900,10 @@ pub struct AppState {
     browser_claim_keyboard: bool,
     /// The `⋯` menu's *Custom width…* question, while it is up.
     pub browser_width_prompt: Option<browser::WidthPrompt>,
+    /// A page's HTTP sign-in question, while it is up (`ui::web_view::answer_auth`).
+    pub browser_auth_prompt: Option<browser::AuthPrompt>,
+    /// Sign-in questions from other tabs, raised one at a time once the window has a frame.
+    browser_auth_asks: Vec<browser::AuthAsk>,
 
     /// Whether this window should take a project from the first catalogue that arrives. True only
     /// for the window the binary opened.

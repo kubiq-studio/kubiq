@@ -82,7 +82,7 @@ impl AppState {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         let engine = self.browser_engine();
-        let target = browser::normalize(url, engine);
+        let (target, credentials) = browser::split_credentials(&browser::normalize(url, engine));
         self.ensure_browser_history(project);
         if !new_tab {
             let active = self
@@ -98,6 +98,7 @@ impl AppState {
                     .or_else(|| open.browser.tabs.last().map(|tab| tab.key.clone()))
             };
             if let Some(key) = reuse {
+                remember_credentials(&key, credentials);
                 self.browser_navigate(&key, &target, cx);
                 self.pending_panels
                     .push(PanelEdit::Reveal(PanelKind::Browser(key.clone())));
@@ -111,6 +112,7 @@ impl AppState {
             self.browser_persist(project),
         );
         let key = tab.key.clone();
+        remember_credentials(&key, credentials);
         self.projects.get_mut(&project)?.browser.tabs.push(tab);
         self.pending_panels
             .push(PanelEdit::Open(PanelKind::Browser(key.clone())));
@@ -159,7 +161,16 @@ impl AppState {
 
     /// Destroy a tab's webview and answer every command still waiting on it.
     pub(super) fn release_browser_tab(&mut self, key: &str) {
+        // `close` cancels whatever sign-in the page was still waiting on.
         web_view::close(key);
+        self.browser_auth_asks.retain(|ask| ask.key != key);
+        if self
+            .browser_auth_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.ask.key == key)
+        {
+            self.browser_auth_prompt = None;
+        }
         if self
             .browser_dropdown
             .as_ref()
@@ -239,6 +250,10 @@ impl AppState {
         }
         if std::mem::take(&mut self.browser_claim_keyboard) {
             web_view::claim_keyboard(window, cx);
+        }
+        if self.browser_auth_prompt.is_none() && !self.browser_auth_asks.is_empty() {
+            let ask = self.browser_auth_asks.remove(0);
+            self.ask_browser_auth(ask, window, cx);
         }
         for (project, key) in bare {
             self.build_browser_field(project, &key, window, cx);
@@ -421,6 +436,20 @@ impl AppState {
                 size,
             } => {
                 self.finish_browser_screenshot(token, png, size);
+                return;
+            }
+            // Raised in `settle_browser`, which has the window the fields are built in.
+            BrowserEvent::Auth {
+                host,
+                realm,
+                failed,
+            } => {
+                self.browser_auth_asks.push(AuthAsk {
+                    key: key.to_string(),
+                    host,
+                    realm,
+                    failed,
+                });
                 return;
             }
             BrowserEvent::Screenshot { png, .. } => {
@@ -738,7 +767,8 @@ impl AppState {
 
     /// Go to `input` — an address, or words that become a search — in tab `id`.
     pub fn browser_navigate(&mut self, id: &str, input: &str, cx: &mut Context<Self>) -> bool {
-        let url = browser::normalize(input, self.browser_engine());
+        let (url, credentials) =
+            browser::split_credentials(&browser::normalize(input, self.browser_engine()));
         let Some(tab) = self
             .projects
             .values_mut()
@@ -746,6 +776,7 @@ impl AppState {
         else {
             return false;
         };
+        remember_credentials(id, credentials);
         // Loading from the press, not from the page: `LoadStarted` is the commit, and a slow or
         // refused server never commits — the bar would show nothing at all. A load that never
         // ends (a refused connection) is let go after `LOADING_MAX`. A move within the page
@@ -885,6 +916,14 @@ const PROBE_JS: &str = "JSON.stringify({b: window.navigation ? navigation.canGoB
 /// a JSON string literal.
 /// A character AppKit uses to *name* a non-printing key (arrows U+001C–U+001F, delete U+007F, the
 /// function-key block U+F700–U+F8FF), never text a person typed into an address.
+/// Hand an address's `user:pass@` to the webview for tab `key`'s first challenge. The address
+/// itself was already stripped of it, so it never reaches the field, the tab or the history.
+fn remember_credentials(key: &str, credentials: Option<browser::UrlCredentials>) {
+    if let Some(c) = credentials {
+        web_view::remember_url_credentials(key, &c.host, c.port, c.user, c.pass);
+    }
+}
+
 fn is_key_glyph(c: char) -> bool {
     c.is_control() || ('\u{F700}'..='\u{F8FF}').contains(&c)
 }
@@ -1382,6 +1421,81 @@ impl AppState {
         self.browser_width_prompt = None;
         self.set_browser_viewport(&key, Some(width), cx);
     }
+
+    // ── The HTTP sign-in prompt ─────────────────────────────────────
+
+    /// Raise a page's sign-in question: a username field (focused) and a masked password.
+    fn ask_browser_auth(&mut self, ask: AuthAsk, window: &mut Window, cx: &mut Context<Self>) {
+        let user = cx.new(|cx| InputState::new(window, cx).placeholder("Username"));
+        let pass = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Password")
+                .masked(true)
+        });
+        let on_enter = |this: &mut Self,
+                        _: &Entity<InputState>,
+                        event: &InputEvent,
+                        _: &mut Window,
+                        cx: &mut Context<Self>| {
+            match event {
+                InputEvent::PressEnter { .. } => this.confirm_browser_auth(cx),
+                _ => cx.notify(),
+            }
+        };
+        let subscriptions = vec![
+            cx.subscribe_in(&user, window, on_enter),
+            cx.subscribe_in(&pass, window, on_enter),
+        ];
+        let handle = user.read(cx).focus_handle(cx);
+        window.focus(&handle, cx);
+        self.browser_auth_prompt = Some(AuthPrompt {
+            ask,
+            user,
+            pass,
+            _subscriptions: subscriptions,
+        });
+        cx.notify();
+    }
+
+    /// Cancel: the page loads without credentials, which is the server's own 401 page.
+    pub fn close_browser_auth(&mut self, cx: &mut Context<Self>) {
+        if let Some(prompt) = self.browser_auth_prompt.take() {
+            web_view::answer_auth(&prompt.ask.key, None);
+        }
+        cx.notify();
+    }
+
+    /// Sign in with what was typed. An empty username leaves the prompt up.
+    pub fn confirm_browser_auth(&mut self, cx: &mut Context<Self>) {
+        let Some(prompt) = &self.browser_auth_prompt else {
+            return;
+        };
+        let user = prompt.user.read(cx).value().to_string();
+        if user.is_empty() {
+            return;
+        }
+        let pass = prompt.pass.read(cx).value().to_string();
+        if let Some(prompt) = self.browser_auth_prompt.take() {
+            web_view::answer_auth(&prompt.ask.key, Some((user, pass)));
+        }
+        cx.notify();
+    }
+}
+
+/// A page's sign-in question, as the webview raised it ([`BrowserEvent::Auth`]).
+pub struct AuthAsk {
+    pub key: String,
+    pub host: String,
+    pub realm: String,
+    pub failed: bool,
+}
+
+/// The sign-in prompt, while it is up: the question and its two fields.
+pub struct AuthPrompt {
+    pub ask: AuthAsk,
+    pub user: Entity<InputState>,
+    pub pass: Entity<InputState>,
+    _subscriptions: Vec<Subscription>,
 }
 
 /// The custom viewport width question, while it is up: whose tab, and the field.

@@ -589,6 +589,80 @@ fn dropdown(app: &AppState, key: &str, cx: &mut Context<AppState>) -> AnyElement
         .into_any_element()
 }
 
+/// A page's HTTP sign-in question: `kit::modal` with two fields, `kit::prompt_modal`'s shape
+/// doubled. Cancel loads the page without credentials.
+pub fn auth_prompt(
+    app: &AppState,
+    window: &gpui::Window,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    use crate::ui::kit::{ghost_button, label_block, modal, modal_note, primary_button};
+
+    let Some(prompt) = app.browser_auth_prompt.as_ref() else {
+        return div().into_any_element();
+    };
+    let view = cx.entity();
+    let ask = &prompt.ask;
+    let mut note = format!("{} asks you to sign in", ask.host);
+    if !ask.realm.is_empty() {
+        note.push_str(&format!(" to \u{201c}{}\u{201d}", ask.realm));
+    }
+    note.push_str(". The credentials are kept in memory for this session only, and never saved.");
+    if ask.failed {
+        note = format!("The username or password was not accepted. {note}");
+    }
+    let input = |label: &str, state: &gpui::Entity<gpui_component::input::InputState>| {
+        let focused = state.read(cx).focus_handle(cx).is_focused(window);
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(label_block(label, ""))
+            .child(
+                field(theme::border(), focused)
+                    .h(px(30.))
+                    .px_2()
+                    .child(Input::new(state).appearance(false)),
+            )
+    };
+    let body = div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .pt_3()
+        .child(modal_note(&note))
+        .child(input("Username", &prompt.user))
+        .child(input("Password", &prompt.pass))
+        .into_any_element();
+    let valid = !prompt.user.read(cx).value().is_empty();
+    let sign_in = crate::ui::handler(&view, |this, _, cx| this.confirm_browser_auth(cx));
+    let cancel = crate::ui::handler(&view, |this, _, cx| this.close_browser_auth(cx));
+    let confirm = primary_button("browser-auth-confirm", None, "Sign in", move |_, w, cx| {
+        sign_in(w, cx)
+    });
+    let footer = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(ghost_button(
+            "browser-auth-cancel",
+            None,
+            "Cancel",
+            move |_, w, cx| cancel(w, cx),
+        ))
+        .child(if valid { confirm } else { confirm.opacity(0.5) })
+        .into_any_element();
+    modal(
+        "browser-auth",
+        theme::accent(),
+        "Sign in",
+        body,
+        footer,
+        crate::ui::handler(&view, |this, _, cx| this.close_browser_auth(cx)),
+        window,
+    )
+}
+
 /// The `⋯` menu's *Custom width…* question: `kit::prompt_modal`, the window's one shape for a
 /// question with a field.
 pub fn width_prompt(

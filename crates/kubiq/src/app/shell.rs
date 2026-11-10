@@ -1080,6 +1080,7 @@ impl AppState {
             (Layer::FileDialog, w.file_dialog.is_some()),
             (Layer::SizeNaming, w.size_prompt.is_some()),
             (Layer::BrowserWidth, self.browser_width_prompt.is_some()),
+            (Layer::BrowserAuth, self.browser_auth_prompt.is_some()),
             (Layer::ThemeEditor, w.theme_editor.is_some()),
             (Layer::ThemeNaming, w.theme_prompt.is_some()),
             (Layer::ClosePane, w.confirm_close_pane.is_some()),
@@ -1271,6 +1272,9 @@ impl AppState {
             self.close_theme_prompt(cx);
         } else if self.workbench.theme_editor.is_some() {
             self.close_theme_editor(cx);
+        } else if self.browser_auth_prompt.is_some() {
+            // Painted over the width prompt, so peeled first.
+            self.close_browser_auth(cx);
         } else if self.browser_width_prompt.is_some() {
             self.close_browser_width(cx);
         } else if self.workbench.size_prompt.is_some() {

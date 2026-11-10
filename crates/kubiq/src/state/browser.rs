@@ -334,6 +334,13 @@ pub fn looks_like_url(input: &str) -> bool {
         return input.len() > "https://".len();
     }
     let authority = input.split(['/', '?', '#']).next().unwrap_or("");
+    // `user:pass@host` is an address with credentials, never words to search for; a bare
+    // `john@example.com` is an email, and stays a search.
+    let authority = match authority.rsplit_once('@') {
+        Some((userinfo, host)) if userinfo.contains(':') => host,
+        Some(_) => return false,
+        None => authority,
+    };
     let host = authority.split(':').next().unwrap_or("");
     if host == "localhost" {
         return true;
@@ -370,6 +377,66 @@ pub fn normalize(input: &str, engine: SearchEngine) -> String {
         return format!("{}://{input}", if local { "http" } else { "https" });
     }
     engine.search_url(input)
+}
+
+/// Credentials an `http(s)` address carried in its userinfo, percent-decoded, and the server they
+/// are for.
+#[derive(Clone, PartialEq, Eq)]
+pub struct UrlCredentials {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub pass: String,
+}
+
+/// Never prints the password.
+impl std::fmt::Debug for UrlCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UrlCredentials")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("user", &self.user)
+            .field("pass", &"<redacted>")
+            .finish()
+    }
+}
+
+/// `url` without its `user:pass@`, and what that was. Anything that is not `http(s)` with a
+/// userinfo comes back as it was.
+pub fn split_credentials(url: &str) -> (String, Option<UrlCredentials>) {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return (url.to_string(), None);
+    };
+    let default_port = match scheme.to_ascii_lowercase().as_str() {
+        "http" => 80,
+        "https" => 443,
+        _ => return (url.to_string(), None),
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(end);
+    let Some((userinfo, hostport)) = authority.rsplit_once('@') else {
+        return (url.to_string(), None);
+    };
+    let decode = |s: &str| {
+        percent_encoding::percent_decode_str(s)
+            .decode_utf8_lossy()
+            .into_owned()
+    };
+    let (user, pass) = userinfo.split_once(':').unwrap_or((userinfo, ""));
+    let (host, port) = match hostport.rsplit_once(':') {
+        Some((host, port)) if !port.contains(']') => (host, port.parse().ok()),
+        _ => (hostport, None),
+    };
+    let credentials = UrlCredentials {
+        host: host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_lowercase(),
+        port: port.unwrap_or(default_port),
+        user: decode(user),
+        pass: decode(pass),
+    };
+    (format!("{scheme}://{hostport}{tail}"), Some(credentials))
 }
 
 /// What ⌘K's "Open in internal browser" row should open for a query — the raw text, which
@@ -464,5 +531,37 @@ mod tests {
         assert_eq!(nav_target("browserify"), None);
         assert_eq!(nav_target("deploy.sh"), None);
         assert_eq!(nav_target("http_client.rs"), None);
+    }
+
+    #[test]
+    fn address_credentials() {
+        let ddg = SearchEngine::DuckDuckGo;
+        assert_eq!(
+            normalize("me:pw@example.com/x", ddg),
+            "https://me:pw@example.com/x"
+        );
+        assert!(looks_like_url("me:pw@example.com"));
+        assert!(!looks_like_url("john@example.com"));
+        assert!(normalize("john@example.com", ddg).starts_with("https://duckduckgo.com/?q="));
+        assert_eq!(
+            normalize("https://john@example.com", ddg),
+            "https://john@example.com"
+        );
+        let (url, creds) = split_credentials("https://me:p%40ss@Example.com:8443/a?b#c");
+        assert_eq!(url, "https://Example.com:8443/a?b#c");
+        assert_eq!(
+            creds,
+            Some(UrlCredentials {
+                host: "example.com".into(),
+                port: 8443,
+                user: "me".into(),
+                pass: "p@ss".into(),
+            })
+        );
+        let (url, creds) = split_credentials("http://me@[::1]/");
+        assert_eq!(url, "http://[::1]/");
+        assert_eq!(creds.map(|c| (c.host, c.port)), Some(("::1".into(), 80)));
+        assert_eq!(split_credentials("https://a.b/x@y").1, None);
+        assert_eq!(split_credentials("about:blank").1, None);
     }
 }
