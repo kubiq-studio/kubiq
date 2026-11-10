@@ -467,8 +467,8 @@ pub fn overflow(app: &AppState, cx: &App) -> Vec<MenuEntry> {
 
 /// The titlebar's remote-host chevron: the host manager. Connecting is the button beside the
 /// chevron; a second edition adds its own remote targets as blocks of this menu.
-pub fn remote(app: &AppState, _cx: &App) -> Vec<MenuEntry> {
-    vec![
+pub fn remote(app: &AppState, cx: &App) -> Vec<MenuEntry> {
+    let mut entries = vec![
         MenuEntry::new("Remote hosts")
             .icon(kit::KubiqIcon::HostRemote)
             .visible_when(app.offers(Tier::Experimental))
@@ -476,7 +476,36 @@ pub fn remote(app: &AppState, _cx: &App) -> Vec<MenuEntry> {
         MenuEntry::new("Configure drone mode\u{2026}")
             .icon(IconName::Network)
             .on(|this, _, cx| this.open_drone_modes(cx)),
-    ]
+    ];
+    // Saved ssh profiles open an interactive `ssh` terminal, the same rows the new-pane menu
+    // offers; none saved, no section.
+    if app.project(cx).is_some() {
+        let profiles: Vec<_> = app
+            .workbench
+            .settings
+            .host
+            .ssh_profiles
+            .iter()
+            .filter(|profile| profile.terminal_enabled)
+            .collect();
+        if !profiles.is_empty() {
+            entries.push(MenuEntry::separator());
+            entries.push(MenuEntry::heading("SSH terminal"));
+            entries.extend(profiles.into_iter().map(|profile| {
+                let id = profile.id;
+                let target = if profile.user.trim().is_empty() {
+                    profile.host.clone()
+                } else {
+                    format!("{}@{}", profile.user.trim(), profile.host)
+                };
+                MenuEntry::new(SharedString::from(profile.name.clone()))
+                    .icon(IconName::Network)
+                    .tooltip(SharedString::from(target))
+                    .on(move |this, _, cx| this.open_ssh_terminal(id, cx))
+            }));
+        }
+    }
+    entries
 }
 
 /// The base's five blocks, one per menu, registered the way a second edition registers its own.
