@@ -210,7 +210,15 @@ pub fn render(
         // turn being written, so it sits at the top of the block rather than against the field it
         // used to hang off. Only where there is something waiting.
         if !conversation.queued.is_empty() {
-            bottom = bottom.child(queue_list(id, view.slot, &view, &conversation.queued, cx));
+            let interrupts = app.holds_prompts(conversation);
+            bottom = bottom.child(queue_list(
+                id,
+                view.slot,
+                &view,
+                &conversation.queued,
+                interrupts,
+                cx,
+            ));
         }
         // Above the footer as well as the composer: it opens upward over the transcript, so
         // nothing under it moves when it does. Only where there is a subagent or a plan — a
@@ -4260,9 +4268,11 @@ fn attachment_tags(
         .into_any_element()
 }
 
-/// Prompts typed while a turn was running, oldest first — each with a send-now that puts it on
-/// the wire immediately, an edit that loads it back into the field, and a delete that drops it
-/// outright. Sits at the top of the bottom block, above the activity bar, the footer and the
+/// Prompts typed while a turn was running, oldest first — each with a send-now, an edit that
+/// loads it back into the field, and a delete that drops it outright. Send-now puts the entry on
+/// the wire immediately where the harness steers; where it cannot (`interrupts`), it reads
+/// "Interrupt & send" and stops the turn, the entry going out first when the turn closes
+/// (`AppState::send_queued_message_now`). Sits at the top of the bottom block, above the activity bar, the footer and the
 /// composer: what is waiting to go out is not part of the message being written, so it does not
 /// hang off the field the way an attachment does. Drawn only when there is one: an empty queue
 /// draws nothing, the same discipline every pill in this file follows.
@@ -4271,6 +4281,7 @@ fn queue_list(
     slot: usize,
     view: &ConversationView,
     queued: &[QueuedMessage],
+    interrupts: bool,
     cx: &mut Context<AppState>,
 ) -> AnyElement {
     let rows: Vec<AnyElement> = queued
@@ -4312,7 +4323,11 @@ fn queue_list(
                 .child(icon_button_tip(
                     view.eid(&format!("queued-send-now-{queued_id}")),
                     IconName::ArrowUp,
-                    "Send now",
+                    if interrupts {
+                        "Interrupt & send"
+                    } else {
+                        "Send now"
+                    },
                     true,
                     cx.listener(move |this, _, _, cx| {
                         this.send_queued_message_now(agent_id, queued_id, cx);

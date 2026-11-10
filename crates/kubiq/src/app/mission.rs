@@ -680,7 +680,8 @@ impl AppState {
                         persistent: true,
                     });
                 }
-                self.send_prompt(agent, request.prompt.clone());
+                // A known agent may be mid-turn: held behind it rather than refused by the wire.
+                self.prompt_or_hold(project_id, agent, request.prompt.clone());
                 return Ok(agent);
             }
         }

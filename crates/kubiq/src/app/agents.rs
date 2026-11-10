@@ -514,9 +514,7 @@ impl AppState {
         // so a running turn is no reason to hold it: it goes out now, exactly as an idle send does.
         let working = self
             .teams_conversation(agent_id, cx)
-            .is_some_and(|conversation| {
-                conversation.run == Run::Working && !self.workbench.steers(&conversation.harness)
-            });
+            .is_some_and(|conversation| self.holds_prompts(conversation));
         if !working {
             self.prompt_agent(agent_id, slot, window, cx);
             return;
@@ -779,12 +777,51 @@ impl AppState {
         cx.notify();
     }
 
-    /// Send a queued prompt down the wire right now — a queue row's Send ASAP control.
+    /// Whether a prompt for this conversation has to wait for the turn to end: a turn is running
+    /// and its harness does not steer (`AgentTypeInfo::steers`). The one answer the composer, the
+    /// queue row and every programmatic send read, so none of them puts a second turn on a wire
+    /// that runs one at a time — ACP refuses it outright.
+    pub fn holds_prompts(&self, conversation: &crate::state::conversation::Conversation) -> bool {
+        conversation.run == Run::Working && !self.workbench.steers(&conversation.harness)
+    }
+
+    /// Send a prompt that did not come from a composer — a mission's, the board's — or hold it on
+    /// the conversation's queue while a turn that cannot be steered is running. The turn-end flush
+    /// sends it, through [`Self::send_prompt`] like any queued entry.
+    pub(super) fn prompt_or_hold(
+        &mut self,
+        project_id: ProjectId,
+        agent_id: AgentId,
+        text: String,
+    ) {
+        let holds = self
+            .projects
+            .get(&project_id)
+            .and_then(|open| open.conversations.get(&agent_id))
+            .is_some_and(|conversation| self.holds_prompts(conversation));
+        if !holds {
+            self.send_prompt(agent_id, text);
+            return;
+        }
+        if let Some(conversation) = self
+            .projects
+            .get_mut(&project_id)
+            .and_then(|open| open.conversations.get_mut(&agent_id))
+        {
+            conversation.enqueue(text);
+        }
+    }
+
+    /// A queue row's send-now control.
     ///
-    /// The queue's normal flush waits for [`Run::Idle`], the turn to end. This is the row's way
-    /// of not waiting: the entry comes back out and goes straight to [`Self::send_prompt`], the
-    /// same wire call a live turn uses. Nothing is cancelled — the turn in flight keeps running,
-    /// and the harness picks the prompt up at its next step.
+    /// The queue's normal flush waits for [`Run::Idle`], the turn to end. Where the harness steers,
+    /// or no turn is running, this is the row's way of not waiting: the entry comes back out and
+    /// goes straight to [`Self::send_prompt`], and a steering harness folds it into the turn.
+    ///
+    /// **Where it cannot steer, the row interrupts instead** ("Interrupt & send"): the entry moves
+    /// to the front of the queue and the turn is cancelled, so the turn-end flush sends it the
+    /// moment the cancelled turn closes. Sending it now would be a second turn on a wire that runs
+    /// one at a time, and the message would be lost to the refusal.
     pub fn send_queued_message_now(
         &mut self,
         agent_id: AgentId,
@@ -794,12 +831,28 @@ impl AppState {
         let Some(id) = self.project_of_agent(agent_id, cx) else {
             return;
         };
-        let Some(text) = self
+        let holds = self
+            .projects
+            .get(&id)
+            .and_then(|open| open.conversations.get(&agent_id))
+            .is_some_and(|conversation| self.holds_prompts(conversation));
+        let Some(conversation) = self
             .projects
             .get_mut(&id)
             .and_then(|open| open.conversations.get_mut(&agent_id))
-            .and_then(|conversation| conversation.remove_queued(queued_id))
         else {
+            return;
+        };
+        if holds {
+            let Some(ix) = conversation.queued.iter().position(|m| m.id == queued_id) else {
+                return;
+            };
+            let entry = conversation.queued.remove(ix);
+            conversation.queued.insert(0, entry);
+            self.cancel_turn(agent_id, cx);
+            return;
+        }
+        let Some(text) = conversation.remove_queued(queued_id) else {
             return;
         };
         self.send_prompt(agent_id, text);

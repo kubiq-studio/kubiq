@@ -5,7 +5,7 @@ kind: proposal
 status: proposal
 summary: Everything Kubiq does with a prompt typed during a running turn happens in the interface — `Conversation::queued` holds it and the turn ending sends the front of the queue. No bridge carries a mid-turn message, because the ACP client refuses a second `session/prompt` outright while the Claude Code bridge could write one but is never asked to, leaving the harness's own queue and its `cancel_queued` interrupt unused. This is what each layer does today and what steering would cost.
 read_when: you are changing how a prompt is held or sent while a turn is running, wiring mid-turn injection, or asking why Enqueue waits for the turn to end
-updated: 2026-09-14
+updated: 2026-11-10
 depends_on: [feat-chat, ref-acp-protocol, tech-agent-manager, tech-transport]
 ---
 
@@ -26,7 +26,8 @@ prompt was held.
 
 | Layer | What it does with a prompt typed mid-turn |
 |---|---|
-| Composer | `AppState::send_or_enqueue` — `run != Working` sends; `Working` with text enqueues; `Working` with nothing does nothing, because Stop is a separate control |
+| Composer | `AppState::send_or_enqueue` — `run != Working`, or a harness that `steers`, sends; otherwise text enqueues (`AppState::holds_prompts`); `Working` with nothing does nothing, because Stop is a separate control |
+| Queue row | Send now where the harness steers; otherwise **Interrupt & send** — the entry moves to the front and `CancelTurn` goes out, so the turn-end flush sends it. Mission and board prompts go through `AppState::prompt_or_hold`, held the same way |
 | `Conversation` | `queued: Vec<QueuedMessage>` with `enqueue` / `dequeue_front` / `remove_queued`, beside `draft` and `attached` for the draft's reason |
 | `AppState::wire` | On every `ConversationUpdate`, once `run == Run::Idle`, `dequeue_front()` → `send_prompt`. One entry per turn end, oldest first |
 | Bus | `Message::PromptAgent { agent_id, text }` — a plain turn. There is no message that means "while you are working" |
@@ -59,7 +60,9 @@ harness maintains and `am` currently never puts anything in
 there on the Claude Code path, untested, reachable only because nothing above ever sends into it.
 
 **Codex (`io/codex.rs`)** blocks on `turn/start`'s ack only, to capture `turn.id` for
-`turn/interrupt`. Same shape as ACP for our purposes: one turn named at a time.
+`turn/interrupt` — and a prompt into a running turn now goes out as `turn/steer`, so native Codex
+`steers` (`harness/codex.rs`) and the composer sends rather than enqueues for it. Codex over ACP does
+not.
 
 The asymmetry is the real finding. The queue lives in the interface because **the weakest bridge
 sets the behaviour for all of them**, and no layer between the composer and the bridge carries the

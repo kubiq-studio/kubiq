@@ -1529,7 +1529,12 @@ impl AppState {
         let label = task.key.clone().unwrap_or_else(|| task_id.to_string());
         match self.task_agent_link(task_id, cx) {
             Some((agent, _, Reach::Resumable)) => {
-                self.send_prompt(agent, task_continue_prompt(&label));
+                match self.project_of_agent(agent, cx) {
+                    Some(project) => {
+                        self.prompt_or_hold(project, agent, task_continue_prompt(&label))
+                    }
+                    None => self.send_prompt(agent, task_continue_prompt(&label)),
+                }
                 self.open_task_chat(agent, cx);
             }
             Some((agent, _, Reach::Live)) => self.open_task_chat(agent, cx),
