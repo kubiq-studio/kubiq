@@ -15,8 +15,8 @@
 //!
 //! [`Message::Mcps`]: kubiq_proto::messages::Message::Mcps
 
-use serde_json::Value;
 use kubiq_proto::mcp::{McpInfo, McpToolInfo};
+use serde_json::Value;
 
 /// The slug of the server that answers "what am I, and where am I working".
 pub const PROJECT_INFO: &str = "project-info";
@@ -81,6 +81,11 @@ pub const WORKER_MCPS: &[&str] = &[USE_TASK, PROJECT_INFO, KUBIQ_KB];
 
 /// The servers the mission runner attaches to the planner it launches.
 pub const LAUNCH_PLANNER_MCPS: &[&str] = &[KUBIQ_MISSION, KUBIQ_DOC, MANAGE_KUBIQ_TASKS, KUBIQ_ASK];
+
+/// The servers the mission runner attaches to a coordinator-driven mission's coordinator: the
+/// mission (where `start_task` is), the plan, the tasks and the user.
+pub const LAUNCH_COORDINATOR_MCPS: &[&str] =
+    &[KUBIQ_MISSION, KUBIQ_DOC, MANAGE_KUBIQ_TASKS, KUBIQ_ASK];
 
 /// The servers the mission runner attaches to a worker or a task reviewer it launches.
 pub const LAUNCH_WORKER_MCPS: &[&str] = &[USE_TASK, KUBIQ_ASK, PROJECT_INFO];
@@ -1750,6 +1755,18 @@ pub const SERVERS: &[ServerSpec] = &[
                     "required": ["phase"]
                 }"#,
             },
+            ToolSpec {
+                name: "start_task",
+                description: "Start one of the mission's tasks: Kubiq opens a worker (or a reviewer, for a review task) on it with the task, the plan and the guidance in its prompt. The task must be ready — every prerequisite satisfied, assigned to no person, not started — or, with retry, in progress with its worker stopped. Returns at once; the worker starts in the background, and a coordinator is told when the task finishes.",
+                schema: r#"{
+                    "type": "object",
+                    "properties": {
+                        "task": {"type": "string", "description": "The task, by id or by key."},
+                        "retry": {"type": "boolean", "description": "Restart a task whose worker stopped before finishing, with the feedback since. Default false."}
+                    },
+                    "required": ["task"]
+                }"#,
+            },
         ],
     },
     ServerSpec {
@@ -1895,7 +1912,10 @@ mod tests {
     fn the_retired_plan_server_resolves_to_the_doc_server() {
         assert_eq!(canonical("ubiq-plan"), KUBIQ_DOC);
         assert_eq!(canonical("kubiq-plan"), KUBIQ_DOC);
-        assert!(server("kubiq-plan").is_none(), "no server answers the old slug itself");
+        assert!(
+            server("kubiq-plan").is_none(),
+            "no server answers the old slug itself"
+        );
     }
 
     #[test]

@@ -107,7 +107,8 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
         "new-mission-driver-hint",
         "Driver",
         "Auto starts ready tasks by itself until the next human task or approval. Manual lists \
-         them and waits for you to press \u{25b6}. Changeable at any time.",
+         them and waits for you to press \u{25b6}. Coordinator opens an agent that starts them \
+         and is told as each one finishes. Changeable at any time.",
         div()
             .flex()
             .flex_none()
@@ -127,6 +128,12 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
                 form.driver == Driver::Manual,
                 cx.listener(|this, _, _, cx| this.set_new_mission_driver(Driver::Manual, cx)),
             ))
+            .child(choice_pill(
+                "new-mission-driver-coordinator",
+                "Coordinator",
+                form.driver == Driver::Coordinator,
+                cx.listener(|this, _, _, cx| this.set_new_mission_driver(Driver::Coordinator, cx)),
+            ))
             .into_any_element(),
     ));
 
@@ -140,7 +147,7 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
         &definitions,
         form.planner.as_ref(),
         form.planner_open,
-        true,
+        DefinitionRole::Planner,
     ));
     body = body.child(definition_row(
         &view,
@@ -150,8 +157,22 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
         &definitions,
         form.worker.as_ref(),
         form.worker_open,
-        false,
+        DefinitionRole::Worker,
     ));
+    if form.driver == Driver::Coordinator {
+        body = body.child(definition_row(
+            &view,
+            "new-mission-coordinator",
+            "Coordinator",
+            "The agent opened when the mission starts running: it starts the ready tasks and is \
+             told as each one finishes. Left on the project default, it is the definition tagged \
+             coordinator. An open agent can be assigned instead from the mission's settings.",
+            &definitions,
+            form.coordinator.as_ref(),
+            form.coordinator_open,
+            DefinitionRole::Coordinator,
+        ));
+    }
 
     body = body.child(more(&form, cx));
 
@@ -357,7 +378,16 @@ fn linked_tasks(
     )
 }
 
-/// A planner or worker picker: *Project default*, then the project's agent definitions.
+/// Which of the dialog's definition pickers a row is.
+#[derive(Clone, Copy)]
+enum DefinitionRole {
+    Planner,
+    Worker,
+    Coordinator,
+}
+
+/// A planner, worker or coordinator picker: *Project default*, then the project's agent
+/// definitions.
 #[allow(clippy::too_many_arguments)]
 fn definition_row(
     view: &gpui::Entity<AppState>,
@@ -367,7 +397,7 @@ fn definition_row(
     definitions: &[Option<String>],
     held: Option<&String>,
     open: bool,
-    planner: bool,
+    role: DefinitionRole,
 ) -> AnyElement {
     let labels: Vec<String> = definitions
         .iter()
@@ -391,16 +421,18 @@ fn definition_row(
         .style(PickerStyle::Field)
         .above_modal()
         .open(open)
-        .on_toggle(handler(view, move |this, _window, cx| match planner {
-            true => this.toggle_new_mission_planner_list(cx),
-            false => this.toggle_new_mission_worker_list(cx),
+        .on_toggle(handler(view, move |this, _window, cx| match role {
+            DefinitionRole::Planner => this.toggle_new_mission_planner_list(cx),
+            DefinitionRole::Worker => this.toggle_new_mission_worker_list(cx),
+            DefinitionRole::Coordinator => this.toggle_new_mission_coordinator_list(cx),
         }))
         // Read back by index off the same list that drew it.
         .on_pick(indexed(view, move |this, index, _window, cx| {
             if let Some(picked) = this.new_mission_definitions(cx).get(index).cloned() {
-                match planner {
-                    true => this.pick_new_mission_planner(picked, cx),
-                    false => this.pick_new_mission_worker(picked, cx),
+                match role {
+                    DefinitionRole::Planner => this.pick_new_mission_planner(picked, cx),
+                    DefinitionRole::Worker => this.pick_new_mission_worker(picked, cx),
+                    DefinitionRole::Coordinator => this.pick_new_mission_coordinator(picked, cx),
                 }
             }
         }));

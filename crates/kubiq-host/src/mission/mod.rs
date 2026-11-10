@@ -28,7 +28,7 @@ use kubiq_proto::bus::{ClientId, Voice};
 use kubiq_proto::ids::{ProjectId, SpawnId, TaskId};
 use kubiq_proto::messages::{Message, TaskField};
 use kubiq_proto::mission::{
-    HistoryEntry, HistoryKind, InitialPlan, LaunchOutcome, LaunchRequest, LaunchRole,
+    Driver, HistoryEntry, HistoryKind, InitialPlan, LaunchOutcome, LaunchRequest, LaunchRole,
     MissionAction, MissionField, MissionSnapshot, MissionTaskAction, NewMission, Phase, RunEvent,
     is_human,
 };
@@ -60,6 +60,19 @@ struct PendingLaunch {
     role: LaunchRole,
     retry: bool,
     client: ClientId,
+    /// How many of the coordinator's inbox lines the prompt carries — cleared from the inbox
+    /// once the window says it launched. Zero for every other role.
+    carried: usize,
+}
+
+/// What the coordinator was last told about a mission: each task's status, the ready set and the
+/// phase. The next update is the difference. In memory: after a restart the first pass only
+/// records it, and the `Gone` lines the scan writes are what is told.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Reported {
+    statuses: Vec<(TaskId, Status)>,
+    ready: Vec<TaskId>,
+    phase: Phase,
 }
 
 /// What a caller on the coordinator's thread knows that this module cannot: which agents are
@@ -114,6 +127,11 @@ pub struct Missions {
     /// The agent definition ids each project can see, read once and dropped by
     /// [`Missions::definitions_changed`].
     definitions: HashMap<ProjectId, Vec<String>>,
+    /// The baseline each coordinator-driven mission's next update is read against.
+    reported: HashMap<(ProjectId, TaskId), Reported>,
+    /// Missions whose coordinator inbox may hold lines, with the coordinator to deliver them to —
+    /// what the run loop's flush polls instead of reading every board.
+    inboxes: HashMap<(ProjectId, TaskId), Option<AgentId>>,
 }
 
 /// A cloneable handle to [`Missions`], on [`crate::plan::Handle`]'s own footing.
@@ -154,6 +172,8 @@ impl Missions {
             sent: HashMap::new(),
             scanned: HashSet::new(),
             definitions: HashMap::new(),
+            reported: HashMap::new(),
+            inboxes: HashMap::new(),
         }
     }
 
@@ -236,6 +256,7 @@ impl Missions {
                 mission_in(&tasks, t.id)
             } else if t.level == Some(Level::Mission)
                 && (settings_of(t).planner_agent == Some(agent)
+                    || settings_of(t).coordinator_agent == Some(agent)
                     || runner::mission_reviewer(t, &|a| a == agent).is_some())
             {
                 Some(t.id)
@@ -262,6 +283,7 @@ impl Missions {
             .collect();
         if let Some(parent) = tasks.iter().find(|t| t.id == mission) {
             out.extend(settings_of(parent).planner_agent);
+            out.extend(settings_of(parent).coordinator_agent);
             out.extend(runner::mission_reviewer(parent, &|_| true));
         }
         out
@@ -382,7 +404,9 @@ impl Missions {
     /// Every mission in the project, as snapshots — answered to the asker. The first listing of
     /// a project after a start is the restart scan (contract §3.5): a pass with launches off over
     /// every mission, which writes the `Gone` lines and derives *Worker gone* and *Planner
-    /// stopped*; nothing is launched.
+    /// stopped*; nothing is launched. A coordinator's `Gone` lines go to its inbox, which —
+    /// written before the restart or by the scan — is carried by **Start coordinator** or by the
+    /// next pass that may launch.
     pub fn list(&mut self, project: ProjectId, ctx: &Ctx) -> Effects {
         let mut eff = Effects::default();
         let missions: Vec<TaskId> = self
@@ -394,6 +418,13 @@ impl Missions {
         if self.scanned.insert(project) {
             for mission in &missions {
                 self.run_into(&mut eff, project, *mission, ctx, false);
+            }
+            for parent in self.tasks(project) {
+                let settings = settings_of(&parent);
+                if missions.contains(&parent.id) && !settings.coordinator_inbox.is_empty() {
+                    self.inboxes
+                        .insert((project, parent.id), settings.coordinator_agent);
+                }
             }
         }
         let tasks = self.tasks(project);
@@ -447,6 +478,9 @@ impl Missions {
     ) {
         let definitions = self.definition_ids(project);
         let mut unloaded: HashSet<AgentId> = HashSet::new();
+        // What the coordinator is told beside the pass's diff: a worker that stopped leaves its
+        // task's status as it was, so only its `Gone` line says it.
+        let mut extra = Vec::new();
         for _ in 0..MAX_PASSES {
             let Ok((parent, tasks)) = self.refusal(project, mission) else {
                 return;
@@ -500,7 +534,10 @@ impl Missions {
                         RunEvent::Finished { agent: Some(agent) },
                     ),
                     Step::Gone { task, agent } => {
-                        self.event(eff, project, task, String::new(), RunEvent::Gone { agent })
+                        self.event(eff, project, task, String::new(), RunEvent::Gone { agent });
+                        if let Some(record) = tasks.iter().find(|t| t.id == task) {
+                            extra.push(prompts::gone_line(record));
+                        }
                     }
                     Step::Unload { task, agent } => {
                         if unloaded.insert(agent) {
@@ -517,6 +554,7 @@ impl Missions {
                 break;
             }
         }
+        self.observe(eff, ctx, project, mission, extra, launch);
         self.announce(eff, project, mission, ctx);
     }
 
@@ -685,6 +723,7 @@ impl Missions {
         let id = SpawnId::generate();
         let mcps = match role {
             LaunchRole::Planner => catalogue::LAUNCH_PLANNER_MCPS,
+            LaunchRole::Coordinator => catalogue::LAUNCH_COORDINATOR_MCPS,
             LaunchRole::Worker | LaunchRole::Reviewer => catalogue::LAUNCH_WORKER_MCPS,
             LaunchRole::MissionReviewer => catalogue::LAUNCH_MISSION_REVIEWER_MCPS,
         };
@@ -697,6 +736,7 @@ impl Missions {
                 role,
                 retry,
                 client,
+                carried: 0,
             },
         );
         eff.launches.push((
@@ -712,7 +752,7 @@ impl Missions {
                     mcps: mcps.iter().map(|m| (*m).to_string()).collect(),
                     prompt,
                     resume,
-                    persistent: role == LaunchRole::Planner,
+                    persistent: matches!(role, LaunchRole::Planner | LaunchRole::Coordinator),
                 }),
             },
         ));
@@ -804,6 +844,231 @@ impl Missions {
                 self.launch_planner(eff, ctx, project, parent, prompt, true);
             }
         }
+    }
+
+    // ── the coordinator ─────────────────────────────────────────────────
+
+    fn coordinator_launch_pending(&self, project: ProjectId, mission: TaskId) -> bool {
+        self.launches.values().any(|l| {
+            l.project == project && l.mission == mission && l.role == LaunchRole::Coordinator
+        })
+    }
+
+    /// Open the coordinator — reviving (and re-assigning) the one the mission has, an open agent
+    /// the user assigned included — with its brief and every update in its inbox. A launch in
+    /// flight is not asked again: what it does not carry stays in the inbox for the flush. False
+    /// when no window could be addressed; the inbox keeps its lines either way.
+    fn launch_coordinator(
+        &mut self,
+        eff: &mut Effects,
+        ctx: &Ctx,
+        project: ProjectId,
+        parent: &TaskRecord,
+    ) -> bool {
+        if self.coordinator_launch_pending(project, parent.id) {
+            return true;
+        }
+        let settings = settings_of(parent);
+        self.launch_failed.remove(&(project, parent.id));
+        let prompt = prompts::coordinator_launch(parent, &settings.coordinator_inbox);
+        if !self.launch(
+            eff,
+            ctx,
+            project,
+            parent.id,
+            parent.id,
+            LaunchRole::Coordinator,
+            prompt,
+            settings.coordinator,
+            settings.coordinator_agent,
+            false,
+        ) {
+            return false;
+        }
+        let carried = settings.coordinator_inbox.len();
+        if let Some(pending) = self.launches.values_mut().find(|l| {
+            l.project == project && l.mission == parent.id && l.role == LaunchRole::Coordinator
+        }) {
+            pending.carried = carried;
+        }
+        true
+    }
+
+    /// Drop the coordinator launch in flight, if any: its answer is then an orphan and unloaded.
+    fn drop_coordinator_launch(&mut self, project: ProjectId, mission: TaskId) {
+        self.launches.retain(|_, l| {
+            !(l.project == project && l.mission == mission && l.role == LaunchRole::Coordinator)
+        });
+    }
+
+    /// Append one update to a coordinator-driven mission's inbox, on the parent. Nothing for any
+    /// other driver.
+    fn post(&mut self, eff: &mut Effects, project: ProjectId, mission: TaskId, lines: Vec<String>) {
+        if lines.is_empty() {
+            return;
+        }
+        let update = prompts::coordinator_update(&lines);
+        let mut posted = None;
+        self.edit(eff, project, mission, |t| {
+            let mut settings = settings_of(t);
+            if settings.driver != Driver::Coordinator {
+                return false;
+            }
+            settings.coordinator_inbox.push(update);
+            posted = Some(settings.coordinator_agent);
+            t.mission = Some(settings);
+            true
+        });
+        if let Some(agent) = posted {
+            self.inboxes.insert((project, mission), agent);
+        }
+    }
+
+    /// The last word of every pass over a coordinator-driven mission that is running, paused or
+    /// in review: what changed since the coordinator was last told — a task's status, the ready
+    /// set, the phase — plus `extra` (the pass's own lines), appended to its inbox. With `launch`
+    /// on, a coordinator that is not live is then revived to hear it.
+    fn observe(
+        &mut self,
+        eff: &mut Effects,
+        ctx: &Ctx,
+        project: ProjectId,
+        mission: TaskId,
+        extra: Vec<String>,
+        launch: bool,
+    ) {
+        let Ok((parent, tasks)) = self.refusal(project, mission) else {
+            return;
+        };
+        let phase = Phase::of(parent.status);
+        if settings_of(&parent).driver != Driver::Coordinator
+            || !matches!(phase, Phase::Running | Phase::Paused | Phase::Review)
+        {
+            self.reported.remove(&(project, mission));
+            return;
+        }
+        let (in_flight, failed) = self.sets(project, mission);
+        let definitions = self.definition_ids(project);
+        let world = World {
+            parent: &parent,
+            tasks: &tasks,
+            live: ctx.live,
+            in_flight: &in_flight,
+            launch_failed: &failed,
+            definitions: &definitions,
+        };
+        let now = Reported {
+            statuses: world.children().map(|t| (t.id, t.status)).collect(),
+            ready: runner::ready(&world),
+            phase,
+        };
+        let named = |id: TaskId| tasks.iter().find(|t| t.id == id);
+        let mut lines = extra;
+        if let Some(before) = self.reported.get(&(project, mission)) {
+            for (id, status) in &now.statuses {
+                let Some(was) = before
+                    .statuses
+                    .iter()
+                    .find(|(held, _)| held == id)
+                    .map(|(_, s)| *s)
+                else {
+                    continue;
+                };
+                // A start is the coordinator's own doing, not news.
+                let started =
+                    *status == Status::InProgress && matches!(was, Status::Ready | Status::Backlog);
+                if was != *status
+                    && !started
+                    && let Some(task) = named(*id)
+                {
+                    lines.push(prompts::status_line(task, was, *status));
+                }
+            }
+            let newly: Vec<&TaskRecord> = now
+                .ready
+                .iter()
+                .filter(|id| !before.ready.contains(id))
+                .filter_map(|id| named(*id))
+                .collect();
+            if !newly.is_empty() {
+                lines.push(prompts::ready_line(&newly));
+            }
+            if before.phase != phase {
+                lines.push(prompts::phase_line(phase));
+            }
+        }
+        self.reported.insert((project, mission), now);
+        self.post(eff, project, mission, lines);
+        if launch {
+            self.revive(eff, ctx, project, mission);
+        }
+    }
+
+    /// A coordinator with lines waiting and no live conversation is revived (or a fresh one
+    /// opened) to hear them — unless a launch is in flight or the last one failed, which waits
+    /// for **Start coordinator**.
+    fn revive(&mut self, eff: &mut Effects, ctx: &Ctx, project: ProjectId, mission: TaskId) {
+        let Ok((parent, _)) = self.refusal(project, mission) else {
+            return;
+        };
+        let settings = settings_of(&parent);
+        if settings.driver != Driver::Coordinator
+            || settings.coordinator_inbox.is_empty()
+            || settings.coordinator_agent.is_some_and(|a| (ctx.live)(a))
+            || self.launch_failed.contains(&(project, mission))
+            || self.coordinator_launch_pending(project, mission)
+        {
+            return;
+        }
+        self.launch_coordinator(eff, ctx, project, &parent);
+    }
+
+    /// The missions whose coordinator inbox holds lines, with the coordinator to give them to —
+    /// what the run loop's flush asks after on every turn.
+    pub fn coordinator_inboxes(&self) -> Vec<(ProjectId, TaskId, AgentId)> {
+        self.inboxes
+            .iter()
+            .filter_map(|((project, mission), agent)| agent.map(|a| (*project, *mission, a)))
+            .collect()
+    }
+
+    /// Take a mission's inbox for delivery to `agent` as one turn, clearing it on the parent: the
+    /// lines and the board's replies to broadcast. `None` when there is nothing, or `agent` is not
+    /// the coordinator any more.
+    pub fn take_coordinator_inbox(
+        &mut self,
+        project: ProjectId,
+        mission: TaskId,
+        agent: AgentId,
+    ) -> Option<(String, Vec<Reply>)> {
+        let mut taken = Vec::new();
+        let replies = self.work.lock().edit(project, mission, |t| {
+            let Some(settings) = t.mission.as_mut() else {
+                return false;
+            };
+            if settings.coordinator_agent != Some(agent) || settings.driver != Driver::Coordinator {
+                return false;
+            }
+            taken = std::mem::take(&mut settings.coordinator_inbox);
+            !taken.is_empty()
+        });
+        self.inboxes.remove(&(project, mission));
+        (!taken.is_empty()).then(|| (taken.join("\n\n"), replies))
+    }
+
+    /// A delivery that did not reach the conversation: the lines go back to the front of the
+    /// inbox.
+    pub fn restore_coordinator_inbox(&mut self, project: ProjectId, mission: TaskId, text: String) {
+        let mut agent = None;
+        self.work.lock().edit(project, mission, |t| {
+            let Some(settings) = t.mission.as_mut() else {
+                return false;
+            };
+            settings.coordinator_inbox.insert(0, text);
+            agent = settings.coordinator_agent;
+            true
+        });
+        self.inboxes.insert((project, mission), agent);
     }
 
     /// The one rule (note §Reject): the feedback is a comment on the target, the target goes back
@@ -1027,18 +1292,54 @@ impl Missions {
         };
         let mut eff = Effects::default();
         let mut settings = settings_of(&parent);
+        let before = settings.clone();
         match field {
             MissionField::Driver(driver) => settings.driver = driver,
+            MissionField::Coordinator(coordinator) => settings.coordinator = trimmed(coordinator),
+            MissionField::CoordinatorAgent(agent) => settings.coordinator_agent = agent,
             MissionField::Planner(planner) => settings.planner = trimmed(planner),
             MissionField::Worker(worker) => settings.worker = trimmed(worker),
             MissionField::Parallel(parallel) => settings.parallel = parallel.max(1),
             MissionField::Approve(approve) => settings.approve = approve,
         }
+        let coordinated = settings.driver == Driver::Coordinator;
+        let switched_away = before.driver == Driver::Coordinator && !coordinated;
+        let reassigned = coordinated && settings.coordinator_agent != before.coordinator_agent;
+        // The coordinator being replaced — by another, or by another driver — is stopped, and a
+        // launch in flight for it dropped, so two never coordinate one mission.
+        if switched_away || reassigned {
+            self.drop_coordinator_launch(project, task);
+            if let Some(old) = before.coordinator_agent.filter(|a| {
+                (ctx.live)(*a) && (switched_away || Some(*a) != settings.coordinator_agent)
+            }) {
+                self.stop(&mut eff, project, task, old);
+            }
+        }
+        if switched_away {
+            settings.coordinator_inbox.clear();
+            self.inboxes.remove(&(project, task));
+            self.reported.remove(&(project, task));
+        } else if reassigned {
+            self.inboxes
+                .insert((project, task), settings.coordinator_agent);
+        }
+        // A started mission switched to the coordinator, or handed a newly assigned one, briefs
+        // it at once.
+        let brief = coordinated
+            && matches!(
+                Phase::of(parent.status),
+                Phase::Running | Phase::Paused | Phase::Review
+            )
+            && (before.driver != Driver::Coordinator
+                || (reassigned && settings.coordinator_agent.is_some()));
         self.edit(&mut eff, project, task, |t| {
             let changed = t.mission.as_ref() != Some(&settings);
             t.mission = Some(settings);
             changed
         });
+        if brief && let Ok((parent, _)) = self.refusal(project, task) {
+            self.launch_coordinator(&mut eff, ctx, project, &parent);
+        }
         self.run_into(&mut eff, project, task, ctx, true);
         eff
     }
@@ -1090,11 +1391,28 @@ impl Missions {
                     }
                 }
                 self.set_phase(&mut eff, project, mission, Phase::Running);
-                if let Some(planner) = settings_of(&parent)
-                    .planner_agent
-                    .filter(|a| (ctx.live)(*a))
+                let settings = settings_of(&parent);
+                // A planner the user also assigned as the coordinator stays: it is needed now.
+                if let Some(planner) =
+                    settings
+                        .planner_agent
+                        .filter(|a| (ctx.live)(*a))
+                        .filter(|a| {
+                            settings.driver != Driver::Coordinator
+                                || settings.coordinator_agent != Some(*a)
+                        })
                 {
                     self.stop(&mut eff, project, mission, planner);
+                }
+                if settings.driver == Driver::Coordinator
+                    && let Ok((parent, _)) = self.refusal(project, mission)
+                    && !self.launch_coordinator(&mut eff, ctx, project, &parent)
+                {
+                    eff.replies.push(Reply::Asker(error(
+                        project,
+                        Some(mission),
+                        "no window to start the coordinator in".to_string(),
+                    )));
                 }
             }
             MissionAction::RedoBreakdown { note } => {
@@ -1191,6 +1509,17 @@ impl Missions {
                 let brief = self.brief(project, &parent, &tasks);
                 let prompt = prompts::planner_with_brief(prompts::RESTARTED, &brief);
                 self.launch_planner(&mut eff, ctx, project, &parent, prompt, true);
+            }
+            MissionAction::StartCoordinator => {
+                if settings_of(&parent).driver != Driver::Coordinator {
+                    return refuse("only a mission driven by a coordinator has one");
+                }
+                if !matches!(phase, Phase::Running | Phase::Paused | Phase::Review) {
+                    return refuse("the coordinator is started once the mission is running");
+                }
+                if !self.launch_coordinator(&mut eff, ctx, project, &parent) {
+                    return refuse("no window to start the coordinator in");
+                }
             }
         }
         self.run_into(&mut eff, project, mission, ctx, true);
@@ -1434,6 +1763,109 @@ impl Missions {
         eff
     }
 
+    /// Why `caller` may not `start_task` this task now, as far as the listener's thread can tell
+    /// — every rule except liveness and the window, which the host checks and reports as an
+    /// update. `None` lets the start go.
+    pub fn start_refusal(
+        &mut self,
+        project: ProjectId,
+        mission: TaskId,
+        task: TaskId,
+        caller: Option<AgentId>,
+        retry: bool,
+    ) -> Option<String> {
+        let tasks = self.tasks(project);
+        let parent = tasks.iter().find(|t| t.id == mission)?;
+        let settings = settings_of(parent);
+        if settings.driver != Driver::Coordinator {
+            return Some("this mission is not driven by a coordinator".to_string());
+        }
+        if caller.is_none() || caller != settings.coordinator_agent {
+            return Some("only the mission's coordinator starts its tasks".to_string());
+        }
+        let phase = Phase::of(parent.status);
+        if phase != Phase::Running {
+            return Some(format!(
+                "the mission is {}: tasks are started while it is running",
+                phase.label()
+            ));
+        }
+        let Some(record) = tasks
+            .iter()
+            .find(|t| t.id == task && t.parent == Some(mission))
+        else {
+            return Some("that task is not in this mission".to_string());
+        };
+        let definitions = self.definition_ids(project);
+        if is_human(record, &definitions) {
+            return Some("that task is a person's — the user marks it done".to_string());
+        }
+        if self.sets(project, mission).0.contains(&task) {
+            return Some("that task's agent is starting".to_string());
+        }
+        match (retry, record.status) {
+            (_, Status::Done | Status::Abandoned) => Some("that task is closed".to_string()),
+            (false, Status::Ready) if !record.ready(&tasks) => {
+                Some("that task still waits on a prerequisite".to_string())
+            }
+            (false, Status::Ready) => None,
+            (true, Status::InProgress | Status::Ready) => None,
+            (false, status) => Some(format!(
+                "only a ready task can be started; this one is {} — retry a task whose worker \
+                 stopped with retry true",
+                status.label()
+            )),
+            (true, status) => Some(format!(
+                "only a task in progress whose worker stopped can be retried; this one is {}",
+                status.label()
+            )),
+        }
+    }
+
+    /// `kubiq-mission`'s `start_task`, said into the host's inbox as `MissionTask` — the
+    /// coordinator's ▶. Only a coordinator-driven mission that is running takes it; and because
+    /// the tool answered before the host decided, a refusal is not an error to nobody but an
+    /// update in the coordinator's inbox.
+    pub fn coordinator_task_action(
+        &mut self,
+        project: ProjectId,
+        task: TaskId,
+        action: MissionTaskAction,
+        ctx: &Ctx,
+    ) -> Effects {
+        let tasks = self.tasks(project);
+        let Some(mission) = mission_in(&tasks, task).filter(|m| *m != task) else {
+            return Effects::default();
+        };
+        let (Some(parent), Some(record)) = (
+            tasks.iter().find(|t| t.id == mission),
+            tasks.iter().find(|t| t.id == task),
+        ) else {
+            return Effects::default();
+        };
+        let mut eff = if settings_of(parent).driver != Driver::Coordinator
+            || Phase::of(parent.status) != Phase::Running
+        {
+            Effects::error(
+                project,
+                Some(task),
+                "the mission is not running under a coordinator".to_string(),
+            )
+        } else {
+            self.task_action(project, task, action, ctx)
+        };
+        let mut refusals = Vec::new();
+        eff.replies.retain(|reply| match reply.message() {
+            Message::MissionError { error, .. } => {
+                refusals.push(prompts::refused_line(record, error));
+                false
+            }
+            _ => true,
+        });
+        self.post(&mut eff, project, mission, refusals);
+        eff
+    }
+
     /// `AddGuidance`: appended to `guidance.md` as a person's save, a `Guidance` line on the
     /// parent, and — when asked — a turn for every live worker.
     pub fn guidance(
@@ -1537,7 +1969,7 @@ impl Missions {
                 status(launch.task),
                 Some(Status::Ready | Status::InProgress | Status::InReview | Status::Blocked)
             ),
-            LaunchRole::Planner | LaunchRole::MissionReviewer => {
+            LaunchRole::Planner | LaunchRole::Coordinator | LaunchRole::MissionReviewer => {
                 matches!(
                     status(mission),
                     None | Some(Status::Done | Status::Abandoned)
@@ -1560,6 +1992,24 @@ impl Missions {
                         t.mission = Some(settings);
                         true
                     }),
+                    LaunchRole::Coordinator => {
+                        // The lines its prompt carried are delivered; anything posted since stays.
+                        let mut left = false;
+                        self.edit(&mut eff, project, mission, |t| {
+                            let mut settings = settings_of(t);
+                            settings.coordinator_agent = Some(agent);
+                            let carried = launch.carried.min(settings.coordinator_inbox.len());
+                            settings.coordinator_inbox.drain(..carried);
+                            left = !settings.coordinator_inbox.is_empty();
+                            t.mission = Some(settings);
+                            true
+                        });
+                        if left {
+                            self.inboxes.insert((project, mission), Some(agent));
+                        } else {
+                            self.inboxes.remove(&(project, mission));
+                        }
+                    }
                     LaunchRole::MissionReviewer => {}
                     LaunchRole::Worker | LaunchRole::Reviewer => {
                         self.edit(&mut eff, project, launch.task, |t| {
@@ -1582,6 +2032,14 @@ impl Missions {
                 );
             }
             LaunchOutcome::Failed(reason) => {
+                // A worker the coordinator asked for that could not start is the coordinator's
+                // to hear about; its own failed launch keeps the inbox for Start coordinator.
+                if matches!(launch.role, LaunchRole::Worker | LaunchRole::Reviewer)
+                    && let Some(record) = tasks.iter().find(|t| t.id == launch.task)
+                {
+                    let line = prompts::launch_failed_line(record, &reason);
+                    self.post(&mut eff, project, mission, vec![line]);
+                }
                 self.event(
                     &mut eff,
                     project,
@@ -1720,6 +2178,7 @@ fn describe(comment: &kubiq_proto::work::Comment) -> (HistoryKind, Option<AgentI
     };
     let role = |role: LaunchRole| match role {
         LaunchRole::Planner => "planner",
+        LaunchRole::Coordinator => "coordinator",
         LaunchRole::Worker => "worker",
         LaunchRole::Reviewer => "reviewer",
         LaunchRole::MissionReviewer => "mission reviewer",

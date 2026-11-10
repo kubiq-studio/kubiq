@@ -6,7 +6,7 @@ status: draft
 summary: The complete message set the UI and the coordinator exchange — the pane, session, project, file, git, work, conversation, search, account, quota, agent definition (with its skills and MCP catalog), command-line, host browse, database, browser, remote-tool, connector, repository, task-source, assist, notification, web asset, drone-mode and carrier families, the tunnel channel beside the bus, the framing rules, and the procedure for adding a variant.
 read_when: you are adding, changing or removing a message, or wiring either half to the bus
 updated: 2026-11-10
-verified: 2026-11-05
+verified: 2026-11-10
 code_anchors: [crates/kubiq-proto/src/messages.rs, crates/kubiq-proto/src/ask.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/armed.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/quota.rs, crates/kubiq-host/src/quota.rs, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/ids.rs, crates/kubiq-proto/src/browser.rs, crates/kubiq-proto/src/remote_tools.rs, crates/kubiq-proto/src/tunnel.rs, crates/kubiq-tunnel/src/mux.rs, crates/kubiq-tunnel/src/registry.rs, crates/kubiq-tunnel/src/pin.rs, crates/kubiq-tunnel/src/tls.rs, crates/kubiq-tunnel/src/duplex.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/src/mcp/remote.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/feedback.rs, crates/kubiq-host/src/feedback/mod.rs, crates/kubiq-host/src/feedback/api.rs, crates/kubiq-host/src/feedback/issues.rs, crates/kubiq-host/src/feedback/keychain.rs, crates/kubiq-proto/src/update.rs, crates/kubiq-host/src/updates/mod.rs, crates/kubiq-host/src/updates/feed.rs, crates/kubiq-host/src/updates/apply.rs, crates/kubiq-proto/src/files.rs, crates/kubiq-proto/src/git.rs, crates/kubiq-proto/src/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-proto/src/conversation.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-proto/src/tasksrc.rs, crates/kubiq-proto/src/stats.rs, crates/kubiq-proto/src/assist.rs, crates/kubiq-proto/src/notifications.rs, crates/kubiq-proto/src/tools.rs, crates/kubiq-host/src/notifications/mod.rs, crates/kubiq-host/src/assist/mod.rs, crates/kubiq-host/src/assist/api.rs, crates/kubiq-host/src/assist/providers.rs, crates/kubiq-host/src/assist/subject.rs, crates/kubiq-host/src/assist/stub.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-proto/src/mcp.rs, crates/kubiq-proto/src/catalog.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-proto/src/mission.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/drone_modes.rs]
 depends_on: [tech-architecture]
 review_cycle: monthly
@@ -1489,25 +1489,30 @@ only whoever asked.
 parent in `backlog`, promotes it, writes the brief, saves the plan and asks the asker's window to
 launch the planner.
 
-**`MissionSettings`** holds `driver` (`Auto` or `Manual`), `planner` and `worker` (agent definition
-ids, `None` is the project default), `parallel` (at least one), `approve` (the default for new
-subtasks) and the planner's agent id for a resume. A mission parent with no settings reads as
+**`MissionSettings`** holds `driver` (`Auto`, `Manual` or `Coordinator`), `planner`, `worker` and
+`coordinator` (agent definition ids, `None` is the project default), `parallel` (at least one),
+`approve` (the default for new subtasks), the planner's agent id for a resume, the coordinator's
+(`coordinator_agent`, launched or assigned) and `coordinator_inbox`, the updates it has not been given
+(`D235`). `MissionField` sets each, `CoordinatorAgent` assigning an open agent — refused with
+`MissionError` unless it was started with `kubiq-mission` and `manage-kubiq-tasks` — and a
+replaced coordinator, or one whose driver is switched away, is stopped. A mission parent with no settings reads as
 `MissionSettings::legacy()`: `Manual`, so a mission written before the runner never launches
 anything by itself. `TaskRecord` carries `approve`, `review_of`, `worker` (the agent the runner last
 launched on it, host-written) and `auto_fails` beside it.
 
 **`MissionAction`** is `ApprovePlan`, `StartMission`, `RedoBreakdown { note }`, `Pause`, `Resume`,
-`Replan { note }`, `RunAgentReview`, `RejectMission { feedback }`, `Complete`, `Abandon` and
-`ResumePlanner`; each is refused with a sentence outside the phase it belongs to, and `ApprovePlan`
+`Replan { note }`, `RunAgentReview`, `RejectMission { feedback }`, `Complete`, `Abandon`,
+`ResumePlanner` and `StartCoordinator`; each is refused with a sentence outside the phase it belongs to, and `ApprovePlan`
 is refused for an empty plan. **`MissionTaskAction`** is `Start`, `Confirm`, `Reject { feedback }`,
 `Done`, `Fail { feedback }`, `Retry` and `AddReview { human }`. A **drag of the parent card to another
 column is refused** (`MoveTask`): the phase moves only through `MissionControl`.
 
 **The host relays a launch; it never starts a conversation.** Only a window can, and the window
 mints the `AgentId`, so the runner posts `MissionLaunch` to **one** client (the one that created or
-last touched the mission) carrying a `LaunchRequest` — `id`, `role` (`Planner`, `Worker`,
-`Reviewer`, `MissionReviewer`), the task to assign the agent to, the definition, the MCP servers,
-the prompt and, for a planner, the conversation to resume. The window starts or revives the
+last touched the mission) carrying a `LaunchRequest` — `id`, `role` (`Planner`, `Coordinator`,
+`Worker`, `Reviewer`, `MissionReviewer`), the task to assign the agent to, the definition, the MCP
+servers, the prompt and, for a planner or a coordinator, the conversation to resume (an assigned
+open agent is "resumed" the same way: re-assigned to the parent and prompted). The window starts or revives the
 conversation, assigns it and answers `MissionLaunched` **after** the launch; an answer naming an
 `id` the host no longer holds is discarded. `LaunchOutcome::Failed` is written as a `LaunchFailed`
 comment and the task waits for **Start** or **Retry**.
@@ -1519,7 +1524,14 @@ ended, a driver or setting changed, `MissionLaunched`, or `MissionSchedule` (the
 listener's thread wakes it, `D138`'s pattern) each run a pass. A ready task is one whose
 prerequisites all `satisfies` it (`done`, `abandoned`, or `in review` without a pending approval),
 assigned to no person and not started; `auto` starts them up to `parallel`, `manual` lists them
-under **Next**. Two consecutive agent-review fails (`AUTO_FAIL_CAP`) stop the loop and surface the
+under **Next**, and `coordinator` lists them too and leaves starting them to the coordinator agent
+(`kubiq-mission`'s `start_task`, said into the host's inbox as `MissionTask { Start | Retry }`;
+a refusal only the host can make is an update rather than a `MissionError`). Under `coordinator`
+each pass appends to `coordinator_inbox` what changed since the coordinator was last told — task
+statuses, the ready set, the phase, a `Gone` line, a failed worker launch — and the run loop
+delivers the inbox as one turn when the coordinator is between turns, clearing it only then; a pass
+that finds lines waiting and no live coordinator revives it with all of them in its prompt
+(`D235`). The restart scan writes to the inbox and launches nothing. Two consecutive agent-review fails (`AUTO_FAIL_CAP`) stop the loop and surface the
 reviewed task in Needs you. In memory only, and lost on a restart by design: the launches in
 flight, the window to address, the tasks whose launch failed and the feedback waiting on a busy
 worker; the restart scan marks a task left `in progress` with no live worker as gone and starts
@@ -1527,10 +1539,11 @@ nothing.
 
 **`MissionSnapshot` is derived**: `phase`, `settings`, `documents` (the names in
 `missions/<TaskId>/docs/`, `guidance` included), `open_threads` of the plan, `needs_you`
-(`NeedsYou`: `PlanReady`, `TasksDrafted`, `PlannerStopped`, `AwaitingApproval`, `HumanTask`,
+(`NeedsYou`: `PlanReady`, `TasksDrafted`, `PlannerStopped`, `CoordinatorStopped`, `AwaitingApproval`, `HumanTask`,
 `WorkerGone`, `ReviewFailedTwice`, `ReadyForReview`, plus the planner's own questions and the next
 ready task under `manual`), `running` (`RunningWorker`: task, agent, role, since), `next` (the ready
-tasks, filled only under `manual`), `agents` (the live planner, workers and reviewers) and `replan_at`
+tasks, filled under `manual` and `coordinator`), `agents` (the live planner, coordinator, workers
+and reviewers) and `replan_at`
 (when the latest breakdown after a Running phase began, which the added, changed and abandoned marks
 read against). **History is
 computed on request** (`LoadHistory`): the tasks' comments, the `RunEvent` comments the runner
@@ -2668,7 +2681,8 @@ non-empty `tags` replace its parent's. The two legacy boolean keys `mission_coor
 tags, and are never written back.
 
 **The `coordinator` and `worker` tags re-assert their MCP servers on save.** `coordinator` (the
-tag a mission's planner carries; a mission has no coordinator agent) implies `kubiq-mission`,
+tag a mission's planner carries, and the one a `coordinator`-driven mission's coordinator is
+opened from by default, `D235`) implies `kubiq-mission`,
 `kubiq-doc`, `manage-kubiq-tasks` and `kubiq-kb`; `worker` implies `use-task`, `project-info` and
 `kubiq-kb`. The host merges the implied set back into `mcps` on every save, whatever arrived,
 because a planner without its servers cannot plan. `planner` implies nothing. `disabled` is the one remaining flag and the simplest:

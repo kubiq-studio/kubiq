@@ -1,4 +1,5 @@
-//! The Settings tab: the whole list — driver, planner, worker, parallel, approve.
+//! The Settings tab: the whole list — driver, planner, worker, coordinator (under the
+//! coordinator driver), parallel, approve.
 //!
 //! **Every control is one `SetMissionField`.** The window asks, the host writes, and
 //! `MissionChanged` comes back — nothing here edits the settings it is drawing.
@@ -9,6 +10,7 @@ use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, px};
 
 use kubiq_proto::ids::TaskId;
 use kubiq_proto::mission::{Driver, MissionField, MissionSettings};
+use kubiq_proto::work::AgentId;
 
 use crate::app::AppState;
 use crate::theme;
@@ -31,75 +33,147 @@ pub fn render(
         .map(|definition| definition.id)
         .collect();
 
+    let mut list = vec![
+        setting_row(
+            "Driver",
+            "Auto starts ready tasks by itself until the next human task or approval. Manual \
+             lists them under Next and waits for you to press \u{25b6}. Coordinator hands them \
+             to a coordinator agent, which is told as each one finishes. Changeable mid-run.",
+            pills(
+                ("mission-driver", task_id),
+                Driver::all(),
+                settings.driver,
+                Driver::label,
+                MissionField::Driver,
+                cx,
+            ),
+        ),
+        setting_row(
+            "Planner",
+            "The agent that writes the plan and drafts the tasks, and that a replan goes back \
+                 to. Default is the project's planner.",
+            definition_pills(
+                ("mission-planner", task_id),
+                &definitions,
+                settings.planner.as_ref(),
+                MissionField::Planner,
+                cx,
+            ),
+        ),
+        setting_row(
+            "Worker",
+            "The agent started on each task, unless the task names one of its own. Default is \
+                 the project's worker.",
+            definition_pills(
+                ("mission-worker", task_id),
+                &definitions,
+                settings.worker.as_ref(),
+                MissionField::Worker,
+                cx,
+            ),
+        ),
+    ];
+    if settings.driver == Driver::Coordinator {
+        list.push(setting_row(
+            "Coordinator",
+            "The agent opened when the mission runs, to start its tasks. Default is the \
+             project's coordinator.",
+            definition_pills(
+                ("mission-coordinator", task_id),
+                &definitions,
+                settings.coordinator.as_ref(),
+                MissionField::Coordinator,
+                cx,
+            ),
+        ));
+        list.push(setting_row(
+            "Coordinator agent",
+            "An open agent to coordinate instead: it is given the coordinator's brief and told \
+             as each task finishes. The one the mission opened is listed here too.",
+            agent_pills(
+                task_id,
+                &app.coordinator_candidates(task_id),
+                settings.coordinator_agent,
+                cx,
+            ),
+        ));
+    }
+    list.extend([
+        setting_row(
+            "Parallel",
+            "How many workers may run at once in auto mode, or the coordinator's limit. Each \
+                 one costs an agent.",
+            count(
+                ("mission-parallel", task_id),
+                settings.parallelism(),
+                1,
+                12,
+                MissionField::Parallel,
+                cx,
+            ),
+        ),
+        setting_row(
+            "Approve each task",
+            "The default for new subtasks: a finished task waits for your Confirm before \
+                 anything that depends on it starts.",
+            switch(
+                task_id,
+                eid2("mission-set", task_id, "approve"),
+                settings.approve,
+                MissionField::Approve,
+                cx,
+            ),
+        ),
+    ]);
+
+    div().flex().flex_col().child(rows(list)).into_any_element()
+}
+
+/// *none* plus one pill per open agent of the project; the held coordinator reads even when it is
+/// not open now.
+fn agent_pills(
+    task_id: TaskId,
+    candidates: &[(AgentId, String)],
+    held: Option<AgentId>,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let mut pills: Vec<AnyElement> = vec![
+        choice_pill(
+            eid2("mission-coordinator-agent", task_id, "none"),
+            "none",
+            held.is_none(),
+            cx.listener(move |this, _, _, cx| {
+                this.set_mission_field(task_id, MissionField::CoordinatorAgent(None), cx)
+            }),
+        )
+        .into_any_element(),
+    ];
+    let mut names: Vec<(AgentId, String)> = candidates.to_vec();
+    if let Some(held) = held
+        && !names.iter().any(|(id, _)| *id == held)
+    {
+        names.push((held, "opened (stopped)".to_string()));
+    }
+    for (agent, name) in names {
+        pills.push(
+            choice_pill(
+                eid2("mission-coordinator-agent", task_id, agent.to_string()),
+                name,
+                held == Some(agent),
+                cx.listener(move |this, _, _, cx| {
+                    this.set_mission_field(task_id, MissionField::CoordinatorAgent(Some(agent)), cx)
+                }),
+            )
+            .into_any_element(),
+        );
+    }
     div()
         .flex()
-        .flex_col()
-        .child(rows(vec![
-            setting_row(
-                "Driver",
-                "Auto starts ready tasks by itself until the next human task or approval. Manual \
-                 lists them under Next and waits for you to press \u{25b6}. Changeable mid-run.",
-                pills(
-                    ("mission-driver", task_id),
-                    [Driver::Auto, Driver::Manual],
-                    settings.driver,
-                    |driver| match driver {
-                        Driver::Auto => "auto",
-                        Driver::Manual => "manual",
-                    },
-                    MissionField::Driver,
-                    cx,
-                ),
-            ),
-            setting_row(
-                "Planner",
-                "The agent that writes the plan and drafts the tasks, and that a replan goes back \
-                 to. Default is the project's planner.",
-                definition_pills(
-                    ("mission-planner", task_id),
-                    &definitions,
-                    settings.planner.as_ref(),
-                    MissionField::Planner,
-                    cx,
-                ),
-            ),
-            setting_row(
-                "Worker",
-                "The agent started on each task, unless the task names one of its own. Default is \
-                 the project's worker.",
-                definition_pills(
-                    ("mission-worker", task_id),
-                    &definitions,
-                    settings.worker.as_ref(),
-                    MissionField::Worker,
-                    cx,
-                ),
-            ),
-            setting_row(
-                "Parallel",
-                "How many workers may run at once in auto mode. Each one costs an agent.",
-                count(
-                    ("mission-parallel", task_id),
-                    settings.parallelism(),
-                    1,
-                    12,
-                    MissionField::Parallel,
-                    cx,
-                ),
-            ),
-            setting_row(
-                "Approve each task",
-                "The default for new subtasks: a finished task waits for your Confirm before \
-                 anything that depends on it starts.",
-                switch(
-                    task_id,
-                    eid2("mission-set", task_id, "approve"),
-                    settings.approve,
-                    MissionField::Approve,
-                    cx,
-                ),
-            ),
-        ]))
+        .flex_wrap()
+        .flex_none()
+        .items_center()
+        .gap_1p5()
+        .children(pills)
         .into_any_element()
 }
 

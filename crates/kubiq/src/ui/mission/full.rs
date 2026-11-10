@@ -184,7 +184,7 @@ fn footer(app: &AppState, task_id: TaskId, cx: &mut Context<AppState>) -> AnyEle
 fn run_label(mission: &MissionSnapshot) -> String {
     let driver = match mission.settings.driver {
         Driver::Auto => format!("auto \u{00d7}{}", mission.settings.parallelism()),
-        Driver::Manual => "manual".to_string(),
+        Driver::Manual | Driver::Coordinator => mission.settings.driver.label().to_string(),
     };
     format!("{} \u{00b7} {driver}", mission.phase.label())
 }

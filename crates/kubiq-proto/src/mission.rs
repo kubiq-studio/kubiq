@@ -114,6 +114,25 @@ pub enum Driver {
     Auto,
     /// The runner launches nothing; the ready tasks are listed and the user starts them.
     Manual,
+    /// The runner launches nothing on its own: the mission's coordinator agent
+    /// ([`MissionSettings::coordinator_agent`]) starts the ready tasks through `kubiq-mission`'s
+    /// `start_task`, and is told every time a task finishes or loses its worker — revived to hear
+    /// it when it has stopped.
+    Coordinator,
+}
+
+impl Driver {
+    pub fn label(self) -> &'static str {
+        match self {
+            Driver::Auto => "auto",
+            Driver::Manual => "manual",
+            Driver::Coordinator => "coordinator",
+        }
+    }
+
+    pub fn all() -> [Driver; 3] {
+        [Driver::Auto, Driver::Manual, Driver::Coordinator]
+    }
 }
 
 fn default_parallel() -> usize {
@@ -140,6 +159,19 @@ pub struct MissionSettings {
     /// The planner's conversation — the handle a resume goes through.
     #[serde(default)]
     pub planner_agent: Option<AgentId>,
+    /// The agent definition (by id) a [`Driver::Coordinator`] mission opens its coordinator from.
+    /// `None` is the project's default coordinator.
+    #[serde(default)]
+    pub coordinator: Option<String>,
+    /// The coordinator's conversation — one the runner opened, or an open agent the user
+    /// assigned. The handle a revive goes through.
+    #[serde(default)]
+    pub coordinator_agent: Option<AgentId>,
+    /// The updates the coordinator has not been given yet, oldest first. Durable, so a stopped
+    /// coordinator, a failed launch or a restart loses none: a line leaves only once it is in a
+    /// turn the coordinator was given. Host-written.
+    #[serde(default)]
+    pub coordinator_inbox: Vec<String>,
 }
 
 impl Default for MissionSettings {
@@ -151,6 +183,9 @@ impl Default for MissionSettings {
             parallel: default_parallel(),
             approve: false,
             planner_agent: None,
+            coordinator: None,
+            coordinator_agent: None,
+            coordinator_inbox: Vec::new(),
         }
     }
 }
@@ -181,6 +216,11 @@ pub enum MissionField {
     Worker(Option<String>),
     Parallel(usize),
     Approve(bool),
+    /// The definition the coordinator is opened from.
+    Coordinator(Option<String>),
+    /// An open agent assigned as the coordinator; `None` unassigns it. While the mission runs,
+    /// the assigned agent is given the coordinator's brief at once.
+    CoordinatorAgent(Option<AgentId>),
 }
 
 /// What the runner launches an agent as.
@@ -188,6 +228,9 @@ pub enum MissionField {
 pub enum LaunchRole {
     /// The mission's planner, persistent, resumable.
     Planner,
+    /// The coordinator of a [`Driver::Coordinator`] mission, on the parent, persistent,
+    /// resumable.
+    Coordinator,
     /// An agent working one task.
     Worker,
     /// An agent reviewing a task that has `review_of`.
@@ -286,6 +329,8 @@ pub enum NeedsYou {
     TasksDrafted,
     /// The planner is not live while the mission is Planning or Breakdown.
     PlannerStopped,
+    /// A [`Driver::Coordinator`] mission is Running and its coordinator is not live.
+    CoordinatorStopped,
     /// A task is in review and waits for the user's confirmation.
     AwaitingApproval { task: TaskId },
     /// A task is assigned to a person.
@@ -329,7 +374,7 @@ pub struct MissionSnapshot {
     pub needs_you: Vec<NeedsYou>,
     #[serde(default)]
     pub running: Vec<RunningWorker>,
-    /// Ready tasks, filled only for [`Driver::Manual`].
+    /// Ready tasks, filled only for [`Driver::Manual`] and [`Driver::Coordinator`].
     #[serde(default)]
     pub next: Vec<TaskId>,
     /// The live planner and the live workers and reviewers.
@@ -386,6 +431,8 @@ pub enum MissionAction {
     Complete,
     Abandon,
     ResumePlanner,
+    /// Open the coordinator, or revive (and brief) the one the mission has.
+    StartCoordinator,
 }
 
 /// What the user does to one task of a mission.
@@ -542,6 +589,9 @@ mod tests {
         assert_eq!(s.parallel, 1);
         assert_eq!(s.driver, Driver::Auto);
         assert_eq!(MissionSettings::legacy().driver, Driver::Manual);
+        assert_eq!(s.coordinator_agent, None);
+        let c: MissionSettings = serde_json::from_str(r#"{"driver":"Coordinator"}"#).unwrap();
+        assert_eq!(c.driver, Driver::Coordinator);
     }
 
     #[test]

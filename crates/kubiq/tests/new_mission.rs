@@ -201,7 +201,7 @@ fn start_says_one_create_mission_with_the_initial_plan_and_the_driver(cx: &mut T
                 worker: None,
                 parallel: 2,
                 approve: true,
-                planner_agent: None,
+                ..MissionSettings::default()
             },
         }
     );

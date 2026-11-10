@@ -110,6 +110,49 @@ impl Rig {
         self.missions.run(self.project, mission, &ctx)
     }
 
+    fn field(&mut self, mission: TaskId, field: kubiq_proto::mission::MissionField) -> Effects {
+        let live = &self.live;
+        let ctx = Ctx {
+            live: &|a| live.contains(&a),
+            client: Some(self.window),
+        };
+        self.missions.set_field(self.project, mission, field, &ctx)
+    }
+
+    /// The first listing after a start: the restart scan.
+    fn list(&mut self) -> Effects {
+        let live = &self.live;
+        let ctx = Ctx {
+            live: &|a| live.contains(&a),
+            client: Some(self.window),
+        };
+        self.missions.list(self.project, &ctx)
+    }
+
+    /// `start_task`, as the coordinator thread receives it from the listener.
+    fn coordinator_act(&mut self, task: TaskId, action: MissionTaskAction) -> Effects {
+        let live = &self.live;
+        let ctx = Ctx {
+            live: &|a| live.contains(&a),
+            client: Some(self.window),
+        };
+        self.missions
+            .coordinator_task_action(self.project, task, action, &ctx)
+    }
+
+    /// The coordinator's undelivered updates, as stored on the parent.
+    fn inbox(&self, mission: TaskId) -> Vec<String> {
+        self.task(mission)
+            .mission
+            .map(|s| s.coordinator_inbox)
+            .unwrap_or_default()
+    }
+
+    /// Move a task as an agent or the user would, then let the runner see it.
+    fn move_to(&mut self, task: TaskId, status: Status) {
+        self.work.lock().move_task(self.project, task, status, None);
+    }
+
     fn answer(&mut self, mission: TaskId, id: SpawnId, outcome: LaunchOutcome) -> Effects {
         let live = &self.live;
         let ctx = Ctx {
@@ -683,6 +726,259 @@ fn a_manual_driver_launches_nothing_until_a_task_is_started() {
     assert_eq!(rig.snapshot(mission).next, vec![id]);
     let effects = rig.act(id, MissionTaskAction::Start);
     assert_eq!(launch_of(&effects).1, id);
+}
+
+fn coordinated() -> MissionSettings {
+    MissionSettings {
+        driver: kubiq_proto::mission::Driver::Coordinator,
+        ..MissionSettings::default()
+    }
+}
+
+/// The coordinator launches the effects carry, as requests.
+fn coordinator_launches(effects: &Effects) -> Vec<kubiq_proto::mission::LaunchRequest> {
+    effects
+        .launches
+        .iter()
+        .filter_map(|(_, m)| match m {
+            Message::MissionLaunch { request, .. } if request.role == LaunchRole::Coordinator => {
+                Some((**request).clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_coordinator_hears_every_finish_and_a_stopped_one_is_revived_with_all_it_missed() {
+    let parent = mission_parent(Phase::Breakdown, coordinated());
+    let mission = parent.id;
+    let first = child(&parent, "first", Status::Backlog);
+    let mut second = child(&parent, "second", Status::Backlog);
+    second.prerequisites = vec![first.id];
+    let (first_id, second_id) = (first.id, second.id);
+    let mut rig = Rig::with(vec![parent, first, second]);
+
+    // Start mission opens the coordinator and nothing else.
+    let effects = rig.control(mission, MissionAction::StartMission);
+    assert_eq!(launch_of(&effects).2, LaunchRole::Coordinator);
+    let (coordinator, after) = rig.launch_answered(mission, &effects);
+    assert!(
+        after.launches.is_empty(),
+        "the runner starts no worker itself"
+    );
+    assert_eq!(
+        rig.task(mission).mission.unwrap().coordinator_agent,
+        Some(coordinator)
+    );
+    assert!(rig.inbox(mission).is_empty());
+
+    // A finish is written to the durable inbox, with what it made ready.
+    let effects = rig.coordinator_act(first_id, MissionTaskAction::Start);
+    assert_eq!(launch_of(&effects).1, first_id);
+    rig.launch_answered(mission, &effects);
+    assert!(rig.inbox(mission).is_empty(), "a start is not news");
+    rig.to_review(first_id);
+    rig.run(mission);
+    let inbox = rig.inbox(mission);
+    assert_eq!(inbox.len(), 1);
+    assert!(inbox[0].contains("is finished") && inbox[0].contains("Ready to start"));
+
+    // Delivered between turns, it leaves the inbox.
+    let (text, _) = rig
+        .missions
+        .take_coordinator_inbox(rig.project, mission, coordinator)
+        .expect("waiting");
+    assert!(text.starts_with("Mission update"));
+    assert!(rig.inbox(mission).is_empty());
+
+    // Sent back for rework and finished again: told both times — no once-per-spawn dedupe.
+    rig.move_to(first_id, Status::InProgress);
+    rig.run(mission);
+    rig.to_review(first_id);
+    rig.run(mission);
+    let inbox = rig.inbox(mission);
+    assert!(inbox.iter().any(|u| u.contains("back in progress")));
+    assert!(inbox.iter().any(|u| u.contains("is finished")));
+
+    // Stopped mid-turn with those still undelivered: the stop's pass revives it with all of them.
+    rig.live.remove(&coordinator);
+    let effects = rig.run(mission);
+    let revived = coordinator_launches(&effects);
+    assert_eq!(revived.len(), 1, "revived once");
+    assert_eq!(revived[0].resume, Some(coordinator));
+    assert!(revived[0].persistent);
+    assert!(revived[0].prompt.contains("back in progress"));
+    assert!(revived[0].prompt.contains("here is your brief"));
+
+    // Another finish while the revive is in flight asks nothing twice and loses nothing.
+    let worker = rig.coordinator_act(second_id, MissionTaskAction::Start);
+    assert!(coordinator_launches(&worker).is_empty(), "no second revive");
+    let (id, _, _) = worker
+        .launches
+        .iter()
+        .find_map(|(_, m)| match m {
+            Message::MissionLaunch { request, .. } if request.role == LaunchRole::Worker => {
+                Some((request.id, request.task, request.role))
+            }
+            _ => None,
+        })
+        .expect("the worker");
+    let agent = AgentId::generate();
+    rig.live.insert(agent);
+    rig.answer(mission, id, LaunchOutcome::Launched(agent));
+    rig.to_review(second_id);
+    rig.run(mission);
+    assert!(
+        rig.inbox(mission)
+            .iter()
+            .any(|u| u.contains("the mission is in review"))
+    );
+
+    // The revive answers: what it carried leaves the inbox, what came after stays.
+    let carried = revived[0].prompt.clone();
+    rig.live.insert(coordinator);
+    rig.answer(mission, revived[0].id, LaunchOutcome::Launched(coordinator));
+    let left = rig.inbox(mission);
+    assert!(!left.is_empty());
+    assert!(left.iter().all(|u| !carried.contains(u.as_str())));
+}
+
+#[test]
+fn a_failed_review_is_told_and_the_review_is_ready_again_once_the_work_is_back() {
+    let parent = mission_parent(Phase::Running, coordinated());
+    let mission = parent.id;
+    let work = child(&parent, "the work", Status::InReview);
+    let check = review(&parent, &work, false);
+    let (work_id, check_id) = (work.id, check.id);
+    let mut rig = Rig::with(vec![parent, work, check]);
+    let coordinator = AgentId::generate();
+    rig.live.insert(coordinator);
+    let effects = rig.field(
+        mission,
+        kubiq_proto::mission::MissionField::CoordinatorAgent(Some(coordinator)),
+    );
+    let (id, _, _) = launch_of(&effects);
+    rig.answer(mission, id, LaunchOutcome::Launched(coordinator));
+
+    let effects = rig.coordinator_act(check_id, MissionTaskAction::Start);
+    rig.launch_answered(mission, &effects);
+    rig.verdict(check_id, false, "no tests");
+    rig.run(mission);
+    let inbox = rig.inbox(mission);
+    let update = inbox.last().expect("told of the verdict");
+    assert!(update.contains(&work_id.to_string()) && update.contains("back in progress"));
+    assert!(update.contains(&check_id.to_string()) && update.contains("ready again"));
+
+    rig.to_review(work_id);
+    rig.run(mission);
+    let update = rig.inbox(mission).last().cloned().unwrap();
+    assert!(update.contains("is finished"));
+    assert!(update.contains("Ready to start") && update.contains(&check_id.to_string()));
+}
+
+#[test]
+fn after_a_restart_the_gone_lines_are_kept_and_start_coordinator_carries_them() {
+    let mut settings = coordinated();
+    let coordinator = AgentId::generate();
+    settings.coordinator_agent = Some(coordinator);
+    settings.coordinator_inbox = vec!["Mission update:\n- written before the restart".into()];
+    let parent = mission_parent(Phase::Running, settings);
+    let mission = parent.id;
+    let mut task = child(&parent, "the work", Status::InProgress);
+    task.worker = Some(AgentId::generate());
+    let mut rig = Rig::with(vec![parent, task]);
+
+    let effects = rig.list();
+    assert!(effects.launches.is_empty(), "the scan starts nothing");
+    let inbox = rig.inbox(mission);
+    assert_eq!(inbox.len(), 2);
+    assert!(inbox[1].contains("stopped before finishing"));
+    assert!(
+        rig.snapshot(mission)
+            .needs_you
+            .contains(&NeedsYou::CoordinatorStopped)
+    );
+
+    let effects = rig.control(mission, MissionAction::StartCoordinator);
+    let launch = coordinator_launches(&effects);
+    assert_eq!(launch.len(), 1);
+    assert_eq!(launch[0].resume, Some(coordinator));
+    assert!(launch[0].prompt.contains("written before the restart"));
+    assert!(launch[0].prompt.contains("stopped before finishing"));
+}
+
+#[test]
+fn start_task_is_the_coordinators_while_running_and_its_refusals_are_told() {
+    let parent = mission_parent(Phase::Running, coordinated());
+    let mission = parent.id;
+    let mut person = child(&parent, "sign off", Status::Ready);
+    person.assigned_to = Some("human".into());
+    let person_id = person.id;
+    let mut rig = Rig::with(vec![parent, person]);
+    let coordinator = AgentId::generate();
+    rig.live.insert(coordinator);
+    rig.field(
+        mission,
+        kubiq_proto::mission::MissionField::CoordinatorAgent(Some(coordinator)),
+    );
+
+    let project = rig.project;
+    let refusal = |rig: &mut Rig, caller| {
+        rig.missions
+            .start_refusal(project, mission, person_id, caller, false)
+    };
+    assert!(refusal(&mut rig, None).is_some(), "only the coordinator");
+    assert!(refusal(&mut rig, Some(AgentId::generate())).is_some());
+    assert!(
+        refusal(&mut rig, Some(coordinator))
+            .unwrap()
+            .contains("person")
+    );
+
+    // What only the host can refuse comes back as an update, not an error to nobody.
+    rig.control(mission, MissionAction::Pause);
+    let effects = rig.coordinator_act(person_id, MissionTaskAction::Start);
+    assert!(!refused(&effects));
+    assert!(effects.launches.is_empty());
+    assert!(
+        rig.inbox(mission)
+            .last()
+            .unwrap()
+            .contains("was refused: the mission is not running under a coordinator")
+    );
+}
+
+#[test]
+fn reassigning_the_coordinator_stops_the_old_one_and_briefs_the_new() {
+    let parent = mission_parent(Phase::Running, coordinated());
+    let mission = parent.id;
+    let open = child(&parent, "the work", Status::Ready);
+    let mut rig = Rig::with(vec![parent, open]);
+    let (old, new) = (AgentId::generate(), AgentId::generate());
+    rig.live.insert(old);
+    rig.live.insert(new);
+    let effects = rig.field(
+        mission,
+        kubiq_proto::mission::MissionField::CoordinatorAgent(Some(old)),
+    );
+    let (id, _, _) = launch_of(&effects);
+    rig.answer(mission, id, LaunchOutcome::Launched(old));
+
+    let effects = rig.field(
+        mission,
+        kubiq_proto::mission::MissionField::CoordinatorAgent(Some(new)),
+    );
+    assert!(effects.unload.contains(&old));
+    let launch = coordinator_launches(&effects);
+    assert_eq!(launch.len(), 1);
+    assert_eq!(launch[0].resume, Some(new));
+
+    let effects = rig.field(
+        mission,
+        kubiq_proto::mission::MissionField::Driver(kubiq_proto::mission::Driver::Manual),
+    );
+    assert!(effects.unload.contains(&new), "switching away stops it");
 }
 
 #[test]

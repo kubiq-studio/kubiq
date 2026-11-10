@@ -5848,6 +5848,40 @@ until the next turn ends. A Claude Code that runs a held prompt as a turn of its
 folding it in ends with a spare `TurnEnded`, read idle for that turn's length. The interrupt's
 boundary is a settled tool call, so a long reply with no tool runs to the turn's end.
 
+### D235 — A mission may opt into a coordinator agent: a third driver, told through a durable inbox
+
+`Driver::Coordinator` sits beside `Auto` and `Manual` and narrows `D217` without reversing it. The
+runner stays deterministic and still decides readiness, verdicts, completion and the phase; under
+this driver it starts nothing itself, and the ready tasks are listed as under `Manual`. Starting them
+is the coordinator's: an agent launched as `LaunchRole::Coordinator` (persistent, resumable, on the
+mission parent, with `kubiq-mission`, `kubiq-doc`, `manage-kubiq-tasks` and `kubiq-ask`) at **Start
+mission**, or an open agent the user assigns (`MissionField::CoordinatorAgent`) — refused unless it
+was started with `kubiq-mission` and `manage-kubiq-tasks` — which goes through the same resume path,
+re-assigned to the parent and given the brief. Replacing the coordinator, or switching the driver
+away, stops the old one. It dispatches through `kubiq-mission`'s `start_task`, which only the
+mission's own coordinator may call, only while the mission runs; the host's half is the window's ▶
+(`MissionTask`) said into its inbox, and what only the host can refuse comes back as an update.
+
+**What the coordinator is told is durable.** Every pass over a running, paused or in-review mission
+compares each task's status, the ready set and the phase with what the coordinator was last told,
+and appends the difference — plus a `Gone` line for a worker that stopped, and a worker launch that
+failed — as one *Mission update* to `MissionSettings::coordinator_inbox`, on the parent. The run
+loop gives a coordinator between turns its whole inbox as one turn and clears it only then; one
+mid-turn or not running keeps it. Any pass that finds lines waiting and no live coordinator revives
+it (or opens a fresh one) with every waiting line in its prompt, and the lines that prompt carried
+leave the inbox when the window answers. A start of the coordinator's own is not news.
+
+**Why:** some missions want judgement between tasks — what to start next, when to retry, what to
+tell the user — that a table of prerequisites cannot give. Keeping the runner as the source of the
+facts and the coordinator as the one who acts on them leaves `Auto` and `Manual` untouched; keeping
+the inbox on the parent is what lets a stop, a failed launch or a restart lose nothing.
+
+**Cost:** the coordinator spends tokens on every update and can stall or drift (Needs you shows
+**Coordinator stopped**). The baseline an update is read against is in memory, so after a restart
+only the scan's `Gone` lines are told, and the restart scan revives nobody: the inbox waits for
+**Start coordinator** or the next pass that may launch. A failed coordinator launch also waits for
+**Start coordinator**. Each update edits the parent task.
+
 ## Related docs
 
 - [`architecture.md`](./architecture.md) — the rules D3 to D6 produce

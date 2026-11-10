@@ -5,8 +5,8 @@
 //! `kubiq-mission` and `kubiq-doc` (the plan, by `task_id`), so their prompts point at the tools
 //! instead of pasting.
 
-use kubiq_proto::mission::RunEvent;
-use kubiq_proto::work::TaskRecord;
+use kubiq_proto::mission::{Phase, RunEvent};
+use kubiq_proto::work::{Status, TaskRecord};
 
 use super::runner::since_spawn;
 
@@ -173,6 +173,116 @@ pub fn mission_reviewer(parent: &TaskRecord) -> String {
         parent.id,
         parent.id,
         parent.id,
+    )
+}
+
+/// The coordinator's brief: its role, and how it starts and follows the work.
+pub fn coordinator(parent: &TaskRecord) -> String {
+    let mut out = format!(
+        "You are the coordinator of the mission {} — \"{}\" (task id {}).\n\n\
+         The mission is running. Kubiq's runner does not start its tasks: you do. Read where it \
+         stands with kubiq-mission's mission_overview (it lists every task with its status), the \
+         brief with read_brief and the plan with kubiq-doc's read_doc (task_id {}). Start the \
+         ready tasks with kubiq-mission's start_task, in the order the plan and the prerequisites \
+         call for and no more at once than {} unless the user says otherwise; each one opens a \
+         worker. Do not do the tasks' work yourself.\n\n\
+         You are told whenever a task changes column, becomes ready, loses its worker or cannot \
+         be started, as a message starting 'Mission update' — even if you have stopped. Then read the task (manage-kubiq-tasks' get_task), start what has \
+         become ready, retry a task whose worker stopped (start_task with retry true) when that \
+         is right, and ask the user with kubiq-ask's ask_user_question only what they must \
+         decide. When nothing is left to start, end your turn and wait for the next update.",
+        name(parent),
+        parent.title,
+        parent.id,
+        parent.id,
+        super::runner::settings_of(parent).parallelism(),
+    );
+    out.push_str(&section("Requirements", &parent.description));
+    out
+}
+
+/// What the coordinator's launch says: the updates it has not heard, then the brief to fall back
+/// on — or the brief alone when there are none.
+pub fn coordinator_launch(parent: &TaskRecord, inbox: &[String]) -> String {
+    let brief = coordinator(parent);
+    if inbox.is_empty() {
+        return brief;
+    }
+    format!(
+        "{}\n\nIf you do not remember this mission, here is your brief.\n\n{brief}",
+        inbox.join("\n\n")
+    )
+}
+
+/// One update: what changed since the coordinator was last told, a line each.
+pub fn coordinator_update(lines: &[String]) -> String {
+    let list = lines
+        .iter()
+        .map(|line| format!("- {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("Mission update:\n{list}")
+}
+
+fn named(task: &TaskRecord) -> String {
+    format!("{} \"{}\" ({})", name(task), task.title, task.id)
+}
+
+/// A task moved column.
+pub fn status_line(task: &TaskRecord, was: Status, now: Status) -> String {
+    let what = match now {
+        Status::InReview => "is finished: its worker moved it to 'in review'",
+        Status::Done => "is done",
+        Status::Abandoned => "was abandoned",
+        Status::InProgress => "is back in progress (feedback went to its worker)",
+        Status::Blocked => "is blocked",
+        Status::Ready => "is ready again",
+        Status::Backlog => "is back in backlog",
+    };
+    format!("{} {what} (was {}).", named(task), was.label())
+}
+
+/// Tasks that became ready to start.
+pub fn ready_line(tasks: &[&TaskRecord]) -> String {
+    let list = tasks
+        .iter()
+        .map(|t| named(t))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Ready to start: {list}.")
+}
+
+/// The mission moved phase.
+pub fn phase_line(phase: Phase) -> String {
+    match phase {
+        Phase::Review => {
+            "Every task is finished: the mission is in review, and the user reviews it now."
+                .to_string()
+        }
+        other => format!("The mission is {} now.", other.label()),
+    }
+}
+
+/// A worker stopped with its task still in progress.
+pub fn gone_line(task: &TaskRecord) -> String {
+    format!(
+        "The worker on {} stopped before finishing; the task is still 'in progress'. Retry it \
+         with start_task (retry true) or tell the user.",
+        named(task)
+    )
+}
+
+/// A `start_task` the host refused.
+pub fn refused_line(task: &TaskRecord, reason: &str) -> String {
+    format!("start_task on {} was refused: {reason}.", named(task))
+}
+
+/// A worker the coordinator started could not be launched.
+pub fn launch_failed_line(task: &TaskRecord, reason: &str) -> String {
+    format!(
+        "The worker for {} could not be started: {}.",
+        named(task),
+        reason.trim()
     )
 }
 

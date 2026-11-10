@@ -991,7 +991,7 @@ impl AppState {
                 .is_some_and(|form| form.open.is_some())
             || w.new_mission
                 .as_ref()
-                .is_some_and(|form| form.planner_open || form.worker_open || form.tasks_open)
+                .is_some_and(|form| form.picker_open())
             || s.ai_form.as_ref().is_some_and(|form| form.open.is_some())
             || s.app_form.as_ref().is_some_and(|form| form.open)
             || self.notifications.muting.is_some();

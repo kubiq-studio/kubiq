@@ -41,10 +41,8 @@ impl AppState {
         let Some(form) = self.workbench.new_mission.as_mut() else {
             return false;
         };
-        let any = form.planner_open || form.worker_open || form.tasks_open;
-        form.planner_open = false;
-        form.worker_open = false;
-        form.tasks_open = false;
+        let any = form.picker_open();
+        form.shut_pickers();
         if any {
             cx.notify();
         }
@@ -53,16 +51,27 @@ impl AppState {
 
     pub fn toggle_new_mission_planner_list(&mut self, cx: &mut Context<Self>) {
         if let Some(form) = self.workbench.new_mission.as_mut() {
-            form.planner_open = !form.planner_open;
-            form.worker_open = false;
+            let open = !form.planner_open;
+            form.shut_pickers();
+            form.planner_open = open;
         }
         cx.notify();
     }
 
     pub fn toggle_new_mission_worker_list(&mut self, cx: &mut Context<Self>) {
         if let Some(form) = self.workbench.new_mission.as_mut() {
-            form.worker_open = !form.worker_open;
-            form.planner_open = false;
+            let open = !form.worker_open;
+            form.shut_pickers();
+            form.worker_open = open;
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_new_mission_coordinator_list(&mut self, cx: &mut Context<Self>) {
+        if let Some(form) = self.workbench.new_mission.as_mut() {
+            let open = !form.coordinator_open;
+            form.shut_pickers();
+            form.coordinator_open = open;
         }
         cx.notify();
     }
@@ -96,6 +105,18 @@ impl AppState {
         if let Some(form) = self.workbench.new_mission.as_mut() {
             form.worker = worker;
             form.worker_open = false;
+        }
+        cx.notify();
+    }
+
+    pub fn pick_new_mission_coordinator(
+        &mut self,
+        coordinator: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.workbench.new_mission.as_mut() {
+            form.coordinator = coordinator;
+            form.coordinator_open = false;
         }
         cx.notify();
     }
@@ -134,9 +155,9 @@ impl AppState {
 
     pub fn toggle_new_mission_task_list(&mut self, cx: &mut Context<Self>) {
         if let Some(form) = self.workbench.new_mission.as_mut() {
-            form.tasks_open = !form.tasks_open;
-            form.planner_open = false;
-            form.worker_open = false;
+            let open = !form.tasks_open;
+            form.shut_pickers();
+            form.tasks_open = open;
         }
         cx.notify();
     }

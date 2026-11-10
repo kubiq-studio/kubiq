@@ -342,6 +342,36 @@ impl AppState {
             .unwrap_or_default()
     }
 
+    /// The open agents a mission's coordinator can be assigned from: the project's live
+    /// conversations started from a definition that carries `kubiq-mission` and
+    /// `manage-kubiq-tasks`, by id and title. A conversation's servers are fixed at its start; the
+    /// host refuses an assignment that lacks them whatever this offers.
+    pub fn coordinator_candidates(&self, task_id: TaskId) -> Vec<(AgentId, String)> {
+        let Some(project) = self.project_of_mission(task_id) else {
+            return Vec::new();
+        };
+        let Some(open) = self.projects.get(&project) else {
+            return Vec::new();
+        };
+        let definitions = self.workbench.settings.definitions_in(Some(project));
+        let equipped = |definition: Option<&String>| {
+            definitions
+                .iter()
+                .find(|d| Some(&d.id) == definition)
+                .is_some_and(|d| {
+                    ["kubiq-mission", "manage-kubiq-tasks"]
+                        .iter()
+                        .all(|server| d.mcps.iter().any(|m| m == server))
+                })
+        };
+        open.work
+            .agents
+            .iter()
+            .filter(|agent| self.conversation_live(agent.id) && equipped(agent.definition.as_ref()))
+            .map(|agent| (agent.id, self.agent_label(agent).title.to_string()))
+            .collect()
+    }
+
     /// Whether this window has a live conversation for the agent.
     pub fn conversation_live(&self, agent: AgentId) -> bool {
         self.projects.values().any(|open| {
@@ -735,8 +765,8 @@ impl AppState {
 }
 
 /// The definition a role runs when the mission names none: the planner tag, then the old
-/// coordinator tag, then anything ticked as a mission assistant; workers and reviewers take the
-/// worker tag.
+/// coordinator tag, then anything ticked as a mission assistant; a coordinator takes the
+/// coordinator tag, then the planner one; workers and reviewers take the worker tag.
 fn default_definition(
     definitions: &[kubiq_proto::messages::AgentDefinition],
     role: LaunchRole,
@@ -748,6 +778,9 @@ fn default_definition(
             .find(|d| d.has_tag(TAG_PLANNER))
             .or_else(|| live().find(|d| d.has_tag(TAG_COORDINATOR)))
             .or_else(|| live().find(|d| d.mission_assistant == Some(true))),
+        LaunchRole::Coordinator => live()
+            .find(|d| d.has_tag(TAG_COORDINATOR))
+            .or_else(|| live().find(|d| d.has_tag(TAG_PLANNER))),
         LaunchRole::Worker | LaunchRole::Reviewer => live().find(|d| d.has_tag(TAG_WORKER)),
     }
 }

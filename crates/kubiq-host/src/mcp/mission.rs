@@ -1,4 +1,5 @@
-//! The `kubiq-mission` server: a mission as tools its planner (and its final reviewer) can call.
+//! The `kubiq-mission` server: a mission as tools its planner, its coordinator (`start_task`) and
+//! its final reviewer can call.
 //!
 //! **No tool here takes a mission id.** Which mission the caller is in is
 //! [`AgentFacts::mission`], filled at launch from the agent's assignment and moved by
@@ -12,11 +13,11 @@
 //! prompt, and they report through `use-task`. Mutations broadcast to every window (`D120`), and
 //! every write that changes what the runner sees says [`Message::MissionSchedule`] to wake it.
 
-use serde_json::{Value, json};
 use kubiq_proto::ids::{ProjectId, TaskId};
 use kubiq_proto::messages::{Message, TaskField};
 use kubiq_proto::mission::Phase;
 use kubiq_proto::work::{Attachment, Level, Status};
+use serde_json::{Value, json};
 
 use super::registry::AgentFacts;
 use super::{MissionReach, PlanReach, WorkAccess};
@@ -47,6 +48,7 @@ pub fn call(
         "create_mission_task" => create_mission_task(arguments, project, mission, work),
         "create_mission_tasks" => create_mission_tasks(arguments, project, mission, work),
         "request_phase" => request_phase(arguments, project, mission, reach),
+        "start_task" => start_task(arguments, facts, project, mission, reach, work),
         _ => Err(format!("unknown tool: kubiq-mission/{tool}")),
     }
 }
@@ -90,8 +92,17 @@ fn overview(
     let settings = crate::mission::runner::settings_of(parent);
     let mut counts = serde_json::Map::new();
     let mut children = 0usize;
+    let mut list = Vec::new();
     for task in tasks.iter().filter(|task| task.parent == Some(mission)) {
         children += 1;
+        list.push(json!({
+            "task_id": task.id.to_string(),
+            "key": task.key,
+            "title": task.title,
+            "status": task.status.label(),
+            "prerequisites_met": task.ready(&tasks),
+            "has_worker": task.worker.is_some(),
+        }));
         let entry = counts
             .entry(task.status.label().to_string())
             .or_insert_with(|| json!(0));
@@ -106,14 +117,14 @@ fn overview(
         "description": parent.description,
         "phase": Phase::of(parent.status).label(),
         "settings": {
-            "driver": format!("{:?}", settings.driver).to_lowercase(),
+            "driver": settings.driver.label(),
             "planner": settings.planner,
             "worker": settings.worker,
             "parallel": settings.parallelism(),
             "approve": settings.approve,
         },
         "documents": documents,
-        "tasks": {"total": children, "by_status": counts},
+        "tasks": {"total": children, "by_status": counts, "list": list},
         "waiting_on_user": pending.map(|phase| format!("you asked for {}", phase.label())),
     }))
 }
@@ -659,6 +670,55 @@ fn request_phase(
         "asked_for": phase.label(),
         "waiting_for_user": true,
         "message": "The user has been told. Stop here and wait for their answer.",
+    }))
+}
+
+/// Start a task of the mission — the coordinator's dispatch. Checked here as far as the board
+/// can say, then said into the host's own inbox as the window's ▶ would be (`MissionTask`): only
+/// the coordinator's thread knows which agents are live and which window launches.
+fn start_task(
+    arguments: &Value,
+    facts: &AgentFacts,
+    project: ProjectId,
+    mission: TaskId,
+    reach: &MissionReach,
+    work: Option<&WorkAccess>,
+) -> Result<Value, String> {
+    let access = work.ok_or_else(|| "this host has no task board".to_string())?;
+    let retry = arguments
+        .get("retry")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let (_, tasks) = access.work.lock().tasks(project);
+    let id = resolve_reference(required_str(arguments, "task")?, &tasks, &[])?;
+    let key = tasks
+        .iter()
+        .find(|t| t.id == id)
+        .and_then(|t| t.key.clone());
+    let caller = facts.key.parse::<kubiq_proto::work::AgentId>().ok();
+    if let Some(reason) = reach
+        .missions
+        .lock()
+        .start_refusal(project, mission, id, caller, retry)
+    {
+        return Err(reason);
+    }
+    access.wake.say(Message::MissionTask {
+        project_id: project,
+        task_id: id,
+        action: if retry {
+            kubiq_proto::mission::MissionTaskAction::Retry
+        } else {
+            kubiq_proto::mission::MissionTaskAction::Start
+        },
+    });
+    Ok(json!({
+        "in_mission": true,
+        "task_id": id.to_string(),
+        "key": key,
+        "starting": true,
+        "message": "The worker is being started. If it cannot start you are told in a mission \
+                    update; otherwise you are told when the task changes.",
     }))
 }
 

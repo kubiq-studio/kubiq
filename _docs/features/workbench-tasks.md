@@ -6,7 +6,7 @@ status: draft
 summary: The rail's Tasks mode — a column per status, a card per task, what a drag means, the labels and the filter that narrow it, missions — a parent task worked by a deterministic runner — and the children they spawn, the task panel that reports one task whole and edits it a field at a time, and the plan a mission opens as a tab.
 read_when: you are changing the tasks board — its columns, its cards, what a drag means, the task panel, a task's attachments or labels, a mission, or the plan surface and its annotations
 updated: 2026-11-01
-verified: 2026-11-01
+verified: 2026-11-10
 code_anchors: [crates/kubiq/src/state/board.rs, crates/kubiq/src/app/board.rs, crates/kubiq/src/ui/board/mod.rs, crates/kubiq/src/state/tasksrc.rs, crates/kubiq/src/app/tasksrc.rs, crates/kubiq/src/ui/tasksrc.rs, crates/kubiq/tests/tasksrc.rs, crates/kubiq/src/ui/board/detail.rs, crates/kubiq/src/ui/board/form.rs, crates/kubiq/tests/board.rs, crates/kubiq/src/state/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-host/src/store/file.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/plan/service.rs, crates/kubiq-host/src/plan/queue.rs, crates/kubiq-host/src/plan/blocks.rs, crates/kubiq-proto/src/blocks.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq/src/app/plan.rs, crates/kubiq/src/app/editor.rs, crates/kubiq/src/state/plan.rs, crates/kubiq/src/state/document.rs, crates/kubiq/src/ui/document.rs, crates/kubiq/src/ui/mdview/annotation.rs, crates/kubiq/tests/plan.rs, crates/kubiq/src/state/new_mission.rs, crates/kubiq/src/app/new_mission.rs, crates/kubiq/src/ui/new_mission.rs, crates/kubiq/src/state/mission.rs, crates/kubiq/src/app/mission.rs, crates/kubiq/src/ui/mission/mod.rs, crates/kubiq/src/ui/mission/panel.rs, crates/kubiq/src/ui/mission/full.rs, crates/kubiq/src/ui/mission/wbs.rs, crates/kubiq/src/ui/mission/settings.rs, crates/kubiq/src/ui/mission/menu.rs, crates/kubiq/src/ui/mission/note.rs, crates/kubiq/src/state/wbs.rs, crates/kubiq/src/app/wire.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mission/prompts.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/coordinator.rs]
 depends_on: [feat-workbench, tech-ui]
 review_cycle: monthly
@@ -233,11 +233,12 @@ project's working tree at a path the user picks, never a continuous mirror. A mi
 planned says so instead of reporting an error, the same way a task with no sub-tasks does.
 
 **A mission is a task tree worked by a deterministic runner.** The parent task carries the mission's
-settings (`driver`, `planner`, `worker`, `parallel`, `approve`), its subtasks are linked by
+settings (`driver`, `planner`, `worker`, `coordinator`, `parallel`, `approve`), its subtasks are linked by
 prerequisites, and its **phase is the parent's status**: *Planning* is `backlog`, *Breakdown*
 `ready`, *Running* `in progress`, *Paused* `blocked`, *Review* `in review`, then `done` or
-`abandoned`. There is no coordinator agent: a planner agent writes the plan and drafts the tasks and
-then exits, and Kubiq's own runner does the rest.
+`abandoned`. A planner agent writes the plan and drafts the tasks and then exits, and Kubiq's own
+runner does the rest — unless the driver is `coordinator`, the one mode with a coordinator agent
+(`D235`).
 
 1. **Planning.** The user chats with the planner, which writes the plan and any detail documents
    through `kubiq-doc` (the plan, by `task_id`) and `kubiq-mission`. **Approve plan** moves to Breakdown. Open annotation
@@ -251,7 +252,17 @@ then exits, and Kubiq's own runner does the rest.
    `approve` off), it is assigned to no person and not started. Under `auto` the runner starts ready
    tasks until `parallel` workers are live, launching the mission's `worker` (or the task's
    `assigned_to` definition) with the task, the guidance and the plan in its prompt; under `manual`
-   they wait under *Next*, each with a start button. A worker moves its task to `in review`: with
+   they wait under *Next*, each with a start button. Under `coordinator` they wait under *Next* too,
+   and **Start mission** opens the mission's coordinator agent — the `coordinator` definition (by
+   default the one tagged coordinator, else planner), or an open agent assigned in Settings, which
+   is re-assigned to the mission and given the brief (only an agent started with `kubiq-mission`
+   and `manage-kubiq-tasks` can be assigned; replacing it stops the old one). It reads
+   `mission_overview` and starts tasks with `start_task`, which only it may call and only while
+   the mission runs. Whenever a task changes column, becomes ready, loses its worker or cannot be
+   started, or the phase moves, a *Mission update* is written to the mission's coordinator inbox
+   and given to it as its next turn; a coordinator that has stopped is revived with every update it
+   missed. While Running without a live coordinator, Needs you shows **Coordinator stopped** with
+   **Start coordinator**, which carries the waiting updates too. A worker moves its task to `in review`: with
    `approve` off the task counts as satisfied, with it on the task waits for **Confirm** (`done`) or
    **Reject…** (the feedback is recorded as a comment and sent to the live worker as its next turn,
    or, when the worker is gone, rides the retry prompt). A worker that exits with its task still
@@ -286,7 +297,8 @@ then exits, and Kubiq's own runner does the rest.
 **Needs you is the one list of what waits on the user**, derived by the host on every pass
 (`MissionSnapshot::needs_you`): the planner is asking, plan ready, tasks drafted, planner stopped,
 task awaiting approval, human task ready, worker gone, agent review failed twice, a worker's
-permission request, the next ready task (`manual` only) and mission ready for review, each with its
+permission request, the next ready task (`manual` and `coordinator`), coordinator stopped and
+mission ready for review, each with its
 own actions.
 
 **A mission's side panel is the cockpit**, opened from the task panel's *Open mission* row or the
@@ -295,7 +307,7 @@ region, the same as a chat tab, and several may be open at once. Above a fixed t
 term, the key and title, a **phase stepper** (display only, no click-to-move) and a segmented
 progress bar over the children by work state beside the **driver switch**, usable mid-run — four
 **sections** scroll as one region: *Needs you*, *Running* (one row per live worker: task, elapsed
-time, *Chat*), *Next* (only under `manual`) and *Documents* (the plan with its open-thread count,
+time, *Chat*), *Next* (under `manual` and `coordinator`) and *Documents* (the plan with its open-thread count,
 the guidance document and the mission's documents, each opening the existing document surface). **Every
 count and segment of the bar is a filter toggle** that opens the full view on its Tasks tab, filtered
 to that state. In **Breakdown** the middle shows the drafted task list and **Start mission** instead
@@ -1158,8 +1170,11 @@ the mutators and `start_new_mission()`, which sends one `CreateMission`. The hos
 else — `Missions::create` (`crates/kubiq-host/src/mission/mod.rs`) makes the parent, writes the brief
 (the requirements are its `description`, the attachments its `attachments`), adopts the included
 tasks, saves the initial plan as revision one, reading a picked file itself, and posts the planner's
-`MissionLaunch`. The planner and worker pickers list every agent definition the project can see
+`MissionLaunch`. The driver is three pills (*Auto*, *Manual*, *Coordinator*); the planner, worker and
+— under *Coordinator* only — coordinator pickers list every agent definition the project can see
 (`SettingsState::definitions_in`); `None` leaves the choice to the window's default for the role.
+Assigning an open agent as the coordinator is the mission's Settings tab (*Coordinator agent*,
+`AppState::coordinator_candidates`), not the dialog.
 `Layer::NewMission` raises the dialog over the board.
 
 `state/board.rs` is the board's view of the same projection, and holds nothing that is a fact about a
@@ -1350,12 +1365,16 @@ reviewer carry `kubiq-mission` and `kubiq-doc` and are pointed at the tools. Eve
 memory — launches in flight, the window to address, failed launches, feedback waiting on a busy
 worker — is lost on a restart, and the first pass afterwards marks tasks with no live worker as gone.
 
-**The `kubiq-mission` server is the planner's and the final reviewer's, and it is small.**
+**The `kubiq-mission` server is the planner's, the coordinator's and the final reviewer's, and it
+is small.**
 `crates/kubiq-host/src/mcp/mission.rs`, catalogued as `mcp::catalogue::KUBIQ_MISSION`, offers
 `mission_overview`, `read_brief`, `list_documents`, `read_document`, `write_document`,
 `attach_document`, `detach_document`, `create_mission_task`, `create_mission_tasks` (the batch form,
-resolving a prerequisite named by a key or an id created earlier in the same call) and
-`request_phase`. Workers have no mission server: they report through `use-task`, whose
+resolving a prerequisite named by a key or an id created earlier in the same call), `request_phase`
+and `start_task` (the coordinator's alone, while the mission runs: a ready task, or with `retry`
+one whose worker stopped, checked by `Missions::start_refusal` and said into the host's inbox as
+`MissionTask`, where `Missions::coordinator_task_action` turns a refusal into an update). `mission_overview` lists every task with its
+status beside the counts. Workers have no mission server: they report through `use-task`, whose
 `change_state` and `add_comment` move and comment on the task and whose `submit_review` gives a
 reviewer's verdict (pass, or fail with findings, sent to the task under review). Neither takes a
 mission argument: `AgentFacts::mission` resolves "which mission am I in" off the URL identity

@@ -3697,6 +3697,23 @@ impl Coordinator {
                 task_id,
                 field,
             } => {
+                // An open agent coordinates only if it was started with the coordinator's tools:
+                // a conversation's servers are fixed at its start, and a revive cannot add them.
+                if let kubiq_proto::mission::MissionField::CoordinatorAgent(Some(agent)) = &field
+                    && let Some(missing) = self.missing_coordinator_tools(*agent)
+                {
+                    self.host.send(
+                        To::Client(client),
+                        Message::MissionError {
+                            project_id,
+                            task_id: Some(task_id),
+                            error: format!(
+                                "this agent cannot coordinate: it was started without {missing}"
+                            ),
+                        },
+                    );
+                    return;
+                }
                 self.mission_job(client, project_id, Some(task_id), |missions, ctx| {
                     missions.set_field(project_id, task_id, field, ctx)
                 });
@@ -3716,8 +3733,15 @@ impl Coordinator {
                 action,
             } => {
                 let mission = self.missions.lock().mission_of_task(project_id, task_id);
+                // Said by `start_task` on the listener's thread: the coordinator agent's ▶, whose
+                // refusals are reported to it rather than to a window.
+                let by_coordinator = client.is_host_voice();
                 self.mission_job(client, project_id, mission, |missions, ctx| {
-                    missions.task_action(project_id, task_id, action, ctx)
+                    if by_coordinator {
+                        missions.coordinator_task_action(project_id, task_id, action, ctx)
+                    } else {
+                        missions.task_action(project_id, task_id, action, ctx)
+                    }
                 });
             }
             Message::AddGuidance {
@@ -6444,12 +6468,73 @@ impl Coordinator {
         }
     }
 
+    /// The coordinator's servers an agent was not started with, named for a refusal, or `None`
+    /// when it carries them all. An agent this host never started carries none.
+    fn missing_coordinator_tools(&self, agent: AgentId) -> Option<String> {
+        use crate::mcp::catalogue::{KUBIQ_MISSION, MANAGE_KUBIQ_TASKS};
+        let held = self
+            .pending_conversations
+            .get(&agent)
+            .map(|pending| pending.mcps.as_slice())
+            .unwrap_or_default();
+        let missing: Vec<&str> = [KUBIQ_MISSION, MANAGE_KUBIQ_TASKS]
+            .into_iter()
+            .filter(|server| !held.iter().any(|m| m == server))
+            .collect();
+        (!missing.is_empty()).then(|| missing.join(" and "))
+    }
+
+    /// The run loop's delivery of a coordinator's inbox: a coordinator between turns gets every
+    /// waiting update as one turn, and only then is the inbox cleared. One mid-turn keeps it; one
+    /// not running keeps it too — the pass its stop wakes revives it with the inbox in its prompt.
+    fn flush_coordinator_inboxes(&mut self) {
+        use kubiq_proto::plan::DocDelivery;
+        let waiting = self.missions.lock().coordinator_inboxes();
+        for (project, mission, agent) in waiting {
+            if self.doc_state(agent) != DocDelivery::Delivered {
+                continue;
+            }
+            let Some((text, replies)) = self
+                .missions
+                .lock()
+                .take_coordinator_inbox(project, mission, agent)
+            else {
+                continue;
+            };
+            for reply in replies {
+                self.host.send(To::Everyone, reply.into_message());
+            }
+            let sent = self
+                .conversations
+                .get(&agent)
+                .map(|conversation| conversation.prompt(text.clone()));
+            match sent {
+                Some(Ok(())) => {
+                    for reply in self.work.lock().send_to_agent(project, agent, text) {
+                        self.host.send(To::Everyone, reply.into_message());
+                    }
+                }
+                Some(Err(error)) => {
+                    tracing::warn!("agent {agent}: mission update not delivered: {error:#}");
+                    self.missions
+                        .lock()
+                        .restore_coordinator_inbox(project, mission, text);
+                }
+                None => self
+                    .missions
+                    .lock()
+                    .restore_coordinator_inbox(project, mission, text),
+            }
+        }
+    }
+
     /// The run loop's delivery of mission feedback and guidance (contract §3.4): an agent
     /// between turns gets its queue as one turn — in front of the model and into its thread row,
     /// as the doc queue does — an agent mid-turn keeps it, and one that is no longer live drops
     /// it (the one rule: a gone worker hears the feedback through Retry).
     fn flush_mission_feedback(&mut self) {
         use kubiq_proto::plan::DocDelivery;
+        self.flush_coordinator_inboxes();
         let agents = self.missions.lock().queued_agents();
         for agent in agents {
             match self.doc_state(agent) {

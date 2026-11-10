@@ -40,12 +40,16 @@ pub struct NewMissionForm {
     /// Planner and worker, by agent-definition id. `None` is the project's default.
     pub planner: Option<String>,
     pub worker: Option<String>,
+    /// The coordinator's definition, for [`Driver::Coordinator`]. `None` is the project's
+    /// default.
+    pub coordinator: Option<String>,
     pub parallel: usize,
     pub approve: bool,
     /// What is typed into the include-tasks picker's own filter field.
     pub task_query: String,
     pub planner_open: bool,
     pub worker_open: bool,
+    pub coordinator_open: bool,
     pub tasks_open: bool,
     /// Whether the *More* group is unfolded.
     pub more_open: bool,
@@ -57,6 +61,19 @@ impl NewMissionForm {
             parallel: 1,
             ..Self::default()
         }
+    }
+
+    /// Whether any of the dialog's pickers is down.
+    pub fn picker_open(&self) -> bool {
+        self.planner_open || self.worker_open || self.coordinator_open || self.tasks_open
+    }
+
+    /// Shut every picker.
+    pub fn shut_pickers(&mut self) {
+        self.planner_open = false;
+        self.worker_open = false;
+        self.coordinator_open = false;
+        self.tasks_open = false;
     }
 
     /// Whether Start may be pressed: something to call the mission by.
@@ -103,7 +120,8 @@ impl NewMissionForm {
                 worker: self.worker.clone(),
                 parallel: self.parallel.max(1),
                 approve: self.approve,
-                planner_agent: None,
+                coordinator: self.coordinator.clone(),
+                ..MissionSettings::default()
             },
         }
     }

@@ -2,7 +2,7 @@
 //!
 //! Top to bottom: the header, the phase stepper (display only, no click-to-move), the progress bar
 //! with the driver switch (chrome, never folds), then the **sections** — *Needs you*, *Running*,
-//! *Next* (manual driver only), *Documents* — each opened or shut on its own through
+//! *Next* (manual and coordinator drivers), *Documents* — each opened or shut on its own through
 //! [`kit::disclosure`], and the guidance composer fixed at the foot. In **Breakdown** the middle
 //! shows the drafted task list and **Start mission** instead of Running and Next.
 //!
@@ -80,7 +80,7 @@ pub fn render(
     let term = app.mission_term(cx);
     let view = app.mission_view(cx).cloned().unwrap_or_default();
     let breakdown = mission.phase == Phase::Breakdown;
-    let manual = mission.settings.driver == Driver::Manual;
+    let manual = mission.settings.driver != Driver::Auto;
 
     let mut sections = div()
         .id(eid("mission-panel-scroll", task_id))
@@ -329,7 +329,7 @@ fn phase_line(mission: &MissionSnapshot) -> impl IntoElement {
         })
 }
 
-/// The driver switch, usable mid-run: `Auto` or `Manual`, one `SetMissionField`.
+/// The driver switch, usable mid-run: `Auto`, `Manual` or `Coordinator`, one `SetMissionField`.
 pub(super) fn driver_switch(
     task_id: TaskId,
     driver: Driver,
@@ -352,6 +352,14 @@ pub(super) fn driver_switch(
             "Manual",
             driver == Driver::Manual,
             cx.listener(move |this, _, _, cx| this.set_mission_driver(task_id, Driver::Manual, cx)),
+        ))
+        .child(choice_pill(
+            eid("mission-driver-coordinator", task_id),
+            "Coordinator",
+            driver == Driver::Coordinator,
+            cx.listener(move |this, _, _, cx| {
+                this.set_mission_driver(task_id, Driver::Coordinator, cx)
+            }),
         ))
 }
 
@@ -684,6 +692,23 @@ pub(super) fn needs_you_rows(
                         "Resume planner",
                         cx.listener(move |this, _, _, cx| {
                             this.mission_control(task_id, MissionAction::ResumePlanner, cx)
+                        }),
+                    )
+                    .into_any_element(),
+                ],
+            ),
+            NeedsYou::CoordinatorStopped => need_row(
+                key,
+                IconName::Bot,
+                theme::warning(),
+                "Coordinator stopped",
+                vec![
+                    primary_button(
+                        eid2("mission-need-coordinator", task_id, index),
+                        None,
+                        "Start coordinator",
+                        cx.listener(move |this, _, _, cx| {
+                            this.mission_control(task_id, MissionAction::StartCoordinator, cx)
                         }),
                     )
                     .into_any_element(),

@@ -82,13 +82,13 @@ pub enum Step {
 
 // ── reading the log back ────────────────────────────────────────────────
 
-/// The index and the comment of the last `Spawned` line on a task.
+/// The index and the comment of the last `Spawned` line on a task. A coordinator's line on the
+/// mission parent is not one: the coordinator works no task, and counting it would reset what a
+/// mission reviewer's verdict and start time are read against.
 fn last_spawned(task: &TaskRecord) -> Option<(usize, &Comment)> {
-    task.comments
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, c)| matches!(c.event, Some(RunEvent::Spawned { .. })))
+    task.comments.iter().enumerate().rev().find(|(_, c)| {
+        matches!(c.event, Some(RunEvent::Spawned { role, .. }) if role != LaunchRole::Coordinator)
+    })
 }
 
 /// The events written since the last `Spawned`, oldest first (everything, when nothing was
@@ -425,6 +425,13 @@ pub fn needs_you(world: &World, open_threads: usize) -> Vec<NeedsYou> {
     {
         out.push(NeedsYou::PlannerStopped);
     }
+    if phase == Phase::Running
+        && settings.driver == Driver::Coordinator
+        && !world.in_flight.contains(&world.parent.id)
+        && !settings.coordinator_agent.is_some_and(|a| (world.live)(a))
+    {
+        out.push(NeedsYou::CoordinatorStopped);
+    }
 
     if matches!(phase, Phase::Running | Phase::Paused | Phase::Review) {
         for t in world.children() {
@@ -493,8 +500,8 @@ pub fn running(world: &World) -> Vec<RunningWorker> {
     out
 }
 
-/// Every live agent of the mission: the planner, the workers and reviewers (idle ones
-/// included), the mission reviewer.
+/// Every live agent of the mission: the planner, the coordinator, the workers and reviewers
+/// (idle ones included), the mission reviewer.
 pub fn agents(world: &World) -> Vec<AgentId> {
     let mut out = Vec::new();
     let mut push = |a: AgentId| {
@@ -502,8 +509,12 @@ pub fn agents(world: &World) -> Vec<AgentId> {
             out.push(a);
         }
     };
-    if let Some(planner) = world.settings().planner_agent {
+    let settings = world.settings();
+    if let Some(planner) = settings.planner_agent {
         push(planner);
+    }
+    if let Some(coordinator) = settings.coordinator_agent {
+        push(coordinator);
     }
     for t in world.children() {
         if let Some(a) = t.worker {
@@ -526,7 +537,7 @@ pub fn snapshot(
 ) -> MissionSnapshot {
     let settings = world.settings();
     let phase = Phase::of(world.parent.status);
-    let next = if settings.driver == Driver::Manual && phase == Phase::Running {
+    let next = if settings.driver != Driver::Auto && phase == Phase::Running {
         ready(world)
     } else {
         Vec::new()
@@ -664,6 +675,20 @@ mod tests {
         f.child("a", Status::Ready);
         f.child("b", Status::InProgress);
         assert!(launches(&f.run()).is_empty());
+    }
+
+    #[test]
+    fn coordinator_launches_nothing_and_its_absence_needs_you() {
+        let mut settings = auto(3);
+        settings.driver = Driver::Coordinator;
+        let mut f = Fixture::new(Status::InProgress, settings);
+        f.child("a", Status::Ready);
+        assert!(launches(&f.run()).is_empty());
+        assert!(f.needs().contains(&NeedsYou::CoordinatorStopped));
+        let coordinator = AgentId::generate();
+        f.parent.mission.as_mut().unwrap().coordinator_agent = Some(coordinator);
+        f.live.insert(coordinator);
+        assert!(!f.needs().contains(&NeedsYou::CoordinatorStopped));
     }
 
     #[test]
