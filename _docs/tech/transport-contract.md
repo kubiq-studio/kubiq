@@ -1607,7 +1607,7 @@ alike, each entry `write: true`; a read-only entry is dropped, never widened. Th
 definition's grants — a project's own shadowing the global ones, as `mcps` do — with the launch's into
 the isolation read-write set, on top of `HostSettings.extra_grants`, and does so only while host
 isolation is on. A path is absolute or `~`-prefixed. The mission launchers send none, and a launch's
-grants are not stored on the conversation row (`G409`).
+grants (and picked policies) are stored on the conversation row, so a revive keeps them.
 
 **`remote` binds the agent to a saved remote host**, by `SavedRemoteHost.id`, with
 `#[serde(default)]`. Set, the host injects the `kubiq-remote` MCP server — whose calls are the

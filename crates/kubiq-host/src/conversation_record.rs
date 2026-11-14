@@ -121,6 +121,13 @@ pub struct ConversationRecord {
     /// `G182` names.
     #[serde(default)]
     pub agent_home: AgentHome,
+    /// The extra read-write folders this launch picked, so a revived conversation is confined
+    /// with the same ones.
+    #[serde(default)]
+    pub extra_rw: Vec<String>,
+    /// The sandbox policies this launch picked, restored for the same reason.
+    #[serde(default)]
+    pub policies: Vec<String>,
 }
 
 /// Where a conversation's row lives.
@@ -332,7 +339,24 @@ mod tests {
             debug_dump: false,
             forked_from: None,
             agent_home: AgentHome::Inherit,
+            extra_rw: vec!["/tmp/extra".to_string()],
+            policies: vec!["net-off".to_string()],
         }
+    }
+
+    #[test]
+    fn a_row_without_launch_picks_opens_with_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let agent = AgentId::generate();
+        let mut value = serde_json::to_value(row()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("extra_rw");
+        object.remove("policies");
+        let file = path(dir.path(), agent);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, value.to_string()).unwrap();
+        let loaded = load(dir.path(), agent).expect("an older row still opens");
+        assert!(loaded.extra_rw.is_empty() && loaded.policies.is_empty());
     }
 
     #[test]

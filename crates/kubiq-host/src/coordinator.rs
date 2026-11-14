@@ -1228,9 +1228,9 @@ impl Coordinator {
                         // restart does not survive one, same as `catalogue` above.
                         mcps: Vec::new(),
                         skills: Vec::new(),
-                        extra_rw: Vec::new(),
-                        policies: Vec::new(),
-                        // Not persisted either: a revived remote agent comes back unbound (`G461`).
+                        extra_rw: row.extra_rw,
+                        policies: row.policies,
+                        // Not persisted: a revived remote agent comes back unbound (`G461`).
                         remote: None,
                     },
                 )
@@ -5850,6 +5850,8 @@ impl Coordinator {
             // it again whenever a `SetSettings` changes it, so a row that named the other one would
             // claim a run answered from a different machine's worth of state than it did.
             agent_home: self.settings.host().agent_home.clone(),
+            extra_rw: pending.extra_rw.clone(),
+            policies: pending.policies.clone(),
         };
         conversation_record::save(&sessions, agent_id, &record);
     }

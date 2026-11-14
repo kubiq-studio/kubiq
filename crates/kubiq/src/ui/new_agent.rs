@@ -315,7 +315,7 @@ pub fn folders_modal(
         "new-agent-folders-done",
         None,
         "Done",
-        cx.listener(|this, _, _, cx| this.close_new_agent_folders(cx)),
+        cx.listener(|this, _, window, cx| this.close_new_agent_folders(window, cx)),
     )
     .into_any_element();
 
@@ -325,8 +325,8 @@ pub fn folders_modal(
         "Extra folders",
         body,
         footer,
-        crate::ui::dismiss(&view, Layer::NewAgentFolders, |this, _, cx| {
-            this.close_new_agent_folders(cx)
+        crate::ui::dismiss(&view, Layer::NewAgentFolders, |this, window, cx| {
+            this.close_new_agent_folders(window, cx)
         }),
         window,
     )

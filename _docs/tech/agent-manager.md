@@ -485,7 +485,7 @@ list replaces its parent's in `resolve_flattened`. The host reads the definition
 run's scope (a project's definition shadows the global one, as `definition_mcps` does), unions it with
 the launch's `StartConversation.grants`, and `add_rw` expands each `~` and adds it to the same
 `extra_rw` set, **only while host isolation is on**; with it off both are ignored. They sit on top of
-`extra_grants`, never in place of them, and are not persisted on the conversation row (`G409`).
+`extra_grants`, never in place of them, and are persisted on the conversation row (`extra_rw`, `policies`) so a revive after a restart keeps them.
 `environment.toml` is deliberately outside `settings.json`: it is machine state a planned policy UI
 edits as one file, not a preference that syncs — see `G204`. What stays per-run is the
 configuration, which `CLAUDE_CONFIG_DIR` and its siblings pin to the run directory.

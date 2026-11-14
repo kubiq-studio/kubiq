@@ -1212,7 +1212,7 @@ impl AppState {
         // The same case again for the start form's own pickers, which keep their open state on
         // the form for the same reason: Escape takes the list down before the form under it.
         if self.new_agent_form().is_some_and(|form| form.folders_open) {
-            self.close_new_agent_folders(cx);
+            self.close_new_agent_folders(window, cx);
             return;
         }
         if let Some(list) = self.new_agent_form().and_then(|form| form.open) {

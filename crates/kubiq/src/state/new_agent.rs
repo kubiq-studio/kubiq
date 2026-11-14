@@ -480,6 +480,13 @@ impl NewAgentForm {
         true
     }
 
+    /// Settle the dialog's field before it closes: text still in it is added. Returns whether the
+    /// dialog may close; a refused path leaves `grant_invalid` set and the dialog open.
+    pub fn finish_grants(&mut self, pending: &str) -> bool {
+        self.grant_invalid = !pending.trim().is_empty() && !self.add_grant(pending);
+        !self.grant_invalid
+    }
+
     /// Drop the folder at `index`, if there is one.
     pub fn remove_grant(&mut self, index: usize) {
         if index < self.grants.len() {
@@ -808,6 +815,19 @@ mod tests {
         assert_eq!(again.grants, form.grants, "an edit opens with them");
         again.remove_grant(0);
         assert_eq!(again.grants.len(), 1);
+    }
+
+    #[test]
+    fn done_adds_a_typed_path_and_stays_open_on_a_bad_one() {
+        let mut form = NewAgentForm::new(Purpose::Start);
+        assert!(form.finish_grants("  /data/typed  "), "a typed path is added, then Done closes");
+        assert_eq!(form.grants.len(), 1);
+        assert_eq!(form.grants[0].path, "/data/typed");
+        assert!(!form.finish_grants("relative/dir"), "a refused path keeps the dialog open");
+        assert!(form.grant_invalid);
+        assert_eq!(form.grants.len(), 1);
+        assert!(form.finish_grants("  "), "an empty field clears the error and closes");
+        assert!(!form.grant_invalid);
     }
 
     #[test]

@@ -211,6 +211,8 @@ mod tests {
             debug_dump: false,
             forked_from: None,
             agent_home: AgentHome::Inherit,
+            extra_rw: Vec::new(),
+            policies: Vec::new(),
         }
     }
 

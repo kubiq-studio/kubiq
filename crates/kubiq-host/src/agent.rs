@@ -3976,6 +3976,70 @@ mod tests {
         );
     }
 
+    /// A launch's extra folder and a definition's both reach the confined run's read-write set, and
+    /// the picked and default policies reach its layers; an unconfined run carries neither.
+    #[test]
+    fn launch_and_definition_folders_and_policies_reach_the_confined_spec() {
+        let root = tempfile::TempDir::new().unwrap();
+        let cwd = tempfile::TempDir::new().unwrap();
+        let agents = Agents::new(root.path(), true);
+        let layer = |name: &str| {
+            let layer = toml::from_str(r#"paths = [{ path = "/tmp", access = "ro" }]"#).unwrap();
+            agents
+                .policy_store()
+                .save(name, None, "", &layer)
+                .expect("saving a policy");
+        };
+        layer("picked");
+        layer("always");
+        agents.policy_store().set_default("always", true).unwrap();
+        agents
+            .save_definition(AgentDefinition {
+                grants: vec![Grant {
+                    path: "/data/from-definition".to_string(),
+                    write: true,
+                }],
+                ..a_definition("review")
+            })
+            .unwrap();
+
+        let composed = agents
+            .compose_run(
+                "agent-1",
+                "claude-code",
+                cwd.path(),
+                Vec::new(),
+                IoModes::Structured,
+                ConverseOptions {
+                    definition: Some("review".to_string()),
+                    extra_rw: vec!["/data/from-launch".to_string(), "~/launch-home".to_string()],
+                    policies: vec!["picked".to_string()],
+                    ..Default::default()
+                },
+            )
+            .expect("composing a confined run");
+        let spec = &composed.confined.as_ref().expect("confined").spec;
+        let home = isolate::real_home().join("launch-home");
+        for want in [
+            "/data/from-definition",
+            "/data/from-launch",
+            home.to_str().unwrap(),
+        ] {
+            assert!(
+                spec.add_dirs_rw.iter().any(|dir| dir == want),
+                "{want} missing from {:?}",
+                spec.add_dirs_rw
+            );
+        }
+        for want in ["picked", "always"] {
+            assert!(
+                spec.profiles.iter().any(|name| name == want),
+                "{want} missing from {:?}",
+                spec.profiles
+            );
+        }
+    }
+
     /// P6: every confined run keeps the real home, whether its conversation named a definition
     /// or not. A home of its own would aim each toolchain layer's `~/.cargo`-shaped grant at
     /// an empty directory, so an agent could hold `cargo` in its `PATH` and still not build;

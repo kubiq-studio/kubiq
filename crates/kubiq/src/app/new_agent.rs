@@ -1148,11 +1148,19 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn close_new_agent_folders(&mut self, cx: &mut Context<Self>) {
+    /// Close the dialog. A path typed but not yet Added is added first, so Done does not drop it;
+    /// one that is refused keeps the dialog open with its error showing.
+    pub fn close_new_agent_folders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pending = self.new_agent_grant_input.read(cx).value().to_string();
         if let Some(form) = self.new_agent_form_mut() {
+            if !form.finish_grants(&pending) {
+                cx.notify();
+                return;
+            }
             form.folders_open = false;
-            form.grant_invalid = false;
         }
+        self.new_agent_grant_input
+            .update(cx, |state, cx| state.set_value("", window, cx));
         cx.notify();
     }
 

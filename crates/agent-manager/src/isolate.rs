@@ -1986,6 +1986,76 @@ mod tests {
         );
     }
 
+    // End to end, on unix: a process confined by a planned policy writes into an extra
+    // read-write folder and nowhere else outside the grants. Skips where this machine cannot
+    // confine (no backend, a kernel without the feature, already confined).
+    #[cfg(unix)]
+    #[test]
+    fn a_confined_process_writes_an_extra_folder_and_not_a_stranger() {
+        use std::os::fd::OwnedFd;
+        if ensure_can_confine().is_err() {
+            eprintln!("skipped: this machine cannot confine");
+            return;
+        }
+        let state = TempDir::new().expect("state dir");
+        let cwd = TempDir::new().expect("cwd");
+        let cfg_dir = TempDir::new().expect("config dir");
+        // Outside `/tmp`, which the base layer grants read-write to every run.
+        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let extra = TempDir::new_in(here).expect("extra folder");
+        let stranger = TempDir::new_in(here).expect("stranger folder");
+        let run = sandboxed_run(cwd.path(), "");
+        let mut options = IsolateOptions::new(state.path().to_path_buf());
+        options.extra_rw = vec![extra.path().to_path_buf()];
+        let touch = ["/usr/bin/touch", "/bin/touch"]
+            .into_iter()
+            .find(|path| Path::new(path).exists())
+            .expect("a touch binary");
+        let launch = Launch {
+            program: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                // Absolute: a confined run's environment is cleared, so no `PATH` finds it.
+                format!(
+                    "{touch} '{}/ok'; {touch} '{}/no'",
+                    extra.path().display(),
+                    stranger.path().display()
+                ),
+            ],
+            ..Launch::default()
+        };
+        let confined = plan(&launch, &run, cfg_dir.path(), &options)
+            .expect("plan")
+            .expect("a policy");
+
+        let null = || -> OwnedFd {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/null")
+                .expect("/dev/null")
+                .into()
+        };
+        let stdio = isol8::SandboxStdio::from_fds(null(), null(), null());
+        let mut child = match isol8::sandbox::spawn_with_stdio_in(&confined.spec, &confined.ctx, stdio) {
+            Ok(child) => child,
+            Err(error) => {
+                eprintln!("skipped: the sandbox would not start here: {error}");
+                return;
+            }
+        };
+        let code = child.wait().expect("waiting on the confined process");
+        if code == 127 {
+            // The backend refused to set the policy up (Landlock cannot open a granted layer
+            // directory that is missing on this machine): nothing about the grants to judge.
+            eprintln!("skipped: the sandbox could not apply its policy here");
+            return;
+        }
+
+        assert!(extra.path().join("ok").exists(), "the extra folder is writable");
+        assert!(!stranger.path().join("no").exists(), "a folder nobody granted is not");
+    }
+
     // An empty layer name (Isolation::Sandboxed(String::new()), the "just
     // isolate me, no named profile" case) must add nothing beyond the
     // builtin defaults, or every plain `--isolate` run silently grows a
