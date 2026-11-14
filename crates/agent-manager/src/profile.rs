@@ -119,6 +119,12 @@ pub struct Profile {
     /// the parent's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_rw: Vec<String>,
+    /// Sandbox policy layers (isol8 layer names, see [`crate::policy`]) a confined run of this
+    /// profile is composed under, on top of the embedder's defaults. Recorded only: the embedder
+    /// passes them to [`crate::isolate::IsolateOptions::layers`]. Empty means "not mentioned" and
+    /// inherits; a non-empty list replaces the parent's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<String>,
 }
 
 impl Profile {
@@ -711,6 +717,9 @@ pub fn flatten(chain: &[Profile]) -> Profile {
         }
         if !profile.extra_rw.is_empty() {
             acc.extra_rw = profile.extra_rw.clone();
+        }
+        if !profile.policies.is_empty() {
+            acc.policies = profile.policies.clone();
         }
         acc.defaults.overlay(&profile.defaults);
     }

@@ -340,6 +340,8 @@ impl AppState {
             // And what the definition form's MCP checklist offers, which the definition section is the
             // other surface for — see `AppState::open_new_agent`.
             self.bus.send(Message::ListMcps);
+            // And the policies the same form offers.
+            self.bus.send(Message::ListPolicies);
             // Same reasoning, for the other half of the identities: a connection made in
             // another window should be here without a restart.
             self.bus.send(Message::ListConnections);

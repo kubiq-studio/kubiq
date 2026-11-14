@@ -130,6 +130,11 @@ pub struct IsolateOptions {
     /// nothing. Passed through as given: an absent path renders as an inert
     /// grant, so a caller never has to pre-check one.
     pub extra_rw: Vec<PathBuf>,
+    /// Further named layers the run is composed under, after the defaults and the run's own
+    /// [`Isolation::Sandboxed`] layer: the policies a definition or a launch picked, and the ones
+    /// the caller marked as always on. A name that does not resolve is an error from [`plan`], so
+    /// a caller drops stale names first (see [`crate::policy::PolicyStore::resolving`]).
+    pub layers: Vec<String>,
 }
 
 impl IsolateOptions {
@@ -140,6 +145,7 @@ impl IsolateOptions {
             home: HomeMode::Inherit,
             extra_ro: Vec::new(),
             extra_rw: Vec::new(),
+            layers: Vec::new(),
         }
     }
 
@@ -865,6 +871,11 @@ pub fn plan(
         .extend(DEV_LAYERS.iter().map(|name| (*name).to_string()));
     if !layer.is_empty() {
         cfg.default_profiles.push(layer.clone());
+    }
+    for name in &options.layers {
+        if !cfg.default_profiles.contains(name) {
+            cfg.default_profiles.push(name.clone());
+        }
     }
 
     let spec = isol8::resolve::spec_from_config(&cfg, base, cmd, &ctx)
@@ -1629,6 +1640,29 @@ mod tests {
         assert!(confined.spec.profiles.contains(&"base".to_string()));
         assert!(confined.spec.profiles.contains(&system_layer.to_string()));
         assert!(confined.spec.profiles.contains(&"no-network".to_string()));
+    }
+
+    // The caller's `layers` join the run once each, after the defaults.
+    #[test]
+    fn extra_layers_join_the_run_once() {
+        let state = TempDir::new().expect("state dir");
+        let cwd = TempDir::new().expect("cwd");
+        let cfg_dir = TempDir::new().expect("config dir");
+        let run = sandboxed_run(cwd.path(), "");
+        let mut options = IsolateOptions::new(state.path().to_path_buf());
+        options.layers = vec!["shared/agent-common".into(), "toolchains/rust".into()];
+
+        let confined = plan(&Launch::default(), &run, cfg_dir.path(), &options)
+            .expect("plan")
+            .expect("policy");
+
+        let count = |name: &str| confined.spec.profiles.iter().filter(|n| *n == name).count();
+        assert_eq!(count("shared/agent-common"), 1);
+        assert_eq!(
+            count("toolchains/rust"),
+            1,
+            "already a dev layer: not doubled"
+        );
     }
 
     // A relocated toolchain root is granted, split by what a build needs

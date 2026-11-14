@@ -419,6 +419,29 @@ pub fn sections(reg: &mut Registry<SettingsSectionSpec>) {
     add(
         ids::SETTINGS_APP_AGENTS,
         SettingsSectionSpec {
+            on_show: Some(AppState::on_show_policies),
+            ..section(
+                ids::POLICIES,
+                "Policies",
+                &[
+                    "policies",
+                    "policy",
+                    "sandbox",
+                    "isolation",
+                    "isol8",
+                    "profiles",
+                    "layers",
+                    "import",
+                    "default",
+                ],
+                || KubiqIcon::Isolation.into(),
+                |ctx, _, cx| crate::ui::policy::section(ctx.app, cx),
+            )
+        },
+    );
+    add(
+        ids::SETTINGS_APP_AGENTS,
+        SettingsSectionSpec {
             on_show: Some(AppState::on_show_assist),
             ..section(
                 ids::ASSIST,
@@ -4148,8 +4171,8 @@ pub fn definition_form(
         )),
         cx,
     )
-    .when(form.policies, |this| {
-        this.child(crate::ui::new_agent::policies_modal(app, &form, window, cx))
+    .when(form.folders_open, |this| {
+        this.child(crate::ui::new_agent::folders_modal(app, &form, window, cx))
     })
     .into_any_element()
 }

@@ -429,6 +429,9 @@ pub struct ConverseOptions {
     /// Extra folders this run may write when isolation is on, as typed (absolute or
     /// `~`-prefixed). The launch's own; the definition's are read in `compose_run`.
     pub extra_rw: Vec<String>,
+    /// The sandbox policies this launch picked, by layer name, on top of the definition's own
+    /// and the defaults. Resolved in `compose_run`; only a confined run has a policy to join.
+    pub policies: Vec<String>,
     /// Always-on instructions Kubiq adds to whatever the definition resolved — appended to the
     /// spec's `initial.instructions`, which the library writes wherever this harness reads them.
     /// Set for an agent bound to a remote (`D226`); `None` everywhere else.
@@ -954,6 +957,7 @@ impl Agents {
                             write: true,
                         })
                         .collect(),
+                    policies: record.policies,
                     project,
                     local: None,
                 })
@@ -1155,6 +1159,7 @@ impl Agents {
                         None => grant.path,
                     })
                     .collect(),
+                policies: definition.policies,
                 extends: kept.extends,
                 isolate: kept.isolate,
                 ..Default::default()
@@ -1359,6 +1364,7 @@ impl Agents {
                 disabled: false,
                 project: None,
                 grants: Vec::new(),
+                policies: Vec::new(),
                 local: None,
             })
             .with_context(|| format!("writing the default agent definition '{id}'"))?;
@@ -1491,6 +1497,11 @@ impl Agents {
     /// it is otherwise unreachable — `operation not permitted: cargo`, with the binary sitting
     /// in the run's own `PATH`. Reading a tool is not writing its cache: what a build writes to
     /// is granted by the toolchain roots, not by this.
+    /// The policy repository under this host's isolation state.
+    pub fn policy_store(&self) -> agent_manager::policy::PolicyStore {
+        agent_manager::policy::PolicyStore::new(self.root.join("isol8"))
+    }
+
     fn isolate_options(&self) -> IsolateOptions {
         let mut options = IsolateOptions::new(self.root.join("isol8"));
         options.grant_toolchains(|name| self.environment.lookup(name));
@@ -1859,6 +1870,28 @@ impl Agents {
             Vec::new()
         };
 
+        // The sandbox policies this run is composed under: the ones marked as defaults, the
+        // definition's, this launch's. A name the registry no longer resolves is dropped with a
+        // warning — a deleted policy must not make every run that once picked it fail.
+        let policies = if self.isolate {
+            let store = self.policy_store();
+            let saved = flat
+                .as_ref()
+                .map(|record| record.policies.clone())
+                .unwrap_or_default();
+            let wanted = union(
+                union(store.defaults(), saved),
+                std::mem::take(&mut options.policies),
+            );
+            let (kept, dropped) = store.resolving(&wanted);
+            if !dropped.is_empty() {
+                tracing::warn!(?dropped, "dropping policies that no longer resolve");
+            }
+            kept
+        } else {
+            Vec::new()
+        };
+
         // Which of Kubiq's own MCP servers this run gets, and — the reason this is here rather
         // than left to the library — which names still belong to `resolve`.
         //
@@ -2109,6 +2142,7 @@ impl Agents {
         let mut options = self.isolate_options();
         options.home = home_mode(&self.home);
         add_rw(&mut options, &extra_rw);
+        options.layers = policies;
         // The account's home — or, with none, the harness's own — is where the harness keeps
         // its login and its sessions; the policy grants the run's own scratch dir, not that.
         options.grant_config_home(harness.as_ref(), &spec.config);
@@ -3813,6 +3847,7 @@ mod tests {
             disabled: false,
             project: None,
             grants: Vec::new(),
+            policies: Vec::new(),
             local: None,
         }
     }

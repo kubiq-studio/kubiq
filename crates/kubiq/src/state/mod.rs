@@ -46,6 +46,7 @@ pub mod notifications;
 pub mod onboarding;
 pub mod overlay;
 pub mod plan;
+pub mod policy;
 pub mod prefs;
 pub mod remote;
 pub mod remote_hosts;

@@ -137,6 +137,8 @@ pub mod mission;
 #[cfg(feature = "desktop")]
 pub mod notifications;
 pub mod plan;
+#[cfg(feature = "harness")]
+pub mod policy;
 pub mod projects;
 pub mod pty;
 #[cfg(feature = "harness")]

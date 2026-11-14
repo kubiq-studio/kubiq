@@ -2973,6 +2973,8 @@ impl AppState {
                 // And the setups built on top of them, for the same reason: the menu offers a
                 // row per definition.
                 self.bus.send(Message::ListAgentDefinitions);
+                // And the sandbox policies the form's checklist offers.
+                self.bus.send(Message::ListPolicies);
                 // And the bell, so a window that has just attached draws the badge the other
                 // windows are already drawing rather than an empty one until something arrives.
                 self.bus.send(Message::ListNotifications);
@@ -3262,6 +3264,12 @@ impl AppState {
                 self.follow_definition_rename();
                 cx.notify();
             }
+            // The sandbox policies, replaced whole like the definitions: the host's answer is
+            // the list, and every mutation re-broadcasts it.
+            Message::Policies { policies } => self.apply_policies(policies, cx),
+            Message::PolicyBody { info, doc, toml } => self.apply_policy_body(info, doc, toml, cx),
+            Message::PolicyImported { names, .. } => self.apply_policy_imported(names, cx),
+            Message::PolicyError { error } => self.apply_policy_error(error, cx),
             // What this build can inject into a harness. Replaced whole, the same way the harness
             // list is: the host's answer *is* the catalogue, and a server this build no longer
             // ships has to leave the checklist.

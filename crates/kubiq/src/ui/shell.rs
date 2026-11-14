@@ -290,6 +290,36 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
                 .as_ref()
                 .map(|_| catalog::mcp_registry(app, window, cx)),
         )
+        // The policy manager's modals, in `Layer` order: the editor over the page, the clone
+        // prompt over the editor, then the import and removal questions.
+        .children(
+            app.workbench
+                .policy
+                .editor
+                .as_ref()
+                .map(|_| crate::ui::policy::editor_modal(app, window, cx)),
+        )
+        .children(
+            app.workbench
+                .policy
+                .clone_as
+                .as_ref()
+                .map(|_| crate::ui::policy::clone_prompt(app, window, cx)),
+        )
+        .children(
+            app.workbench
+                .policy
+                .import
+                .as_ref()
+                .map(|_| crate::ui::policy::import_modal(app, window, cx)),
+        )
+        .children(
+            app.workbench
+                .policy
+                .confirm_delete
+                .as_ref()
+                .map(|_| crate::ui::policy::delete_confirm(app, window, cx)),
+        )
         // The accounts section's rename, delete or sign-out question — painted after the login
         // modal for the same reason that one is painted after the settings page: each can be up
         // over what raised it and has to be on top.

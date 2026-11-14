@@ -1027,16 +1027,20 @@ impl AppState {
             (Layer::NewMission, w.new_mission.is_some()),
             (Layer::AgentDefinitionForm, s.definition_form.is_some()),
             (
-                Layer::NewAgentPolicies,
+                Layer::NewAgentFolders,
                 w.new_agent
                     .as_ref()
                     .or(s.definition_form.as_ref())
-                    .is_some_and(|form| form.policies),
+                    .is_some_and(|form| form.folders_open),
             ),
             (Layer::SkillBrowse, s.catalog.browse.is_some()),
             (Layer::SkillSource, s.catalog.add_source),
             (Layer::McpForm, s.catalog.form.is_some()),
             (Layer::McpRegistry, s.catalog.registry.is_some()),
+            (Layer::PolicyEditor, w.policy.editor.is_some()),
+            (Layer::PolicyClone, w.policy.clone_as.is_some()),
+            (Layer::PolicyImport, w.policy.import.is_some()),
+            (Layer::PolicyDelete, w.policy.confirm_delete.is_some()),
             (Layer::AccountDialog, s.dialog.is_some()),
             (Layer::Connect, s.connect.is_some()),
             (Layer::AppForm, s.app_form.is_some()),
@@ -1207,8 +1211,8 @@ impl AppState {
         }
         // The same case again for the start form's own pickers, which keep their open state on
         // the form for the same reason: Escape takes the list down before the form under it.
-        if self.new_agent_form().is_some_and(|form| form.policies) {
-            self.close_new_agent_policies(cx);
+        if self.new_agent_form().is_some_and(|form| form.folders_open) {
+            self.close_new_agent_folders(cx);
             return;
         }
         if let Some(list) = self.new_agent_form().and_then(|form| form.open) {
@@ -1357,6 +1361,16 @@ impl AppState {
             self.cancel_connect(window, cx);
         } else if settings.dialog.is_some() {
             self.close_account_dialog(cx);
+        } else if self.workbench.policy.confirm_delete.is_some() {
+            // The policy manager's four modals, in reverse paint order: the delete question and
+            // the import question sit over the page, the clone prompt over the editor.
+            self.cancel_delete_policy(cx);
+        } else if self.workbench.policy.import.is_some() {
+            self.close_policy_import(cx);
+        } else if self.workbench.policy.clone_as.is_some() {
+            self.close_policy_clone(cx);
+        } else if self.workbench.policy.editor.is_some() {
+            self.close_policy_editor(cx);
         } else if settings.catalog.registry.is_some() {
             // The catalog's four modals, in reverse paint order: the registry search and the
             // source question are raised over the form and the browser, so Escape takes them
@@ -1957,6 +1971,7 @@ impl Render for AppState {
         self.sync_git_fields(window, cx);
         self.sync_settings_fields(window, cx);
         self.sync_catalog_fields(window, cx);
+        self.sync_policy_fields(window, cx);
         // Made anonymous straight away so the frame stops borrowing the window: the queue below
         // is drained on the same `&mut self` the tree was built from.
         let tree = ui::shell::render(self, window, cx).into_any_element();

@@ -983,6 +983,7 @@ fn a_definition(id: &str, project: Option<ProjectId>) -> kubiq_proto::messages::
         disabled: false,
         project,
         grants: Vec::new(),
+        policies: Vec::new(),
         local: None,
     }
 }

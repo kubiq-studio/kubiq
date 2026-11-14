@@ -359,7 +359,7 @@ impl AppState {
             return;
         }
         // The folders dialog's field answers Enter with Add, and the form stays put.
-        if form.policies {
+        if form.folders_open {
             self.add_new_agent_grant(_window, cx);
             return;
         }
@@ -947,6 +947,7 @@ impl AppState {
             mcps: form.mcps.clone(),
             skills: form.skills.clone(),
             grants: form.grants.clone(),
+            policies: form.policy_picks.clone(),
             // The drone serving the project, when one does; else the form's pick, bound only while
             // that remote is still attached and serves tools.
             remote: drone.or_else(|| {
@@ -1043,6 +1044,7 @@ impl AppState {
             mcps: form.mcps.clone(),
             skills: form.skills.clone(),
             grants: form.grants.clone(),
+            policies: form.policy_picks.clone(),
         };
         self.spawn_pane(Some(form.agent_type.clone()), Vec::new(), picks, cx);
         // **Release the aim.** A form raised from a chat header or the sink wrote down where the
@@ -1133,22 +1135,22 @@ impl AppState {
     }
 
     /// Raise the extra-folders dialog over the form.
-    pub fn open_new_agent_policies(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_new_agent_folders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = self.new_agent_grant_input.clone();
         input.update(cx, |state, cx| {
             state.set_value("", window, cx);
             state.focus(window, cx);
         });
         if let Some(form) = self.new_agent_form_mut() {
-            form.policies = true;
+            form.folders_open = true;
             form.grant_invalid = false;
         }
         cx.notify();
     }
 
-    pub fn close_new_agent_policies(&mut self, cx: &mut Context<Self>) {
+    pub fn close_new_agent_folders(&mut self, cx: &mut Context<Self>) {
         if let Some(form) = self.new_agent_form_mut() {
-            form.policies = false;
+            form.folders_open = false;
             form.grant_invalid = false;
         }
         cx.notify();

@@ -649,6 +649,7 @@ fn the_forms_answers_ride_out_on_spawn_workspace_as_picks(cx: &mut TestAppContex
             mcps: vec!["filesystem".to_string(), "git".to_string()],
             skills: Vec::new(),
             grants: Vec::new(),
+            policies: Vec::new(),
         },
         "every answer the form held rode out on the pick"
     );
@@ -956,6 +957,7 @@ fn picking_a_harness_on_a_definition_form_keeps_its_scope_and_words(cx: &mut Tes
         disabled: false,
         project: Some(project),
         grants: Vec::new(),
+        policies: Vec::new(),
         local: None,
     };
 
