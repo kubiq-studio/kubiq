@@ -1532,11 +1532,13 @@ hatch for a toolchain installed somewhere the policy does not expect: a path per
 until the chip is clicked, because read-only is the safer half of the choice and what a shared cache
 usually wants.
 
-**Pane confinement works on macOS and Windows, and the section reports what does not rather than
-failing at the spawn.** A build with no enforcing backend — Linux today — draws the state chip in
-the warning colour and dims the toggle, status by colour and not by wording alone, the same as
-everywhere else. A row that promised protection it could not deliver would be worse than the plain
-run it silently became.
+**Pane confinement works on macOS, Linux and Windows, and the section reports what does not rather
+than failing at the spawn.** A build with no enforcing backend — any other platform — draws the
+state chip in the warning colour and dims the toggle, status by colour and not by wording alone, the
+same as everywhere else. A row that promised protection it could not deliver would be worse than the
+plain run it silently became. A read-write extra grant whose folder is missing is created before a
+confined run is planned, so the sandbox grants that folder and not its parent; one that cannot be
+created is dropped from the run with a warning in the log, and the agent still starts.
 
 **The Policies section lists the layers an isolated run stacks, and it is where a policy is edited.**
 Rows are grouped under *Local*, *Imported*, *isol8 user* and *Built-in*, and each carries its origin as

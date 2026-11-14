@@ -533,13 +533,21 @@ startup sweep included, where the finish time is the sweep's own and the exit co
 All of it is best effort: a record that cannot be written is never a reason to fail a spawn or a
 close, and a run with no metadata is a plain shell pane rather than an error.
 
-Confining a run in a terminal Kubiq owns works on macOS and Windows, not on Linux. isol8 spawns with
+Confining a run in a terminal Kubiq owns works on macOS, Linux and Windows. isol8 spawns with
 inherited stdio and keeps its child handle private, so no host hands it a pseudo-terminal: on macOS
-`isolate::confined_launch` renders the policy and execs `sandbox-exec` around the harness. Windows
-has no ConPTY seam either, but isol8 calls `CreateProcessW` with no console-creation flag, so its
-child attaches to the caller's console — `confined_launch` writes the policy, environment, command
-and cwd to a `ConfinePayload` under `<state_dir>/confine/` and re-invokes the running binary under
-`isolate::CONFINE_ARG`, Chrome's `--type=renderer` pattern rather than a second shipped executable.
+`isolate::confined_launch` renders the policy and execs `sandbox-exec` around the harness. Linux and
+Windows have no rendered form — Landlock applies between `fork` and `exec`, and isol8 calls
+`CreateProcessW` with no console-creation flag, so its child attaches to the caller's console — so
+`confined_launch` writes the policy, environment, command and cwd to a `ConfinePayload` under
+`<state_dir>/confine/` and re-invokes the running binary under `isolate::CONFINE_ARG`, Chrome's
+`--type=renderer` pattern rather than a second shipped executable. On Linux the confine run calls
+isol8's backend `spawn`, which forks once and applies Landlock in the child, and the harness inherits
+the pane's pty, session and foreground group: resizes reach it as `SIGWINCH` from the kernel, and the
+confine run catches `SIGINT`/`SIGQUIT` so a Ctrl+C meant for the harness does not hang it up.
+Before writing the payload on Linux, `drop_unopenable_grants` removes grants where neither the folder
+nor its parent exists, since Landlock fails the whole spawn on such a rule. `LINUX_DEVICE_RW` grants
+`/dev` read-write, since isol8's runtime layer grants it read-only and `2>/dev/null` would fail
+(`D237`).
 For a conversation the caller is the shim `crates/agent-manager/src/io/structured.rs`'s
 `spawn_piped` starts, and that spawn now asks Windows for `CREATE_NO_WINDOW`, so the console the
 confined harness inherits carries no window rather than popping up a freestanding one beside the
@@ -584,9 +592,6 @@ agent definition files ship with their `filter.os` commented out rather than set
 this side zeroes them — inert, never functional (`G302`). All three are written up with their
 evidence in [`../inbox/isol8-upstream.md`](../inbox/isol8-upstream.md); only the first is fixed
 here.
-Landlock has no rendered
-form, applying between `fork` and `exec`, so `confined_launch` errors on Linux;
-`refs/isol8-pty-seam-update.md` specifies the seam that replaces it on unix.
 
 Everything an embedder can substitute is a trait: the catalog registry, the account store, the
 secret store, agent definitions, templates, session history, and an in-process MCP service behind the

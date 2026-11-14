@@ -1509,12 +1509,37 @@ impl Agents {
         for grant in self.environment.grants.iter().chain(&self.extra_grants) {
             let path = expand_home(&grant.path);
             if grant.write {
-                options.extra_rw.push(path);
+                if self.rw_folder_ready(&path) {
+                    options.extra_rw.push(path);
+                }
             } else {
                 options.extra_ro.push(path);
             }
         }
         options
+    }
+
+    /// Whether a read-write folder the user granted can join a confined run's policy, creating
+    /// it first when it is missing. A sandbox can only rule on a folder that is there — Landlock
+    /// would grant the parent instead, or fail the spawn when that is missing too — and a person
+    /// who granted a folder means "this one". One that cannot be created is dropped with a
+    /// warning rather than failing the launch. Only the user's own grants come through here:
+    /// toolchain and layer paths keep the library's rules. Unconfined, nothing is touched.
+    fn rw_folder_ready(&self, path: &Path) -> bool {
+        if !self.isolate {
+            return true;
+        }
+        match std::fs::create_dir_all(path) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    "dropping a read-write folder from the agent's policy: it is missing and could \
+                     not be created: {error}"
+                );
+                false
+            }
+        }
     }
 
     /// What signing an account's config home in has to run (`D194`): the harness's own login,
@@ -2141,6 +2166,10 @@ impl Agents {
         // both are settings a person set on this machine, and the library has no way to ask.
         let mut options = self.isolate_options();
         options.home = home_mode(&self.home);
+        let extra_rw: Vec<String> = extra_rw
+            .into_iter()
+            .filter(|path| self.rw_folder_ready(&expand_home(path)))
+            .collect();
         add_rw(&mut options, &extra_rw);
         options.layers = policies;
         // The account's home — or, with none, the harness's own — is where the harness keeps
@@ -3976,13 +4005,25 @@ mod tests {
         );
     }
 
-    /// A launch's extra folder and a definition's both reach the confined run's read-write set, and
-    /// the picked and default policies reach its layers; an unconfined run carries neither.
+    /// A launch's extra folder, a definition's and a host-wide one all reach the confined run's
+    /// read-write set, created when missing; one that cannot be created is dropped and the run
+    /// still composes. The picked and default policies reach its layers.
     #[test]
     fn launch_and_definition_folders_and_policies_reach_the_confined_spec() {
         let root = tempfile::TempDir::new().unwrap();
         let cwd = tempfile::TempDir::new().unwrap();
-        let agents = Agents::new(root.path(), true);
+        let data = tempfile::TempDir::new().unwrap();
+        let at = |rel: &str| data.path().join(rel).to_str().unwrap().to_string();
+        // A folder under a file: no `create_dir_all` makes that.
+        std::fs::write(data.path().join("a-file"), "").unwrap();
+        let mut agents = Agents::new(root.path(), true);
+        agents.set_policy(
+            AgentHome::default(),
+            vec![Grant {
+                path: at("host/wide"),
+                write: true,
+            }],
+        );
         let layer = |name: &str| {
             let layer = toml::from_str(r#"paths = [{ path = "/tmp", access = "ro" }]"#).unwrap();
             agents
@@ -3996,7 +4037,7 @@ mod tests {
         agents
             .save_definition(AgentDefinition {
                 grants: vec![Grant {
-                    path: "/data/from-definition".to_string(),
+                    path: at("from-definition"),
                     write: true,
                 }],
                 ..a_definition("review")
@@ -4012,25 +4053,30 @@ mod tests {
                 IoModes::Structured,
                 ConverseOptions {
                     definition: Some("review".to_string()),
-                    extra_rw: vec!["/data/from-launch".to_string(), "~/launch-home".to_string()],
+                    extra_rw: vec![at("from-launch/deep"), at("a-file/under")],
                     policies: vec!["picked".to_string()],
                     ..Default::default()
                 },
             )
-            .expect("composing a confined run");
+            .expect("an uncreatable folder must not fail the run");
         let spec = &composed.confined.as_ref().expect("confined").spec;
-        let home = isolate::real_home().join("launch-home");
         for want in [
-            "/data/from-definition",
-            "/data/from-launch",
-            home.to_str().unwrap(),
+            at("from-definition"),
+            at("from-launch/deep"),
+            at("host/wide"),
         ] {
             assert!(
-                spec.add_dirs_rw.iter().any(|dir| dir == want),
+                spec.add_dirs_rw.contains(&want),
                 "{want} missing from {:?}",
                 spec.add_dirs_rw
             );
+            assert!(Path::new(&want).is_dir(), "{want} was created");
         }
+        assert!(
+            !spec.add_dirs_rw.contains(&at("a-file/under")),
+            "an uncreatable folder is dropped: {:?}",
+            spec.add_dirs_rw
+        );
         for want in ["picked", "always"] {
             assert!(
                 spec.profiles.iter().any(|name| name == want),

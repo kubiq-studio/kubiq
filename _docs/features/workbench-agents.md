@@ -225,7 +225,9 @@ extra read-write folder, a path field and `Add`. A path is
 absolute or `~`-prefixed and anything else is refused under the field; Escape closes the dialog before
 the form. `Done`, Escape and the backdrop add a path still typed in the field first, and a refused one
 keeps the dialog open with its error. The folders seed from the chosen definition's `grants`, a saved definition keeps them, and
-a start sends them as `grants`; the mission launchers send none. A conversation's launch folders
+a start sends them as `grants`; the mission launchers send none. A folder that does not exist yet is
+created when a confined run starts, and one that cannot be created is left out of that run with a
+log warning rather than failing it (`Agents::rw_folder_ready`). A conversation's launch folders
 and picked policies are written on its row, so a revive after a restart is confined with them.
 
 **Sandbox policies are picked from a checklist behind the Policies button, beside Extra folders.** The

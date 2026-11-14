@@ -126,6 +126,13 @@ ureq = { version = "3", default-features = false, features = ["rustls", "json"] 
 [target.'cfg(windows)'.dependencies]
 win32job = "2"
 
+# A Linux confine run shares the pane's terminal with the harness it forks, so a
+# Ctrl+C in cooked mode reaches both. `flag::register` is the safe way to keep the
+# trampoline alive through it (a caught signal resets to default across `exec`, so
+# the harness still gets its own) — `#![forbid(unsafe_code)]` rules out `sigaction`.
+[target.'cfg(target_os = "linux")'.dependencies]
+signal-hook = "0.4"
+
 # Windows confinement's evidence, and its regression test: a confined child must
 # land on the caller's own ConPTY, at the caller's own size, in the directory the
 # policy was resolved against. Not a unit test because it wants a real

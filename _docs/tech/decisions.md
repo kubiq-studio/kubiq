@@ -839,14 +839,12 @@ them.
 
 **Cost:** three of them. The environment a pane starts from is no longer Kubiq's own, so `pty::spawn`
 takes a `Program` rather than a program name — a confined run brings its whole environment, because
-the policy sanitized it. Confinement of a pane is macOS and Windows only. isol8 spawns with
-inherited stdio and a host cannot hand it a pseudo-terminal directly; on macOS the stopgap renders
-the policy and execs `sandbox-exec`, and on Windows `confined_launch` re-invokes the running binary
-in the pane under `isolate::CONFINE_ARG` instead — isol8 creates the harness from there, and the
-harness lands on the pane's own ConPTY, because isol8's Windows backend spawns with no
-console-creation flag and so attaches to whatever console its caller has. The seam that fixes this
-natively on unix is specified in `refs/isol8-pty-seam-update.md`; Linux has no rendered form at all,
-because Landlock applies between `fork` and `exec`. And a harness whose toolchain lives outside the
+the policy sanitized it. isol8 spawns with inherited stdio and a host cannot hand it a
+pseudo-terminal directly; on macOS the stopgap renders the policy and execs `sandbox-exec`, and on
+Linux and Windows `confined_launch` re-invokes the running binary in the pane under
+`isolate::CONFINE_ARG` instead — isol8 creates the harness from there, and the harness lands on the
+pane's own pty or ConPTY, because isol8 spawns with inherited stdio and, on Windows, no
+console-creation flag (`D237`). And a harness whose toolchain lives outside the
 project reads as broken until a recipe grants it — both are rows in the backlog register.
 
 ### D53 — The agent conversation is ACP-shaped, bus-transported, and keyed by agent id
@@ -5903,6 +5901,33 @@ for isol8 on their own, so isol8 reads them with or without Kubiq running.
 carried by `PolicyDoc` and `format_layer` together, and a layer saved from the editor is rewritten from
 the mirror, so a field the mirror does not carry is not kept through an edit. An import is a snapshot:
 upstream changes reach Kubiq only on a re-import, and the source records the URL but not a commit.
+
+### D237 — A confined pane on Linux is this binary under `CONFINE_ARG`, forking the harness under Landlock
+
+`isolate::confined_launch` on Linux renders the same re-invocation it renders on Windows: a
+`ConfinePayload` under `<state_dir>/confine/` and the running binary with `CONFINE_ARG`. The confine
+run (`confine_run`) enters the payload's cwd, catches `SIGINT`/`SIGQUIT`, and calls isol8's Linux
+backend `spawn`, which forks once, sets `no_new_privs`, applies Landlock and execs the harness. The
+harness inherits the pane's pty and stays in the confine run's session and foreground group, so it
+gets keystrokes, `SIGWINCH` and its own Ctrl+C from the kernel, and killing the confine run (the
+session leader) hangs it up. Two policy changes make a real home start at all. First,
+`drop_unopenable_grants` removes every grant where neither the folder nor its parent exists, because
+Landlock fails the whole spawn on a rule it cannot open, and the shipped layers name folders like
+`~/Library/Caches` and uninstalled toolchains. Second, `LINUX_DEVICE_RW` grants `/dev` read-write,
+because `linux/system-runtime` grants it read-only and a harness's shell could not write
+`/dev/null`. Separately, the host creates the user's extra read-write folders before it plans a
+confined run (`Agents::rw_folder_ready`), and drops with a warning any it cannot create.
+
+**Why:** isol8 has no way to apply its Linux policy to the calling process. Its rule building and
+`restrict_self` are private, and the only entry points fork. A child of a process that is already on
+the pane's pty needs no seam. Sharing the Windows payload and entry point keeps one confine path.
+The trampoline catches the terminal signals rather than ignoring them because an ignored signal
+stays ignored across `exec`.
+
+**Cost:** the pane's pid is the confine run's, not the harness's, as on Windows. `/dev` read-write
+is wider than `/dev/null` and the terminal, though Landlock can only grant a file through its
+parent anyway, and device mode bits still apply. A dropped grant is logged at debug level only. A
+missing user folder is created on disk even when the run then fails for another reason.
 
 ## Related docs
 

@@ -2067,15 +2067,18 @@ fn index_level_choice(current: IndexLevel, cx: &mut Context<AppState>) -> AnyEle
 /// Confinement, the home a confined agent runs with, and the directories it may reach past its
 /// policy. Every value here is host-owned, so each control writes the Host layer.
 ///
-/// **Confinement of terminal panes is macOS and Windows.** `confined_launch` in the harness
-/// library renders a `sandbox-exec` policy on macOS; on Windows it renders this same binary
-/// invoked again, which runs in the pane and lets isol8 create the harness from in there, onto the
-/// ConPTY the host already opened. Linux has neither — Landlock is applied between `fork` and
-/// `exec` and has no rendered form — so the toggle is disabled there rather than offering a switch
-/// that does nothing.
+/// **Confinement of terminal panes is macOS, Linux and Windows.** `confined_launch` in the
+/// harness library renders a `sandbox-exec` policy on macOS; on Linux and Windows it renders this
+/// same binary invoked again, which runs in the pane and lets isol8 create the harness from in
+/// there, onto the pty or ConPTY the host already opened. Anywhere else the toggle is disabled
+/// rather than offering a switch that does nothing.
 fn isolation(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
     let host = &app.workbench.settings.host;
-    let supported = cfg!(any(target_os = "macos", target_os = "windows"));
+    let supported = cfg!(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    ));
 
     let mut toggle = check_box(
         "app-settings-isolate-agents",
@@ -2106,7 +2109,8 @@ fn isolation(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
                     1.0,
                 ),
                 false => state_chip(
-                    "Confinement is macOS and Windows only \u{2014} agents here run unconfined",
+                    "Confinement is macOS, Linux and Windows only \u{2014} agents here run \
+                     unconfined",
                     theme::warning(),
                     1.0,
                 ),
