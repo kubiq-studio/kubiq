@@ -77,6 +77,7 @@ pub mod messages;
 pub mod mission;
 pub mod notifications;
 pub mod plan;
+pub mod policy;
 pub mod projects;
 pub mod quota;
 pub mod remote_tools;

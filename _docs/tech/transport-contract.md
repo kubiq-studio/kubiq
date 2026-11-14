@@ -5,7 +5,7 @@ kind: tech
 status: draft
 summary: The complete message set the UI and the coordinator exchange — the pane, session, project, file, git, work, conversation, search, account, quota, agent definition (with its skills and MCP catalog), command-line, host browse, database, browser, remote-tool, connector, repository, task-source, assist, notification, web asset, drone-mode and carrier families, the tunnel channel beside the bus, the framing rules, and the procedure for adding a variant.
 read_when: you are adding, changing or removing a message, or wiring either half to the bus
-updated: 2026-11-10
+updated: 2026-11-14
 verified: 2026-11-10
 code_anchors: [crates/kubiq-proto/src/messages.rs, crates/kubiq-proto/src/ask.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/armed.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/quota.rs, crates/kubiq-host/src/quota.rs, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/ids.rs, crates/kubiq-proto/src/browser.rs, crates/kubiq-proto/src/remote_tools.rs, crates/kubiq-proto/src/tunnel.rs, crates/kubiq-tunnel/src/mux.rs, crates/kubiq-tunnel/src/registry.rs, crates/kubiq-tunnel/src/pin.rs, crates/kubiq-tunnel/src/tls.rs, crates/kubiq-tunnel/src/duplex.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/src/mcp/remote.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/feedback.rs, crates/kubiq-host/src/feedback/mod.rs, crates/kubiq-host/src/feedback/api.rs, crates/kubiq-host/src/feedback/issues.rs, crates/kubiq-host/src/feedback/keychain.rs, crates/kubiq-proto/src/update.rs, crates/kubiq-host/src/updates/mod.rs, crates/kubiq-host/src/updates/feed.rs, crates/kubiq-host/src/updates/apply.rs, crates/kubiq-proto/src/files.rs, crates/kubiq-proto/src/git.rs, crates/kubiq-proto/src/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-proto/src/conversation.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-proto/src/tasksrc.rs, crates/kubiq-proto/src/stats.rs, crates/kubiq-proto/src/assist.rs, crates/kubiq-proto/src/notifications.rs, crates/kubiq-proto/src/tools.rs, crates/kubiq-host/src/notifications/mod.rs, crates/kubiq-host/src/assist/mod.rs, crates/kubiq-host/src/assist/api.rs, crates/kubiq-host/src/assist/providers.rs, crates/kubiq-host/src/assist/subject.rs, crates/kubiq-host/src/assist/stub.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-proto/src/mcp.rs, crates/kubiq-proto/src/catalog.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-proto/src/mission.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/drone_modes.rs]
 depends_on: [tech-architecture]
@@ -1563,7 +1563,7 @@ is what multiplexes several of them down one channel.
 
 | Message | Direction | Payload | Responds with |
 |---|---|---|---|
-| `StartConversation` | UI → host | `agent_id`, `project_id`, `session_id`, `rel_path?`, `agent_type`, `account?`, `definition?`, `model?`, `thinking?`, `mode?`, `mcps`, `skills`, `grants`, `spawned_by?`, `remote?` | `ConversationStarted` or `ConversationError` |
+| `StartConversation` | UI → host | `agent_id`, `project_id`, `session_id`, `rel_path?`, `agent_type`, `account?`, `definition?`, `model?`, `thinking?`, `mode?`, `mcps`, `skills`, `grants`, `policies`, `spawned_by?`, `remote?` | `ConversationStarted` or `ConversationError` |
 | `PromptAgent` | UI → host | `agent_id`, `text` | — |
 | `CancelTurn` | UI → host | `agent_id` | — |
 | `AnswerPermission` | UI → host | `agent_id`, `request_id`, `option_id` | — |
@@ -2723,6 +2723,11 @@ carrying its own agent id, and neither the URL nor the port is a fact the interf
 a build no longer offers is dropped at composition with a warning, which is the same "a stale
 reference costs a row in a list" rule the agent definition family already lives by.
 
+**Sandbox policies ride the same records.** `AgentDefinition.policies`, `StartConversation.policies`
+and `AgentPicks.policies` name sandbox policies by `PolicyInfo::name`, as `mcps` names servers. The
+host adds the default policies on top of them at launch, and a name the host no longer resolves is
+dropped at launch. The family is in [The policy family](#the-policy-family).
+
 ### The skills and MCP catalog
 
 The other half of what a definition can name. A **catalog** is a layer of skills and MCP servers the user
@@ -2756,6 +2761,52 @@ layer, because sources are application-wide. `SaveCatalogMcp` boxes its `Catalog
 terminal chunks the enum is sized for) and refuses an id that is a built-in slug. `previous_id` makes a
 save a rename. Searches (`SearchSkills`, `SearchMcpRegistry`) and a remote `AddSkill` touch the network
 and are answered when done; a source that fails is a line in `problems`, not a `CatalogError`.
+
+## The policy family
+
+The sandbox policies an isolated agent runs under: which exist, their content, and how they are
+written. A policy is an isol8 profile layer, and this family is how the interface lists, reads, edits
+and imports them without ever parsing TOML itself. It answers from the host's `PolicyStore`, and the
+host is the only writer of the local repository.
+
+| Message | Direction | Payload | Responds with |
+|---|---|---|---|
+| `ListPolicies` | UI → host | — | `Policies` |
+| `Policies` | host → UI | `policies` | — |
+| `ReadPolicy` | UI → host | `name` | `PolicyBody`, or `PolicyError` |
+| `PolicyBody` | host → UI | `info`, `doc`, `toml` | — |
+| `SavePolicy` | UI → host | `name`, `replaces?`, `description`, `doc` | `Policies`, or `PolicyError` |
+| `ClonePolicy` | UI → host | `name`, `new_name` | `Policies`, or `PolicyError` |
+| `DeletePolicy` | UI → host | `name` | `Policies`, or `PolicyError` |
+| `SetPolicyDefault` | UI → host | `name`, `default` | `Policies`, or `PolicyError` |
+| `ImportPolicies` | UI → host | `url`, `git_ref?` | `PolicyImported` and `Policies`, or `PolicyError` |
+| `PolicyImported` | host → UI | `url`, `names` | — |
+| `PolicyError` | host → UI | `error` | — |
+
+**`Policies` goes to every client after any change to the set**, not only to the asker, so every
+window's list agrees. `PolicyBody` and `PolicyImported` go to the asking client alone. `SavePolicy`
+names `replaces` when it renames a policy, and is refused when the name is not a relative layer path,
+collides with a different policy, or names a policy that is not `Local`. `ClonePolicy` never
+overwrites.
+
+**`PolicyInfo` is one row of the list**: `name` (the layer path, e.g. `toolchains/rust`), `origin`,
+`description` (Kubiq's own metadata, since isol8 layers carry none) and `default`. `PolicyOrigin` says
+where a row comes from and what may be done with it: `Builtin` (embedded in isol8, read-only), `Local`
+(in Kubiq's repository, editable and deletable), `Imported { source }` (copied from a git repository,
+read-only, deletable, with `source` the clone URL as typed) and `User` (isol8's own user folder, outside
+Kubiq, read-only). The editable and deletable rules are methods on the type, so the interface and the
+host decide them the same way.
+
+**`PolicyDoc` is the structured mirror of an isol8 `Profile`**, in the order isol8 documents it:
+`requires`, `filter` (`PolicyFilter`: `os`, `arch`, `executables`), `paths` (`PolicyPath`: `path`,
+`access`, `matching`), `env` as ordered name–value pairs, `home_replace` (`PolicyHome`), `ensure_args`,
+`rules` (`PolicyRule`, a filter with its own paths), `macos_capabilities`, `macos_raw` (verbatim SBPL)
+and `windows_capabilities`. Enum-valued fields travel as the strings isol8 writes, so the contract
+carries no isol8 dependency. `PolicyBody.toml` is the layer the doc serializes to, and it is read-only
+in the editor.
+
+The conversation family's `StartConversation`, `AgentPicks` and `AgentDefinition` each carry
+`policies: Vec<String>` with `#[serde(default)]`, the same shape as `grants` and `mcps`.
 
 ## The command-line family
 

@@ -5,7 +5,7 @@ kind: tech
 status: current
 summary: Every open question, known gap and deferred item across the project, in one register.
 read_when: you are planning the next piece of work, or you hit something unresolved and need somewhere to put it
-updated: 2026-11-07
+updated: 2026-11-14
 verified: 2026-10-09
 review_cycle: monthly
 ---
@@ -436,6 +436,10 @@ change what Kubiq does (here), or where a document lives (there)?
 | G467 | Harness agents (`D233`), what stays open beside starting them like project definitions: the mission runner tells a definition from a person by the stored ids alone (`Agents::definition_ids`), so a local agent named in `assigned_to` reads as a person; a `.agents/agents` agent with no `kubiq-harness` is listed on the host's default agent, and on an empty harness when none is set; the Codex copy's `developer_instructions` is the only TOML key Kubiq maps, and a Codex-only key does not reach the other formats; the New project form draws neither harness agent tick, because the record does not exist yet | [`features/workbench.md`](./features/workbench.md), [`tech/agent-manager.md`](./tech/agent-manager.md) |
 | G468 | A resumed or forked Codex conversation redraws its history from `thread/resume`/`thread/fork`'s `thread.turns` (full hydration, `Mapper::map_history`), which codex-cli 0.166.0 marks deprecated for paginated threads; moving to `thread/turns/list` + `thread/items/list` is the replacement. User-turn images are not redrawn, and a delegate announced only in the replayed history is re-announced if its thread speaks again after the resume | [`crates/agent-manager/_docs/harness/codex.md`](../crates/agent-manager/_docs/harness/codex.md) |
 | G469 | Claude Code's native replay of a resumed session (`io/jsonl.rs`'s `history`) redraws only the conversation's own lines: a subagent's thread (its sidechain transcript beside the session file) is not replayed, so a delegate's call comes back closed with only its final result; replayed messages are undated though each line carries a `timestamp`; and a user line Claude Code wrote itself is recognised by its leading tag (`<command-`, `<local-command-`, `<task-notification>`), so a new injected shape would be drawn as the user's | [`features/sessions-and-workspaces.md`](./features/sessions-and-workspaces.md), [`features/chat.md`](./features/chat.md) |
+| G470 | The Policies list shows isol8's ambient `~/.config/isol8/profiles` read-only as isol8 user (`PolicyOrigin::User`). Kubiq cannot edit, delete or default those layers, because isol8 owns them and they sit outside Kubiq's repository; Clone copies one into the local repository. | [`features/workbench.md`](./features/workbench.md), [`tech/agent-manager.md`](./tech/agent-manager.md) |
+| G471 | The policy editor has no live dry-run of the effective policy. It shows the layer's own TOML, but not what a run gets once `requires`, the defaults and every other picked layer are resolved, so the user learns what a layer grants only by running an agent under it. | [`features/workbench.md`](./features/workbench.md) |
+| G472 | Policy import is git-only. `ImportPolicies` clones a git URL at a ref, and isol8's HTTP-served recipe registries are not read, so a layer published only as an HTTP index cannot be imported. | [`features/workbench.md`](./features/workbench.md), [`tech/agent-manager.md`](./tech/agent-manager.md) |
+| G473 | isol8's cage overlay can change a run's policy. `ISOL8_CAGE` and a project's `.isol8/cage.toml` can overlay a run with layers the Policies list and the run's picks do not name, so a confined run may hold more than its definition and defaults say. | [`tech/agent-manager.md`](./tech/agent-manager.md), [`features/workbench-agents.md`](./features/workbench-agents.md) |
 
 
 ## Related docs

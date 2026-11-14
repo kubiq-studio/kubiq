@@ -5,7 +5,7 @@ kind: feature
 status: draft
 summary: The window's shell — the activity rail and the ten modes it selects between, the dock of movable panels the user arranges around the centre, the titlebar and its navigator, the projects a window holds and the empty state one with none shows, the picker that adds, clones and opens them, project and application settings, the Tools dialog, the file picker any screen raises, and the status bar that reports on all of it. Each mode's own screen has a document of its own.
 read_when: you are changing the window layout, the rail, the dock, where a panel may sit or when it is drawn, the titlebar, the navigator, the project picker, cloning a project, project or application settings, the Tools dialog, remote hosts, the file picker, vim mode, or the status bar
-updated: 2026-11-10
+updated: 2026-11-14
 verified: 2026-11-10
 code_anchors: [crates/kubiq/src/ui/trust.rs, crates/kubiq/src/app/browser.rs, crates/kubiq/src/state/browser.rs, crates/kubiq/src/ui/browser.rs, crates/kubiq/src/ui/web_view.rs, crates/kubiq/src/app/mod.rs, crates/kubiq/src/app/onboarding.rs, crates/kubiq/src/state/onboarding.rs, crates/kubiq/src/ui/search.rs, crates/kubiq/src/app/shell.rs, crates/kubiq/src/app/panels.rs, crates/kubiq/src/state/mod.rs, crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/windows.rs, crates/kubiq/src/state/when.rs, crates/kubiq/src/state/prefs.rs, crates/kubiq/tests/prefs.rs, crates/kubiq-host/src/projects.rs, crates/kubiq/src/ui/shell.rs, crates/kubiq/src/ui/ribbon.rs, crates/kubiq/src/state/dock.rs, crates/kubiq/src/ui/dock/mod.rs, crates/kubiq/src/ui/dock/skin.rs, crates/kubiq/src/ui/tab_menu.rs, crates/kubiq/src/ui/menus.rs, crates/kubiq/src/ext/menu.rs, crates/kubiq/src/ui/overflow_menu.rs, crates/kubiq/src/ui/new_project_menu.rs, crates/kubiq/src/ui/run_tool_menu.rs, crates/kubiq/src/ui/hidden_agents_menu.rs, crates/kubiq/tests/new_project.rs, crates/kubiq/tests/dock.rs, crates/kubiq/tests/mode_restore.rs, crates/kubiq/src/ui/terminal.rs, crates/kubiq/src/ui/logs.rs, crates/kubiq/src/ui/outline.rs, crates/kubiq/src/ui/rail.rs, crates/kubiq/src/ext/rail.rs, crates/kubiq/tests/rail_container.rs, crates/kubiq/src/ui/project_face.rs, crates/kubiq/src/ui/titlebar.rs, crates/kubiq/src/ui/project_menu.rs, crates/kubiq/src/ui/all_projects.rs, crates/kubiq/src/ui/empty.rs, crates/kubiq/src/ui/status_bar.rs, crates/kubiq/src/state/updates.rs, crates/kubiq/src/app/updates.rs, crates/kubiq/src/ui/size.rs, crates/kubiq/src/app/size.rs, crates/kubiq/src/ui/kit/controls.rs, crates/kubiq/src/state/work.rs, crates/kubiq/src/ui/settings.rs, crates/kubiq/src/ext/settings.rs, crates/kubiq/src/ui/sink/ext_demo.rs, crates/kubiq/src/ui/acp_capabilities.rs, crates/kubiq/src/app/settings.rs, crates/kubiq/src/state/settings.rs, crates/kubiq/src/ui/kit/settings.rs, crates/kubiq/tests/settings.rs, crates/kubiq/tests/settings_container.rs, crates/kubiq/src/state/catalog.rs, crates/kubiq/src/app/catalog.rs, crates/kubiq/src/ui/catalog.rs, crates/kubiq/tests/catalog.rs, crates/kubiq/src/ui/sink/project.rs, crates/kubiq-host/src/cli_shortcut.rs, crates/kubiq-host/src/shell_integration.rs, crates/kubiq/src/state/file_picker.rs, crates/kubiq/src/ui/file_picker.rs, crates/kubiq/tests/file_picker.rs, crates/kubiq/src/state/vim/mod.rs, crates/kubiq/src/state/vim/step.rs, crates/kubiq/src/state/vim/motion.rs, crates/kubiq/src/state/vim/object.rs, crates/kubiq/src/state/vim/search.rs, crates/kubiq/src/app/vim.rs, crates/kubiq/tests/vim.rs, crates/kubiq/src/state/nav.rs, crates/kubiq/src/state/nav/text.rs, crates/kubiq/src/state/navigator.rs, crates/kubiq/src/app/nav.rs, crates/kubiq/src/ui/navigator.rs, crates/kubiq/tests/nav.rs, crates/kubiq/tests/nav_text.rs, crates/kubiq/tests/bookmarks.rs, crates/kubiq/tests/navigator.rs, crates/kubiq/src/app/projects.rs, crates/kubiq/src/state/clone.rs, crates/kubiq/src/app/clone.rs, crates/kubiq/src/ui/clone.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-host/src/repos/mod.rs, crates/kubiq-host/src/repos/list.rs, crates/kubiq-host/src/repos/clone.rs, crates/kubiq/src/state/remote.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq/src/app/ssh_connect.rs, crates/kubiq/src/app/unix_connect.rs, crates/kubiq/src/ui/remote_connect.rs, crates/kubiq/src/app/host_browse.rs, crates/kubiq/src/app/hosts.rs, crates/kubiq/src/app/picker.rs, crates/kubiq/src/state/run_picker.rs, crates/kubiq/src/state/about.rs, crates/kubiq/src/app/about.rs, crates/kubiq/src/ui/about.rs, crates/kubiq/src/state/devtools.rs, crates/kubiq/src/app/devtools.rs, crates/kubiq/src/ui/devtools.rs, crates/kubiq/src/devtools/mod.rs, crates/kubiq/src/devtools/codec.rs, crates/kubiq/src/devtools/detect.rs, crates/kubiq/src/devtools/diff.rs, crates/kubiq/src/devtools/hash.rs, crates/kubiq/src/devtools/jwt.rs, crates/kubiq/src/devtools/lorem.rs, crates/kubiq/src/devtools/time.rs, crates/kubiq/src/devtools/uuids.rs]
 depends_on: [tech-ui]
@@ -1234,6 +1234,8 @@ source), **Harnesses** (every harness the
 host offers, with its command, then the accounts registered here), **Agent definitions** (the saved setups, with
 `Add agent` above them), **Skills** and **MCP servers** (the catalog an agent definition ticks from), **Isolation** (whether an
 agent is confined, whose home it runs in, and the directories it may reach beyond its policy),
+**Policies** (the sandbox policies an agent may be confined under, each with its origin and a Default
+checkbox, and New, Edit, Clone, Delete and Import from a git URL and ref),
 **Search** (what every project's search skips, and what a project is indexed to), **Connectors**
 (the named identities at each provider, and the registrations a flow picks from), **Hosts** (the
 remote hosts a window may attach to), **SSH profiles** (the named SSH targets a host connection can
@@ -1535,6 +1537,22 @@ failing at the spawn.** A build with no enforcing backend — Linux today — dr
 the warning colour and dims the toggle, status by colour and not by wording alone, the same as
 everywhere else. A row that promised protection it could not deliver would be worse than the plain
 run it silently became.
+
+**The Policies section lists the layers an isolated run stacks, and it is where a policy is edited.**
+Each row names one policy and carries its origin as a badge: *built-in* (embedded in isol8), *local*
+(in Kubiq's repository under `<config root>/isol8/profiles/`), *imported* (copied from a git
+repository) or *isol8 user* (isol8's own `~/.config/isol8/profiles`, outside Kubiq). The **Default**
+checkbox makes a policy apply to every isolated run, on top of the picks it was saved with. **New**
+and **Edit** write to the local repository only; **Clone** copies any policy there under a new name;
+**Delete** removes local and imported ones; **Import** takes a git URL and an optional ref and copies
+every layer the repository holds, read-only. Built-in, imported and isol8-user rows open read-only,
+with Clone offered in their place.
+
+The policy editor follows isol8's layer structure and its order: name and description, requires,
+filter (OS, architecture, executables), paths (path, access, match), environment, home replace,
+rewrite `ensure_args`, conditional rules, macOS capabilities with the raw SBPL beneath them, and
+Windows capabilities. The advanced sections are collapsed until opened, and a read-only TOML preview
+shows the layer the form serializes to.
 
 **The Editor section's "Closing a tab" heading holds three settings, one per pane kind, each a
 `Hide`/`Close` choice for what that kind's × means.** `terminal_close` (a plain shell pane) and

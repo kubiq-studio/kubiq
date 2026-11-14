@@ -5,7 +5,7 @@ kind: tech
 status: current
 summary: One entry per structural decision — what was chosen, why, and what it costs — cited as `Dnn` across this library.
 read_when: you are about to argue with a rule, reverse a design choice, or make one a reasonable person might later reverse
-updated: 2026-11-10
+updated: 2026-11-14
 verified: 2026-10-08
 depends_on: [tech-architecture]
 review_cycle: quarterly
@@ -5881,6 +5881,28 @@ the inbox on the parent is what lets a stop, a failed launch or a restart lose n
 only the scan's `Gone` lines are told, and the restart scan revives nobody: the inbox waits for
 **Start coordinator** or the next pass that may launch. A failed coordinator launch also waits for
 **Start coordinator**. Each update edits the parent task.
+
+### D236 — Sandbox policies are isol8 profile layers that Kubiq edits structurally, beside its own metadata, imported by git copy
+
+A policy is an isol8 profile layer, and the layer file is the policy: a layer Kubiq writes is one
+isol8 reads unchanged, under the same `profiles/` folder that `isolate::plan` searches. isol8 has no
+layer editor, so Kubiq edits a layer as a structured mirror of `isol8::Profile` (`PolicyDoc`) and
+serializes it with isol8's own `format_layer`, rather than handing the user raw TOML. The metadata
+Kubiq needs (a description, the Default flag, each import's source) lives in `policies.toml` beside the
+layers and not inside them, because isol8 layers deny unknown fields and a key Kubiq added would stop
+the layer loading in isol8. Import is a `git clone --depth 1` copied read-only under
+`profiles/imported/<slug>/`, not isol8's recipe registry: a git copy is a file tree the user can read
+and a re-import replaces wholesale, and it needs nothing from isol8's registry format or its trust
+model.
+
+**Why:** the policy list and editor are Kubiq's to build, and the TOML they write has to be the layer
+isol8 enforces, byte for byte in meaning. Keeping the metadata out of the layers keeps the layers valid
+for isol8 on their own, so isol8 reads them with or without Kubiq running.
+
+**Cost:** Kubiq is a second writer of isol8's layer format, so an isol8 change to `Profile` has to be
+carried by `PolicyDoc` and `format_layer` together, and a layer saved from the editor is rewritten from
+the mirror, so a field the mirror does not carry is not kept through an edit. An import is a snapshot:
+upstream changes reach Kubiq only on a re-import, and the source records the URL but not a commit.
 
 ## Related docs
 

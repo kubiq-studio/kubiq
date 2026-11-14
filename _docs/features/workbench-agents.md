@@ -5,7 +5,7 @@ kind: feature
 status: draft
 summary: The rail's Agents mode — a row of parallel columns, each a transcript and a composer over one live conversation, tabs that group agents into a column, the bench of agents no column is showing, the sidebar that lists every conversation the window holds, the three-dots menu over a live agent, and the New agent form all three surfaces raise.
 read_when: you are changing the agents screen — its columns, its tabs, what a tab drag means, the bench, the sidebar, a column's composer or footer, or the New agent form
-updated: 2026-11-10
+updated: 2026-11-14
 verified: 2026-11-05
 code_anchors: [crates/kubiq/src/state/workbench.rs, crates/kubiq/src/state/agents.rs, crates/kubiq/src/app/agents.rs, crates/kubiq/src/state/new_agent.rs, crates/kubiq/src/app/new_agent.rs, crates/kubiq/src/ui/new_agent.rs, crates/kubiq/src/state/conversation.rs, crates/kubiq/src/ui/conversation/mod.rs, crates/kubiq/tests/conversation.rs, crates/kubiq/src/ui/agents/mod.rs, crates/kubiq/src/ui/agents/sidebar.rs, crates/kubiq/src/ui/agents/column.rs, crates/kubiq/src/state/status.rs, crates/kubiq/src/ui/work.rs, crates/kubiq/src/ui/teams/status.rs, crates/kubiq/tests/agents.rs, crates/kubiq/src/app/mission.rs]
 depends_on: [feat-workbench, tech-ui, feat-chat]
@@ -192,7 +192,7 @@ name of a
 definition opened for editing renames it (`NewAgentForm::original_id` rides out as
 `SaveAgentDefinition::replaces`) rather than leaving a copy, and is refused when the new name is
 taken. What names the old one follows: the host rewrites `extends` in the definition stores and every
-mission's planner and worker pick, and the window moves the last-used start target when the definitions list echoes the rename. A save also keeps the record's `extends` and isolation, which the form does not carry.
+mission's planner and worker pick, and the window moves the last-used start target when the definitions list echoes the rename. The form does carry `policies`, the sandbox policy names a save writes back, and a save also keeps the record's `extends` and isolation, which the form does not carry.
 
 **The form's footer offers the MCP servers Kubiq itself injects.** `MCPs` opens a checklist of the
 `McpInfo` rows the host answered `ListMcps` with — one tick box per server, its title, what it is
@@ -226,6 +226,14 @@ the form. The folders seed from the chosen definition's `grants`, a saved defini
 a start sends them as `grants`; the mission launchers send none. They do not outlive the launch
 (`G409`).
 
+**Sandbox policies are picked by name, beside the extra folders.** The New agent dialog and the
+definition editor pick from the policies Settings lists, and what is picked is the form's `policies`:
+saved on the definition, sent on `StartConversation::policies`, and carried in `AgentPicks::policies`
+on a start. A pick the host no longer resolves is dropped at launch. The default policies apply to
+every isolated run on top of the picks, so they show in the form as locked and cannot be unticked;
+the host adds them whatever the form says. The extra-folder grants above are not policies and stay as
+they are.
+
 **The model and the level are known before anything is started.** Opening the form sends
 `ListHarnessCatalogue` for the chosen harness and identity, and `HarnessCatalogue` comes back with
 the models that harness will answer for, the reasoning levels each accepts, and what this harness
@@ -241,7 +249,7 @@ nothing", so the interface never guesses which id means all permissions.
 agent arrives as a transcript; `Start in terminal` sends `SpawnWorkspace` and the same harness
 arrives as a pane, drawing its own screen under a pseudo-terminal. Everything the form asked rides
 out either way — the identity, the saved setup, the model, the level, the permission mode and the
-ticked MCP servers and extra folders are one `AgentPicks` record on both messages, and isolation is a host setting
+ticked MCP servers, extra folders and sandbox policies are one `AgentPicks` record on both messages, and isolation is a host setting
 applied to both faces alike, so the two buttons differ in the face the run wears and in nothing
 else. The terminal button carries no preamble and ignores the initial prompt: a subagent ceiling,
 the agent prompt and the initial prompt are folded into a first turn by a composer, and a pane has
