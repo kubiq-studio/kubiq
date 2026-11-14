@@ -36,6 +36,7 @@ crates/kubiq-proto/src/
 ├── lib.rs
 ├── log.rs
 ├── messages.rs
+├── policy.rs
 ├── projects.rs
 ├── files.rs
 ├── work.rs
@@ -80,6 +81,7 @@ crates/kubiq-host/src/
 ├── agent.rs
 ├── coordinator.rs
 ├── lib.rs
+├── policy.rs
 ├── store/
 │   ├── file.rs
 │   ├── memory.rs
@@ -296,6 +298,7 @@ crates/kubiq/src/
 │   ├── remote.rs
 │   ├── notifications.rs
 │   ├── new_agent.rs
+│   ├── policy.rs
 │   ├── a2ui/
 │   │   ├── checkable-inputs.json
 │   │   ├── contact-form.json
@@ -484,6 +487,7 @@ crates/kubiq/src/
 │   ├── themes.rs
 │   ├── help_target.rs
 │   ├── ident.rs
+│   ├── policy.rs
 │   ├── project_face.rs
 │   ├── ask.rs
 │   ├── new_mission.rs
@@ -572,6 +576,7 @@ crates/kubiq/src/
 │   ├── mod.rs         `AppState`, `OpenProject`, `PaneState`, `BusHub`, the free window functions and the key bindings
 │   ├── panels.rs      the dock: settling mode, layout, visibility and placement
 │   ├── picker.rs      the file picker and the log panel
+│   ├── policy.rs      the sandbox policy list, editor, import and clone
 │   ├── projects.rs    add, edit and close a project; preference persistence
 │   ├── settings.rs    the settings overlay and harness login
 │   ├── shell.rs       project lifecycle, chrome and menus, rail mode, font and zoom, the `Render` impl
@@ -707,6 +712,7 @@ the documents in its row.
 | `crates/agent-manager/src/lib.rs` | [`agent-manager.md`](./agent-manager.md) |
 | `crates/agent-manager/src/main.rs` | [`agent-manager.md`](./agent-manager.md) |
 | `crates/agent-manager/src/overlay.rs` | [`wip/claude-auth-problem.md`](../wip/claude-auth-problem.md) |
+| `crates/agent-manager/src/policy.rs` | [`agent-manager.md`](./agent-manager.md), [`features/workbench.md`](../features/workbench.md) |
 | `crates/agent-manager/src/profile.rs` | [`agent-manager.md`](./agent-manager.md), [`wip/agent-setup.md`](../wip/agent-setup.md) |
 | `crates/agent-manager/src/provision.rs` | [`agent-manager.md`](./agent-manager.md), [`wip/claude-auth-problem.md`](../wip/claude-auth-problem.md) |
 | `crates/agent-manager/src/quota.rs` | [`agent-manager.md`](./agent-manager.md) |
@@ -818,6 +824,7 @@ the documents in its row.
 | `crates/kubiq-host/src/plan/mod.rs` | [`features/workbench-tasks.md`](../features/workbench-tasks.md), [`architecture.md`](./architecture.md), [`transport-contract.md`](./transport-contract.md), [`wip/planning-system.md`](../wip/planning-system.md) |
 | `crates/kubiq-host/src/plan/queue.rs` | [`features/workbench-tasks.md`](../features/workbench-tasks.md) |
 | `crates/kubiq-host/src/plan/service.rs` | [`features/workbench-tasks.md`](../features/workbench-tasks.md), [`wip/planning-system.md`](../wip/planning-system.md) |
+| `crates/kubiq-host/src/policy.rs` | [`agent-manager.md`](./agent-manager.md), [`transport-contract.md`](./transport-contract.md) |
 | `crates/kubiq-host/src/projects.rs` | [`features/stats.md`](../features/stats.md), [`features/workbench.md`](../features/workbench.md), [`architecture.md`](./architecture.md), [`wip/clone-a-project.md`](../wip/clone-a-project.md), [`wip/web-panel-phase3.md`](../wip/web-panel-phase3.md) |
 | `crates/kubiq-host/src/pty/mod.rs` | [`features/panes-and-terminals.md`](../features/panes-and-terminals.md) |
 | `crates/kubiq-host/src/quota.rs` | [`transport-contract.md`](./transport-contract.md) |
@@ -882,6 +889,7 @@ the documents in its row.
 | `crates/kubiq-proto/src/mission.rs` | [`transport-contract.md`](./transport-contract.md) |
 | `crates/kubiq-proto/src/notifications.rs` | [`features/notifications.md`](../features/notifications.md), [`transport-contract.md`](./transport-contract.md) |
 | `crates/kubiq-proto/src/plan.rs` | [`features/workbench-tasks.md`](../features/workbench-tasks.md), [`transport-contract.md`](./transport-contract.md), [`wip/planning-system.md`](../wip/planning-system.md) |
+| `crates/kubiq-proto/src/policy.rs` | [`transport-contract.md`](./transport-contract.md), [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq-proto/src/projects.rs` | [`features/drone.md`](../features/drone.md), [`transport-contract.md`](./transport-contract.md), [`wip/clone-a-project.md`](../wip/clone-a-project.md), [`wip/indexing.md`](../wip/indexing.md) |
 | `crates/kubiq-proto/src/quota.rs` | [`transport-contract.md`](./transport-contract.md) |
 | `crates/kubiq-proto/src/remote_tools.rs` | [`transport-contract.md`](./transport-contract.md) |
@@ -945,6 +953,7 @@ the documents in its row.
 | `crates/kubiq/src/app/panels.rs` | [`features/chat.md`](../features/chat.md), [`features/panes-and-terminals.md`](../features/panes-and-terminals.md), [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/app/picker.rs` | [`features/chat.md`](../features/chat.md), [`features/workbench.md`](../features/workbench.md), [`components.md`](./components.md) |
 | `crates/kubiq/src/app/plan.rs` | [`features/workbench-tasks.md`](../features/workbench-tasks.md) |
+| `crates/kubiq/src/app/policy.rs` | [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/app/projects.rs` | [`features/chat.md`](../features/chat.md), [`features/drone.md`](../features/drone.md), [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/app/remote_connect.rs` | [`features/drone.md`](../features/drone.md), [`features/workbench.md`](../features/workbench.md), [`architecture.md`](./architecture.md), [`transport-contract.md`](./transport-contract.md) |
 | `crates/kubiq/src/app/settings.rs` | [`features/connectors.md`](../features/connectors.md), [`features/panes-and-terminals.md`](../features/panes-and-terminals.md), [`features/workbench.md`](../features/workbench.md) |
@@ -1034,6 +1043,7 @@ the documents in its row.
 | `crates/kubiq/src/state/onboarding.rs` | [`features/onboarding.md`](../features/onboarding.md), [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/state/overlay.rs` | [`ui-and-design.md`](./ui-and-design.md) |
 | `crates/kubiq/src/state/plan.rs` | [`features/workbench-tasks.md`](../features/workbench-tasks.md) |
+| `crates/kubiq/src/state/policy.rs` | [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/state/prefs.rs` | [`features/chat.md`](../features/chat.md), [`features/onboarding.md`](../features/onboarding.md), [`features/workbench.md`](../features/workbench.md), [`ui-and-design.md`](./ui-and-design.md) |
 | `crates/kubiq/src/state/remote.rs` | [`features/workbench.md`](../features/workbench.md), [`architecture.md`](./architecture.md) |
 | `crates/kubiq/src/state/run_picker.rs` | [`features/workbench.md`](../features/workbench.md) |
@@ -1150,6 +1160,7 @@ the documents in its row.
 | `crates/kubiq/src/ui/onboarding/mod.rs` | [`features/onboarding.md`](../features/onboarding.md), [`ui-and-design.md`](./ui-and-design.md) |
 | `crates/kubiq/src/ui/outline.rs` | [`features/workbench.md`](../features/workbench.md), [`ui-and-design.md`](./ui-and-design.md) |
 | `crates/kubiq/src/ui/overflow_menu.rs` | [`features/workbench.md`](../features/workbench.md) |
+| `crates/kubiq/src/ui/policy.rs` | [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/ui/project_face.rs` | [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/ui/project_menu.rs` | [`features/workbench.md`](../features/workbench.md) |
 | `crates/kubiq/src/ui/rail.rs` | [`features/workbench.md`](../features/workbench.md), [`wip/db-explorer.md`](../wip/db-explorer.md), [`wip/in-place-help.md`](../wip/in-place-help.md) |

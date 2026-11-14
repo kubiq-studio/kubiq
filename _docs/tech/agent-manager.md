@@ -7,7 +7,7 @@ summary: What the embedded harness-management library owns, what Kubiq owns, how
 read_when: you are about to write code that launches a harness, drives one as a conversation, names a harness config path, or touches accounts, skills or MCP servers
 updated: 2026-11-14
 verified: 2026-11-05
-code_anchors: [crates/agent-manager/src/harness_agents.rs, crates/kubiq-host/src/harness_agents.rs, crates/kubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/kubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/ask.rs]
+code_anchors: [crates/agent-manager/src/harness_agents.rs, crates/kubiq-host/src/harness_agents.rs, crates/kubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/kubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/ask.rs, crates/agent-manager/src/policy.rs, crates/kubiq-host/src/policy.rs]
 depends_on: [tech-structure]
 review_cycle: monthly
 ---
@@ -492,7 +492,9 @@ configuration, which `CLAUDE_CONFIG_DIR` and its siblings pin to the run directo
 
 **The sandbox policies are the library's `policy` module, and the interface edits them through it.**
 `agent_manager::policy::PolicyStore`, rooted at `<config root>/isol8` (its `state_dir`), owns the
-policies a confined run stacks. The local repository is `<config root>/isol8/profiles/`, already one of
+policies a confined run stacks. It lists, reads, saves, clones, deletes, sets the default of, imports
+and resolves them, and names the folder they live in (`profiles_dir`). Its row types are `Info` and
+`Origin`, `valid_name` checks a layer name, and `Layer` is a re-export of `isol8::Profile`. The local repository is `<config root>/isol8/profiles/`, already one of
 isol8's `profile_paths`, so `isolate::plan` reads it without new wiring. Each policy is one isol8
 profile layer, named by its path under that folder without the extension (`toolchains/rust`). Kubiq's
 own metadata — a description, the Default flag and each import's source — sits beside the layers in
@@ -502,10 +504,11 @@ Built-in layers come from isol8's `LayerRegistry` and are read-only, and so is i
 directory, copied under `profiles/imported/<slug>/`, and a re-import replaces that folder. isol8 has
 no layer editor or importer, so `PolicyStore` serializes and validates through
 `isol8::profile::format_layer` and `resolve_requires`, and the wire carries only the `PolicyDoc`
-mirror (`D236`). `isolate::plan` takes a list of named layers, the union of the defaults, the
-definition's `policies` and the launch's picks, and a name the registry no longer resolves is dropped
-rather than failing the run. The definition record (`Profile` in `profile.rs`) gains
-`policies: Vec<String>`, beside `extra_rw`.
+mirror (`D236`). `IsolateOptions::layers` names the layers a run is composed under, after the shipped
+defaults, and `isolate::plan` puts them on the profile stack. The host fills it with the union of the
+defaults, the definition's `policies` and the launch's picks, and `PolicyStore::resolving` drops a name
+the registry does not resolve, so the run goes on without it. The definition record (`Profile` in
+`profile.rs`) gains `policies: Vec<String>`, beside `extra_rw`.
 
 **A run's record is written through the library and kept by Kubiq.** Two library entry points carry
 it. `Harness::transcripts(config_dir)` in `crates/agent-manager/src/harness/mod.rs` answers the

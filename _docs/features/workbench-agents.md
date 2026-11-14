@@ -217,22 +217,26 @@ either form asks `ListCatalog` for both layers. The
 catalogue lives on `WorkbenchState::mcps`, one list for the window: what this build can inject is a
 property of the build, not of the harness, the identity or the setup being filled in. Until the
 host answers, the button is drawn faint and takes no click, the way the rest of the form draws a
-row with nothing to offer. `Custom policies` beside it is live only while `isolate_agents` is on —
+row with nothing to offer. `Extra folders` beside it is live only while `isolate_agents` is on —
 otherwise it is faint with a tooltip saying isolation is off — and carries the folder count in its
-label (`Custom policies · 2`). It opens a stacked dialog (`Layer::NewAgentPolicies`) over the New agent
-dialog or the definition editor: a chip per extra read-write folder, a path field and `Add`. A path is
+label (`Extra folders · 2`). It opens a stacked dialog (`Layer::NewAgentFolders`, shown while
+`NewAgentForm::folders_open` is set) over the New agent dialog or the definition editor: a chip per
+extra read-write folder, a path field and `Add`. A path is
 absolute or `~`-prefixed and anything else is refused under the field; Escape closes the dialog before
 the form. The folders seed from the chosen definition's `grants`, a saved definition keeps them, and
 a start sends them as `grants`; the mission launchers send none. They do not outlive the launch
 (`G409`).
 
-**Sandbox policies are picked by name, beside the extra folders.** The New agent dialog and the
-definition editor pick from the policies Settings lists, and what is picked is the form's `policies`:
-saved on the definition, sent on `StartConversation::policies`, and carried in `AgentPicks::policies`
-on a start. A pick the host no longer resolves is dropped at launch. The default policies apply to
-every isolated run on top of the picks, so they show in the form as locked and cannot be unticked;
-the host adds them whatever the form says. The extra-folder grants above are not policies and stay as
-they are.
+**Sandbox policies are picked from a checklist behind the Policies button, beside Extra folders.** The
+button reads `Policies`, and carries the pick count (`Policies · 2`). It is live only while isolation
+is on and the host lists at least one policy; otherwise it is faint, with a tooltip saying isolation
+is off. It opens an inline checklist (`OpenList::Policies`), not a stacked dialog. The default policies
+come first, ticked and locked with the note `Default — always applied`; every other policy follows,
+each with its description and a tick. The picks are the form's `policies`: saved on the definition,
+sent on `StartConversation::policies`, and carried in `AgentPicks::policies` on a start. A pick the
+host no longer resolves is dropped at launch. The default policies apply to every isolated run on top
+of the picks, and the host adds them whatever the form says. The extra-folder grants above are not
+policies and stay as they are.
 
 **The model and the level are known before anything is started.** Opening the form sends
 `ListHarnessCatalogue` for the chosen harness and identity, and `HarnessCatalogue` comes back with
