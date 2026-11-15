@@ -29,10 +29,9 @@ use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, canvas, 
 /// interface asks before offering to edit in place.
 pub const SUPPORTED: bool = cfg!(any(target_os = "macos", target_os = "windows"));
 
-/// Whether a browser tab can be sent through a proxy ("Browse via remote"). Windows only: WebView2
-/// takes it as a browser argument. macOS needs wry's `mac-proxy`, which links macOS 14 symbols
-/// against a macOS 13 floor, so it is not built.
-pub const PROXY: bool = cfg!(target_os = "windows");
+/// Whether a browser tab can be sent through a proxy ("Browse via remote"). WebView2 takes it as a
+/// browser argument; macOS through wry's `mac-proxy` (macOS 14 symbols — the bundle's floor is 14.0).
+pub const PROXY: bool = SUPPORTED;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod platform {
@@ -381,7 +380,8 @@ pub fn open_browser(
 /// 16-byte id (macOS 14 and later; older systems fall back to the shared store); Windows keeps a
 /// directory per profile.
 ///
-/// `proxy` ([`PROXY`] builds only) sends every request through `127.0.0.1:<port>`. WebView2 fixes
+/// `proxy` ([`PROXY`] builds only) sends every request through `127.0.0.1:<port>` — on macOS
+/// through a data store of the tab's own, since WebKit proxies per store. WebView2 fixes
 /// browser arguments per data directory and process, so a proxied tab gets a directory of its own
 /// per port — its own cookies — and the loopback is proxied too (`<-loopback>`): on a remote,
 /// `localhost` is the far machine's.
@@ -418,8 +418,26 @@ fn profiled_builder(
             return builder;
         }
     }
-    #[cfg(not(target_os = "windows"))]
-    let _ = proxy;
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(port) = proxy {
+            use wry::WebViewBuilderExtDarwin as _;
+            // WebKit sets the proxy on the data store, which every tab of a profile shares — so a
+            // proxied tab gets a store of its own per port (an ephemeral one is already its own).
+            let builder = if persist {
+                let mut id = profile.data_id();
+                id[14..].copy_from_slice(&port.to_be_bytes());
+                id[13] ^= 0xa5;
+                wry::WebViewBuilder::new().with_data_store_identifier(id)
+            } else {
+                wry::WebViewBuilder::new().with_incognito(true)
+            };
+            return builder.with_proxy_config(wry::ProxyConfig::Http(wry::ProxyEndpoint {
+                host: "127.0.0.1".into(),
+                port: port.to_string(),
+            }));
+        }
+    }
     // Ephemeral: a non-persistent store, so nothing reaches disk and there is no profile to name.
     if !persist {
         return wry::WebViewBuilder::new().with_incognito(true);

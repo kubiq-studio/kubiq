@@ -246,7 +246,7 @@ impl AppState {
                         tab.url.clone(),
                         tab.profile,
                         tab.persist,
-                        tab.via_remote.as_ref().map(|via| via.port),
+                        tab.via_remote.as_ref().and_then(|via| via.port),
                     ));
                 }
             }
@@ -758,13 +758,10 @@ impl AppState {
         };
         let next = match (current.clone(), remote) {
             (Some(_), _) => None,
-            (None, Some(save_id)) => match self.browser_proxy_port(&save_id) {
-                Ok(port) => Some(browser::ViaRemote { save_id, port }),
-                Err(err) => {
-                    tracing::warn!("browser: browse via remote: {err}");
-                    return;
-                }
-            },
+            (None, Some(save_id)) => {
+                let port = self.start_browser_proxy(&save_id);
+                Some(browser::ViaRemote { save_id, port })
+            }
             (None, None) => return,
         };
         if let Some(tab) = self
@@ -792,6 +789,79 @@ impl AppState {
             if !ridden {
                 self.drop_browser_proxy(&old.save_id);
             }
+        }
+        cx.notify();
+    }
+
+    /// Start the proxy for `save_id`; on failure raise a warning naming the remote and the error,
+    /// and answer `None` (the tab keeps its intent and "Restart remote proxy" retries).
+    fn start_browser_proxy(&mut self, save_id: &str) -> Option<u16> {
+        match self.browser_proxy_port(save_id) {
+            Ok(port) => Some(port),
+            Err(err) => {
+                tracing::warn!("browser: browse via remote: {err}");
+                let remote = self
+                    .workbench
+                    .settings
+                    .host
+                    .remote_hosts
+                    .iter()
+                    .find(|saved| saved.id == save_id)
+                    .map(|saved| saved.name.clone())
+                    .unwrap_or_else(|| save_id.to_string());
+                self.raise_notification(
+                    NotificationRequest::warning(
+                        Family::Kubiq,
+                        format!(
+                            "Browse via remote: the proxy over \u{201c}{remote}\u{201d} did not start \u{2014} {err}. Use \u{201c}Restart remote proxy\u{201d} in the Remote menu to retry."
+                        ),
+                    )
+                    .with_category("browser-proxy"),
+                );
+                None
+            }
+        }
+    }
+
+    /// The saved remote the current project runs on, when some browser tab is set to browse via it
+    /// (its proxy running or failed): what the Remote menu's "Restart remote proxy" row offers.
+    pub fn browser_proxy_remote(&self, cx: &App) -> Option<String> {
+        let save_id = self.bus.serving_save_id(self.project(cx)?)?;
+        self.projects
+            .values()
+            .flat_map(|open| open.browser.tabs.iter())
+            .any(|tab| {
+                tab.via_remote
+                    .as_ref()
+                    .is_some_and(|via| via.save_id == save_id)
+            })
+            .then_some(save_id)
+    }
+
+    /// "Restart remote proxy": stop and start the follower of `save_id`, point every tab riding
+    /// that remote at the new port and rebuild their webviews. The retry when it failed.
+    pub fn restart_browser_proxy(&mut self, save_id: &str, cx: &mut Context<Self>) {
+        let save_id = save_id.to_string();
+        self.drop_browser_proxy(&save_id);
+        let port = self.start_browser_proxy(&save_id);
+        let mut rebuilt = Vec::new();
+        for tab in self
+            .projects
+            .values_mut()
+            .flat_map(|open| open.browser.tabs.iter_mut())
+        {
+            if let Some(via) = tab.via_remote.as_mut()
+                && via.save_id == save_id
+            {
+                via.port = port;
+                tab.loading = true;
+                tab.loading_since = Some(Instant::now());
+                tab.committed = false;
+                rebuilt.push(tab.key.clone());
+            }
+        }
+        for key in rebuilt {
+            web_view::close(&key);
         }
         cx.notify();
     }

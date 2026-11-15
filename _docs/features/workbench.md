@@ -165,7 +165,13 @@ proxy (`TunnelKind::Proxy`) that rides whichever link carries that host's tunnel
 machine — its `localhost` included (`--proxy-bypass-list=<-loopback>`) — within the far side's
 tunnel allow list. Per tab and never saved; WebView2 fixes a proxy per data directory, so a
 proxied tab keeps its own cookie jar per proxy port, and the last tab off a remote's proxy stops
-it. macOS is not offered: wry's `mac-proxy` links macOS 14 symbols against the macOS 13 floor. Anywhere in the tab — the bar or the page holding the keyboard — `secondary-r`
+it. A proxy that fails to start raises a warning notification naming the remote and the error; the
+tab keeps the setting (`ViaRemote.port` is `None`, the page loads direct) and the titlebar Remote
+menu's *Restart remote proxy* row — shown while a tab is set to browse via the project's remote —
+stops and starts the follower, repoints every tab riding that remote and rebuilds their webviews,
+which is the retry. On macOS it rides wry's `mac-proxy` — macOS 14 symbols, so the bundle's floor
+(`LSMinimumSystemVersion`) is 14.0 — and, since WebKit proxies a whole data store, a proxied tab gets a
+store of its own per port. Anywhere in the tab — the bar or the page holding the keyboard — `secondary-r`
 reloads, `secondary-shift-r` reloads past the cache (`reloadFromOrigin` on macOS; WebView2 has no
 such call, so Windows reloads plainly), and `secondary-shift-=`/`-`/`0` zoom the page in, out and
 back to 100% (`ui::browser::tab_bindings`, context `BrowserTab`; ⌘ on macOS, Ctrl elsewhere; the

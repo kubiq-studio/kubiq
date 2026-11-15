@@ -227,6 +227,8 @@ wry = { version = "0.53.3", package = "lb-wry" }
 raw-window-handle = { version = "0.6", features = ["std"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# A webview's proxy ("Browse via remote") — links macOS 14 symbols, the bundle's floor.
+wry = { version = "0.53.3", package = "lb-wry", features = ["mac-proxy"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = [
     "NSApplication",
