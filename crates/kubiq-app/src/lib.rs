@@ -309,9 +309,9 @@ pub fn run(boot: Boot) {
         std::process::exit(code);
     }
 
-    // The same reasoning, one process kind further: a confined pane on Windows runs
-    // this very executable again, because isol8 confines only what it creates itself
-    // and has no ConPTY seam to hand one back. It spawns the harness onto the pane's
+    // The same reasoning, one process kind further: a confined pane on Linux or Windows
+    // runs this very executable again, because isol8 confines only what it creates itself
+    // (Landlock between fork and exec; the hook DLL). It spawns the harness onto the pane's
     // terminal and waits, so it must be decided before the console is detached, before
     // the log, and certainly before a window.
     if let Some(code) = agent_manager::isolate::confine_entrypoint() {

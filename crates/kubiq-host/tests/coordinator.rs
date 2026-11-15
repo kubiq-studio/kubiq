@@ -1652,6 +1652,7 @@ fn start_conversation(
         skills: Vec::new(),
         spawned_by: None,
         grants: Vec::new(),
+        policies: Vec::new(),
         remote: None,
     });
     agent_id
@@ -1818,6 +1819,7 @@ fn spawned_by_sets_the_new_agents_parent() {
         skills: Vec::new(),
         spawned_by: Some(asker),
         grants: Vec::new(),
+        policies: Vec::new(),
         remote: None,
     });
     expect_conversation_started(&ui, spawned);

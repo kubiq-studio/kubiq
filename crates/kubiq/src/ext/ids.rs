@@ -27,7 +27,7 @@ pub const SETTINGS_PROJECT: SlotId = SlotId::new("settings/project");
 
 /// Appearance, Size, File explorer, Editor, Search.
 pub const SETTINGS_APP_INTERFACE: SlotId = SlotId::new("settings/app/interface");
-/// Harnesses, Agent definitions, Isolation, Assistance.
+/// Harnesses, Agent definitions, Isolation, Policies, Assistance.
 pub const SETTINGS_APP_AGENTS: SlotId = SlotId::new("settings/app/agents");
 /// Connectors, Hosts, SSH profiles, Drones.
 pub const SETTINGS_APP_CONNECTIVITY: SlotId = SlotId::new("settings/app/connectivity");
@@ -53,6 +53,7 @@ pub const AGENT_DEFINITIONS: SlotId = SlotId::new("kubiq.settings.agent-definiti
 pub const SKILLS: SlotId = SlotId::new("kubiq.settings.skills");
 pub const MCP_SERVERS: SlotId = SlotId::new("kubiq.settings.mcp-servers");
 pub const ISOLATION: SlotId = SlotId::new("kubiq.settings.isolation");
+pub const POLICIES: SlotId = SlotId::new("kubiq.settings.policies");
 pub const ASSIST: SlotId = SlotId::new("kubiq.settings.assist");
 pub const CONNECTORS: SlotId = SlotId::new("kubiq.settings.connectors");
 pub const HOSTS: SlotId = SlotId::new("kubiq.settings.hosts");

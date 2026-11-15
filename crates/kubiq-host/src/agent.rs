@@ -429,6 +429,9 @@ pub struct ConverseOptions {
     /// Extra folders this run may write when isolation is on, as typed (absolute or
     /// `~`-prefixed). The launch's own; the definition's are read in `compose_run`.
     pub extra_rw: Vec<String>,
+    /// The sandbox policies this launch picked, by layer name, on top of the definition's own
+    /// and the defaults. Resolved in `compose_run`; only a confined run has a policy to join.
+    pub policies: Vec<String>,
     /// Always-on instructions Kubiq adds to whatever the definition resolved — appended to the
     /// spec's `initial.instructions`, which the library writes wherever this harness reads them.
     /// Set for an agent bound to a remote (`D226`); `None` everywhere else.
@@ -954,6 +957,7 @@ impl Agents {
                             write: true,
                         })
                         .collect(),
+                    policies: record.policies,
                     project,
                     local: None,
                 })
@@ -1155,6 +1159,7 @@ impl Agents {
                         None => grant.path,
                     })
                     .collect(),
+                policies: definition.policies,
                 extends: kept.extends,
                 isolate: kept.isolate,
                 ..Default::default()
@@ -1359,6 +1364,7 @@ impl Agents {
                 disabled: false,
                 project: None,
                 grants: Vec::new(),
+                policies: Vec::new(),
                 local: None,
             })
             .with_context(|| format!("writing the default agent definition '{id}'"))?;
@@ -1491,6 +1497,11 @@ impl Agents {
     /// it is otherwise unreachable — `operation not permitted: cargo`, with the binary sitting
     /// in the run's own `PATH`. Reading a tool is not writing its cache: what a build writes to
     /// is granted by the toolchain roots, not by this.
+    /// The policy repository under this host's isolation state.
+    pub fn policy_store(&self) -> agent_manager::policy::PolicyStore {
+        agent_manager::policy::PolicyStore::new(self.root.join("isol8"))
+    }
+
     fn isolate_options(&self) -> IsolateOptions {
         let mut options = IsolateOptions::new(self.root.join("isol8"));
         options.grant_toolchains(|name| self.environment.lookup(name));
@@ -1498,12 +1509,37 @@ impl Agents {
         for grant in self.environment.grants.iter().chain(&self.extra_grants) {
             let path = expand_home(&grant.path);
             if grant.write {
-                options.extra_rw.push(path);
+                if self.rw_folder_ready(&path) {
+                    options.extra_rw.push(path);
+                }
             } else {
                 options.extra_ro.push(path);
             }
         }
         options
+    }
+
+    /// Whether a read-write folder the user granted can join a confined run's policy, creating
+    /// it first when it is missing. A sandbox can only rule on a folder that is there — Landlock
+    /// would grant the parent instead, or fail the spawn when that is missing too — and a person
+    /// who granted a folder means "this one". One that cannot be created is dropped with a
+    /// warning rather than failing the launch. Only the user's own grants come through here:
+    /// toolchain and layer paths keep the library's rules. Unconfined, nothing is touched.
+    fn rw_folder_ready(&self, path: &Path) -> bool {
+        if !self.isolate {
+            return true;
+        }
+        match std::fs::create_dir_all(path) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    "dropping a read-write folder from the agent's policy: it is missing and could \
+                     not be created: {error}"
+                );
+                false
+            }
+        }
     }
 
     /// What signing an account's config home in has to run (`D194`): the harness's own login,
@@ -1859,6 +1895,28 @@ impl Agents {
             Vec::new()
         };
 
+        // The sandbox policies this run is composed under: the ones marked as defaults, the
+        // definition's, this launch's. A name the registry no longer resolves is dropped with a
+        // warning — a deleted policy must not make every run that once picked it fail.
+        let policies = if self.isolate {
+            let store = self.policy_store();
+            let saved = flat
+                .as_ref()
+                .map(|record| record.policies.clone())
+                .unwrap_or_default();
+            let wanted = union(
+                union(store.defaults(), saved),
+                std::mem::take(&mut options.policies),
+            );
+            let (kept, dropped) = store.resolving(&wanted);
+            if !dropped.is_empty() {
+                tracing::warn!(?dropped, "dropping policies that no longer resolve");
+            }
+            kept
+        } else {
+            Vec::new()
+        };
+
         // Which of Kubiq's own MCP servers this run gets, and — the reason this is here rather
         // than left to the library — which names still belong to `resolve`.
         //
@@ -2108,7 +2166,12 @@ impl Agents {
         // both are settings a person set on this machine, and the library has no way to ask.
         let mut options = self.isolate_options();
         options.home = home_mode(&self.home);
+        let extra_rw: Vec<String> = extra_rw
+            .into_iter()
+            .filter(|path| self.rw_folder_ready(&expand_home(path)))
+            .collect();
         add_rw(&mut options, &extra_rw);
+        options.layers = policies;
         // The account's home — or, with none, the harness's own — is where the harness keeps
         // its login and its sessions; the policy grants the run's own scratch dir, not that.
         options.grant_config_home(harness.as_ref(), &spec.config);
@@ -3813,6 +3876,7 @@ mod tests {
             disabled: false,
             project: None,
             grants: Vec::new(),
+            policies: Vec::new(),
             local: None,
         }
     }
@@ -3939,6 +4003,87 @@ mod tests {
             composed.is_confined(),
             "a conversation follows the isolation setting, same as a pane"
         );
+    }
+
+    /// A launch's extra folder, a definition's and a host-wide one all reach the confined run's
+    /// read-write set, created when missing; one that cannot be created is dropped and the run
+    /// still composes. The picked and default policies reach its layers.
+    #[test]
+    fn launch_and_definition_folders_and_policies_reach_the_confined_spec() {
+        let root = tempfile::TempDir::new().unwrap();
+        let cwd = tempfile::TempDir::new().unwrap();
+        let data = tempfile::TempDir::new().unwrap();
+        let at = |rel: &str| data.path().join(rel).to_str().unwrap().to_string();
+        // A folder under a file: no `create_dir_all` makes that.
+        std::fs::write(data.path().join("a-file"), "").unwrap();
+        let mut agents = Agents::new(root.path(), true);
+        agents.set_policy(
+            AgentHome::default(),
+            vec![Grant {
+                path: at("host/wide"),
+                write: true,
+            }],
+        );
+        let layer = |name: &str| {
+            let layer = toml::from_str(r#"paths = [{ path = "/tmp", access = "ro" }]"#).unwrap();
+            agents
+                .policy_store()
+                .save(name, None, "", &layer)
+                .expect("saving a policy");
+        };
+        layer("picked");
+        layer("always");
+        agents.policy_store().set_default("always", true).unwrap();
+        agents
+            .save_definition(AgentDefinition {
+                grants: vec![Grant {
+                    path: at("from-definition"),
+                    write: true,
+                }],
+                ..a_definition("review")
+            })
+            .unwrap();
+
+        let composed = agents
+            .compose_run(
+                "agent-1",
+                "claude-code",
+                cwd.path(),
+                Vec::new(),
+                IoModes::Structured,
+                ConverseOptions {
+                    definition: Some("review".to_string()),
+                    extra_rw: vec![at("from-launch/deep"), at("a-file/under")],
+                    policies: vec!["picked".to_string()],
+                    ..Default::default()
+                },
+            )
+            .expect("an uncreatable folder must not fail the run");
+        let spec = &composed.confined.as_ref().expect("confined").spec;
+        for want in [
+            at("from-definition"),
+            at("from-launch/deep"),
+            at("host/wide"),
+        ] {
+            assert!(
+                spec.add_dirs_rw.contains(&want),
+                "{want} missing from {:?}",
+                spec.add_dirs_rw
+            );
+            assert!(Path::new(&want).is_dir(), "{want} was created");
+        }
+        assert!(
+            !spec.add_dirs_rw.contains(&at("a-file/under")),
+            "an uncreatable folder is dropped: {:?}",
+            spec.add_dirs_rw
+        );
+        for want in ["picked", "always"] {
+            assert!(
+                spec.profiles.iter().any(|name| name == want),
+                "{want} missing from {:?}",
+                spec.profiles
+            );
+        }
     }
 
     /// P6: every confined run keeps the real home, whether its conversation named a definition

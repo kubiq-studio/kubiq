@@ -507,6 +507,9 @@ struct PendingConversation {
     /// The extra read-write folders this launch asked for, from
     /// [`Message::StartConversation::grants`], carried through to [`ConverseOptions::extra_rw`].
     extra_rw: Vec<String>,
+    /// The sandbox policies this launch picked, from [`Message::StartConversation::policies`],
+    /// carried through to [`ConverseOptions::policies`] the same way.
+    policies: Vec<String>,
     /// The saved remote this conversation is bound to, from
     /// [`Message::StartConversation::remote`]: registered on its MCP row so every `kubiq-remote`
     /// call names it, and turned into the run's remote instructions on every launch (`D226`).
@@ -529,6 +532,24 @@ fn rw_paths(grants: Vec<kubiq_proto::settings::Grant>) -> Vec<String> {
         .filter(|grant| grant.write)
         .map(|grant| grant.path)
         .collect()
+}
+
+/// The policy list as the wire carries it. A repository that cannot be read lists as empty, with
+/// the reason logged: the windows' lists stay as they were rather than failing a refresh.
+fn policies_message(store: &agent_manager::policy::PolicyStore) -> Message {
+    let policies = store.list().unwrap_or_else(|error| {
+        tracing::warn!("The policies could not be listed: {error:#}");
+        Vec::new()
+    });
+    Message::Policies {
+        policies: policies.into_iter().map(crate::policy::info).collect(),
+    }
+}
+
+fn policy_error(error: anyhow::Error) -> Message {
+    Message::PolicyError {
+        error: format!("{error:#}"),
+    }
 }
 
 /// Whether a mutation's replies carry a refusal.
@@ -1207,8 +1228,9 @@ impl Coordinator {
                         // restart does not survive one, same as `catalogue` above.
                         mcps: Vec::new(),
                         skills: Vec::new(),
-                        extra_rw: Vec::new(),
-                        // Not persisted either: a revived remote agent comes back unbound (`G461`).
+                        extra_rw: row.extra_rw,
+                        policies: row.policies,
+                        // Not persisted: a revived remote agent comes back unbound (`G461`).
                         remote: None,
                     },
                 )
@@ -2150,6 +2172,70 @@ impl Coordinator {
             }
             Message::ListAgentDefinitions => {
                 self.send_definitions(client);
+            }
+            Message::ListPolicies => self.send_policies(To::Client(client)),
+            Message::ReadPolicy { name } => {
+                let answer = self.agents.policy_store().read(&name);
+                self.host.send(
+                    To::Client(client),
+                    match answer {
+                        Ok((row, layer, toml)) => Message::PolicyBody {
+                            info: crate::policy::info(row),
+                            doc: crate::policy::doc_of(&layer),
+                            toml,
+                        },
+                        Err(error) => policy_error(error),
+                    },
+                );
+            }
+            Message::SavePolicy {
+                name,
+                replaces,
+                description,
+                doc,
+            } => {
+                let saved = crate::policy::layer_of(&doc)
+                    .map_err(|error| anyhow::anyhow!("{error}"))
+                    .and_then(|layer| {
+                        self.agents.policy_store().save(
+                            &name,
+                            replaces.as_deref(),
+                            &description,
+                            &layer,
+                        )
+                    });
+                self.policy_changed(client, saved);
+            }
+            Message::ClonePolicy { name, new_name } => {
+                let cloned = self.agents.policy_store().clone_policy(&name, &new_name);
+                self.policy_changed(client, cloned);
+            }
+            Message::DeletePolicy { name } => {
+                let deleted = self.agents.policy_store().delete(&name);
+                self.policy_changed(client, deleted);
+            }
+            Message::SetPolicyDefault { name, default } => {
+                let set = self.agents.policy_store().set_default(&name, default);
+                self.policy_changed(client, set);
+            }
+            // A clone of a remote repository: seconds, and the network's to decide, so it runs on
+            // a thread of its own and the reader goes on.
+            Message::ImportPolicies { url, git_ref } => {
+                let store = self.agents.policy_store();
+                let asker = self.host.mailbox(To::Client(client));
+                let everyone = self.host.mailbox(To::Everyone);
+                thread::Builder::new()
+                    .name("policy-import".to_string())
+                    .spawn(move || match store.import(&url, git_ref.as_deref()) {
+                        Ok(names) => {
+                            asker.send(Message::PolicyImported { url, names });
+                            everyone.send(policies_message(&store));
+                        }
+                        Err(error) => {
+                            asker.send(policy_error(error));
+                        }
+                    })
+                    .ok();
             }
             Message::SaveAgentDefinition {
                 definition,
@@ -3798,6 +3884,7 @@ impl Coordinator {
                 skills,
                 spawned_by,
                 grants,
+                policies,
                 remote,
             } => {
                 self.start_conversation(
@@ -3816,6 +3903,7 @@ impl Coordinator {
                     skills,
                     spawned_by,
                     rw_paths(grants),
+                    policies,
                     remote,
                 );
             }
@@ -4367,6 +4455,7 @@ impl Coordinator {
         skills: Vec<String>,
         spawned_by: Option<AgentId>,
         extra_rw: Vec<String>,
+        policies: Vec<String>,
         remote: Option<String>,
     ) {
         // A drone-served project's folder is on the far machine, so there is no local folder to
@@ -4611,6 +4700,7 @@ impl Coordinator {
                 mcps,
                 skills,
                 extra_rw,
+                policies,
                 remote,
             },
         );
@@ -4791,6 +4881,7 @@ impl Coordinator {
                 mcps: pending.mcps.clone(),
                 skills: pending.skills.clone(),
                 extra_rw: pending.extra_rw.clone(),
+                policies: pending.policies.clone(),
                 instructions: pending
                     .remote
                     .as_ref()
@@ -5386,6 +5477,7 @@ impl Coordinator {
             // a link nobody made.
             None,
             Vec::new(),
+            Vec::new(),
             // The binding is not on the row: the window's, or the live recipe's, above (`G461`).
             remote,
         );
@@ -5758,6 +5850,8 @@ impl Coordinator {
             // it again whenever a `SetSettings` changes it, so a row that named the other one would
             // claim a run answered from a different machine's worth of state than it did.
             agent_home: self.settings.host().agent_home.clone(),
+            extra_rw: pending.extra_rw.clone(),
+            policies: pending.policies.clone(),
         };
         conversation_record::save(&sessions, agent_id, &record);
     }
@@ -7839,6 +7933,7 @@ impl Coordinator {
             mcps: picks.mcps,
             skills: picks.skills,
             extra_rw: rw_paths(picks.grants),
+            policies: picks.policies,
             prompt: None,
             resume: None,
             fork: false,
@@ -8560,6 +8655,20 @@ impl Coordinator {
     /// with the project it belongs to. The window already holds every project, so a scope is a
     /// field to filter on rather than a second ask — and a project whose definitions cannot be
     /// read contributes none rather than emptying the list.
+    /// Answer a policy mutation: the new list to every window on success, the refusal to the
+    /// asker alone otherwise.
+    fn policy_changed(&mut self, client: ClientId, outcome: anyhow::Result<()>) {
+        match outcome {
+            Ok(()) => self.send_policies(To::Everyone),
+            Err(error) => self.host.send(To::Client(client), policy_error(error)),
+        }
+    }
+
+    fn send_policies(&self, to: To) {
+        self.host
+            .send(to, policies_message(&self.agents.policy_store()));
+    }
+
     fn send_definitions(&mut self, client: ClientId) {
         // Every save, clone and delete of a definition ends here, so this is where the mission
         // runner's cached definition ids go stale.
@@ -9351,6 +9460,7 @@ mod tests {
                 mcps: Vec::new(),
                 skills: Vec::new(),
                 extra_rw: Vec::new(),
+                policies: Vec::new(),
                 remote: None,
             },
         );

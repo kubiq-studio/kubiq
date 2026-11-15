@@ -596,6 +596,66 @@ pub enum Message {
         channels: Vec<ChannelRelease>,
     },
 
+    // ── Policy family: the isol8 sandbox policies an isolated agent runs under ──
+    /// Which policies exist. Answered with [`Message::Policies`].
+    ListPolicies,
+    /// Every policy the host can resolve — built-in, local, imported and isol8's user folder —
+    /// sorted by name. Sent after every change to the set, to every client.
+    Policies {
+        policies: Vec<crate::policy::PolicyInfo>,
+    },
+    /// Read one policy for the editor. Answered with [`Message::PolicyBody`] to the asking client,
+    /// or [`Message::PolicyError`].
+    ReadPolicy {
+        name: String,
+    },
+    /// One policy's content: the structured form and the TOML it serializes to.
+    PolicyBody {
+        info: crate::policy::PolicyInfo,
+        doc: crate::policy::PolicyDoc,
+        toml: String,
+    },
+    /// Write a local policy, creating it when `name` names none. `replaces` is the name it was
+    /// opened under when it is being renamed. Refused with [`Message::PolicyError`] when the name
+    /// is not a relative layer path, collides with a different policy, or the target is not
+    /// [`crate::policy::PolicyOrigin::Local`]. Answered with [`Message::Policies`].
+    SavePolicy {
+        name: String,
+        replaces: Option<String>,
+        description: String,
+        doc: crate::policy::PolicyDoc,
+    },
+    /// Copy any policy into the local repository under `new_name`. Never overwrites.
+    ClonePolicy {
+        name: String,
+        new_name: String,
+    },
+    /// Remove a local or imported policy.
+    DeletePolicy {
+        name: String,
+    },
+    /// Mark a policy as a default: every isolated run gets it on top of its own picks.
+    SetPolicyDefault {
+        name: String,
+        default: bool,
+    },
+    /// Copy every layer of a remote git repository into the local repository, read-only, under
+    /// `imported/<repo>/`. `git_ref` is a branch or tag; `None` is the remote's default.
+    /// Answered with [`Message::PolicyImported`] to the asking client and [`Message::Policies`].
+    ImportPolicies {
+        url: String,
+        git_ref: Option<String>,
+    },
+    /// The layer names an import wrote.
+    PolicyImported {
+        url: String,
+        names: Vec<String>,
+    },
+    /// A policy operation failed. A human-readable sentence.
+    PolicyError {
+        error: String,
+    },
+
     // ── AgentDefinition family: the saved setups a conversation starts from ──
     /// Which definitions exist. Answered with [`Message::AgentDefinitions`].
     ListAgentDefinitions,
@@ -3193,6 +3253,11 @@ pub enum Message {
         /// normal case.
         #[serde(default)]
         grants: Vec<crate::settings::Grant>,
+        /// The sandbox policies this launch runs under, by [`crate::policy::PolicyInfo::name`], on
+        /// top of the default ones. A pick that stands on its own, like `mcps`. Ignored without
+        /// isolation.
+        #[serde(default)]
+        policies: Vec<String>,
         /// The saved remote this agent is bound to, by [`crate::settings::SavedRemoteHost::id`].
         /// Set, the host injects the `kubiq-remote` MCP server — whose calls travel as
         /// [`Message::RemoteToolCall`] naming this remote — and runs the harness in
@@ -4150,6 +4215,9 @@ pub struct AgentPicks {
     /// own [`AgentDefinition::grants`]. Empty is the normal case.
     #[serde(default)]
     pub grants: Vec<crate::settings::Grant>,
+    /// The sandbox policies this launch runs under, as in [`Message::StartConversation`].
+    #[serde(default)]
+    pub policies: Vec<String>,
 }
 
 /// One shell the host found on this machine, as the new-pane menu offers it.
@@ -4421,6 +4489,11 @@ pub struct AgentDefinition {
     /// isolation ignores them. Empty is the normal case.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub grants: Vec<crate::settings::Grant>,
+    /// The sandbox policies this definition's runs are isolated under, by
+    /// [`crate::policy::PolicyInfo::name`]. The default policies are added on top, never instead.
+    /// A name the host no longer resolves is dropped at launch. Ignored without isolation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<String>,
     /// The project this setup belongs to, when it belongs to one. `None` is a global definition —
     /// every definition written before this field existed, and every one the app-wide settings
     /// screen writes.

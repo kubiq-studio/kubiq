@@ -48,7 +48,7 @@ pub enum Layer {
     /// The agent-definition form, beside the login modal.
     AgentDefinitionForm,
     /// The extra-folders dialog, painted over the New agent modal or the definition form.
-    NewAgentPolicies,
+    NewAgentFolders,
     /// The skills page's repository browser, over the settings page or a project's.
     SkillBrowse,
     /// Its "Add source" question, over the browser or the page.
@@ -57,6 +57,14 @@ pub enum Layer {
     McpForm,
     /// The MCP registry search, over the form or the page that raised it.
     McpRegistry,
+    /// The policy editor, over the settings page.
+    PolicyEditor,
+    /// Its "clone as" name prompt, over the editor or the page.
+    PolicyClone,
+    /// The policy import question.
+    PolicyImport,
+    /// The policy removal question.
+    PolicyDelete,
     /// The accounts section's rename, delete or sign-out question.
     AccountDialog,
     /// The connect flow.

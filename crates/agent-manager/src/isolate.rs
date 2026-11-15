@@ -38,7 +38,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, anyhow};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 use tracing::debug;
 use tracing::info;
 
@@ -64,6 +64,21 @@ use crate::spec::{ConfigStrategy, Isolation, RunSpec};
 const WINDOWS_DEVICE_RW: &[&str] = &[r"\Device\Afd", r"\Device\Nsi"];
 #[cfg(not(target_os = "windows"))]
 const WINDOWS_DEVICE_RW: &[&str] = &[];
+
+/// The device tree a confined process writes to on Linux: `/dev/null`, the
+/// terminal it was started on (`/dev/tty`, `/dev/pts/*`), a new pty.
+///
+/// isol8's `linux/system-runtime` grants `/dev` read-only, and Landlock checks
+/// a write open of a device node like any file's — so every `2>/dev/null` a
+/// harness's shell tool runs fails with "Permission denied". A grant on a file
+/// is a rule on its parent under Landlock, so naming `/dev/null` alone would
+/// grant `/dev` anyway; it is named whole instead, honestly. What a device
+/// lets a process do is still decided by its mode bits, which is how it was
+/// decided before Landlock.
+#[cfg(target_os = "linux")]
+const LINUX_DEVICE_RW: &[&str] = &["/dev"];
+#[cfg(not(target_os = "linux"))]
+const LINUX_DEVICE_RW: &[&str] = &[];
 
 /// Where a confined run's `$HOME` comes from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -130,6 +145,11 @@ pub struct IsolateOptions {
     /// nothing. Passed through as given: an absent path renders as an inert
     /// grant, so a caller never has to pre-check one.
     pub extra_rw: Vec<PathBuf>,
+    /// Further named layers the run is composed under, after the defaults and the run's own
+    /// [`Isolation::Sandboxed`] layer: the policies a definition or a launch picked, and the ones
+    /// the caller marked as always on. A name that does not resolve is an error from [`plan`], so
+    /// a caller drops stale names first (see [`crate::policy::PolicyStore::resolving`]).
+    pub layers: Vec<String>,
 }
 
 impl IsolateOptions {
@@ -140,6 +160,7 @@ impl IsolateOptions {
             home: HomeMode::Inherit,
             extra_ro: Vec::new(),
             extra_rw: Vec::new(),
+            layers: Vec::new(),
         }
     }
 
@@ -866,6 +887,11 @@ pub fn plan(
     if !layer.is_empty() {
         cfg.default_profiles.push(layer.clone());
     }
+    for name in &options.layers {
+        if !cfg.default_profiles.contains(name) {
+            cfg.default_profiles.push(name.clone());
+        }
+    }
 
     let spec = isol8::resolve::spec_from_config(&cfg, base, cmd, &ctx)
         .context("resolving the isolation policy for this run")?;
@@ -898,14 +924,13 @@ pub fn describe(confined: &Confined) -> Result<isol8::DryRun> {
 /// constructor private, so a caller cannot hand it descriptors of its own. On
 /// macOS that costs nothing: the policy renders to text and `sandbox-exec`
 /// `execve`s in place — the same thing isol8 does internally — so the harness
-/// is still one process, whatever is on its descriptors. Linux has no
-/// equivalent: Landlock is applied inside the target process between `fork`
-/// and `exec`, and no rendered form of it exists to hand anyone. Windows is
-/// confined the same way it is spawned — suspended `CreateProcessW` plus the
-/// hook DLL — so a caller-owned ConPTY is equally out of reach: isol8
-/// (v0.4.0) offers inherited stdio only, no ConPTY seam. Both error below
-/// until isol8 grows the seam (`refs/isol8-pty-seam-update.md` for unix;
-/// ConPTY is separate work).
+/// is still one process, whatever is on its descriptors. Linux and Windows have
+/// no rendered form: Landlock is applied inside the target process between
+/// `fork` and `exec`, and Windows confines a process the way it creates it —
+/// suspended `CreateProcessW` plus the hook DLL. Both put *this binary* in the
+/// pane instead, under [`CONFINE_ARG`]: the confine run spawns the harness
+/// through isol8's own backend, and the harness inherits the pane's terminal
+/// (the pty slave on Linux, the ConPTY on Windows). See [`confine_entrypoint`].
 pub fn confined_launch(confined: &Confined) -> Result<Launch> {
     // Rendering the policy ourselves bypasses the guard `isol8::Sandbox::spawn`
     // applies, so it is applied here: a sandbox cannot nest, and the honest
@@ -919,6 +944,8 @@ pub fn confined_launch(confined: &Confined) -> Result<Launch> {
     isol8::home::materialize(&effective.home).context("materializing the confined run's home")?;
     isol8::resolve::confine_executable(&mut effective.profile, &mut effective.cmd)
         .context("granting the harness binary to the policy that confines it")?;
+    #[cfg(target_os = "linux")]
+    drop_unopenable_grants(&mut effective.profile);
 
     let env: Vec<(String, String)> = effective.env.into_iter().collect();
 
@@ -937,16 +964,17 @@ pub fn confined_launch(confined: &Confined) -> Result<Launch> {
         });
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
-        // isol8 confines only a process it creates itself, and offers no ConPTY
-        // seam — so nothing can be rendered to an argv the caller execs. What it
-        // does do is spawn without any console creation flag, which means the
-        // confined child attaches to its caller's console. So put *this binary*
-        // in the pane, invoked again under `CONFINE_ARG`: isol8 creates the
-        // harness from in there, and it lands on the very ConPTY the caller
-        // opened. Nothing extra ships, and the process applying the policy is by
-        // construction the build that resolved it.
+        // isol8 confines only a process it creates itself — Landlock between
+        // `fork` and `exec`, the hook DLL into a suspended process — so nothing
+        // can be rendered to an argv the caller execs. What it does do is spawn
+        // with inherited stdio and no console creation flag, so the confined
+        // child lands on its caller's terminal. So put *this binary* in the pane,
+        // invoked again under `CONFINE_ARG`: isol8 creates the harness from in
+        // there, on the very pty or ConPTY the caller opened. Nothing extra
+        // ships, and the process applying the policy is by construction the
+        // build that resolved it.
         debug!(program = %effective.cmd.first().cloned().unwrap_or_default(), via_confine_shim = true, "confined launch");
         let payload = ConfinePayload {
             profile: effective.profile,
@@ -967,17 +995,38 @@ pub fn confined_launch(confined: &Confined) -> Result<Launch> {
         });
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = (env, effective.profile, effective.cmd);
     }
 
     #[allow(unreachable_code)]
     Err(anyhow!(
-        "isolating a run whose descriptors the caller owns needs isol8's stdio seam, \
-         which this platform has no substitute for. Run without --isolate, or see \
-         refs/isol8-pty-seam-update.md"
+        "isolating a run is not supported on this platform. Run without --isolate"
     ))
+}
+
+/// Drop every grant Landlock could not open a rule for.
+///
+/// isol8 puts a rule on a granted directory, or on its parent when the grant is
+/// a file or is missing, and fails the whole spawn when that directory cannot
+/// be opened. The shipped layers name folders a given machine may not have —
+/// `~/Library/Caches` on Linux, a toolchain never installed — so without this
+/// almost no real home could start a confined run. A grant whose folder and
+/// parent are both missing grants nothing reachable: anything that could create
+/// it needs write access to an ancestor, which is a rule of its own.
+#[cfg(target_os = "linux")]
+fn drop_unopenable_grants(profile: &mut isol8::Profile) {
+    profile.paths.retain(|grant| {
+        let path = Path::new(&grant.path);
+        let keep = grant.access == isol8::Access::None
+            || path.is_dir()
+            || path.parent().is_some_and(Path::is_dir);
+        if !keep {
+            debug!(path = %grant.path, "dropping a grant Landlock cannot open: neither it nor its parent exists");
+        }
+        keep
+    });
 }
 
 /// The resolved policy a confine run applies, as it crosses from this process to
@@ -1046,7 +1095,7 @@ impl ConfinePayload {
 
 /// The argv word that turns a run of this binary into a confine run.
 ///
-/// Windows confinement needs a process inside the pane, and that process is this
+/// Linux and Windows confinement need a process inside the pane, and that process is this
 /// same executable invoked again rather than a second one shipped beside it —
 /// the shape Chrome's `--type=renderer` and busybox's argv dispatch use. An
 /// embedder calls [`confine_entrypoint`] before it starts anything; there is
@@ -1086,19 +1135,39 @@ pub fn confine_entrypoint() -> Option<i32> {
 }
 
 /// Apply `payload` and run the harness under it, returning its exit code.
-#[cfg(target_os = "windows")]
+///
+/// The harness is this process's child, on its terminal: stdio is inherited,
+/// and on Linux it stays in this process's session and foreground process
+/// group, so it reads the pty, gets `SIGWINCH` on a resize straight from the
+/// kernel and owns its own Ctrl+C. When this process dies — the host kills a
+/// pane by killing it — the kernel hangs up the session it leads, and the
+/// harness goes with it; on Windows the kill-on-close job does the same.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn confine_run(payload: &Path) -> Result<i32> {
     let payload = ConfinePayload::take(payload)?;
 
-    // Both before the spawn: from here on, whatever this process creates
-    // inherits the directory the policy grants, and belongs to the job.
+    // Before the spawn: from here on, whatever this process creates inherits
+    // the directory the policy grants.
     std::env::set_current_dir(&payload.cwd).with_context(|| {
         format!(
             "entering {} — the directory this run's policy was resolved against",
             payload.cwd.display()
         )
     })?;
+    #[cfg(target_os = "windows")]
     kill_on_close_job().context("putting the confined run in a kill-on-close job")?;
+    // A terminal signal reaches the whole foreground group, this process too, and
+    // a trampoline that died of the harness's Ctrl+C would hang the harness up.
+    // Caught rather than ignored, because an ignored signal stays ignored across
+    // `exec` and the harness must get its own.
+    #[cfg(target_os = "linux")]
+    {
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGQUIT] {
+            signal_hook::flag::register(signal, flag.clone())
+                .context("keeping the confine run alive through terminal signals")?;
+        }
+    }
 
     let env: std::collections::HashMap<String, String> = payload.env.into_iter().collect();
     let mut child = isol8::backends::select()
@@ -1109,11 +1178,11 @@ fn confine_run(payload: &Path) -> Result<i32> {
         .map_err(|e| anyhow!("waiting on the confined harness: {e}"))
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn confine_run(_payload: &Path) -> Result<i32> {
     Err(anyhow!(
-        "a confine run exists for Windows, where isol8 has no ConPTY seam. Everywhere \
-         else `confined_launch` renders a policy the caller execs itself."
+        "a confine run exists for Linux and Windows, where isol8 confines only what it \
+         spawns. Everywhere else `confined_launch` renders a policy the caller execs itself."
     ))
 }
 
@@ -1218,8 +1287,9 @@ fn read_write_grants(dir: &Path, run: &RunSpec, options: &IsolateOptions) -> Vec
     }
 
     // A run reaches the network for the same reason a login does, and on Windows
-    // that is a path grant like any other.
-    for device in WINDOWS_DEVICE_RW {
+    // that is a path grant like any other. On Linux, `/dev/null` and the
+    // terminal are — see [`LINUX_DEVICE_RW`].
+    for device in WINDOWS_DEVICE_RW.iter().chain(LINUX_DEVICE_RW) {
         let grant = (*device).to_string();
         if !grants.contains(&grant) {
             grants.push(grant);
@@ -1631,6 +1701,29 @@ mod tests {
         assert!(confined.spec.profiles.contains(&"no-network".to_string()));
     }
 
+    // The caller's `layers` join the run once each, after the defaults.
+    #[test]
+    fn extra_layers_join_the_run_once() {
+        let state = TempDir::new().expect("state dir");
+        let cwd = TempDir::new().expect("cwd");
+        let cfg_dir = TempDir::new().expect("config dir");
+        let run = sandboxed_run(cwd.path(), "");
+        let mut options = IsolateOptions::new(state.path().to_path_buf());
+        options.layers = vec!["shared/agent-common".into(), "toolchains/rust".into()];
+
+        let confined = plan(&Launch::default(), &run, cfg_dir.path(), &options)
+            .expect("plan")
+            .expect("policy");
+
+        let count = |name: &str| confined.spec.profiles.iter().filter(|n| *n == name).count();
+        assert_eq!(count("shared/agent-common"), 1);
+        assert_eq!(
+            count("toolchains/rust"),
+            1,
+            "already a dev layer: not doubled"
+        );
+    }
+
     // A relocated toolchain root is granted, split by what a build needs
     // there: a cache is written, an SDK tree is only read. Without this a
     // policy names `~/.cargo` on a machine whose cargo lives elsewhere, and
@@ -1952,6 +2045,83 @@ mod tests {
         );
     }
 
+    // End to end, on unix: a process confined by a planned policy writes into an extra
+    // read-write folder and nowhere else outside the grants. Skips where this machine cannot
+    // confine (no backend, a kernel without the feature, already confined).
+    #[cfg(unix)]
+    #[test]
+    fn a_confined_process_writes_an_extra_folder_and_not_a_stranger() {
+        use std::os::fd::OwnedFd;
+        if ensure_can_confine().is_err() {
+            eprintln!("skipped: this machine cannot confine");
+            return;
+        }
+        let state = TempDir::new().expect("state dir");
+        let cwd = TempDir::new().expect("cwd");
+        let cfg_dir = TempDir::new().expect("config dir");
+        // Outside `/tmp`, which the base layer grants read-write to every run.
+        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let extra = TempDir::new_in(here).expect("extra folder");
+        let stranger = TempDir::new_in(here).expect("stranger folder");
+        let run = sandboxed_run(cwd.path(), "");
+        let mut options = IsolateOptions::new(state.path().to_path_buf());
+        options.extra_rw = vec![extra.path().to_path_buf()];
+        let touch = ["/usr/bin/touch", "/bin/touch"]
+            .into_iter()
+            .find(|path| Path::new(path).exists())
+            .expect("a touch binary");
+        let launch = Launch {
+            program: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                // Absolute: a confined run's environment is cleared, so no `PATH` finds it.
+                format!(
+                    "{touch} '{}/ok'; {touch} '{}/no'",
+                    extra.path().display(),
+                    stranger.path().display()
+                ),
+            ],
+            ..Launch::default()
+        };
+        let confined = plan(&launch, &run, cfg_dir.path(), &options)
+            .expect("plan")
+            .expect("a policy");
+
+        let null = || -> OwnedFd {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/null")
+                .expect("/dev/null")
+                .into()
+        };
+        let stdio = isol8::SandboxStdio::from_fds(null(), null(), null());
+        let mut child =
+            match isol8::sandbox::spawn_with_stdio_in(&confined.spec, &confined.ctx, stdio) {
+                Ok(child) => child,
+                Err(error) => {
+                    eprintln!("skipped: the sandbox would not start here: {error}");
+                    return;
+                }
+            };
+        let code = child.wait().expect("waiting on the confined process");
+        if code == 127 {
+            // The backend refused to set the policy up (Landlock cannot open a granted layer
+            // directory that is missing on this machine): nothing about the grants to judge.
+            eprintln!("skipped: the sandbox could not apply its policy here");
+            return;
+        }
+
+        assert!(
+            extra.path().join("ok").exists(),
+            "the extra folder is writable"
+        );
+        assert!(
+            !stranger.path().join("no").exists(),
+            "a folder nobody granted is not"
+        );
+    }
+
     // An empty layer name (Isolation::Sandboxed(String::new()), the "just
     // isolate me, no named profile" case) must add nothing beyond the
     // builtin defaults, or every plain `--isolate` run silently grows a
@@ -1975,42 +2145,10 @@ mod tests {
         assert!(!confined.spec.profiles.contains(&String::new()));
     }
 
-    // Linux has no form to render — Landlock applies between `fork` and `exec`
-    // — so `confined_launch` must fail there loudly, naming what it waits on,
-    // rather than pretend to confine the run. macOS and Windows both serve it
-    // and are covered elsewhere: macOS by `tests/confined_bridge.rs`, Windows
-    // by `examples/conpty_confine_probe.rs`, neither of which can run here
-    // (one would exec `sandbox-exec`, the other wants a real pseudoconsole).
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    #[test]
-    fn confined_launch_errors_on_platforms_without_a_native_seam() {
-        let state = TempDir::new().expect("state dir");
-        let cwd = TempDir::new().expect("cwd");
-        // The test binary itself: guaranteed to resolve on every platform
-        // (`true` has no Windows equivalent, and an unresolvable command
-        // fails earlier, inside `confine_executable`).
-        let exe = std::env::current_exe().expect("test binary path");
-        let spec = isol8::Spec::new(vec![exe.display().to_string()]);
-        let ctx = isol8::Context {
-            real_home: cwd.path().to_path_buf(),
-            cwd: cwd.path().to_path_buf(),
-            platform: isol8::Platform::current(),
-            config_dir: state.path().to_path_buf(),
-            managed_root: state.path().join("homes"),
-        };
-        let confined = Confined { spec, ctx };
-
-        let err = confined_launch(&confined).expect_err("Linux must not confine");
-        assert!(
-            err.to_string().contains("stdio seam"),
-            "a Linux refusal must name the missing stdio seam: {err}"
-        );
-    }
-
-    // The Windows branch renders a re-invocation of this very binary, not a
-    // second executable beside it — nothing to package, and the process that
-    // applies the policy is by construction the build that resolved it.
-    #[cfg(target_os = "windows")]
+    // The Linux and Windows branches render a re-invocation of this very binary,
+    // not a second executable beside it — nothing to package, and the process
+    // that applies the policy is by construction the build that resolved it.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn confined_launch_renders_a_re_invocation_of_this_binary() {
         let state = TempDir::new().expect("state dir");
@@ -2036,9 +2174,147 @@ mod tests {
 
         // The payload is real, carries the directory the policy was resolved
         // against, and is the shim's to delete.
+        assert_eq!(
+            launch.args.len(),
+            2,
+            "the flag and the payload: {:?}",
+            launch.args
+        );
+        assert!(
+            Path::new(&launch.args[1]).starts_with(state.path().join("confine")),
+            "the payload lives under the run's state dir"
+        );
+        // The pane's own environment reaches the shim untouched; the harness's
+        // sanitized one travels in the payload.
+        assert!(launch.env.is_empty() && !launch.env_clear);
         let payload =
             ConfinePayload::take(Path::new(&launch.args[1])).expect("payload round-trips");
         assert_eq!(payload.cwd, cwd.path());
+        assert_eq!(payload.cmd.first().map(PathBuf::from), Some(exe));
         assert!(!Path::new(&launch.args[1]).exists(), "taking it removes it");
+    }
+
+    // Landlock opens a rule's directory — the grant, or its parent — before it
+    // restricts anything, so a grant with neither is dropped rather than failing
+    // the spawn; a deny is kept whatever the disk holds.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn grants_landlock_cannot_open_are_dropped() {
+        let root = TempDir::new().expect("root");
+        let grant = |path: PathBuf, access| isol8::PathGrant {
+            path: path.display().to_string(),
+            access,
+            r#match: isol8::MatchKind::Subpath,
+        };
+        let mut profile = isol8::Profile {
+            paths: vec![
+                grant(root.path().to_path_buf(), isol8::Access::Rw),
+                grant(root.path().join("missing"), isol8::Access::Rw),
+                grant(root.path().join("missing/deeper"), isol8::Access::Ro),
+                grant(root.path().join("gone/secret"), isol8::Access::None),
+            ],
+            ..Default::default()
+        };
+
+        drop_unopenable_grants(&mut profile);
+
+        let kept: Vec<&str> = profile.paths.iter().map(|g| g.path.as_str()).collect();
+        let want = [
+            root.path().display().to_string(),
+            root.path().join("missing").display().to_string(),
+            root.path().join("gone/secret").display().to_string(),
+        ];
+        assert_eq!(kept, want.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+
+    // End to end through the Linux trampoline: `confined_launch` writes the payload,
+    // and the confine run it names forks the harness under Landlock — which writes
+    // into an extra read-write folder and not into a folder nobody granted.
+    //
+    // Run in a child test process with an empty fake `$HOME`, so it does not
+    // depend on what this machine's home holds — and so it proves a bare home
+    // starts a confined run: the layers grant `~/.cargo`, `~/Library/Caches` and
+    // the like, and Landlock refuses a rule on a folder that is not there unless
+    // `drop_unopenable_grants` takes it out first.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_confine_run_writes_an_extra_folder_and_not_a_stranger() {
+        // isol8's rendered policy reports the kernel's Landlock ABI, probing
+        // without restricting anything.
+        let landlock = !isol8::backends::select()
+            .render_policy(&isol8::Profile::default())
+            .contains("Landlock ABI: unavailable");
+        if !landlock || ensure_can_confine().is_err() {
+            eprintln!("skipped: this machine cannot confine with Landlock");
+            return;
+        }
+        let home = TempDir::new().expect("fake home");
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "isolate::tests::confine_run_in_a_fake_home",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("HOME", home.path())
+            .output()
+            .expect("running the inner test");
+        let log = String::from_utf8_lossy(&output.stdout).into_owned()
+            + &String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "the inner test failed:\n{log}");
+        assert!(
+            log.contains("1 passed"),
+            "the inner test did not run:\n{log}"
+        );
+    }
+
+    // The body of the test above, which runs it with `$HOME` pointed at a fake home.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "run by a_confine_run_writes_an_extra_folder_and_not_a_stranger"]
+    fn confine_run_in_a_fake_home() {
+        let state = TempDir::new().expect("state dir");
+        let cwd = TempDir::new().expect("cwd");
+        let cfg_dir = TempDir::new().expect("config dir");
+        // Outside `/tmp`, which the base layer grants read-write to every run.
+        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let extra = TempDir::new_in(here).expect("extra folder");
+        let stranger = TempDir::new_in(here).expect("stranger folder");
+        let run = sandboxed_run(cwd.path(), "");
+        let mut options = IsolateOptions::new(state.path().to_path_buf());
+        options.extra_rw = vec![extra.path().to_path_buf()];
+        let touch = ["/usr/bin/touch", "/bin/touch"]
+            .into_iter()
+            .find(|path| Path::new(path).exists())
+            .expect("a touch binary");
+        let launch = Launch {
+            program: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                format!(
+                    "{touch} '{}/ok'; {touch} '{}/no'; echo quiet > /dev/null",
+                    extra.path().display(),
+                    stranger.path().display()
+                ),
+            ],
+            ..Launch::default()
+        };
+        let confined = plan(&launch, &run, cfg_dir.path(), &options)
+            .expect("plan")
+            .expect("a policy");
+        let rendered = confined_launch(&confined).expect("a Linux confined launch");
+        assert_eq!(rendered.args.first().map(String::as_str), Some(CONFINE_ARG));
+
+        let code = confine_run(Path::new(&rendered.args[1])).expect("the confine run");
+
+        assert!(
+            extra.path().join("ok").exists(),
+            "the extra folder is writable"
+        );
+        assert!(
+            !stranger.path().join("no").exists(),
+            "a folder nobody granted is not"
+        );
+        assert_eq!(code, 0, "the last command, a write to /dev/null, succeeds");
     }
 }

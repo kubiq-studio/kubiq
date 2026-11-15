@@ -45,6 +45,7 @@ pub mod menus;
 pub mod mission;
 pub mod navigator;
 pub mod new_agent;
+pub mod policy;
 pub mod new_mission;
 pub mod new_pane_menu;
 pub mod new_project_menu;

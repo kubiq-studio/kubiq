@@ -5,9 +5,9 @@ kind: tech
 status: draft
 summary: What the embedded harness-management library owns, what Kubiq owns, how the application consumes it, and the rule that keeps the two from growing into each other.
 read_when: you are about to write code that launches a harness, drives one as a conversation, names a harness config path, or touches accounts, skills or MCP servers
-updated: 2026-11-10
+updated: 2026-11-14
 verified: 2026-11-05
-code_anchors: [crates/agent-manager/src/harness_agents.rs, crates/kubiq-host/src/harness_agents.rs, crates/kubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/kubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/ask.rs]
+code_anchors: [crates/agent-manager/src/harness_agents.rs, crates/kubiq-host/src/harness_agents.rs, crates/kubiq-host/src/catalog.rs, crates/agent-manager/src/harness/claude.rs, crates/agent-manager/src/harness/registry.rs, crates/kubiq-host/Cargo.toml, crates/kubiq-host/src/agent.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-host/src/environment.rs, crates/agent-manager/src/lib.rs, crates/agent-manager/src/main.rs, crates/agent-manager/src/session.rs, crates/agent-manager/src/harness/mod.rs, crates/agent-manager/src/quota.rs, crates/agent-manager/src/credentials/mod.rs, crates/agent-manager/src/provision.rs, crates/agent-manager/src/spec.rs, crates/agent-manager/src/resolve.rs, crates/agent-manager/src/profile.rs, crates/agent-manager/src/isolate.rs, crates/agent-manager/examples/confined_shell_probe.rs, crates/agent-manager/src/io/structured.rs, crates/kubiq-app/src/lib.rs, crates/agent-manager/src/io/mod.rs, crates/agent-manager/src/io/acp.rs, crates/agent-manager/src/io/acp_caps.rs, crates/agent-manager/src/io/acp_client.rs, crates/kubiq-host/src/mcp/mod.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/ask.rs, crates/agent-manager/src/policy.rs, crates/kubiq-host/src/policy.rs]
 depends_on: [tech-structure]
 review_cycle: monthly
 ---
@@ -485,10 +485,30 @@ list replaces its parent's in `resolve_flattened`. The host reads the definition
 run's scope (a project's definition shadows the global one, as `definition_mcps` does), unions it with
 the launch's `StartConversation.grants`, and `add_rw` expands each `~` and adds it to the same
 `extra_rw` set, **only while host isolation is on**; with it off both are ignored. They sit on top of
-`extra_grants`, never in place of them, and are not persisted on the conversation row (`G409`).
+`extra_grants`, never in place of them, and are persisted on the conversation row (`extra_rw`, `policies`) so a revive after a restart keeps them.
 `environment.toml` is deliberately outside `settings.json`: it is machine state a planned policy UI
 edits as one file, not a preference that syncs — see `G204`. What stays per-run is the
 configuration, which `CLAUDE_CONFIG_DIR` and its siblings pin to the run directory.
+
+**The sandbox policies are the library's `policy` module, and the interface edits them through it.**
+`agent_manager::policy::PolicyStore`, rooted at `<config root>/isol8` (its `state_dir`), owns the
+policies a confined run stacks. It lists, reads, saves, clones, deletes, sets the default of, imports
+and resolves them, and names the folder they live in (`profiles_dir`). Its row types are `Info` and
+`Origin`, `valid_name` checks a layer name, and `Layer` is a re-export of `isol8::Profile`. The local repository is `<config root>/isol8/profiles/`, already one of
+isol8's `profile_paths`, so `isolate::plan` reads it without new wiring. Each policy is one isol8
+profile layer, named by its path under that folder without the extension (`toolchains/rust`). Kubiq's
+own metadata — a description, the Default flag and each import's source — sits beside the layers in
+`<config root>/isol8/policies.toml`, not inside them, because isol8 layers deny unknown fields.
+Built-in layers come from isol8's `LayerRegistry` and are read-only, and so is isol8's ambient
+`~/.config/isol8/profiles`, listed as `User`. An import is `git clone --depth 1` into a temporary
+directory, copied under `profiles/imported/<slug>/`, and a re-import replaces that folder. isol8 has
+no layer editor or importer, so `PolicyStore` serializes and validates through
+`isol8::profile::format_layer` and `resolve_requires`, and the wire carries only the `PolicyDoc`
+mirror (`D236`). `IsolateOptions::layers` names the layers a run is composed under, after the shipped
+defaults, and `isolate::plan` puts them on the profile stack. The host fills it with the union of the
+defaults, the definition's `policies` and the launch's picks, and `PolicyStore::resolving` drops a name
+the registry does not resolve, so the run goes on without it. The definition record (`Profile` in
+`profile.rs`) gains `policies: Vec<String>`, beside `extra_rw`.
 
 **A run's record is written through the library and kept by Kubiq.** Two library entry points carry
 it. `Harness::transcripts(config_dir)` in `crates/agent-manager/src/harness/mod.rs` answers the
@@ -513,13 +533,21 @@ startup sweep included, where the finish time is the sweep's own and the exit co
 All of it is best effort: a record that cannot be written is never a reason to fail a spawn or a
 close, and a run with no metadata is a plain shell pane rather than an error.
 
-Confining a run in a terminal Kubiq owns works on macOS and Windows, not on Linux. isol8 spawns with
+Confining a run in a terminal Kubiq owns works on macOS, Linux and Windows. isol8 spawns with
 inherited stdio and keeps its child handle private, so no host hands it a pseudo-terminal: on macOS
-`isolate::confined_launch` renders the policy and execs `sandbox-exec` around the harness. Windows
-has no ConPTY seam either, but isol8 calls `CreateProcessW` with no console-creation flag, so its
-child attaches to the caller's console — `confined_launch` writes the policy, environment, command
-and cwd to a `ConfinePayload` under `<state_dir>/confine/` and re-invokes the running binary under
-`isolate::CONFINE_ARG`, Chrome's `--type=renderer` pattern rather than a second shipped executable.
+`isolate::confined_launch` renders the policy and execs `sandbox-exec` around the harness. Linux and
+Windows have no rendered form — Landlock applies between `fork` and `exec`, and isol8 calls
+`CreateProcessW` with no console-creation flag, so its child attaches to the caller's console — so
+`confined_launch` writes the policy, environment, command and cwd to a `ConfinePayload` under
+`<state_dir>/confine/` and re-invokes the running binary under `isolate::CONFINE_ARG`, Chrome's
+`--type=renderer` pattern rather than a second shipped executable. On Linux the confine run calls
+isol8's backend `spawn`, which forks once and applies Landlock in the child, and the harness inherits
+the pane's pty, session and foreground group: resizes reach it as `SIGWINCH` from the kernel, and the
+confine run catches `SIGINT`/`SIGQUIT` so a Ctrl+C meant for the harness does not hang it up.
+Before writing the payload on Linux, `drop_unopenable_grants` removes grants where neither the folder
+nor its parent exists, since Landlock fails the whole spawn on such a rule. `LINUX_DEVICE_RW` grants
+`/dev` read-write, since isol8's runtime layer grants it read-only and `2>/dev/null` would fail
+(`D237`).
 For a conversation the caller is the shim `crates/agent-manager/src/io/structured.rs`'s
 `spawn_piped` starts, and that spawn now asks Windows for `CREATE_NO_WINDOW`, so the console the
 confined harness inherits carries no window rather than popping up a freestanding one beside the
@@ -564,9 +592,6 @@ agent definition files ship with their `filter.os` commented out rather than set
 this side zeroes them — inert, never functional (`G302`). All three are written up with their
 evidence in [`../inbox/isol8-upstream.md`](../inbox/isol8-upstream.md); only the first is fixed
 here.
-Landlock has no rendered
-form, applying between `fork` and `exec`, so `confined_launch` errors on Linux;
-`refs/isol8-pty-seam-update.md` specifies the seam that replaces it on unix.
 
 Everything an embedder can substitute is a trait: the catalog registry, the account store, the
 secret store, agent definitions, templates, session history, and an in-process MCP service behind the

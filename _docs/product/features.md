@@ -5,7 +5,7 @@ kind: product
 status: current
 summary: What a person can do with Kubiq, grouped by area — agents and chat, panes and layout, projects, the IDE, Git, knowledge base, database, tasks and missions, teams, remote hosts, connectors, notifications and settings — each pointing at the document that owns it.
 read_when: you want the list of what Kubiq does, or you are checking whether a capability exists before proposing it
-updated: 2026-10-09
+updated: 2026-11-14
 verified: 2026-10-09
 review_cycle: quarterly
 depends_on: [prod-overview, feat-workbench, feat-chat, feat-panes, feat-sessions, feat-workbench-agents, feat-workbench-ide, feat-workbench-git, feat-workbench-db, feat-workbench-tasks, feat-workbench-teams, feat-drone, feat-connectors, feat-notifications, feat-logs, feat-stats]
@@ -32,6 +32,7 @@ Owned by [Agents mode](../features/workbench-agents.md) and [Sessions and worksp
 - **Per-agent menu.** Fork, stop, abort, unload, hide or close a live agent from its three-dots menu, and read its details.
 - **Auto-named conversations.** A conversation takes a short name from its opening exchange.
 - **Isolated runs.** Each run gets its own throwaway configuration, so the user's real harness config stays untouched; a run's record is kept after it ends.
+- **Sandbox policies.** Choose the named policies an isolated run is confined under, make some apply to every run, and write or import your own from a git repository.
 
 ## Conversations and chat
 

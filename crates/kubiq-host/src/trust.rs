@@ -646,6 +646,7 @@ mod tests {
             disabled: false,
             project,
             grants: Vec::new(),
+            policies: Vec::new(),
             local: None,
         }
     }

@@ -1523,6 +1523,7 @@ mod onboarding;
 mod panels;
 mod picker;
 mod plan;
+mod policy;
 mod projects;
 mod remote_connect;
 mod remote_hosts;

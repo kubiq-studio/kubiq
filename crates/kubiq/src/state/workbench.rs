@@ -1049,6 +1049,8 @@ pub struct WorkbenchState {
     ///
     /// [`Message::Mcps`]: kubiq_proto::messages::Message::Mcps
     pub mcps: Vec<McpInfo>,
+    /// The sandbox policies and the overlays that work on them. See [`crate::state::policy`].
+    pub policy: crate::state::policy::PolicyState,
     /// The runnable tools the host lists: the machine-wide rows first, then the current
     /// project's. The titlebar's run chevron offers the applicable ones. Empty until the host
     /// answers — asked every time that menu opens, so a tool added in the settings is offered
@@ -1206,6 +1208,7 @@ impl Default for WorkbenchState {
             shells_from: None,
             agent_types: Vec::new(),
             mcps: Vec::new(),
+            policy: Default::default(),
             tools: Vec::new(),
             bookmarks_open: false,
         }
@@ -1510,6 +1513,7 @@ mod tests {
             disabled: false,
             project: None,
             grants: Vec::new(),
+            policies: Vec::new(),
             local: None,
         }
     }

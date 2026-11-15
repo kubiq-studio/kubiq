@@ -742,6 +742,7 @@ impl AppState {
             mcps: request.mcps.clone(),
             skills: Vec::new(),
             grants: Vec::new(),
+            policies: definition.policies.clone(),
             // Bound to the drone serving the project, when one does — the harness runs here and
             // the folder is on the far machine (`R7`).
             remote: self.drone_binding(project_id),

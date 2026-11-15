@@ -179,8 +179,7 @@ doing so.
 `#[serde(default)]`, so an old file reads as "no default" and nothing changes for anyone who never
 opens the screen. The resolved id and the layer file's sha256 go on `ConversationRecord`
 (`crates/kubiq-host/src/conversation_record.rs`), so a revive after a restart reruns under the same
-policy and can say so when the file changed underneath — the same gap `G409` records for grants, and
-the same fix.
+policy and can say so when the file changed underneath — the same fix the launch's grants and picked policies took on the row.
 
 ### 4.2 Sources, precedence, materialisation
 
@@ -463,4 +462,4 @@ Each stage ships alone and leaves the tree consistent.
 - [`../tech/ui-and-design.md`](../tech/ui-and-design.md) — the kit and the token rule.
 - [`../features/workbench-agents.md`](../features/workbench-agents.md) — the agent form and the
   definitions list.
-- [`../backlog.md`](../backlog.md) — `G89`, `G91`, `G409`.
+- [`../backlog.md`](../backlog.md) — `G89`, `G91`.

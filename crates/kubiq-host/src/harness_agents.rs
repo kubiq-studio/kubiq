@@ -108,6 +108,7 @@ pub fn to_definition(agent: &Found, project: ProjectId, fallback: &str) -> Agent
         tags: list_of(kubiq.get(TAGS)),
         disabled: text(DISABLED).as_deref() == Some("true"),
         grants: Vec::new(),
+        policies: Vec::new(),
         project: Some(project),
         local: Some(LocalAgent {
             folders: agent.folders().into_iter().map(str::to_string).collect(),
@@ -261,6 +262,7 @@ mod tests {
             tags: vec!["worker".into()],
             disabled: false,
             grants: Vec::new(),
+            policies: Vec::new(),
             project: Some(project),
             local: Some(LocalAgent::default()),
         }

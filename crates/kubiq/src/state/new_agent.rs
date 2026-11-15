@@ -89,6 +89,8 @@ pub enum OpenList {
     Mcps,
     /// The skills checklist, on the MCP one's terms.
     Skills,
+    /// The sandbox policies checklist, on the MCP one's terms.
+    Policies,
 }
 
 impl OpenList {
@@ -99,7 +101,7 @@ impl OpenList {
     /// field would be — so opening it must leave the keyboard where it was: focusing a field
     /// nothing draws is a keyboard nobody owns, and the window's own Escape never arrives at it.
     pub fn has_filter(self) -> bool {
-        !matches!(self, Self::Mcps | Self::Skills)
+        !matches!(self, Self::Mcps | Self::Skills | Self::Policies)
     }
 }
 
@@ -162,9 +164,13 @@ pub struct NewAgentForm {
     /// the chosen definition and added to here for this launch. Each `write: true`; ignored by the
     /// host when isolation is off.
     pub grants: Vec<Grant>,
+    /// The sandbox policies this start asks for on top of the defaults — [`AgentDefinition::policies`],
+    /// by policy name. Ticked order is kept, the way [`Self::mcps`] keeps it. Ignored by the host
+    /// when isolation is off.
+    pub policy_picks: Vec<String>,
     /// Whether the folders dialog is up over the form, the way [`Self::naming`] is for the name
     /// prompt.
-    pub policies: bool,
+    pub folders_open: bool,
     /// Whether the last path typed into that dialog was refused, for the line under the field.
     pub grant_invalid: bool,
     /// The **agent prompt** — [`AgentDefinition::prompt`]: standing instructions folded in front
@@ -355,7 +361,8 @@ impl NewAgentForm {
             mcps: Vec::new(),
             skills: Vec::new(),
             grants: Vec::new(),
-            policies: false,
+            policy_picks: Vec::new(),
+            folders_open: false,
             grant_invalid: false,
             prompt: String::new(),
             open: None,
@@ -404,6 +411,7 @@ impl NewAgentForm {
             mcps: definition.mcps.clone(),
             skills: definition.skills.clone(),
             grants: definition.grants.clone(),
+            policy_picks: definition.policies.clone(),
             prompt: definition.prompt.clone().unwrap_or_default(),
             mission_assistant: definition.mission_assistant.unwrap_or(false),
             tags: definition.tags.clone(),
@@ -436,6 +444,7 @@ impl NewAgentForm {
             mcps: self.mcps.clone(),
             skills: self.skills.clone(),
             grants: self.grants.clone(),
+            policies: self.policy_picks.clone(),
             // Ticked is written down; unticked writes `None` rather than `Some(false)` — the two
             // read the same to every filter, and `None` is the ordinary "says nothing" shape every
             // other optional field here already uses.
@@ -471,6 +480,13 @@ impl NewAgentForm {
         true
     }
 
+    /// Settle the dialog's field before it closes: text still in it is added. Returns whether the
+    /// dialog may close; a refused path leaves `grant_invalid` set and the dialog open.
+    pub fn finish_grants(&mut self, pending: &str) -> bool {
+        self.grant_invalid = !pending.trim().is_empty() && !self.add_grant(pending);
+        !self.grant_invalid
+    }
+
     /// Drop the folder at `index`, if there is one.
     pub fn remove_grant(&mut self, index: usize) {
         if index < self.grants.len() {
@@ -503,6 +519,16 @@ impl NewAgentForm {
                 self.skills.remove(at);
             }
             None => self.skills.push(id.to_string()),
+        }
+    }
+
+    /// Tick or untick one policy, by name. Ticked order is kept, like [`Self::mcps`].
+    pub fn toggle_policy(&mut self, name: &str) {
+        match self.policy_picks.iter().position(|it| it == name) {
+            Some(at) => {
+                self.policy_picks.remove(at);
+            }
+            None => self.policy_picks.push(name.to_string()),
         }
     }
 
@@ -792,6 +818,19 @@ mod tests {
     }
 
     #[test]
+    fn done_adds_a_typed_path_and_stays_open_on_a_bad_one() {
+        let mut form = NewAgentForm::new(Purpose::Start);
+        assert!(form.finish_grants("  /data/typed  "), "a typed path is added, then Done closes");
+        assert_eq!(form.grants.len(), 1);
+        assert_eq!(form.grants[0].path, "/data/typed");
+        assert!(!form.finish_grants("relative/dir"), "a refused path keeps the dialog open");
+        assert!(form.grant_invalid);
+        assert_eq!(form.grants.len(), 1);
+        assert!(form.finish_grants("  "), "an empty field clears the error and closes");
+        assert!(!form.grant_invalid);
+    }
+
+    #[test]
     fn ticked_skills_are_written_down_and_read_back() {
         let mut form = NewAgentForm::new(Purpose::AgentDefinition);
         form.toggle_skill("pdf");
@@ -823,6 +862,7 @@ mod tests {
             disabled: false,
             project: None,
             grants: Vec::new(),
+            policies: Vec::new(),
             local: None,
         }
     }
