@@ -196,6 +196,16 @@ pub struct BrowserTab {
     /// The width the page is laid out at, centred in the tab (and never wider than it); `None`
     /// fills the tab. Width only: the user agent and pixel density are the tab's own.
     pub viewport: Option<u32>,
+    /// "Browse via remote": the tab's webview goes through the loopback forward proxy that
+    /// browses as this saved remote host. Per tab; toggling it rebuilds the webview.
+    pub via_remote: Option<ViaRemote>,
+}
+
+/// Where a proxied tab's traffic leaves from: a saved remote host, through a proxy on this port.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ViaRemote {
+    pub save_id: String,
+    pub port: u16,
 }
 
 impl BrowserTab {
@@ -216,6 +226,7 @@ impl BrowserTab {
             persist,
             zoom: 1.0,
             viewport: None,
+            via_remote: None,
         }
     }
 

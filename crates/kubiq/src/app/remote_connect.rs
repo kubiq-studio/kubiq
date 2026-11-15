@@ -819,9 +819,22 @@ impl AppState {
 
     /// Pick which SSH profile the drone is reached with. Only meaningful in
     /// [`ConnectMode::Ssh`]; kept on the state regardless, like the trust flag above.
+    ///
+    /// A profile marked Persistent moves the lifetime from Attached to Session with the profile's
+    /// own idle timeout — a starting point the pills below still change.
     pub fn set_remote_profile(&mut self, profile: SshProfileId, cx: &mut Context<Self>) {
+        let features = self
+            .workbench
+            .settings
+            .ssh_profile(profile)
+            .map(|held| held.features.clone())
+            .unwrap_or_default();
         if let Some(state) = &mut self.workbench.remote_connect {
             state.profile = Some(profile);
+            if features.persistent && state.preset == DronePreset::Attached {
+                state.preset = DronePreset::Session;
+                state.linger_secs = features.linger_secs;
+            }
         }
         cx.notify();
     }

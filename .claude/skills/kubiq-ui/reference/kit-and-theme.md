@@ -122,6 +122,8 @@ reads the accessor** — `theme::titlebar_height()`, `theme::explorer_width()`,
 | `ONBOARDING_WIDTH` / `ONBOARDING_HEIGHT` | 560 / 440 | The onboarding dialog, fixed so steps never resize it |
 | `ONBOARDING_CALLOUT_WIDTH` / `ONBOARDING_CALLOUT_ROOM` / `ONBOARDING_DOT` / `ONBOARDING_GLOW` | 360 / 190 / 7 / 4 | A highlight step's card, the height placement assumes for it, a progress dot, the pulsing ring around the outline |
 | `SETTINGS_WIDTH` / `SETTINGS_HEIGHT` | 820 / 560 | The settings page overlay |
+| `SETTINGS_LIST_ROW` | 44 | One settings list row (`list_row`) |
+| `SETTINGS_HEADER_HEIGHT` / `SETTINGS_DETAIL_INSET` | 52 / 40 | What `settings_detail_height()` takes off the panel for a drill-in page |
 
 `MdWidth` (`Readable`/`Wide`/`Full`), `MdDensity` (`Comfortable`/`Compact`) and `MdMinimapSide`
 (`Left`/`Right`) are the Markdown preview's own axes (T-116, T-118) — ratios over the body font
@@ -160,8 +162,9 @@ a harness is a small secondary tag, never where one is being *chosen*.
 | `tag(...)` | The label does something when clicked, and nothing takes it off |
 | `removable_tag(...)` | `tag` plus a `×` that drops it. Built from `tag`, so the two never drift |
 | `check_box(...)` | A row chosen where several may be |
+| `check_label(id, label, checked, enabled, on_click)` | A labelled tick, the whole of it clickable — a feature switch on a list row; `enabled: false` is ticked-and-fixed |
 | `icon_button(...)`, `ghost_button(...)`, `primary_button(...)` | Icon-only (30px, tooltip carries the label), inline label, and the screen's single obvious action |
-| `row_action(id, RowAction, on_click)` → `RowActionButton` (`.tip(..)`, `.enabled(..)`) | A list row's verb, icon-only, 24px: `Test`, `StopTest`, `Terminal`, `Edit`, `Rename`, `Clone`, `Delete` — fixed icon and tooltip each, in that order on a row |
+| `row_action(id, RowAction, on_click)` → `RowActionButton` (`.tip(..)`, `.enabled(..)`) | A list row's verb, icon-only, 24px: `Connect`, `Disconnect`, `Show`, `Hide`, `Start`, `Stop`, `Refresh`, `Check`, `Test`, `StopTest`, `Terminal`, `Copy`, `Forget`, `Edit`, `Rename`, `Clone`, `Delete` — fixed icon and tooltip each, in that order on a row |
 | `elided(...)`, `elided_with(...)` | Truncate with the system ellipsis, whole string as tooltip — takes an element id |
 | `meter(fraction, colour)` | The flat meter |
 | `progress_ring(pct, diameter)`, `progress_ring_in(pct, diameter, fill)` | A canvas ring; `_in` takes its own fill token |
@@ -274,7 +277,12 @@ clears the query from either, `enter` opens what the query landed on without lea
 ### `settings.rs` — settings page furniture
 
 `heading(title, note)`, `setting_row(label, note, control)`, `label_block(label, note)`,
-`nav_item(...)`, `column(children)`.
+`nav_item(...)`, `column(children)`. The list/detail pattern (SKILL.md, "Settings pages"):
+`list_header(title, count, note, add)`, `list_row(id, title, detail, chips, actions)` (one line,
+`SETTINGS_LIST_ROW` high), `form_group(label, rows)`, `detail_page(id, crumbs, on_back, banner,
+body, footer)` (sized by `settings_detail_height()`, footer pinned), `detail_footer(id, ready,
+delete, on_cancel, on_save)`, `delete_control(id, what, confirming, on_ask, on_confirm, on_keep)`,
+`inline_confirm(id, text, yes, no, danger, on_yes, on_no)`.
 
 ### `canvas.rs` — what is painted rather than laid out
 

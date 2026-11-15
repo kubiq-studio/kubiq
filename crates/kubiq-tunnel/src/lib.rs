@@ -11,7 +11,9 @@
 //! - [`TunnelManager`] is the window's half: a loopback listener per enabled
 //!   [`kubiq_proto::settings::TunnelSpec`], each accepted socket an `Open` on the attached mux. The
 //!   listeners outlive the link — with none attached they refuse, and [`TunnelManager::attach`]
-//!   puts a new one under them.
+//!   puts a new one under them. Per spec kind: TCP splices bytes, HTTP rewrites both ways
+//!   (`http`), and the proxy kind is a forward proxy whose every connection names its own
+//!   destination (`proxy`).
 //! - [`Registry`] keeps one manager per saved target, process-wide ([`global`]), under a key the
 //!   carrier chooses: link, down, reconfigure, forget. The carrier is only the dial it hands in.
 //! - [`serve`] is the drone's half: dial what an `Open` names, if the [`AllowList`] admits it.
@@ -28,13 +30,14 @@ mod local;
 mod mux;
 pub mod pin;
 mod pipe;
+mod proxy;
 mod rate;
 mod registry;
 mod remote;
 mod tls;
 
 pub use duplex::TlsDuplex;
-pub use local::{TunnelManager, TunnelStatus};
-pub use registry::{Dial, Live, Registry, global};
+pub use local::{Source, TunnelManager, TunnelStatus};
+pub use registry::{Dial, Live, Registry, global, saved_key};
 pub use mux::{Incoming, Mux, Recv, TunnelStream};
 pub use remote::{AllowList, serve};

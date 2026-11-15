@@ -53,9 +53,9 @@ pub mod slider;
 
 pub use colour::{HsvAction, colour_picker};
 pub use controls::{
-    RowAction, RowActionButton, badge, card, check_box, choice_pill, disclosure, elided,
-    elided_with, field, ghost_button, hex_mark, icon_button, icon_button_tip, meter, mono, pill,
-    primary_button, progress_ring, progress_ring_in, progress_ring_pair, pulse_animation,
+    RowAction, RowActionButton, badge, card, check_box, check_label, choice_pill, disclosure,
+    elided, elided_with, field, ghost_button, hex_mark, icon_button, icon_button_tip, meter, mono,
+    pill, primary_button, progress_ring, progress_ring_in, progress_ring_pair, pulse_animation,
     removable_tag, row_action, section_label, slab, state_chip, status_dot, stepper, tag,
     toggle_pill,
 };
@@ -75,6 +75,8 @@ pub use popover::popover;
 pub use quota::quota_ring;
 pub use ribbon::{RIBBON_SIZE, Ribbon, RibbonCorner, ribbon};
 pub use settings::{
-    column, heading, hint_row, label_block, label_hint, nav_item, setting_row, settings_split,
+    column, delete_control, detail_footer, detail_page, form_group, heading, hint_row,
+    inline_confirm, label_block, label_hint, list_header, list_row, nav_item, setting_row,
+    settings_split,
 };
 pub use slider::{Slider, slider_state};

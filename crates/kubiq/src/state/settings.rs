@@ -65,6 +65,63 @@ impl SettingsSection {
     }
 }
 
+/// The Remote section's three tabs, in strip order. Each tab draws the blocks registered for it
+/// (`ext::remote`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RemoteTab {
+    /// Every connection this machine dials, of every type.
+    #[default]
+    Remotes,
+    /// This instance serving others: the drone modes.
+    HostMode,
+    /// Section-wide settings: the drone list URL.
+    Settings,
+}
+
+impl RemoteTab {
+    pub const ALL: &'static [Self] = &[Self::Remotes, Self::HostMode, Self::Settings];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Remotes => "Remotes",
+            Self::HostMode => "Host mode",
+            Self::Settings => "Settings",
+        }
+    }
+
+    /// The `ext::remote` group a block for this tab is registered in.
+    pub fn group(self) -> SlotId {
+        match self {
+            Self::Remotes => ids::REMOTE_REMOTES,
+            Self::HostMode => ids::REMOTE_HOST_MODE,
+            Self::Settings => ids::REMOTE_SETTINGS,
+        }
+    }
+}
+
+/// The drill-in editor's own chrome (`ui::kit::detail_page`): what the form held when it opened,
+/// and which inline question is up. One for the overlay — only one editor is open at a time.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DetailState {
+    /// The editor's field values when it opened; Back compares against them.
+    pub snapshot: Vec<String>,
+    /// Back was pressed with changes: the "Discard unsaved changes?" banner is up.
+    pub confirm_back: bool,
+    /// The footer's Delete was pressed: its inline confirm is up.
+    pub confirm_delete: bool,
+}
+
+/// One of an SSH profile's switches on the Remote section's row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SshFeature {
+    /// `SshProfile::terminal_enabled`.
+    Terminal,
+    /// `SshFeatures::drone`.
+    Drone,
+    /// `SshFeatures::persistent`.
+    Persistent,
+}
+
 /// What the host last said about the `kubiq` command on the shell's `PATH`.
 ///
 /// Every field is the host's answer and none of it is decided here: the interface draws what it
@@ -943,6 +1000,10 @@ pub struct SettingsState {
     pub ssh_checks: HashMap<SshProfileId, Result<HostCheck, String>>,
     /// Whether the Hosts section's dropdown list is down.
     pub host_picker_open: bool,
+    /// Which tab the Remote section shows.
+    pub remote_tab: RemoteTab,
+    /// The open drill-in editor's chrome.
+    pub detail: DetailState,
     /// Addresses a reconnect started from the Hosts section most recently failed to reach —
     /// see [`crate::app::hosts::host_menu_rows`]'s `failed` parameter. An address leaves this set
     /// the moment it attaches, so the dropdown never shows a stale failure for a host that is now
@@ -1256,6 +1317,8 @@ impl Default for SettingsState {
             ssh_check_busy: HashSet::new(),
             ssh_checks: HashMap::new(),
             host_picker_open: false,
+            remote_tab: RemoteTab::default(),
+            detail: DetailState::default(),
             failed_hosts: HashSet::new(),
             reconnects: HashMap::new(),
             error: None,

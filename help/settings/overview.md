@@ -28,7 +28,7 @@ What belongs to one project, such as its name, colour and task board, is in
 | **Skills**, **MCP servers** | The skills and tool servers an agent definition or a start can give an agent; see [Skills](settings-skills) and [MCP servers](settings-mcp-servers) |
 | **Assistance** | The model that names conversations and drafts short text; see [Assistance](settings-assist) |
 | **Connectors** | Your signed-in identities at GitHub, GitLab and similar; see [Connectors](settings-connectors) |
-| **Hosts**, **SSH profiles**, **Drones** | Other machines, how to sign in to them, and what runs on them; see [Hosts, SSH and drones](settings-hosts) |
+| **Remote** | Other machines, how to sign in to them, what runs on them, and this desktop serving others; see [Remote](settings-hosts) |
 | **Tools**, **Command line** | Commands you can run from the title bar, and the `kubiq` launcher; see [Tools and command line](settings-tools) |
 | **Feedback** | Where a report from the feedback dialog is sent; see [Sending feedback](feedback) |
 | **Updates** | The version running, the release channel, and whether Kubiq checks and downloads on its own, with **Check now**; see [Updates](settings-updates) |

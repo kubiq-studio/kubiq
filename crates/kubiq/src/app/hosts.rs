@@ -1048,6 +1048,12 @@ impl crate::app::AppState {
             .filter(|save_id| self.bus.serves_tools(save_id))
     }
 
+    /// The saved remote serving `project_id` right now, for a `runs_on` project a drone serves —
+    /// what an edition's titlebar item asks to know whether the active project is its own.
+    pub fn serving_save_id(&self, project_id: ProjectId) -> Option<String> {
+        self.bus.serving_save_id(project_id)
+    }
+
     /// What a remote has said about itself, for the manager panel and the picker's tooltips.
     /// `None` for the local host and for a remote that has said nothing yet.
     pub fn remote_host_meta(&self, host: HostRef) -> Option<RemoteHostMeta> {

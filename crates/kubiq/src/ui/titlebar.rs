@@ -65,6 +65,24 @@ pub fn control_icon(id: &UiId, dark: bool) -> Option<Icon> {
     Some(icon)
 }
 
+/// The green "something is live" dot on a titlebar button's top-right corner: a slow pulse, a hint
+/// at the edge of vision rather than an alert. The button it sits on is `relative`. Shared with
+/// contributed titlebar items (`ext::titlebar`).
+pub fn live_dot(id: &'static str) -> impl IntoElement {
+    div()
+        .absolute()
+        .top(px(6.))
+        .right(px(6.))
+        .size(px(7.))
+        .rounded_full()
+        .bg(theme::success())
+        .with_animation(
+            id,
+            pulse_animation(Duration::from_millis(2_000)).with_easing(pulsating_between(0.3, 1.0)),
+            |this, delta| this.opacity(delta),
+        )
+}
+
 pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> impl IntoElement {
     // The three switches report the dock's own regions rather than a flag beside it: a region the
     // user collapsed by dragging its last panel out has to read as closed here too.
@@ -193,79 +211,70 @@ pub fn render(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> im
         )
         // Remote hosts: connect, and the chevron for the host manager and a second edition's
         // remote targets. Experimental, like every way in to a remote.
-        .children(
-            app.drone_modes_reachable()
-                .then(|| {
-                    div()
-                        .h_full()
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .child(rule())
+        .children(app.drone_modes_reachable().then(|| {
+            div()
+                .h_full()
+                .flex()
+                .flex_none()
+                .items_center()
+                .child(rule())
+                .child(
+                    split_pair()
                         .child(
-                            split_pair()
+                            div()
+                                .relative()
+                                .h_full()
+                                .flex_none()
                                 .child(
-                                    div()
-                                        .relative()
-                                        .h_full()
-                                        .flex_none()
-                                        .child(
-                                            icon_button(
-                                                "remote-connect",
-                                                KubiqIcon::HostRemote,
-                                                false,
-                                                cx.listener(|this, _, window, cx| {
-                                                    this.open_remote_connect(window, cx)
-                                                }),
-                                            )
-                                            .h_full()
-                                            .tooltip(
-                                                move |window, cx| {
-                                                    gpui_component::tooltip::Tooltip::new(
-                                                        "Connect to a remote host",
-                                                    )
-                                                    .build(window, cx)
-                                                },
-                                            ),
-                                        )
-                                        // A drone mode is serving: a slow green pulse, a hint at the
-                                        // edge of vision rather than an alert.
-                                        .when(app.workbench.drone_modes.any_serving(), |this| {
-                                            this.child(
-                                                div()
-                                                    .absolute()
-                                                    .top(px(6.))
-                                                    .right(px(6.))
-                                                    .size(px(7.))
-                                                    .rounded_full()
-                                                    .bg(theme::success())
-                                                    .with_animation(
-                                                        "drone-serving-pulse",
-                                                        pulse_animation(Duration::from_millis(
-                                                            2_000,
-                                                        ))
-                                                        .with_easing(pulsating_between(0.3, 1.0)),
-                                                        |this, delta| this.opacity(delta),
-                                                    ),
-                                            )
+                                    icon_button(
+                                        "remote-connect",
+                                        KubiqIcon::HostRemote,
+                                        false,
+                                        cx.listener(|this, _, window, cx| {
+                                            this.open_remote_connect(window, cx)
                                         }),
+                                    )
+                                    .h_full()
+                                    .tooltip(
+                                        move |window, cx| {
+                                            gpui_component::tooltip::Tooltip::new(
+                                                "Connect to a remote host",
+                                            )
+                                            .build(window, cx)
+                                        },
+                                    ),
                                 )
-                                .child(split_chevron(
-                                    "remote-menu",
-                                    None,
-                                    app.workbench.open_menu == Some(MenuId::Remote),
-                                    "Remote hosts",
-                                    cx.listener(|this, event: &ClickEvent, _, cx| {
-                                        let at = (
-                                            f32::from(event.position().x),
-                                            f32::from(event.position().y),
-                                        );
-                                        this.open_remote_menu(at, cx);
-                                    }),
-                                )),
+                                // A drone mode is serving: a slow green pulse, a hint at the
+                                // edge of vision rather than an alert.
+                                .when(app.workbench.drone_modes.any_serving(), |this| {
+                                    this.child(live_dot("drone-serving-pulse"))
+                                }),
                         )
-                }),
-        )
+                        .child(split_chevron(
+                            "remote-menu",
+                            None,
+                            app.workbench.open_menu == Some(MenuId::Remote),
+                            "Remote hosts",
+                            cx.listener(|this, event: &ClickEvent, _, cx| {
+                                let at =
+                                    (f32::from(event.position().x), f32::from(event.position().y));
+                                this.open_remote_menu(at, cx);
+                            }),
+                        )),
+                )
+        }))
+        // What an edition contributes (`ext::titlebar`), each behind its own rule.
+        .children(crate::ext::titlebar::items().iter().filter_map(|item| {
+            (item.render)(app, window, cx).map(|element| {
+                div()
+                    .h_full()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .child(rule())
+                    .child(element)
+            })
+        }))
         // Back and forward belong to the project they walk, so they sit beside it rather than
         // beside the field: settings, web, tools, a rule, add project, a rule, remote, a rule, then
         // the two arrows.

@@ -235,6 +235,13 @@ pub struct HostSettings {
     #[serde(default)]
     pub drone_modes: Vec<DroneMode>,
 
+    /// Where a list of drones reachable over ssh is fetched from — the Remote section's
+    /// **Settings** tab. `None` is unset. Stored only: nothing fetches it yet (`_docs/backlog.md`).
+    ///
+    /// **UI-mutated**, on [`Self::remote_hosts`]' footing: it rides `SetSettings` whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drone_list_url: Option<String>,
+
     /// The harness and model the definitions a fresh install starts with run on — what the
     /// onboarding's **Default agent** step picks. `None` is the step's "not configured": it is
     /// offered while this is unset, and the host seeds with the first harness it finds.
@@ -379,6 +386,48 @@ pub struct SshProfile {
     /// terminal"). Off by default.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub terminal_enabled: bool,
+    /// What else this connection is used for, beside the terminal above — the Remote section's
+    /// per-connection checkboxes. The defaults are what every profile did before they existed.
+    #[serde(default, skip_serializing_if = "SshFeatures::is_default")]
+    pub features: SshFeatures,
+}
+
+/// An [`SshProfile`]'s feature switches.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SshFeatures {
+    /// Whether the profile is offered to carry a drone (the connect modal's SSH list). On by
+    /// default: every profile was, before this switch.
+    #[serde(default = "ssh_drone_default")]
+    pub drone: bool,
+    /// Whether what runs over the connection survives a dropped link: the terminal attaches a
+    /// `tmux` (or `screen`) session named after the profile, and a drone picked with this profile
+    /// starts on the `Session` lifetime with [`Self::linger_secs`]. Off by default.
+    #[serde(default)]
+    pub persistent: bool,
+    /// How long a persistent drone outlives a dropped link, in seconds — the `--linger` the
+    /// connect modal starts from. `None` is the lifetime's own (ten minutes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linger_secs: Option<u64>,
+}
+
+fn ssh_drone_default() -> bool {
+    true
+}
+
+impl Default for SshFeatures {
+    fn default() -> Self {
+        SshFeatures {
+            drone: ssh_drone_default(),
+            persistent: false,
+            linger_secs: None,
+        }
+    }
+}
+
+impl SshFeatures {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl SshProfile {
@@ -580,8 +629,9 @@ pub struct TunnelSpec {
     /// URL's — a virtual host behind an address. `None` (or blank) uses [`Self::remote_authority`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_rewrite: Option<String>,
-    /// [`TunnelKind::Http`] only, experimental: replace the upstream's origin with the local one
-    /// in response bodies whose `Content-Type` matches [`Self::content_types`].
+    /// [`TunnelKind::Http`] only: replace the upstream's origin with the local one in response
+    /// bodies whose `Content-Type` matches [`Self::content_types`]. Off for a record that never
+    /// set it; a spec the form creates starts with it on.
     #[serde(default)]
     pub rewrite_content: bool,
     /// The `Content-Type` patterns `rewrite_content` processes; `*` matches any run of characters.
@@ -594,17 +644,19 @@ fn tunnel_rewrite_host_default() -> bool {
 }
 
 impl TunnelSpec {
-    /// The content types a fresh spec rewrites: the text formats a URL is written into.
+    /// The content types a fresh spec rewrites: the textual formats a URL is written into.
+    /// `text/event-stream` matches `text/*` but is never held (it never ends).
     pub fn default_content_types() -> Vec<String> {
         [
-            "text/html",
-            "text/css",
-            "text/javascript",
+            "text/*",
             "application/javascript",
             "application/x-javascript",
+            "application/ecmascript",
             "application/json",
             "application/*+json",
-            "application/manifest+json",
+            "application/xml",
+            "application/*+xml",
+            "image/svg+xml",
         ]
         .into_iter()
         .map(String::from)
@@ -731,8 +783,12 @@ pub enum TunnelKind {
     #[default]
     Tcp,
     /// HTTP, so the `Host` header and the host-bearing response headers can be rewritten, the
-    /// upstream wrapped in TLS, and — experimentally — response bodies rewritten.
+    /// upstream wrapped in TLS, and response bodies of textual types rewritten.
     Http,
+    /// A standard HTTP forward proxy on `local_port`: each request names its own destination
+    /// (`CONNECT host:port`, or an absolute `http://` URI), dialled on the far machine under its
+    /// allow list. `host` and `port` are unused.
+    Proxy,
 }
 
 /// How a saved remote host's frames are carried.
@@ -1066,6 +1122,7 @@ impl Default for HostSettings {
             ssh_profiles: Vec::new(),
             feedback_url: None,
             drone_modes: Vec::new(),
+            drone_list_url: None,
             default_agent: None,
         }
     }

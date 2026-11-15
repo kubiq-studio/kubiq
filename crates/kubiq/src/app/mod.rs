@@ -1111,6 +1111,8 @@ pub struct AppState {
     /// on Enter and on blur rather than on a keystroke: every commit writes a file on the host.
     pub search_excludes_input: Entity<InputState>,
     pub search_fallbacks_input: Entity<InputState>,
+    /// The Remote section's drone list URL, on the two lists' commit rule.
+    pub drone_list_url_input: Entity<InputState>,
     /// The Isolation section's two host-owned fields: the name of the kept agent home, and the
     /// path a grant is added from. Both commit on Enter and on blur, the two search lists' rule.
     pub agent_home_input: Entity<InputState>,

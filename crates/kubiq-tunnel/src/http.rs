@@ -21,13 +21,19 @@
 //! back through the tunnel; a `Set-Cookie` loses its `Domain`, so the cookie lands on `localhost`.
 //! A `101` or a `CONNECT`'s `2xx` turns the stream raw; so does anything that does not parse.
 //!
-//! **Bodies** ([`TunnelSpec::rewrite_content`], experimental). A response whose `Content-Type`
-//! matches one of [`TunnelSpec::content_types`] and carries no `Content-Encoding` is held whole —
-//! decoded from `chunked` if it came so — has the upstream's origin replaced by the local one (and
-//! the JSON-escaped `https:\/\/` spelling too), and goes out with a fresh `Content-Length`. The
-//! request side asks for `Accept-Encoding: identity` so a server has no reason to compress. A
-//! body that outgrows [`CAPTURE_MAX`] goes out as it came, unrewritten, and `text/event-stream`
-//! is never held.
+//! **Bodies** ([`TunnelSpec::rewrite_content`]). A response whose `Content-Type` matches one of
+//! [`TunnelSpec::content_types`] — by default the textual ones: `text/*`, JavaScript, JSON and
+//! `+json`, XML and `+xml`, SVG — and carries no `Content-Encoding` is held whole — decoded from
+//! `chunked` if it came so — has the upstream's origin replaced by the local one (and the
+//! JSON-escaped `https:\/\/` spelling too), and goes out with a fresh `Content-Length` and no
+//! `Transfer-Encoding`. Compression is avoided rather than decoded: the request side drops the
+//! browser's `Accept-Encoding` and asks for `identity`, and a response compressed anyway passes
+//! untouched. Any other type (images, fonts, archives) streams as it came, and so does a body
+//! that outgrows [`CAPTURE_MAX`]; `text/event-stream` is never held.
+//!
+//! Every window-side tunnel goes through this one path: [`crate::TunnelManager`] runs it for each
+//! HTTP connection whichever carrier feeds the mux (a socket's `/tunnel`, SSH, the Studio RDP
+//! channel). The drone's half ([`crate::serve`]) only dials and splices.
 //!
 //! **Refusals.** A request the guard refuses (`403`) or whose framing is ambiguous — a
 //! `Transfer-Encoding` other than `chunked`, two `Content-Length`s that disagree (`400`) — forwards
@@ -44,8 +50,8 @@ use std::io;
 use std::sync::Arc;
 
 use httparse::Status;
-use parking_lot::Mutex;
 use kubiq_proto::settings::TunnelSpec;
+use parking_lot::Mutex;
 
 /// The longest request or response head accepted.
 const HEAD_MAX: usize = 64 * 1024;
@@ -1223,7 +1229,8 @@ HTTP/1.1 204 No Content\r\n\r\n",
     fn other_types_encoded_bodies_and_head_answers_pass_untouched() {
         let req = b"GET / HTTP/1.1\r\nHost: localhost:8080\r\n\r\n";
         for res in [
-            &b"HTTP/1.1 200 OK\r\nContent-Type: image/svg+xml\r\nContent-Length: 13\r\n\r\nhttp://web:80"[..],
+            &b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 13\r\n\r\nhttp://web:80"[..],
+            b"HTTP/1.1 200 OK\r\nContent-Type: font/woff2\r\nTransfer-Encoding: chunked\r\n\r\nd\r\nhttp://web:80\r\n0\r\n\r\n",
             b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Encoding: gzip\r\nContent-Length: 13\r\n\r\nhttp://web:80",
         ] {
             let (_, got) = answer(&rewriting("http://web"), req, res, 3);
@@ -1279,6 +1286,42 @@ HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 10\r\n\r\nhttp://w
         assert!(r.rewrites_content("text/plain; charset=utf-8"));
         assert!(!r.rewrites_content("application/json"));
         assert!(!r.rewrites_content(""));
+    }
+
+    #[test]
+    fn the_default_types_are_the_textual_ones() {
+        let r = Rewrite::new(&rewriting("http://web"));
+        for text in [
+            "text/html; charset=utf-8",
+            "text/plain",
+            "text/css",
+            "text/javascript",
+            "application/javascript",
+            "application/json",
+            "application/ld+json",
+            "application/xml",
+            "application/atom+xml",
+            "image/svg+xml",
+        ] {
+            assert!(r.rewrites_content(text), "{text}");
+        }
+        for binary in [
+            "image/png",
+            "font/woff2",
+            "application/octet-stream",
+            "application/wasm",
+            "text/event-stream",
+        ] {
+            assert!(!r.rewrites_content(binary), "{binary}");
+        }
+        // An SVG with the origin in it comes back pointing at the tunnel.
+        let req = b"GET /i.svg HTTP/1.1\r\nHost: localhost:8080\r\n\r\n";
+        let res = b"HTTP/1.1 200 OK\r\nContent-Type: image/svg+xml\r\nContent-Length: 20\r\n\r\n<a href=\"http://web\"";
+        let (_, got) = answer(&rewriting("http://web"), req, res, 5);
+        assert!(
+            got.ends_with("Content-Length: 31\r\n\r\n<a href=\"http://localhost:8080\""),
+            "{got}"
+        );
     }
 
     #[test]

@@ -32,9 +32,7 @@ fn the_overlay_draws_the_same_rows_in_the_same_order() {
         "Isolation",
         "Assistance",
         "Connectors",
-        "Hosts",
-        "SSH profiles",
-        "Drones",
+        "Remote",
         "Tools",
         "Command line",
         "Feedback",
@@ -251,7 +249,9 @@ fn the_tier_switches_decide_which_sections_are_listed() {
             .map(|spec| spec.label)
             .collect()
     };
-    let gated = ["Connectors", "Hosts", "Drones", "Remote", "Extensions demo"];
+    // "Remote" here is the project dialog's; the application's Remote section is stable (its SSH
+    // profiles block is), and its experimental blocks are gated one by one (`ext::remote`).
+    let gated = ["Connectors", "Extensions demo"];
     let mut ui = UiSettings::default();
     assert!(!ui.experimental && !ui.dev_settings);
     let off = listed(&ui);
@@ -263,11 +263,15 @@ fn the_tier_switches_decide_which_sections_are_listed() {
     }
     // The switches themselves are never hidden.
     assert!(off.contains(&"Experimental"));
-    assert!(off.contains(&"SSH profiles"));
+    assert_eq!(
+        off.iter().filter(|label| **label == "Remote").count(),
+        1,
+        "only the application's Remote is listed with both switches off"
+    );
 
     ui.experimental = true;
     let on = listed(&ui);
-    for label in ["Connectors", "Hosts", "Drones", "Remote"] {
+    for label in ["Connectors", "Remote"] {
         assert!(
             on.contains(&label),
             "`{label}` comes back with experimental on"
@@ -279,6 +283,34 @@ fn the_tier_switches_decide_which_sections_are_listed() {
     ui.dev_settings = true;
     let dev = listed(&ui);
     assert!(dev.contains(&"Extensions demo"));
-    assert!(!dev.contains(&"Hosts"));
+    assert!(!dev.contains(&"Connectors"));
     assert!(ui.offers(Tier::Dev) && !ui.offers(Tier::Experimental) && ui.offers(Tier::Stable));
+}
+
+/// The former Hosts, SSH profiles and Drones sections are one Remote section now, still found by
+/// their old names, and its three tabs hold the base's own blocks.
+#[test]
+fn remote_replaces_hosts_ssh_and_drones_and_keeps_their_names_searchable() {
+    use kubiq::ext::remote::{RemoteTab, tab_blocks};
+    let remote = kubiq::ext::settings::spec(kubiq::ext::ids::REMOTE).expect("registered");
+    for old in ["hosts", "ssh profiles", "drones", "host mode"] {
+        assert!(remote.matches(old), "`{old}` does not find Remote");
+    }
+    let ids = |tab| tab_blocks(tab).map(|block| block.id).collect::<Vec<_>>();
+    assert_eq!(
+        ids(RemoteTab::Remotes),
+        [
+            kubiq::ext::ids::REMOTE_HOSTS,
+            kubiq::ext::ids::REMOTE_SSH,
+            kubiq::ext::ids::REMOTE_DRONES
+        ]
+    );
+    assert_eq!(
+        ids(RemoteTab::HostMode),
+        [kubiq::ext::ids::REMOTE_DRONE_MODES]
+    );
+    assert_eq!(
+        ids(RemoteTab::Settings),
+        [kubiq::ext::ids::REMOTE_DRONE_LIST]
+    );
 }

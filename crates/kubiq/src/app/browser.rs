@@ -234,14 +234,20 @@ impl AppState {
     /// bring a field up to date with the page it fronts. Idempotent.
     pub(super) fn settle_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut bare: Vec<(ProjectId, String)> = Vec::new();
-        let mut unbuilt: Vec<(String, String, Profile, bool)> = Vec::new();
+        let mut unbuilt: Vec<(String, String, Profile, bool, Option<u16>)> = Vec::new();
         for (project, open) in &self.projects {
             for tab in &open.browser.tabs {
                 if tab.input.is_none() {
                     bare.push((*project, tab.key.clone()));
                 }
                 if web_view::SUPPORTED && !web_view::is_open(&tab.key) {
-                    unbuilt.push((tab.key.clone(), tab.url.clone(), tab.profile, tab.persist));
+                    unbuilt.push((
+                        tab.key.clone(),
+                        tab.url.clone(),
+                        tab.profile,
+                        tab.persist,
+                        tab.via_remote.as_ref().map(|via| via.port),
+                    ));
                 }
             }
         }
@@ -258,8 +264,10 @@ impl AppState {
         for (project, key) in bare {
             self.build_browser_field(project, &key, window, cx);
         }
-        for (key, url, profile, persist) in unbuilt {
-            if let Err(err) = web_view::open_browser(&key, &url, profile, persist, window, cx) {
+        for (key, url, profile, persist, proxy) in unbuilt {
+            if let Err(err) =
+                web_view::open_browser(&key, &url, profile, persist, proxy, window, cx)
+            {
                 tracing::warn!("browser: no embedded browser for {key}: {err}");
             }
         }
@@ -722,6 +730,68 @@ impl AppState {
         self.browser_more = None;
         if self.workbench.open_menu == Some(MenuId::BrowserMore) {
             self.workbench.open_menu = None;
+        }
+        cx.notify();
+    }
+
+    /// The saved remote host the current project runs on, when the browser can be sent through
+    /// it: what the `⋯` menu's "Browse via remote" offers.
+    pub fn browser_remote(&self, cx: &App) -> Option<String> {
+        if !web_view::PROXY {
+            return None;
+        }
+        self.bus.serving_save_id(self.project(cx)?)
+    }
+
+    /// Turn "Browse via remote" on or off for tab `key`: route it through a loopback forward proxy
+    /// over the current project's remote ([`Self::browser_proxy_port`]), or back to direct. The
+    /// webview is rebuilt on the next render, at the page it was on.
+    pub fn toggle_browser_via_remote(&mut self, key: &str, cx: &mut Context<Self>) {
+        let remote = self.browser_remote(cx);
+        let Some(current) = self
+            .projects
+            .values()
+            .find_map(|open| open.browser.tab(key))
+            .map(|tab| tab.via_remote.clone())
+        else {
+            return;
+        };
+        let next = match (current.clone(), remote) {
+            (Some(_), _) => None,
+            (None, Some(save_id)) => match self.browser_proxy_port(&save_id) {
+                Ok(port) => Some(browser::ViaRemote { save_id, port }),
+                Err(err) => {
+                    tracing::warn!("browser: browse via remote: {err}");
+                    return;
+                }
+            },
+            (None, None) => return,
+        };
+        if let Some(tab) = self
+            .projects
+            .values_mut()
+            .find_map(|open| open.browser.tab_mut(key))
+        {
+            tab.via_remote = next;
+            tab.loading = true;
+            tab.loading_since = Some(Instant::now());
+            tab.committed = false;
+        }
+        web_view::close(key);
+        // The last tab off a remote's proxy stops it.
+        if let Some(old) = current {
+            let ridden = self
+                .projects
+                .values()
+                .flat_map(|open| open.browser.tabs.iter())
+                .any(|tab| {
+                    tab.via_remote
+                        .as_ref()
+                        .is_some_and(|via| via.save_id == old.save_id)
+                });
+            if !ridden {
+                self.drop_browser_proxy(&old.save_id);
+            }
         }
         cx.notify();
     }

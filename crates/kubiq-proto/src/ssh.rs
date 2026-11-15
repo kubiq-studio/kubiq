@@ -41,7 +41,8 @@ pub fn typable_target(profile: &SshProfile) -> Option<String> {
 /// spawned headless: no batch mode, so a password or passphrase is asked for in the terminal.
 ///
 /// An [`SshProfile::initial_command`] forces a tty (`-t`) and rides as the remote command followed
-/// by `exec $SHELL -l`, so the session stays interactive once it finishes. `None` when the target
+/// by `exec $SHELL -l`, so the session stays interactive once it finishes. A persistent profile
+/// wraps that in a named `tmux`/`screen` session ([`persistent_command`]). `None` when the target
 /// cannot be put in an argv.
 pub fn terminal_args(profile: &SshProfile) -> Option<Vec<String>> {
     let target = typable_target(profile)?;
@@ -64,14 +65,34 @@ pub fn terminal_args(profile: &SshProfile) -> Option<Vec<String>> {
         .as_deref()
         .map(str::trim)
         .filter(|command| !command.is_empty());
-    if initial.is_some() {
+    let persistent = profile.features.persistent;
+    if initial.is_some() || persistent {
         args.push("-t".to_string());
     }
     args.push(target);
-    if let Some(command) = initial {
-        args.push(format!("{command}; exec $SHELL -l"));
+    let inner = initial.map(|command| format!("{command}; exec $SHELL -l"));
+    if persistent {
+        args.push(persistent_command(profile, inner.as_deref()));
+    } else if let Some(command) = inner {
+        args.push(command);
     }
     Some(args)
+}
+
+/// The remote command of a [`persistent`](crate::settings::SshFeatures::persistent) terminal:
+/// attach the `tmux` session named after the profile (creating it, running `inner` once, if it is
+/// not there), else the `screen` one, else a plain login shell. The session outlives the link.
+fn persistent_command(profile: &SshProfile, inner: Option<&str>) -> String {
+    let id = profile.id.to_string();
+    let name = format!("kubiq-{}", &id[id.len().saturating_sub(8)..]).to_lowercase();
+    let tmux_cmd = inner
+        .map(|command| format!(" '{}'", command.replace('\'', r"'\''")))
+        .unwrap_or_default();
+    format!(
+        "if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s {name}{tmux_cmd}; \
+         elif command -v screen >/dev/null 2>&1; then exec screen -D -RR {name}; \
+         else exec $SHELL -l; fi"
+    )
 }
 
 /// Which program [`apply_connection_options`] is building argv for. `ssh` and `scp` read
@@ -263,7 +284,21 @@ mod tests {
             auth,
             initial_command: None,
             terminal_enabled: false,
+            features: Default::default(),
         }
+    }
+
+    #[test]
+    fn a_persistent_terminal_attaches_a_named_tmux_session() {
+        let mut p = profile(SshAuth::Agent);
+        p.features.persistent = true;
+        p.initial_command = Some("it's".into());
+        let args = terminal_args(&p).unwrap();
+        assert!(args.contains(&"-t".to_string()));
+        let remote = args.last().unwrap();
+        assert!(remote.contains("exec tmux new-session -A -s kubiq-"));
+        assert!(remote.contains(r"'it'\''s; exec $SHELL -l'"));
+        assert!(remote.contains("screen -D -RR kubiq-"));
     }
 
     #[test]

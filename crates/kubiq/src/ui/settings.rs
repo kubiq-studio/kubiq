@@ -40,11 +40,12 @@ use crate::state::settings::{
 use crate::theme;
 use crate::theme::{Family, Role};
 use crate::ui::kit::{
-    KubiqIcon, RowAction, badge, card, check_box, choice_pill, column, confirm_modal, elided,
-    field, ghost_button, heading, icon_button, icon_button_tip, label_block, menu::Picker, meter,
-    modal, modal_note, modal_sized, mono, nav_item, primary_button, prompt_modal,
-    quota_ring as kit_quota_ring, removable_tag, row_action, section_label, setting_row,
-    settings_split, slab, state_chip, status_dot,
+    KubiqIcon, RowAction, Tab, badge, card, check_box, check_label, choice_pill, column,
+    confirm_modal, delete_control, detail_footer, detail_page, elided, field, form_group,
+    ghost_button, heading, icon_button, icon_button_tip, inline_confirm, label_block, list_header,
+    list_row, menu::Picker, meter, modal, modal_note, modal_sized, mono, nav_item, primary_button,
+    prompt_modal, quota_ring as kit_quota_ring, removable_tag, row_action, section_label,
+    setting_row, settings_split, slab, state_chip, status_dot, tab_strip, toggle_pill,
 };
 use crate::ui::sink::project::Form;
 use crate::ui::size;
@@ -215,7 +216,7 @@ pub(crate) fn no_match() -> AnyElement {
         .into_any_element()
 }
 
-/// The overlay's own seventeen sections — eighteen on Windows, where Shell integration joins the
+/// The overlay's own sections — one more on Windows, where Shell integration joins the
 /// System group — registered into the settings container (`D180`).
 ///
 /// This is the base's side of `X4`: the container's first commit is also the commit that converts
@@ -482,56 +483,41 @@ pub fn sections(reg: &mut Registry<SettingsSectionSpec>) {
             )
         },
     );
+    // Remote: the former Hosts, SSH profiles and Drones sections, as the tabs of one
+    // (`ext::remote`). Their names stay keywords, so a search for any of them still lands here.
     add(
         ids::SETTINGS_APP_CONNECTIVITY,
         SettingsSectionSpec {
-            tier: Tier::Experimental,
+            on_show: Some(remote_on_show),
             ..section(
-                ids::HOSTS,
-                "Hosts",
+                ids::REMOTE,
+                "Remote",
                 &[
                     "remote",
+                    "hosts",
                     "remote hosts",
                     "saved hosts",
                     "serve",
                     "connect",
                     "network",
+                    "ssh",
+                    "ssh profiles",
+                    "keys",
+                    "profiles",
+                    "tunnel",
+                    "drone",
+                    "drones",
+                    "kubiq-drone",
+                    "unattended",
+                    "port forward",
+                    "host mode",
+                    "drone mode",
+                    "drone list",
+                    "persistent",
+                    "tmux",
                 ],
                 || KubiqIcon::HostRemote.into(),
-                |ctx, _, cx| hosts_section(ctx.app, cx),
-            )
-        },
-    );
-    add(
-        ids::SETTINGS_APP_CONNECTIVITY,
-        section(
-            ids::SSH,
-            "SSH profiles",
-            &["ssh", "keys", "profiles", "tunnel", "remote"],
-            || IconName::Network.into(),
-            |ctx, _, cx| ssh_profiles(ctx.app, cx),
-        ),
-    );
-    add(
-        ids::SETTINGS_APP_CONNECTIVITY,
-        SettingsSectionSpec {
-            tier: Tier::Experimental,
-            ..section(
-                ids::DRONES,
-                "Drones",
-                &[
-                    "drone",
-                    "remote",
-                    "kubiq-drone",
-                    "ssh",
-                    "unattended",
-                    "tunnel",
-                    "port forward",
-                ],
-                // A drone is unattended by design — the same mark the titlebar's own agent menu
-                // wears.
-                || IconName::Bot.into(),
-                |ctx, window, cx| drones_section(ctx.app, window, cx),
+                remote_section,
             )
         },
     );
@@ -4795,6 +4781,164 @@ fn connectors(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
     column(rows)
 }
 
+/// The Remote section's base blocks (`ext::remote`): saved hosts, SSH profiles and the drones they
+/// run on Remotes; the drone modes on Host mode; the drone list URL on Settings. The tiers are the
+/// former sections' own — Hosts and Drones were experimental, SSH profiles were not.
+pub fn remote_blocks(reg: &mut Registry<crate::ext::remote::RemoteBlockSpec>) {
+    use crate::ext::remote::{RemoteBlockSpec, RemoteTab, register};
+    let block = |id, tab, tier, render| RemoteBlockSpec {
+        id,
+        tab,
+        tier,
+        on_show: None,
+        render,
+        detail: None,
+    };
+    register(
+        reg,
+        block(
+            ids::REMOTE_HOSTS,
+            RemoteTab::Remotes,
+            Tier::Experimental,
+            |ctx, _, cx| hosts_section(ctx.app, cx),
+        ),
+    );
+    register(
+        reg,
+        RemoteBlockSpec {
+            detail: Some(|ctx, window, cx| ssh_detail(ctx.app, window, cx)),
+            ..block(
+                ids::REMOTE_SSH,
+                RemoteTab::Remotes,
+                Tier::Stable,
+                |ctx, _, cx| ssh_profiles(ctx.app, cx),
+            )
+        },
+    );
+    register(
+        reg,
+        RemoteBlockSpec {
+            detail: Some(|ctx, window, cx| tunnels_detail(ctx.app, window, cx)),
+            ..block(
+                ids::REMOTE_DRONES,
+                RemoteTab::Remotes,
+                Tier::Experimental,
+                |ctx, window, cx| drones_section(ctx.app, window, cx),
+            )
+        },
+    );
+    register(
+        reg,
+        RemoteBlockSpec {
+            detail: Some(|ctx, window, cx| crate::ui::drone_modes::detail(ctx.app, window, cx)),
+            ..block(
+                ids::REMOTE_DRONE_MODES,
+                RemoteTab::HostMode,
+                Tier::Experimental,
+                |ctx, _, cx| crate::ui::drone_modes::list_page(ctx.app, cx),
+            )
+        },
+    );
+    register(
+        reg,
+        block(
+            ids::REMOTE_DRONE_LIST,
+            RemoteTab::Settings,
+            Tier::Experimental,
+            drone_list_block,
+        ),
+    );
+}
+
+/// The Remote section: a tab strip over the blocks registered for the tab it stands on — or, while
+/// one of those blocks has its drill-in editor open, that editor alone. The strip is hidden then:
+/// the breadcrumb names the tab and Back returns to it, and a tab switch cannot strand an editor
+/// with unsaved changes behind another tab.
+fn remote_section(ctx: &SectionCtx<'_>, window: &Window, cx: &mut Context<AppState>) -> AnyElement {
+    use crate::state::settings::RemoteTab;
+    let app = ctx.app;
+    let current = app.workbench.settings.remote_tab;
+    for block in crate::ext::remote::tab_blocks(current) {
+        if let Some(detail) = block.detail
+            && app.offers(block.tier)
+            && let Some(page) = detail(ctx, window, cx)
+        {
+            return page;
+        }
+    }
+    let view = cx.entity();
+    let active = RemoteTab::ALL
+        .iter()
+        .position(|tab| *tab == current)
+        .unwrap_or(0);
+    let strip = tab_strip(
+        "app-settings-remote-tabs",
+        RemoteTab::ALL
+            .iter()
+            .map(|tab| Tab::new(tab.label()))
+            .collect(),
+        active,
+        move |ix, _, cx| {
+            if let Some(tab) = RemoteTab::ALL.get(ix).copied() {
+                view.update(cx, |this, cx| this.set_remote_tab(tab, cx));
+            }
+        },
+        None,
+        None,
+    );
+    let mut rows = vec![div().flex().child(strip).into_any_element()];
+    let blocks: Vec<AnyElement> = crate::ext::remote::tab_blocks(current)
+        .filter(|block| app.offers(block.tier))
+        .map(|block| (block.render)(ctx, window, cx))
+        .collect();
+    if blocks.is_empty() {
+        rows.push(note(
+            "Nothing here while experimental settings are off.",
+            theme::text_faint(),
+        ));
+    }
+    rows.extend(blocks);
+    column(rows)
+}
+
+/// Arriving at the Remote section runs every offered block's own `on_show`.
+fn remote_on_show(app: &mut AppState, cx: &mut Context<AppState>) {
+    for block in crate::ext::remote::blocks() {
+        if let Some(show) = block.on_show
+            && app.offers(block.tier)
+        {
+            show(app, cx);
+        }
+    }
+}
+
+/// Settings: the URL a list of drones reachable over ssh is fetched from. Stored, not yet fetched.
+fn drone_list_block(
+    ctx: &SectionCtx<'_>,
+    window: &Window,
+    cx: &mut Context<AppState>,
+) -> AnyElement {
+    let input = &ctx.app.drone_list_url_input;
+    let focused = input.read(cx).focus_handle(cx).is_focused(window);
+    column(vec![
+        heading(
+            "Drone list",
+            "Where the drones reachable over ssh are listed. Written when the field is left or \
+             Enter is pressed; nothing fetches it yet.",
+        ),
+        setting_row(
+            "Drone list URL",
+            "An http(s) URL answering the list of drones for ssh mode. Empty is none.",
+            field(theme::border(), focused)
+                .h(px(30.))
+                .w(px(300.))
+                .px_2()
+                .child(Input::new(input).appearance(false))
+                .into_any_element(),
+        ),
+    ])
+}
+
 /// `Local`, every attached remote, and every saved host with no live connection — one dropdown to
 /// set which host a message naming neither a pane nor a project reaches, and a list below it to
 /// manage what is remembered.
@@ -4861,7 +5005,7 @@ fn hosts_section(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
             .flex_col()
             .gap_2()
             .pt_4()
-            .child(section_label("Saved hosts"))
+            .child(list_header("Saved hosts", Some(saved.len()), "", None))
             .children(if saved.is_empty() {
                 Some(
                     div()
@@ -4924,33 +5068,34 @@ fn host_row(
         ("saved", theme::text_faint())
     };
 
-    setting_row(
+    let mut actions: Vec<AnyElement> = attached
+        .map(|id| {
+            row_action(
+                ElementId::Name(format!("app-settings-host-{address}-disconnect").into()),
+                RowAction::Disconnect,
+                cx.listener(move |this, _, _, cx| {
+                    this.disconnect_host(id, cx);
+                }),
+            )
+            .into_any_element()
+        })
+        .into_iter()
+        .collect();
+    actions.push(
+        row_action(
+            ElementId::Name(format!("app-settings-host-{address}-forget").into()),
+            RowAction::Delete,
+            cx.listener(move |this, _, _, cx| this.forget_remote_host(save_id.clone(), cx)),
+        )
+        .tip("Forget")
+        .into_any_element(),
+    );
+    list_row(
+        ElementId::Name(format!("app-settings-host-{address}").into()),
         &host.name,
         &host.address,
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(badge(chip, colour))
-            .children(attached.map(|id| {
-                ghost_button(
-                    ElementId::Name(format!("app-settings-host-{address}-disconnect").into()),
-                    None,
-                    "Disconnect",
-                    cx.listener(move |this, _, _, cx| {
-                        this.disconnect_host(id, cx);
-                    }),
-                )
-            }))
-            .child(
-                row_action(
-                    ElementId::Name(format!("app-settings-host-{address}-forget").into()),
-                    RowAction::Delete,
-                    cx.listener(move |this, _, _, cx| this.forget_remote_host(save_id.clone(), cx)),
-                )
-                .tip("Forget"),
-            )
-            .into_any_element(),
+        vec![badge(chip, colour).into_any_element()],
+        actions,
     )
 }
 
@@ -4961,26 +5106,22 @@ fn host_row(
 /// exactly the state every user arrives in.
 fn ssh_profiles(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
     let profiles = app.workbench.settings.host.ssh_profiles.clone();
-    let mut rows = vec![
-        heading(
-            "SSH profiles",
-            "Where an SSH connection goes and how it proves who it is. The address, the port and \
-             a key file\u{2019}s path are references and ride the settings file; a passphrase or \
-             a password never does \u{2014} it goes to this machine\u{2019}s own credential \
-             store, under the profile\u{2019}s id, and is never read back.",
-        ),
-        div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(primary_button(
+    let mut rows = vec![list_header(
+        "SSH profiles",
+        Some(profiles.len()),
+        "Where an SSH connection goes and how it proves who it is, and what it is used for. A \
+         passphrase or a password never rides the settings file \u{2014} it goes to this \
+         machine\u{2019}s own credential store, under the profile\u{2019}s id.",
+        Some(
+            primary_button(
                 "app-settings-ssh-add",
                 Some(IconName::Plus),
-                "Add profile\u{2026}",
+                "Add",
                 cx.listener(|this, _, window, cx| this.open_ssh_form(None, window, cx)),
-            ))
+            )
             .into_any_element(),
-    ];
+        ),
+    )];
 
     if profiles.is_empty() {
         rows.push(note(
@@ -5069,61 +5210,121 @@ fn ssh_profile_row(app: &AppState, profile: &SshProfile, cx: &mut Context<AppSta
         })
     };
 
-    let row = setting_row(
-        &format!("{} \u{b7} {method}", profile.name),
-        &address,
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .children(chip.map(|(text, colour)| badge(text, colour)))
-            .children(profile.terminal_enabled.then(|| {
-                row_action(
-                    ElementId::Name(format!("app-settings-ssh-{id}-terminal").into()),
-                    RowAction::Terminal,
-                    cx.listener(move |this, _, _, cx| this.open_ssh_terminal(id, cx)),
-                )
-            }))
-            // Offered only where there is one to forget: a control that clears nothing is a
-            // control that lies about what is filed.
-            .children(filed.then(|| {
-                ghost_button(
-                    ElementId::Name(format!("app-settings-ssh-{id}-forget").into()),
-                    None,
-                    "Forget secret",
-                    cx.listener(move |this, _, _, cx| this.forget_ssh_secret(id, cx)),
-                )
-            }))
-            .child(test_button)
-            .child(row_action(
-                ElementId::Name(format!("app-settings-ssh-{id}-edit").into()),
-                RowAction::Edit,
-                cx.listener(move |this, _, window, cx| this.open_ssh_form(Some(id), window, cx)),
-            ))
-            .child(row_action(
-                ElementId::Name(format!("app-settings-ssh-{id}-clone").into()),
-                RowAction::Clone,
-                cx.listener(move |this, _, _, cx| this.clone_ssh_profile(id, cx)),
-            ))
-            .child(
-                row_action(
-                    ElementId::Name(format!("app-settings-ssh-{id}-remove").into()),
-                    RowAction::Delete,
-                    cx.listener(move |this, _, _, cx| this.open_remove_ssh_profile(id, cx)),
-                )
-                .tip("Remove"),
+    // Verbs in the canonical order; Delete is the editor's, behind its inline confirm.
+    let mut actions = vec![test_button.into_any_element()];
+    if profile.terminal_enabled {
+        actions.push(
+            row_action(
+                ElementId::Name(format!("app-settings-ssh-{id}-terminal").into()),
+                RowAction::Terminal,
+                cx.listener(move |this, _, _, cx| this.open_ssh_terminal(id, cx)),
             )
             .into_any_element(),
-    );
-    match verdict_line {
-        Some(line) => div()
-            .flex()
-            .flex_col()
-            .child(row)
-            .child(div().pb_2().child(line))
-            .into_any_element(),
-        None => row,
+        );
     }
+    // Offered only where there is one to forget: a control that clears nothing is a control that
+    // lies about what is filed.
+    if filed {
+        actions.push(
+            row_action(
+                ElementId::Name(format!("app-settings-ssh-{id}-forget").into()),
+                RowAction::Forget,
+                cx.listener(move |this, _, _, cx| this.forget_ssh_secret(id, cx)),
+            )
+            .into_any_element(),
+        );
+    }
+    actions.push(
+        row_action(
+            ElementId::Name(format!("app-settings-ssh-{id}-edit").into()),
+            RowAction::Edit,
+            cx.listener(move |this, _, window, cx| this.open_ssh_form(Some(id), window, cx)),
+        )
+        .into_any_element(),
+    );
+    actions.push(
+        row_action(
+            ElementId::Name(format!("app-settings-ssh-{id}-clone").into()),
+            RowAction::Clone,
+            cx.listener(move |this, _, _, cx| this.clone_ssh_profile(id, cx)),
+        )
+        .into_any_element(),
+    );
+    let row = list_row(
+        ElementId::Name(format!("app-settings-ssh-{id}").into()),
+        &profile.name,
+        &format!("{address} \u{b7} {method}"),
+        chip.map(|(text, colour)| badge(text, colour).into_any_element())
+            .into_iter()
+            .collect(),
+        actions,
+    );
+    div()
+        .flex()
+        .flex_col()
+        .child(row)
+        .child(ssh_features_line(profile, cx))
+        .children(verdict_line.map(|line| div().pb_2().child(line)))
+        .into_any_element()
+}
+
+/// One profile's feature switches, under its row: Terminal, Remote drone, Persistent and — while
+/// persistent — the drone's idle timeout. Each click writes the profile ([`AppState::set_ssh_feature`]).
+fn ssh_features_line(profile: &SshProfile, cx: &mut Context<AppState>) -> AnyElement {
+    use crate::state::settings::SshFeature;
+    let id = profile.id;
+    let features = &profile.features;
+    let check = |what: SshFeature, label: &'static str, on: bool, cx: &mut Context<AppState>| {
+        check_label(
+            ElementId::Name(format!("app-settings-ssh-{id}-feature-{label}").into()),
+            label,
+            on,
+            true,
+            cx.listener(move |this, _, _, cx| this.set_ssh_feature(id, what, !on, cx)),
+        )
+        .into_any_element()
+    };
+    let mut line = div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_3()
+        .pb_2()
+        .child(check(
+            SshFeature::Terminal,
+            "Terminal",
+            profile.terminal_enabled,
+            cx,
+        ))
+        .child(check(SshFeature::Drone, "Remote drone", features.drone, cx))
+        .child(check(
+            SshFeature::Persistent,
+            "Persistent",
+            features.persistent,
+            cx,
+        ));
+    if features.persistent {
+        let linger = features.linger_secs;
+        line = line
+            .child(mono("timeout", theme::text_faint()))
+            .child(toggle_pill(
+                ElementId::Name(format!("app-settings-ssh-{id}-linger-default").into()),
+                "10 min",
+                theme::accent(),
+                linger.is_none(),
+                cx.listener(move |this, _, _, cx| this.set_ssh_linger(id, None, cx)),
+            ));
+        for &(secs, label) in crate::app::ssh_connect::SESSION_LINGERS {
+            line = line.child(toggle_pill(
+                ElementId::Name(format!("app-settings-ssh-{id}-linger-{secs}").into()),
+                label,
+                theme::accent(),
+                linger == Some(secs),
+                cx.listener(move |this, _, _, cx| this.set_ssh_linger(id, Some(secs), cx)),
+            ));
+        }
+    }
+    line.into_any_element()
 }
 
 /// The drones running on every saved ssh-carrier host, one sub-section per host.
@@ -5220,48 +5421,41 @@ fn drone_host_section(
     let check_result = app.workbench.settings.ssh_checks.get(&profile_id);
 
     let refresh_id = host_id.clone();
-    let refresh_button = primary_button(
+    let refresh_button = row_action(
         ElementId::Name(format!("app-settings-drones-{host_id}-refresh").into()),
-        Some(IconName::RotateCw),
-        if busy {
-            "Refreshing\u{2026}"
-        } else {
-            "Refresh"
-        },
+        RowAction::Refresh,
         cx.listener(move |this, _, _, cx| this.refresh_drones(refresh_id.clone(), cx)),
     )
-    .when(busy, |button| button.opacity(0.5));
+    .tip(if busy {
+        "Refreshing\u{2026}"
+    } else {
+        "Refresh the running drones"
+    })
+    .enabled(!busy);
 
     let check_host_id = host_id.clone();
-    let check_button = ghost_button(
+    let check_button = row_action(
         ElementId::Name(format!("app-settings-drones-{host_id}-check").into()),
-        Some(IconName::CircleCheck),
-        if check_busy {
-            "Checking\u{2026}"
-        } else {
-            "Check"
-        },
+        RowAction::Check,
         cx.listener(move |this, _, _, cx| this.check_saved_ssh_host(check_host_id.clone(), cx)),
     )
-    .when(check_busy, |button| button.opacity(0.5));
+    .tip(if check_busy {
+        "Checking\u{2026}"
+    } else {
+        "Check the host is reachable"
+    })
+    .enabled(!check_busy);
 
-    let mut children = vec![
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_3()
-            .child(label_block(&host.name, &host.address))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(check_button)
-                    .child(refresh_button),
-            )
-            .into_any_element(),
-    ];
+    let mut children = vec![list_row(
+        ElementId::Name(format!("app-settings-drones-{host_id}").into()),
+        &host.name,
+        &host.address,
+        Vec::new(),
+        vec![
+            check_button.into_any_element(),
+            refresh_button.into_any_element(),
+        ],
+    )];
     if let Some((text, colour)) = check_result.map(crate::ui::host_check_line) {
         children.push(note(&text, colour));
     }
@@ -5297,85 +5491,158 @@ fn drone_host_section(
 fn tunnels_block(
     app: &AppState,
     host: &kubiq_proto::settings::SavedRemoteHost,
-    window: &Window,
+    _window: &Window,
     cx: &mut Context<AppState>,
 ) -> Vec<AnyElement> {
-    use crate::ui::tunnels::{OnEdit, status_lines, tunnel_row};
+    use crate::ui::tunnels::status_lines;
     let host_id = host.id.clone();
-    let mut out = vec![section_label("Tunnels").into_any_element()];
-    if let Some(form) = app.tunnel_form.as_ref().filter(|f| f.save_id == host_id) {
-        let view = cx.entity();
-        let on_edit: OnEdit =
-            std::rc::Rc::new(|this: &mut AppState, id, edit, cx| this.edit_tunnel(id, edit, cx));
-        out.push(setting_row(
-            "Rate limit",
-            "Bytes per second over the tunnel channel, shared by every tunnel. Empty is \
-             unlimited.",
-            crate::ui::tunnels::sized_field(&form.rate, 260., window, cx),
-        ));
-        let prefix = format!("app-settings-drones-{host_id}");
-        for (spec, inputs) in form.specs.iter().zip(&form.inputs) {
-            out.push(tunnel_row(
-                &view, &prefix, spec, inputs, &on_edit, window, cx,
-            ));
-        }
-        if let Some(error) = &form.error {
-            out.push(note(error, theme::danger()));
-        }
-        out.push(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(ghost_button(
-                    ElementId::Name(format!("{prefix}-tunnel-add").into()),
-                    Some(IconName::Plus),
-                    "Add tunnel",
-                    cx.listener(|this, _, window, cx| this.add_tunnel(window, cx)),
-                ))
-                .child(ghost_button(
-                    ElementId::Name(format!("{prefix}-tunnel-cancel").into()),
-                    None,
-                    "Cancel",
-                    cx.listener(|this, _, _, cx| this.close_tunnel_form(cx)),
-                ))
-                .child(primary_button(
-                    ElementId::Name(format!("{prefix}-tunnel-save").into()),
-                    None,
-                    "Save tunnels",
-                    cx.listener(|this, _, _, cx| this.save_tunnel_form(cx)),
-                ))
-                .into_any_element(),
-        );
-        return out;
-    }
     let enabled = host.tunnels.iter().filter(|spec| spec.enabled).count();
     let summary = match (host.tunnels.len(), enabled) {
-        (0, _) => "None. A tunnel forwards a port on this machine to one the far host can reach."
+        (0, _) => "Tunnels: none. A tunnel forwards a port on this machine to one the far host \
+                   can reach."
             .to_string(),
-        (all, on) => format!("{all} configured, {on} enabled."),
+        (all, on) => format!("Tunnels: {all} configured, {on} enabled."),
     };
-    out.push(
+    let mut out = vec![
         div()
             .flex()
             .items_center()
             .justify_between()
             .gap_3()
             .child(note(&summary, theme::text_faint()))
-            .child(ghost_button(
-                ElementId::Name(format!("app-settings-drones-{host_id}-tunnels-edit").into()),
-                Some(IconName::Settings),
-                "Edit tunnels",
-                cx.listener(move |this, _, window, cx| {
-                    this.open_tunnel_form(host_id.clone(), window, cx)
-                }),
-            ))
+            .child(
+                row_action(
+                    ElementId::Name(format!("app-settings-drones-{host_id}-tunnels-edit").into()),
+                    RowAction::Edit,
+                    cx.listener(move |this, _, window, cx| {
+                        this.open_tunnel_form(host_id.clone(), window, cx);
+                        let values = tunnel_form_values(this, cx);
+                        this.detail_begin(values);
+                    }),
+                )
+                .tip("Edit tunnels"),
+            )
             .into_any_element(),
-    );
+    ];
     if let Some(live) = app.tunnel_live(&host.id) {
         out.extend(status_lines(&host.tunnels, &live));
     }
     out
+}
+
+/// What the open tunnel form holds, flattened — what Back compares against.
+fn tunnel_form_values(app: &AppState, cx: &gpui::App) -> Vec<String> {
+    let Some(form) = &app.tunnel_form else {
+        return Vec::new();
+    };
+    let mut values = vec![
+        format!("{:?}", form.specs),
+        form.rate.read(cx).value().to_string(),
+    ];
+    values.extend(
+        form.inputs
+            .iter()
+            .map(|inputs| format!("{:?}", inputs.fields(cx))),
+    );
+    values
+}
+
+/// A saved host's tunnels as a drill-in page (`D227`): the rate limit, a row per tunnel, Add.
+/// The form saves onto the host's record; an attached host relinks with the new list.
+fn tunnels_detail(
+    app: &AppState,
+    window: &Window,
+    cx: &mut Context<AppState>,
+) -> Option<AnyElement> {
+    use crate::ui::tunnels::{OnEdit, tunnel_row};
+    let form = app.tunnel_form.as_ref()?;
+    let host = app
+        .workbench
+        .settings
+        .host
+        .remote_hosts
+        .iter()
+        .find(|host| host.id == form.save_id)?;
+    let view = cx.entity();
+    let on_edit: OnEdit =
+        std::rc::Rc::new(|this: &mut AppState, id, edit, cx| this.edit_tunnel(id, edit, cx));
+    let prefix = format!("app-settings-drones-{}", host.id);
+    let mut rows: Vec<AnyElement> = form
+        .specs
+        .iter()
+        .zip(&form.inputs)
+        .map(|(spec, inputs)| tunnel_row(&view, &prefix, spec, inputs, &on_edit, window, cx))
+        .collect();
+    if rows.is_empty() {
+        rows.push(note("No tunnels yet.", theme::text_faint()));
+    }
+    let mut body = vec![
+        form_group(
+            "Link",
+            vec![setting_row(
+                "Rate limit",
+                "Bytes per second over the tunnel channel, shared by every tunnel. Empty is \
+                 unlimited.",
+                crate::ui::tunnels::sized_field(&form.rate, 260., window, cx),
+            )],
+        ),
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(list_header(
+                "Tunnels",
+                Some(form.specs.len()),
+                "Each forwards a port on this machine to one the far host can reach.",
+                Some(
+                    primary_button(
+                        ElementId::Name(format!("{prefix}-tunnel-add").into()),
+                        Some(IconName::Plus),
+                        "Add",
+                        cx.listener(|this, _, window, cx| this.add_tunnel(window, cx)),
+                    )
+                    .into_any_element(),
+                ),
+            ))
+            .children(rows)
+            .into_any_element(),
+    ];
+    if let Some(error) = &form.error {
+        body.push(note(error, theme::danger()));
+    }
+    let banner = app.workbench.settings.detail.confirm_back.then(|| {
+        inline_confirm(
+            "app-settings-tunnels-discard",
+            "Discard unsaved changes?",
+            "Discard",
+            "Keep editing",
+            false,
+            cx.listener(|this, _, _, cx| this.close_tunnel_form(cx)),
+            cx.listener(|this, _, _, cx| this.detail_keep(cx)),
+        )
+    });
+    let footer = detail_footer(
+        &prefix,
+        true,
+        None,
+        cx.listener(|this, _, _, cx| this.close_tunnel_form(cx)),
+        cx.listener(|this, _, _, cx| this.save_tunnel_form(cx)),
+    );
+    Some(detail_page(
+        "app-settings-tunnels",
+        &["Remotes", &host.name, "Tunnels"],
+        move |_, _, cx| {
+            view.update(cx, |this, cx| {
+                let values = tunnel_form_values(this, cx);
+                if this.detail_may_leave(values, cx) {
+                    this.close_tunnel_form(cx);
+                }
+            })
+        },
+        banner,
+        body,
+        footer,
+    ))
 }
 
 /// One running drone: its roots, uptime, pane count, version (flagged on skew) and linger, with
@@ -5419,10 +5686,9 @@ fn drone_row(
                 )
             }))
             .child(
-                ghost_button(
+                row_action(
                     ElementId::Name(format!("app-settings-drones-{host_id}-{socket}-stop").into()),
-                    None,
-                    "Stop",
+                    RowAction::Stop,
                     cx.listener(move |this, _, _, cx| {
                         this.open_drone_stop(
                             host_id.clone(),
@@ -5432,7 +5698,8 @@ fn drone_row(
                         )
                     }),
                 )
-                .when(busy, |button| button.opacity(0.5)),
+                .tip("Stop the drone")
+                .enabled(!busy),
             )
             .into_any_element(),
     )
@@ -6343,10 +6610,9 @@ pub fn ai_remove(app: &AppState, window: &mut Window, cx: &mut Context<AppState>
     )
 }
 
-/// The SSH-profile form: what to call the target, where it is, and what it takes to unlock it.
-///
-/// A [`modal`] on [`ai_form`]'s shape, because it is the same kind of question and a second
-/// visual language for it would be a second thing to learn.
+/// The SSH-profile editor: what to call the target, where it is, and what it takes to unlock it —
+/// a drill-in page of the Remote section (`ui::kit::detail_page`), drawn in place of the Remotes
+/// tab while [`SettingsState::ssh_form`](crate::state::settings::SettingsState) is open.
 ///
 /// **The secret is write-only.** The box is always empty when the form opens, because nothing on
 /// this side has ever been sent one. On an edit that is also how a filed secret is kept: blank
@@ -6357,14 +6623,17 @@ pub fn ai_remove(app: &AppState, window: &mut Window, cx: &mut Context<AppState>
 /// the port and the user are not asked for at all — a box whose value the record ignores is a box
 /// that lies. A key file asks for its path; a key file and a password each ask for their secret;
 /// an agent asks for neither.
-pub fn ssh_form(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> AnyElement {
-    let Some(form) = app.workbench.settings.ssh_form else {
-        return div().into_any_element();
-    };
+pub fn ssh_detail(
+    app: &AppState,
+    window: &Window,
+    cx: &mut Context<AppState>,
+) -> Option<AnyElement> {
+    let form = app.workbench.settings.ssh_form?;
     let view = cx.entity();
     let editing = form.id.is_some();
     let alias = form.method == SshMethod::ConfigAlias;
-    let named = !app.ssh_name_input.read(cx).value().trim().is_empty();
+    let typed_name = app.ssh_name_input.read(cx).value().trim().to_string();
+    let named = !typed_name.is_empty();
     let addressed = !app.ssh_host_input.read(cx).value().trim().is_empty();
     let keyed = !app.ssh_key_path_input.read(cx).value().trim().is_empty();
     // A name and an address are what make a record dialable at all, and a key file with no path
@@ -6390,38 +6659,15 @@ pub fn ssh_form(app: &AppState, window: &mut Window, cx: &mut Context<AppState>)
         })
         .collect();
 
-    let body = div()
-        .flex()
-        .flex_col()
-        .gap_3()
-        .pt_3()
-        .child(modal_note(
-            "Where the connection goes, and what it takes to prove who you are. A passphrase or \
-             a password is filed in this machine\u{2019}s credential store under the \
-             record\u{2019}s own id, and is never read back \u{2014} not by this form, and not \
-             by anything else.",
-        ))
-        .child(form_field(
+    let mut connection = vec![
+        form_field(
             "Name",
             "What to call it \u{2014} \"build box\", \"jump\". Several targets on one machine \
              are ordinary, so the name is what tells them apart.",
             &app.ssh_name_input,
             focused(&app.ssh_name_input),
-        ))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(label_block(
-                    "Method",
-                    "How the connection authenticates. The agent is what an already-working \
-                     setup usually is; the alias hands the whole question to \
-                     \u{7e}/.ssh/config, for a target Kubiq should not try to re-describe.",
-                ))
-                .child(div().flex().flex_wrap().gap_2().children(methods)),
-        )
-        .child(form_field(
+        ),
+        form_field(
             if alias { "Alias" } else { "Host" },
             if alias {
                 "The name of a Host block in \u{7e}/.ssh/config. Everything else about the \
@@ -6432,109 +6678,138 @@ pub fn ssh_form(app: &AppState, window: &mut Window, cx: &mut Context<AppState>)
             },
             &app.ssh_host_input,
             focused(&app.ssh_host_input),
-        ))
-        // Not asked for a config alias: the file the alias names answers both, and a box whose
-        // value the record ignores is a box that lies.
-        .when(!alias, |body| {
-            body.child(form_field(
-                "Port",
-                "Empty means 22.",
-                &app.ssh_port_input,
-                focused(&app.ssh_port_input),
-            ))
-            .child(form_field(
-                "User",
-                "Empty means whatever \u{201c}ssh\u{201d} would pick \u{2014} the local \
-                 username, or what the config file says.",
-                &app.ssh_user_input,
-                focused(&app.ssh_user_input),
-            ))
-        })
-        .when(form.method == SshMethod::KeyFile, |body| {
-            body.child(form_field(
-                "Key file",
-                "The private key on this machine, absolute or \u{7e}-prefixed. The path is a \
-                 reference and rides the settings file; the key itself is never read here.",
-                &app.ssh_key_path_input,
-                focused(&app.ssh_key_path_input),
-            ))
-        })
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(check_box(
-                    "app-settings-ssh-terminal-enabled",
-                    form.terminal,
-                    cx.listener(|this, _, _, cx| this.toggle_ssh_terminal(cx)),
-                ))
-                .child(label_block(
-                    "Enable terminal",
-                    "Offer this profile as a terminal in the new-pane menu.",
-                )),
-        )
-        .when(form.terminal, |body| {
-            body.child(form_field(
-                "Initial command",
-                "Optional. Run on the far side when the terminal opens; the session stays at a \
-                 login shell afterwards.",
-                &app.ssh_initial_command_input,
-                focused(&app.ssh_initial_command_input),
-            ))
-        })
-        .when(form.method.takes_secret(), |body| {
-            body.child(form_field(
-                form.method.secret_label(),
-                if editing {
-                    "Leave it blank to keep what is already filed. Typing one replaces it; \
-                     \u{201c}Forget secret\u{201d} on the row is what clears it."
-                } else {
-                    "Optional \u{2014} an unencrypted key needs none. It crosses once, on its \
-                     way to this machine\u{2019}s credential store."
-                },
-                &app.ssh_secret_input,
-                focused(&app.ssh_secret_input),
-            ))
-        })
-        .into_any_element();
+        ),
+    ];
+    // Not asked for a config alias: the file the alias names answers both, and a box whose value
+    // the record ignores is a box that lies.
+    if !alias {
+        connection.push(form_field(
+            "Port",
+            "Empty means 22.",
+            &app.ssh_port_input,
+            focused(&app.ssh_port_input),
+        ));
+        connection.push(form_field(
+            "User",
+            "Empty means whatever \u{201c}ssh\u{201d} would pick \u{2014} the local username, \
+             or what the config file says.",
+            &app.ssh_user_input,
+            focused(&app.ssh_user_input),
+        ));
+    }
 
-    let footer = div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(ghost_button(
-            "app-settings-ssh-form-cancel",
-            None,
-            "Cancel",
+    let mut auth = vec![
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(label_block(
+                "Method",
+                "How the connection authenticates. The agent is what an already-working setup \
+                 usually is; the alias hands the whole question to \u{7e}/.ssh/config, for a \
+                 target Kubiq should not try to re-describe. A passphrase or a password is filed \
+                 in this machine\u{2019}s credential store and never read back.",
+            ))
+            .child(div().flex().flex_wrap().gap_2().children(methods))
+            .into_any_element(),
+    ];
+    if form.method == SshMethod::KeyFile {
+        auth.push(form_field(
+            "Key file",
+            "The private key on this machine, absolute or \u{7e}-prefixed. The path is a \
+             reference and rides the settings file; the key itself is never read here.",
+            &app.ssh_key_path_input,
+            focused(&app.ssh_key_path_input),
+        ));
+    }
+    if form.method.takes_secret() {
+        auth.push(form_field(
+            form.method.secret_label(),
+            if editing {
+                "Leave it blank to keep what is already filed. Typing one replaces it; \
+                 \u{201c}Forget secret\u{201d} on the row is what clears it."
+            } else {
+                "Optional \u{2014} an unencrypted key needs none. It crosses once, on its way to \
+                 this machine\u{2019}s credential store."
+            },
+            &app.ssh_secret_input,
+            focused(&app.ssh_secret_input),
+        ));
+    }
+
+    let mut terminal = vec![
+        check_label(
+            "app-settings-ssh-terminal-enabled",
+            "Offer this profile as a terminal in the new-pane menu",
+            form.terminal,
+            true,
+            cx.listener(|this, _, _, cx| this.toggle_ssh_terminal(cx)),
+        )
+        .into_any_element(),
+    ];
+    if form.terminal {
+        terminal.push(form_field(
+            "Initial command",
+            "Optional. Run on the far side when the terminal opens; the session stays at a login \
+             shell afterwards.",
+            &app.ssh_initial_command_input,
+            focused(&app.ssh_initial_command_input),
+        ));
+    }
+
+    let detail = &app.workbench.settings.detail;
+    let banner = detail.confirm_back.then(|| {
+        inline_confirm(
+            "app-settings-ssh-discard",
+            "Discard unsaved changes?",
+            "Discard",
+            "Keep editing",
+            false,
             cx.listener(|this, _, window, cx| this.close_ssh_form(window, cx)),
-        ))
-        .child(
-            primary_button(
-                "app-settings-ssh-form-save",
-                None,
-                "Save",
-                cx.listener(|this, _, window, cx| this.save_ssh_form(window, cx)),
-            )
-            .when(!ready, |button| button.opacity(0.5)),
+            cx.listener(|this, _, _, cx| this.detail_keep(cx)),
         )
-        .into_any_element();
+    });
+    let delete = form.id.map(|id| {
+        delete_control(
+            "app-settings-ssh-form",
+            "this profile and its filed secret",
+            detail.confirm_delete,
+            cx.listener(|this, _, _, cx| this.detail_ask_delete(cx)),
+            cx.listener(move |this, _, window, cx| {
+                this.workbench.settings.ssh_remove = Some(id);
+                this.confirm_remove_ssh_profile(cx);
+                this.close_ssh_form(window, cx);
+            }),
+            cx.listener(|this, _, _, cx| this.detail_keep(cx)),
+        )
+    });
+    let footer = detail_footer(
+        "app-settings-ssh-form",
+        ready,
+        delete,
+        cx.listener(|this, _, window, cx| this.close_ssh_form(window, cx)),
+        cx.listener(|this, _, window, cx| this.save_ssh_form(window, cx)),
+    );
+    let crumb = if editing && named {
+        typed_name
+    } else if editing {
+        "SSH profile".to_string()
+    } else {
+        "New SSH profile".to_string()
+    };
 
-    modal(
-        "app-settings-ssh-form-modal",
-        theme::accent(),
-        if editing {
-            "Edit SSH profile"
-        } else {
-            "Add SSH profile"
-        },
-        body,
+    Some(detail_page(
+        "app-settings-ssh-form",
+        &["Remotes", &crumb],
+        move |_, window, cx| view.update(cx, |this, cx| this.ssh_detail_back(window, cx)),
+        banner,
+        vec![
+            form_group("Connection", connection),
+            form_group("Authentication", auth),
+            form_group("Terminal", terminal),
+        ],
         footer,
-        crate::ui::dismiss(&view, Layer::SshForm, |this, window, cx| {
-            this.close_ssh_form(window, cx)
-        }),
-        window,
-    )
+    ))
 }
 
 /// The removal question. Danger, because the secret filed under the record's id goes with it:

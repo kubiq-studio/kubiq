@@ -29,6 +29,11 @@ use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, canvas, 
 /// interface asks before offering to edit in place.
 pub const SUPPORTED: bool = cfg!(any(target_os = "macos", target_os = "windows"));
 
+/// Whether a browser tab can be sent through a proxy ("Browse via remote"). Windows only: WebView2
+/// takes it as a browser argument. macOS needs wry's `mac-proxy`, which links macOS 14 symbols
+/// against a macOS 13 floor, so it is not built.
+pub const PROXY: bool = cfg!(target_os = "windows");
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod platform {
     use std::cell::RefCell;
@@ -307,6 +312,7 @@ pub fn open_browser(
     url: &str,
     profile: crate::state::browser::Profile,
     persist: bool,
+    proxy: Option<u16>,
     window: &mut Window,
     cx: &mut App,
 ) -> Result<(), String> {
@@ -324,7 +330,7 @@ pub fn open_browser(
         );
         let recent = std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
         let recent_win = recent.clone();
-        let builder = profiled_builder(profile, persist)
+        let builder = profiled_builder(profile, persist, proxy)
             .with_url(url)
             .with_initialization_script(NEW_TAB_SCRIPT)
             .with_document_title_changed_handler(move |title| {
@@ -366,7 +372,7 @@ pub fn open_browser(
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        let _ = (key, url, profile, persist, window, cx);
+        let _ = (key, url, profile, persist, proxy, window, cx);
         Err("an embedded browser is not available on this platform".to_string())
     }
 }
@@ -374,11 +380,46 @@ pub fn open_browser(
 /// A builder on `profile`'s cookie jar and storage. macOS keys a persistent data store by a
 /// 16-byte id (macOS 14 and later; older systems fall back to the shared store); Windows keeps a
 /// directory per profile.
+///
+/// `proxy` ([`PROXY`] builds only) sends every request through `127.0.0.1:<port>`. WebView2 fixes
+/// browser arguments per data directory and process, so a proxied tab gets a directory of its own
+/// per port — its own cookies — and the loopback is proxied too (`<-loopback>`): on a remote,
+/// `localhost` is the far machine's.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn profiled_builder(
     profile: crate::state::browser::Profile,
     persist: bool,
+    proxy: Option<u16>,
 ) -> wry::WebViewBuilder<'static> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(port) = proxy {
+            use wry::WebViewBuilderExtWindows as _;
+            thread_local! {
+                static PROXIED: std::cell::RefCell<
+                    std::collections::HashMap<u16, *mut wry::WebContext>,
+                > = std::cell::RefCell::new(std::collections::HashMap::new());
+            }
+            let context = PROXIED.with(|contexts| {
+                *contexts.borrow_mut().entry(port).or_insert_with(|| {
+                    let dir =
+                        windows_profile_dir(profile).with_file_name(format!("via-remote-{port}"));
+                    Box::into_raw(Box::new(wry::WebContext::new(Some(dir))))
+                })
+            });
+            // SAFETY: leaked like the profiles' contexts below, and only used on the UI thread.
+            let builder = wry::WebViewBuilder::new_with_web_context(unsafe { &mut *context })
+                .with_incognito(!persist)
+                // wry's own defaults, which an explicit argument list replaces, then the proxy.
+                .with_additional_browser_args(format!(
+                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+                     --proxy-server=http://127.0.0.1:{port} --proxy-bypass-list=<-loopback>"
+                ));
+            return builder;
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = proxy;
     // Ephemeral: a non-persistent store, so nothing reaches disk and there is no profile to name.
     if !persist {
         return wry::WebViewBuilder::new().with_incognito(true);

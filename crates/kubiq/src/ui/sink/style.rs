@@ -31,8 +31,8 @@ use crate::state::sink::{CHOICES, FACETS, MENU_ITEMS, SinkModal};
 use crate::theme;
 use crate::ui::kit::{
     ContextItem, MultiPicker, Picker, PickerStyle, RIBBON_SIZE, RibbonCorner, RowAction, Tab,
-    badge, card, check_box, choice_pill, colour_picker, context_panel, disclosure, file_row,
-    filter_bar, ghost_button, hint_row, icon_button, kind_icon, label_hint, meter, mono,
+    badge, card, check_box, check_label, choice_pill, colour_picker, context_panel, disclosure,
+    file_row, filter_bar, ghost_button, hint_row, icon_button, kind_icon, label_hint, meter, mono,
     panel_header, pill, primary_button, progress_ring, progress_ring_pair, quota_ring,
     removable_tag, ribbon, row_action, row_font, section_label, slab, state_chip, status_dot,
     stepper, tab_strip, tag, toggle_pill, view_switch,
@@ -444,8 +444,19 @@ fn controls(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
                 .items_center()
                 .children(
                     [
+                        RowAction::Connect,
+                        RowAction::Disconnect,
+                        RowAction::Show,
+                        RowAction::Hide,
+                        RowAction::Start,
+                        RowAction::Stop,
+                        RowAction::Refresh,
+                        RowAction::Check,
                         RowAction::Test,
                         RowAction::StopTest,
+                        RowAction::Terminal,
+                        RowAction::Copy,
+                        RowAction::Forget,
                         RowAction::Edit,
                         RowAction::Rename,
                         RowAction::Clone,
@@ -543,6 +554,34 @@ fn controls(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
                     "Persistent",
                     "Persists across Kubiq restarts \u{2014} not yet built.",
                     check_box("sink-hint-row-check", true, |_, _, _| {}).into_any_element(),
+                ))
+                .into_any_element(),
+        ),
+        labelled(
+            "check_label",
+            div()
+                .flex()
+                .gap_3()
+                .child(check_label(
+                    "sink-check-label-on",
+                    "Terminal",
+                    true,
+                    true,
+                    |_, _, _| {},
+                ))
+                .child(check_label(
+                    "sink-check-label-off",
+                    "Persistent",
+                    false,
+                    true,
+                    |_, _, _| {},
+                ))
+                .child(check_label(
+                    "sink-check-label-fixed",
+                    "Remote Desktop",
+                    true,
+                    false,
+                    |_, _, _| {},
                 ))
                 .into_any_element(),
         ),

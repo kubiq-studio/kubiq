@@ -157,8 +157,15 @@ the typed address or search; ctrl/⌘-click and `target=_blank` open another bes
 action bar carries Back and Forward, one load button (a spinning Stop while a page loads, Reload otherwise), the
 address field with a dropdown of the project's history, a Go button that does what Enter does (and
 reloads when the field is unchanged), and a ⋯ menu with *Reload*, *Reload, bypassing the cache*,
-page zoom (0.5×–3.0×, per tab; *Reset zoom* shows the level), the page **width** and, on macOS,
-*Copy screenshot*. Anywhere in the tab — the bar or the page holding the keyboard — `secondary-r`
+page zoom (0.5×–3.0×, per tab; *Reset zoom* shows the level), the page **width**, on macOS
+*Copy screenshot*, and on Windows, while the project runs on a saved remote
+(`Bus::serving_save_id`), a checkable *Browse via remote*: the tab is rebuilt on a loopback forward
+proxy (`TunnelKind::Proxy`) that rides whichever link carries that host's tunnels
+(`AppState::browser_proxy_port`, `kubiq_tunnel::Registry::follow`), so it browses as the far
+machine — its `localhost` included (`--proxy-bypass-list=<-loopback>`) — within the far side's
+tunnel allow list. Per tab and never saved; WebView2 fixes a proxy per data directory, so a
+proxied tab keeps its own cookie jar per proxy port, and the last tab off a remote's proxy stops
+it. macOS is not offered: wry's `mac-proxy` links macOS 14 symbols against the macOS 13 floor. Anywhere in the tab — the bar or the page holding the keyboard — `secondary-r`
 reloads, `secondary-shift-r` reloads past the cache (`reloadFromOrigin` on macOS; WebView2 has no
 such call, so Windows reloads plainly), and `secondary-shift-=`/`-`/`0` zoom the page in, out and
 back to 100% (`ui::browser::tab_bindings`, context `BrowserTab`; ⌘ on macOS, Ctrl elsewhere; the
@@ -423,7 +430,7 @@ row is the only place a first-time user learns the feature exists at all. With o
 the file picker walking that host's own filesystem, rooted at whatever `BrowseHostDir { path: None
 }` answers with; choosing a folder there sends `AddProject` to that host rather than to the local
 one — unless the host is a drone, which keeps no catalogue: then the folder becomes a local project
-pinned to the drone's carrier ([`drone.md`](./drone.md)). **With more than one remote attached it opens the one application settings' Hosts section has
+pinned to the drone's carrier ([`drone.md`](./drone.md)). **With more than one remote attached it opens the one the application settings' Remote section's saved-hosts block has
 active** — `AppState::preferred_remote_host()` reads `Bus::active` and falls back to the first
 remote attached when `active` is Local (the common case, since nothing points it anywhere else
 until the Hosts dropdown, below, is used), so the row never refuses to act just because a second
@@ -657,7 +664,10 @@ pick sends and what a tool is are the panes-and-terminals document's.
 
 **Back and forward are one stack per window, spanning every project it has shown.** `⌃-` and
 `⌃⇧-`, and two controls at the left of the titlebar, past a rule from the project menu's controls — project settings, the web link, the run controls, then, past a rule, the
-`+`/chevron pair: they walk that project's places, so they sit beside it
+`+`/chevron pair, the remote-host pair, and whatever the titlebar-item container
+(`ext::titlebar`, `Contributions::titlebar_items`, empty in the base) contributes, each item asked
+on every draw and drawn behind its own rule only when it answers `Some` — Studio's remote-desktop
+buttons; `ui::titlebar::live_dot` is the remote button's green serving pulse, shared with them: they walk that project's places, so they sit beside it
 rather than beside the field — each drawn
 faint and taking neither pointer nor click when its end of the stack is empty, and each carrying
 the name of where it would
@@ -953,7 +963,7 @@ labelled — for a fresh dial, by the address or the picked agent definition's n
 name for a reconnect started from the Hosts settings section, below — what `Bus::remotes()` hands
 back to the project picker's "Open remote project…" row (above) so a project can be opened on it. A
 dial that succeeds is saved automatically, its carrier included, so it can be offered again after a
-restart — the Hosts section, below, is where that record is managed. A dial that fails, ssh included,
+restart — the Remote section's saved hosts, below, is where that record is managed. A dial that fails, ssh included,
 lands on the same `Failed` step and shows the reason verbatim — an unreachable host, a refused
 handshake, or a drone that exited on the far machine all read here rather than the modal being stuck
 on "Connecting" forever. **An `https` host with "Trust certificate" ticked is pinned to its key on
@@ -984,9 +994,9 @@ outcomes land, not two: unreachable or unauthenticated shows the connect failure
 answer, not an error, since the Connect button can still deploy one from here; reachable with a
 drone shows its version, its triple and the round-trip time in `theme::success`.
 `crate::ui::host_check_line` renders that one line wherever this document names Check — here, and
-in the Drones settings section below.
+in the Remote settings section's drones block below.
 
-**Application settings' Hosts section is where a window says which host an unaddressed message
+**The saved-hosts block of the application settings' Remote section (Remotes tab) is where a window says which host an unaddressed message
 reaches, and where a saved host is managed.** A dropdown lists `Local` first, always attached; then
 every remote this window has dialled, each read as attached; then every saved host with no live
 connection of its own, read as not attached or, if the last reconnect from this list failed to
@@ -1199,11 +1209,13 @@ same answer — `AppState::offers(Tier)` — is what a rail predicate or a menu 
 second edition. **Off hides the ways in, never what is running**: an attached host or a serving drone
 keeps going.
 
-- *Enable experimental settings* (`Tier::Experimental`): **Connectors**, **Hosts** and **Drones**
-  here, **Remote** in the project dialog, the remote menu's *Remote hosts* and the titlebar's *Connect to a
+- *Enable experimental settings* (`Tier::Experimental`): **Connectors** here, and in **Remote**
+  every block but the SSH profiles (saved hosts, drones, Host mode, the drone list URL — a block
+  carries its own tier, `ext::remote`), **Remote** in the project dialog, the remote menu's *Remote hosts* and the titlebar's *Connect to a
   remote host* button, the new-project menu's and project picker's *Open remote project…*, and
   `open_remote_manager()` / `open_remote_connect()` / `open_remote_project_picker()` themselves.
-  **SSH profiles** stays stable: a database connection's tunnel dials them too.
+  The **SSH profiles** block stays stable, and with it the Remote section: a database
+  connection's tunnel dials them too.
 - *Enable dev settings* (`Tier::Dev`): the **Sink** rail mode (`Availability::When`), the
   **Extensions demo** section and the demo rail mode it gates. Switching a tier off with the window
   in a mode that leaves the rail moves the window to the first mode still on it.
@@ -1237,17 +1249,30 @@ agent is confined, whose home it runs in, and the directories it may reach beyon
 **Policies** (the sandbox policies an agent may be confined under, each with its origin and a Default
 checkbox, and New, Edit, Clone, Delete and Import from a git URL and ref),
 **Search** (what every project's search skips, and what a project is indexed to), **Connectors**
-(the named identities at each provider, and the registrations a flow picks from), **Hosts** (the
-remote hosts a window may attach to), **SSH profiles** (the named SSH targets a host connection can
-dial, each with its address, port and user and one of four ways to authenticate — an agent, a key
-file, a password or a `~/.ssh/config` alias — and a key's passphrase or a password filed at this
-machine's own credential store rather than in the settings file), **Drones** (per saved ssh-carrier
-host, what `kubiq-drone --list` reports is running there — uptime, pane count, version, linger and
-the roots served — with a Check beside Refresh that asks only whether the host is reachable and a
-drone already on its `PATH`, drawn the same one line the connect modal's own Check does, above; a
-Refresh that shells to `ssh` again and a Stop, danger-confirmed because it
-kills every pane the drone holds; a version differing from this build's own is flagged with the
-one remedy the design names: stop, redeploy, reattach), **Assistance** (which backend
+(the named identities at each provider, and the registrations a flow picks from), **Remote** (one
+section, three tabs drawn with the kit's `tab_strip`, each the column of blocks the remote-block
+container (`ext::remote`, `Contributions::remote_blocks`) holds for it; the former Hosts, SSH
+profiles and Drones sections' names stay its search keywords. **Remotes**: the saved hosts a
+window may attach to; the **SSH profiles** (the named SSH targets a host connection can dial, each
+with its address, port and user and one of four ways to authenticate — an agent, a key file, a
+password or a `~/.ssh/config` alias — and a key's passphrase or a password filed at this machine's
+own credential store rather than in the settings file; edited, and deleted, on a drill-in page —
+the pattern below), each row carrying its feature checkboxes:
+*Terminal* (`terminal_enabled` — offered as an `ssh` pane), *Remote drone* (`SshFeatures::drone`,
+on by default — offered in the connect modal's SSH list) and *Persistent* (`SshFeatures::persistent`
+— the terminal attaches a `tmux`/`screen` session named after the profile, and picking the profile
+in the connect modal moves an Attached lifetime to Session with the profile's *timeout*,
+`linger_secs`); the **Drones** (per saved ssh-carrier host, what `kubiq-drone --list` reports is
+running there — uptime, pane count, version, linger and the roots served — with a Check beside
+Refresh that asks only whether the host is reachable and a drone already on its `PATH`, drawn the
+same one line the connect modal's own Check does, above; a Refresh that shells to `ssh` again and a
+Stop, danger-confirmed because it kills every pane the drone holds; a version differing from this
+build's own is flagged with the one remedy the design names: stop, redeploy, reattach), then any
+connection type an edition registers. **Host mode**: the drone modes this desktop serves — the
+*Configure drone mode* dialog's own rows and form, as a list page and a drill-in editor
+(`ui::drone_modes::list_page` / `detail`; the dialog the remote menu raises is unchanged).
+**Settings**: the *Drone list URL* (`HostSettings::drone_list_url`), stored and not yet fetched),
+**Assistance** (which backend
 writes the short lines Kubiq
 would otherwise invent mechanically, what that backend reports about itself, whether a conversation
 names itself from its opening exchange, and the API providers
@@ -1280,6 +1305,32 @@ module touched to add it, and the switch that gates the rail's own demo mode bel
 on is never hidden. The kitchen
 sink still draws the larger
 fixture nav; that page is how the furniture is looked at, not how the application is configured.
+
+**A settings page that manages records is a list page with a drill-in editor** — the pattern the
+Remote section is built on, with its furniture in `ui/kit/settings.rs`:
+
+- **Tabs or groups.** A section whose content splits into peers a person visits one at a time
+  (Remote's Remotes / Host mode / Settings) takes a `tab_strip` under the section, its tab kept on
+  the settings state; content read together stays one column of `heading`-led groups.
+- **List page.** `list_header` — title, count, and the Add as an icon+label `primary_button` at its
+  right — over `list_row`s, every one `SETTINGS_LIST_ROW` high: name and one-line detail at the
+  left, status chips, then the verbs as icon-only `row_action`s with tooltips. What does not fit
+  the line (a feature line of `check_label`s, a test verdict) sits under the row. A switch that is
+  one click with no other input is an inline `check_label` on the list; anything that needs typing
+  is the editor's.
+- **Drill-in editor.** Add or Edit replaces the tab's content — the strip and the other blocks
+  with it — by a `detail_page`: Back and a breadcrumb (`Remotes › build box`), the form in
+  `form_group`s, a body that scrolls on its own, and a footer pinned at the bottom
+  (`settings_detail_height`) with the destructive `delete_control` at the left and Cancel / Save at
+  the right. The strip hides while editing because the breadcrumb already names the tab and Back
+  returns to it, and a tab switch could otherwise strand unsaved changes behind another tab.
+  Never an editor inline in a list, never a modal over the settings overlay.
+- **Questions in place.** Delete is confirmed inside the footer, and Back (or Escape) with changes
+  asks "Discard unsaved changes?" as an `inline_confirm` banner under the header: the editor's
+  values are snapshotted when it opens (`AppState::detail_begin`) and compared on Back
+  (`detail_may_leave`). Delete lives in the editor, not on the row, wherever the row has one.
+- **Extending it.** A Remote block declares `detail` beside `render` (`ext::remote`); while one
+  answers `Some`, the section draws that alone. Studio's RDP targets use exactly this seam.
 
 **The theme editor is a modal over that page, not more rows in it.** Appearance is a fixed panel
 with a nav down its left, so a token list beside a colour picker above a live specimen does not fit

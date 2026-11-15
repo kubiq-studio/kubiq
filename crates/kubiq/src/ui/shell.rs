@@ -394,16 +394,8 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
                 .as_ref()
                 .map(|_| settings::ai_remove(app, window, cx)),
         )
-        // The SSH-profile form, raised from the SSH profiles section — painted here on the same
-        // terms as the provider form above it.
-        .children(
-            app.workbench
-                .settings
-                .ssh_form
-                .as_ref()
-                .map(|_| settings::ssh_form(app, window, cx)),
-        )
-        // Its removal question, over whatever raised it.
+        // The SSH-profile form is a drill-in page of the Remote section (`settings::ssh_detail`),
+        // not a modal. Its removal question, raised from the list row, still is.
         .children(
             app.workbench
                 .settings

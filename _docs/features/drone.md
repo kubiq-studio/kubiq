@@ -312,32 +312,45 @@ is the `--serve` listener in-process, bound to **`127.0.0.1` by default**, with 
 kept in the settings so a saved connect string survives a restart; an edition's kind (`ext`, by
 name — Studio's `rdp`) is started by an endpoint the binary registered. **Stopping or rotating
 closes what the mode accepted** — the remote windows lose their carrier and their panes are reaped.
+The modes are configured on the settings Remote section's **Host mode** tab (a list page and a
+drill-in editor) or in the remote menu's *Configure drone mode…* dialog — the same rows and form.
+An edition's kind is offered only where it can run: Studio registers `rdp` on Windows alone.
 
 ### The surfaces
 
 - **The connect modal** carries a carrier pill: a socket body, or a profile chosen from the saved
   list, a folder, and a lifetime preset. A Check control sits under the profile picker.
-- **The SSH profiles settings section** is a row list, a form modal that holds no typed values of
-  its own, and a delete confirm. Saving mints the id and writes the list; the secret box is sent
+- **The settings' Remote section** (one section, tabs Remotes / Host mode / Settings —
+  [`workbench.md`](./workbench.md)) holds every surface below. Its **Settings** tab carries the
+  *Drone list URL* (`HostSettings::drone_list_url`), stored and not yet fetched (`G474`).
+- **The SSH profiles block** (Remotes tab) is a row list and a drill-in editor page that holds no
+  typed values of its own, with Delete confirmed in its footer. Each row carries three feature
+  checkboxes (`SshProfile::terminal_enabled` and `SshFeatures`): *Terminal* offers the profile as
+  an `ssh` pane; *Remote drone* (on by default) lists it in the connect modal's SSH carrier;
+  *Persistent* makes the terminal attach a `tmux` session named `kubiq-<id>` (`screen` when there
+  is no `tmux`, a plain login shell when neither — `kubiq_proto::ssh::terminal_args`) and makes
+  picking the profile in the connect modal move an Attached lifetime to Session with the
+  profile's *timeout* (`linger_secs`, the `--linger` the drone starts with; `G475`). Saving mints the id and writes the list; the secret box is sent
   only when it was typed into, is blanked either way, and is never prefilled from storage. Each row carries a **Test** icon action — the same
   `ssh` probe the Check runs, against that profile — which becomes **Stop test** while it runs. A
   verdict line sits under the row: "Testing the connection…", then "Test passed: the session
   connected." or "Test failed: <reason>". **Stop test** stops waiting and drops the late answer; the
   `ssh` process is left to finish, not killed (`G452`). The running state and the verdict are shared
-  with the Drones section's Check and the connect modal's Check, so any of the three answers for the
+  with the Drones block's Check and the connect modal's Check, so any of the three answers for the
   profile.
 - **Drones are experimental** (`Tier::Experimental`, Settings › Experimental); a serving one runs on.
-- **The Drones settings section** lists, per saved SSH-carrier host, what is running there — roots,
+- **The Drones block** (Remotes tab) lists, per saved SSH-carrier host, what is running there — roots,
   uptime, pane count, version and linger — with a per-host Refresh, a per-host Check, and a per-drone
   Stop behind a danger confirm, since stopping kills every pane the drone holds. Version skew is
   flagged on the row rather than hidden: a managed drone outlives the Kubiq that deployed it, and the
   one remedy is stop, redeploy, reattach. **A drone is never hot-swapped under live panes.**
   Under each host sits its **Tunnels** block: a summary and, while attached, a line per enabled
   tunnel (local port → target, linked or waiting, connections, bytes, last error), and *Edit
-  tunnels*, which opens the shared tunnel form (`ui/tunnels.rs`) in place — rate limit, rows of
-  TCP (local port → host:port) or HTTP (local port → remote URL, *Rewrite Host header* with an
-  optional value, *Rewrite host in contents* with its content types, *Skip certificate check* for
-  `https`). Saving writes `SavedRemoteHost.tunnels` and relinks an attached host. The forwarding
+  tunnels*, which drills into the shared tunnel form (`ui/tunnels.rs`) as a page of its own
+  (`Remotes › <host> › Tunnels`) — rate limit, rows of
+  TCP (local port → host:port), HTTP (→ remote URL, *Rewrite Host header* with an optional value,
+  *Rewrite host in text contents*, on for a new row, with its content types, *Skip certificate
+  check* for `https`) or Proxy (an HTTP/HTTPS forward proxy browsing as the far machine). Saving writes `SavedRemoteHost.tunnels` and relinks an attached host. The forwarding
   itself is a second `ssh` exec, `kubiq-drone --tunnel`
   ([`../tech/transport-contract.md`](../tech/transport-contract.md), *The tunnel channel*).
   Below the SSH hosts, a **Served hosts** block lists every saved socket host (`kubiq --serve`) with
@@ -445,7 +458,8 @@ stops the accept loop, shuts every accepted socket and counts the attached ones.
 
 The askpass helper mode lives in `crates/kubiq-app/src/lib.rs`, the one crate that names both halves.
 The drawing sits in `crates/kubiq/src/ui/remote_connect.rs` (the carrier pill and the per-step note),
-`crates/kubiq/src/ui/settings.rs` (the SSH profiles and Drones sections) and
+`crates/kubiq/src/ui/settings.rs` (the Remote section's SSH profiles and Drones blocks, their
+drill-in pages) and
 `crates/kubiq/src/ui/sink/project.rs` with its state in `crates/kubiq/src/state/sink.rs` (the Remote
 panel). `_tools/drone.py` generates and verifies the manifest.
 
