@@ -153,7 +153,7 @@ pub fn apply_fields(specs: &mut [TunnelSpec], fields: &[TunnelFields]) -> Result
                     .collect();
             }
             // Each request names its own destination.
-            TunnelKind::Proxy => {}
+            TunnelKind::Proxy | TunnelKind::Unknown => {}
         }
     }
     Ok(())
@@ -294,7 +294,9 @@ pub fn tunnel_row(
     first = if http {
         first.child(sized_field(&inputs.url, 260., window, cx))
     } else if spec.kind == TunnelKind::Proxy {
-        first.child(small("any host the drone may dial (HTTP/HTTPS proxy)"))
+        first.child(small(
+            "any host the drone may dial (HTTP/HTTPS proxy) \u{2014} no auth: any local program can use it",
+        ))
     } else {
         first
             .child(sized_field(&inputs.host, 160., window, cx))
@@ -374,6 +376,7 @@ pub fn status_lines(specs: &[TunnelSpec], live: &Live) -> Vec<AnyElement> {
                 TunnelKind::Tcp => format!("{}:{}", spec.host, spec.port),
                 TunnelKind::Http => spec.remote_url(),
                 TunnelKind::Proxy => "proxy".to_string(),
+                TunnelKind::Unknown => "unknown kind".to_string(),
             })
             .unwrap_or_default();
         let state = match (s.listening, live.linked) {

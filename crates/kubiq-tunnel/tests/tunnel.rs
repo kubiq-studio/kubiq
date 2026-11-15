@@ -552,5 +552,8 @@ fn a_follower_rides_its_parents_link_and_leaves_it_up() {
 
     registry.forget("proxy");
     thread::sleep(Duration::from_millis(200));
-    assert!(registry.mux("parent").is_some(), "the parent's link stays up");
+    assert!(
+        registry.mux("parent").is_some(),
+        "the parent's link stays up"
+    );
 }

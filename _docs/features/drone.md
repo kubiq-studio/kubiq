@@ -314,7 +314,7 @@ name — Studio's `rdp`) is started by an endpoint the binary registered. **Stop
 closes what the mode accepted** — the remote windows lose their carrier and their panes are reaped.
 The modes are configured on the settings Remote section's **Host mode** tab (a list page and a
 drill-in editor) or in the remote menu's *Configure drone mode…* dialog — the same rows and form.
-An edition's kind is offered only where it can run: Studio registers `rdp` on Windows alone.
+An edition's kind is offered only where it can run: an edition's kind can be limited to the platform it runs on.
 
 ### The surfaces
 

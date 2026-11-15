@@ -350,7 +350,7 @@ pub const SETTINGS_DETAIL_INSET: f32 = 40.0;
 pub const SETTINGS_HEADER_HEIGHT: f32 = 52.0;
 
 pub fn settings_detail_height() -> f32 {
-    settings_height() - SETTINGS_HEADER_HEIGHT - scaled(SETTINGS_DETAIL_INSET)
+    settings_height() - scaled(SETTINGS_HEADER_HEIGHT) - scaled(SETTINGS_DETAIL_INSET)
 }
 
 /// One row of a settings list page (`ui::kit::list_row`): every row the same height.

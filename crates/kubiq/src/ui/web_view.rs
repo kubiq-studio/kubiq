@@ -311,7 +311,7 @@ pub fn open_browser(
     url: &str,
     profile: crate::state::browser::Profile,
     persist: bool,
-    proxy: Option<u16>,
+    proxy: Option<(&str, u16)>,
     window: &mut Window,
     cx: &mut App,
 ) -> Result<(), String> {
@@ -380,32 +380,42 @@ pub fn open_browser(
 /// 16-byte id (macOS 14 and later; older systems fall back to the shared store); Windows keeps a
 /// directory per profile.
 ///
-/// `proxy` ([`PROXY`] builds only) sends every request through `127.0.0.1:<port>` — on macOS
-/// through a data store of the tab's own, since WebKit proxies per store. WebView2 fixes
-/// browser arguments per data directory and process, so a proxied tab gets a directory of its own
-/// per port — its own cookies — and the loopback is proxied too (`<-loopback>`): on a remote,
+/// `proxy` ([`PROXY`] builds only) is the saved remote's id and the loopback port of its proxy:
+/// every request goes through `127.0.0.1:<port>`, from a store of its own per profile and remote
+/// ([`proxied_store`]) — WebKit proxies per data store, and WebView2 fixes browser arguments per
+/// data directory and process. The loopback is proxied too (`<-loopback>`): on a remote,
 /// `localhost` is the far machine's.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn profiled_builder(
     profile: crate::state::browser::Profile,
     persist: bool,
-    proxy: Option<u16>,
+    proxy: Option<(&str, u16)>,
 ) -> wry::WebViewBuilder<'static> {
     #[cfg(target_os = "windows")]
     {
-        if let Some(port) = proxy {
+        if let Some((save_id, port)) = proxy {
             use wry::WebViewBuilderExtWindows as _;
             thread_local! {
                 static PROXIED: std::cell::RefCell<
-                    std::collections::HashMap<u16, *mut wry::WebContext>,
+                    std::collections::HashMap<
+                        (crate::state::browser::Profile, String, Option<u16>),
+                        *mut wry::WebContext,
+                    >,
                 > = std::cell::RefCell::new(std::collections::HashMap::new());
             }
+            let slot = proxied_store(profile, save_id, port);
             let context = PROXIED.with(|contexts| {
-                *contexts.borrow_mut().entry(port).or_insert_with(|| {
-                    let dir =
-                        windows_profile_dir(profile).with_file_name(format!("via-remote-{port}"));
-                    Box::into_raw(Box::new(wry::WebContext::new(Some(dir))))
-                })
+                *contexts
+                    .borrow_mut()
+                    .entry((profile, save_id.to_string(), slot))
+                    .or_insert_with(|| {
+                        let mut name = format!("via-remote-{}", sanitise(save_id));
+                        if let Some(port) = slot {
+                            name.push_str(&format!("-{port}"));
+                        }
+                        let dir = windows_profile_dir(profile).join(name);
+                        Box::into_raw(Box::new(wry::WebContext::new(Some(dir))))
+                    })
             });
             // SAFETY: leaked like the profiles' contexts below, and only used on the UI thread.
             let builder = wry::WebViewBuilder::new_with_web_context(unsafe { &mut *context })
@@ -420,14 +430,21 @@ fn profiled_builder(
     }
     #[cfg(target_os = "macos")]
     {
-        if let Some(port) = proxy {
+        if let Some((save_id, port)) = proxy {
             use wry::WebViewBuilderExtDarwin as _;
             // WebKit sets the proxy on the data store, which every tab of a profile shares — so a
-            // proxied tab gets a store of its own per port (an ephemeral one is already its own).
+            // proxied tab gets a store of its own per profile and remote, derived from the
+            // profile's id and a stable hash of the remote (an ephemeral one is already its own).
             let builder = if persist {
                 let mut id = profile.data_id();
-                id[14..].copy_from_slice(&port.to_be_bytes());
-                id[13] ^= 0xa5;
+                let mut salt = save_id.to_string();
+                if let Some(port) = proxied_store(profile, save_id, port) {
+                    salt.push_str(&format!(":{port}"));
+                }
+                for (byte, hash) in id[8..].iter_mut().zip(fnv1a(&salt).to_be_bytes()) {
+                    *byte ^= hash;
+                }
+                id[7] ^= 0xa5;
                 wry::WebViewBuilder::new().with_data_store_identifier(id)
             } else {
                 wry::WebViewBuilder::new().with_incognito(true)
@@ -475,6 +492,51 @@ fn windows_profile_dir(profile: crate::state::browser::Profile) -> std::path::Pa
         .join("Kubiq")
         .join("browser")
         .join(profile.dir_name())
+}
+
+/// Which store a proxied tab of `profile` on remote `save_id` uses, given its proxy's `port`:
+/// `None` is the stable one — keyed by profile and remote, so its cookies survive a restart — and
+/// `Some(port)` a store of that port's own.
+///
+/// The first port seen for a profile and remote in this process owns the stable store. The app
+/// rebinds the same port on a restart where it can (`AppState::browser_proxy_port`), so a
+/// different port is rare: the old one was taken, or another window runs its own proxy. It cannot
+/// share the store, because WebView2 fixes `--proxy-server` per data directory while that
+/// directory's browser process lives (a new value would be silently ignored), and on macOS the
+/// store's proxy is shared by every tab on it — so it gets a store of its own, for this run only.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn proxied_store(profile: crate::state::browser::Profile, save_id: &str, port: u16) -> Option<u16> {
+    thread_local! {
+        static FIRST: std::cell::RefCell<
+            std::collections::HashMap<(crate::state::browser::Profile, String), u16>,
+        > = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    FIRST.with(|first| {
+        let mut first = first.borrow_mut();
+        let owner = *first.entry((profile, save_id.to_string())).or_insert(port);
+        (owner != port).then_some(port)
+    })
+}
+
+/// A saved host's id as a directory-name fragment.
+#[cfg(target_os = "windows")]
+fn sanitise(save_id: &str) -> String {
+    save_id
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,
+            _ => '_',
+        })
+        .collect()
+}
+
+/// 64-bit FNV-1a: a hash stable across builds and Rust versions, unlike `DefaultHasher`, so a
+/// store id derived from it keys the same cookies every run.
+#[cfg(target_os = "macos")]
+fn fnv1a(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 /// Page zoom for the webview behind `key`.

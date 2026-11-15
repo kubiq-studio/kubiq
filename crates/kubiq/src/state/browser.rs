@@ -202,8 +202,8 @@ pub struct BrowserTab {
 }
 
 /// Where a proxied tab's traffic leaves from: a saved remote host, through a proxy on this port.
-/// `port: None` is the tab's intent with no proxy behind it (it failed to start): the tab loads
-/// direct until "Restart remote proxy".
+/// `port: None` is the tab's intent with no proxy behind it (it failed to start): the tab gets no
+/// webview and loads nothing — never direct — until "Restart remote proxy".
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViaRemote {
     pub save_id: String,

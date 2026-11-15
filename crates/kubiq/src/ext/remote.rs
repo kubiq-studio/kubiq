@@ -4,7 +4,7 @@
 //! Settings. Each tab is the column of blocks registered for it, in registration order. The base
 //! registers its own — saved hosts, SSH profiles and their drones on Remotes, the drone modes on
 //! Host mode, the drone list URL on Settings (`ui::settings::remote_blocks`) — and an edition adds
-//! its own connection types the same way (Studio's remote-desktop targets on Remotes).
+//! its own connection types the same way (an edition's targets on Remotes).
 //!
 //! A block is drawn against the same [`SectionCtx`] a settings section is, so a former section
 //! moves here by changing its registration and nothing else.

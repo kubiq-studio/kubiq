@@ -2957,7 +2957,9 @@ unlimited. All are `#[serde(default)]`, addresses and flags with nothing a crede
 The three new rewrite fields need no bump: an older build drops them and the spec reads back as a
 Host-rewriting tunnel with no content rewrite. Neither does `proxy`, a new `kind` value: an older
 build cannot read the spec and drops the host's tunnels on its next write — the cost every
-additive enum value carries here.
+additive enum value carries here. From `proxy` on, `TunnelKind` ends in an inert `Unknown`
+(`#[serde(other)]`): a kind a newer build wrote still loads, is never forwarded (the listener
+refuses it) and is never offered in the form, so later kinds are forward-compatible.
 
 **A trust-any `https` host carries the key it is pinned to** (`D228`). `SavedRemoteHost.tls_pin?` is
 the lowercase hex SHA-256 of the leaf certificate's DER `SubjectPublicKeyInfo`, recorded on the
@@ -3695,14 +3697,20 @@ never held), has the origin replaced (the JSON-escaped `\/` spelling too) and go
 fresh `Content-Length` and no `Transfer-Encoding`; any other type streams as it came. This is the
 one rewriting path: every carrier (SSH, a served host's `/tunnel`, an embedder's) feeds the
 window's `TunnelManager`, and the far half only dials. A `proxy`-kind listener (`proxy.rs`) reads
-each connection's first head: `CONNECT host:port` opens it, answers `200 Connection Established`
+each connection's first head, within one 30 s deadline for the whole head (not per read):
+`CONNECT host:port` opens it, answers `200 Connection Established`
 and pipes raw (HTTPS stays end-to-end TLS); an absolute `http://` URI opens its authority and goes
 out in origin form with the URI's `Host`, no `Proxy-*` / `Connection` / `Keep-Alive`, and
 `Connection: close` (one request per connection); anything else is a `400`, and an open the far
 allow list refuses a `502`. `Registry::follow` starts listeners that own no link and borrow, per
 connection, the first live one among named keys — the embedded browser's proxy rides a saved
 host's link that way, found by `tunnel_key` or by `kubiq_tunnel::saved_key(save_id)`, the key an
-embedder that dials a saved host itself links under. A `101`, a `CONNECT`'s `2xx` or anything unparseable turns the response raw. A
+embedder that dials a saved host itself links under. **The proxy takes no credentials**: a
+browser given `--proxy-server` cannot answer a `407`, so any program on this machine that finds
+the loopback port can dial whatever the far allow list admits, as the far host — a local pivot,
+bounded only by the loopback bind and that allow list. The browser's follower binds the port it
+last had in the window first, then up to three fresh ones (`AppState::browser_proxy_port`), since
+probing `:0` and binding again races. A `101`, a `CONNECT`'s `2xx` or anything unparseable turns the response raw. A
 request with a `Transfer-Encoding` not ending in `chunked` or with conflicting `Content-Length`s is
 answered `400`; that answer, like the `403`, is sent by the response side once every response owed
 before it is out, so it never lands inside one. A Unix-socket drone has no channel yet (`G462`).

@@ -25,7 +25,8 @@ use crate::{proxy, tls};
 
 /// How often an idle listener looks at the stop flag.
 const ACCEPT_POLL: Duration = Duration::from_millis(50);
-/// How long a proxy client may take to send its first request head.
+/// How long a proxy client may take to send its whole first request head — a deadline, not a
+/// per-read timeout.
 const PROXY_HEAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// One spec's state, as the settings page or a status line would draw it.
@@ -268,6 +269,15 @@ fn connection(shared: &Shared, tunnel: &Tunnel, socket: TcpStream) {
         proxy_connection(&mux, socket, counters);
         return;
     }
+    if spec.kind == TunnelKind::Unknown {
+        refuse(
+            socket,
+            spec.kind,
+            "this tunnel's kind is not known to this build".into(),
+            counters,
+        );
+        return;
+    }
     let stream = match mux.open(&spec.host, spec.port) {
         Ok(stream) => stream,
         Err(e) => {
@@ -281,7 +291,7 @@ fn connection(shared: &Shared, tunnel: &Tunnel, socket: TcpStream) {
         }
     };
     match spec.kind {
-        TunnelKind::Tcp | TunnelKind::Proxy => {
+        TunnelKind::Tcp | TunnelKind::Proxy | TunnelKind::Unknown => {
             pipe::pipe(&mux, socket, stream, None, None, Some(counters.clone()))
         }
         TunnelKind::Http => {
@@ -330,12 +340,18 @@ fn connection(shared: &Shared, tunnel: &Tunnel, socket: TcpStream) {
 fn proxy_connection(mux: &Mux, mut socket: TcpStream, counters: &Arc<Counters>) {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
-    let _ = socket.set_read_timeout(Some(PROXY_HEAD_TIMEOUT));
+    // One deadline for the whole head, not per read: a client trickling a byte at a time must not
+    // hold the connection open indefinitely.
+    let deadline = std::time::Instant::now() + PROXY_HEAD_TIMEOUT;
     let parsed = loop {
         match proxy::parse(&buf) {
             Ok(Some(parsed)) => break Ok(parsed),
             Ok(None) => {}
             Err(e) => break Err(e.to_string()),
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() || socket.set_read_timeout(Some(left)).is_err() {
+            return;
         }
         match socket.read(&mut chunk) {
             // Closed, or silent past the timeout, before a whole head: nothing to answer.

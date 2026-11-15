@@ -85,14 +85,27 @@ pub fn terminal_args(profile: &SshProfile) -> Option<Vec<String>> {
 fn persistent_command(profile: &SshProfile, inner: Option<&str>) -> String {
     let id = profile.id.to_string();
     let name = format!("kubiq-{}", &id[id.len().saturating_sub(8)..]).to_lowercase();
-    let tmux_cmd = inner
-        .map(|command| format!(" '{}'", command.replace('\'', r"'\''")))
+    // `inner` always runs under `sh -c`, whatever the remote login shell or multiplexer default is.
+    let run = inner
+        .map(|command| format!(" sh -c {}", sh_quote(command)))
         .unwrap_or_default();
-    format!(
-        "if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s {name}{tmux_cmd}; \
-         elif command -v screen >/dev/null 2>&1; then exec screen -D -RR {name}; \
-         else exec $SHELL -l; fi"
-    )
+    let plain = match inner {
+        Some(command) => format!("exec sh -c {}", sh_quote(command)),
+        None => "exec \"$SHELL\" -l".to_string(),
+    };
+    // The whole `if` is POSIX, so it rides as one `sh -c` argument: the login shell (fish, csh,
+    // nushell…) only has to run `sh`.
+    let script = format!(
+        "if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s {name}{run}; \
+         elif command -v screen >/dev/null 2>&1; then exec screen -D -RR -S {name}{run}; \
+         else {plain}; fi"
+    );
+    format!("sh -c {}", sh_quote(&script))
+}
+
+/// `text` as one POSIX single-quoted word.
+fn sh_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 /// Which program [`apply_connection_options`] is building argv for. `ssh` and `scp` read
@@ -296,9 +309,17 @@ mod tests {
         let args = terminal_args(&p).unwrap();
         assert!(args.contains(&"-t".to_string()));
         let remote = args.last().unwrap();
-        assert!(remote.contains("exec tmux new-session -A -s kubiq-"));
-        assert!(remote.contains(r"'it'\''s; exec $SHELL -l'"));
-        assert!(remote.contains("screen -D -RR kubiq-"));
+        // One `sh -c` word, so the remote login shell's own syntax never matters.
+        assert!(remote.starts_with("sh -c '") && remote.ends_with('\''));
+        let inner = sh_quote("it's; exec $SHELL -l");
+        let full = p.id.to_string();
+        let id = full[full.len() - 8..].to_lowercase();
+        let script = format!(
+            "if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s kubiq-{id} sh -c {inner}; \
+             elif command -v screen >/dev/null 2>&1; then exec screen -D -RR -S kubiq-{id} sh -c {inner}; \
+             else exec sh -c {inner}; fi"
+        );
+        assert_eq!(remote, &format!("sh -c {}", sh_quote(&script)));
     }
 
     #[test]

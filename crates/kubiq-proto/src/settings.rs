@@ -789,6 +789,10 @@ pub enum TunnelKind {
     /// (`CONNECT host:port`, or an absolute `http://` URI), dialled on the far machine under its
     /// allow list. `host` and `port` are unused.
     Proxy,
+    /// A kind a newer build wrote that this one does not know. Inert: kept so the file still
+    /// loads, never forwarded and never offered in the form.
+    #[serde(other)]
+    Unknown,
 }
 
 /// How a saved remote host's frames are carried.

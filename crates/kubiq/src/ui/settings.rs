@@ -60,6 +60,8 @@ pub fn help_page() -> Option<&'static str> {
 }
 
 pub fn overlay(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> AnyElement {
+    // A drill-in page drawn below re-registers its Back for Escape; none drawn leaves none.
+    crate::ui::kit::clear_detail_back();
     let viewport = window.viewport_size();
     // Every modal this page raises — the login, the forms, the questions over them — is painted
     // over it, and a click inside one is outside this panel's bounds. `AppState::covered` is what

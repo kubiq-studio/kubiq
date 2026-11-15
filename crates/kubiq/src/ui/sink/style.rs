@@ -578,7 +578,7 @@ fn controls(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
                 ))
                 .child(check_label(
                     "sink-check-label-fixed",
-                    "Remote Desktop",
+                    "Keep a copy",
                     true,
                     false,
                     |_, _, _| {},

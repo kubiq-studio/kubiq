@@ -75,7 +75,7 @@ pub use popover::popover;
 pub use quota::quota_ring;
 pub use ribbon::{RIBBON_SIZE, Ribbon, RibbonCorner, ribbon};
 pub use settings::{
-    column, delete_control, detail_footer, detail_page, form_group, heading, hint_row,
+    clear_detail_back, column, delete_control, detail_back, detail_footer, detail_page, form_group, heading, hint_row,
     inline_confirm, label_block, label_hint, list_header, list_row, nav_item, setting_row,
     settings_split,
 };

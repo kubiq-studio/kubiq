@@ -168,8 +168,19 @@ pub fn render(
             )
             .into_any_element(),
     });
+    // Set to browse via a remote whose proxy did not start: no webview at all, so nothing leaves
+    // from this machine instead ([`AppState::settle_browser`]).
+    let stalled = tab
+        .via_remote
+        .as_ref()
+        .is_some_and(|via| via.port.is_none());
     let body = page.unwrap_or_else(|| {
         let notice = match web_view::SUPPORTED {
+            true if stalled => {
+                "Browse via remote: the proxy is not running, so this tab loads nothing. \
+                 Use \u{201c}Restart remote proxy\u{201d} in the Remote menu, or turn \
+                 \u{201c}Browse via remote\u{201d} off."
+            }
             true => "Starting the browser\u{2026}",
             false => "The internal browser is not available on this platform.",
         };

@@ -1,8 +1,8 @@
 //! The titlebar-item container: controls an edition adds to the titlebar's left group.
 //!
 //! Each item is a function asked on every titlebar draw; it answers `None` when it has nothing to
-//! show (most of the time — Studio's remote-desktop buttons exist only while the active project
-//! runs on one). The titlebar draws the answers in registration order after the remote-host split
+//! show (most of the time — an edition's buttons for one kind of project exist only while the
+//! active project is of that kind). The titlebar draws the answers in registration order after the remote-host split
 //! button, each behind its own rule. Empty in the base.
 //!
 //! The order is resolved **once** and cached for the process, never walked in a draw path.

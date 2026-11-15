@@ -15,6 +15,23 @@ use crate::theme;
 use crate::theme::{Family, Role};
 use crate::ui::kit::mono;
 
+type DetailBack = std::rc::Rc<dyn Fn(&mut gpui::Window, &mut gpui::App)>;
+
+thread_local! {
+    /// The Back of the drill-in page drawn last frame ([`detail_page`]), for Escape.
+    static DETAIL_BACK: std::cell::RefCell<Option<DetailBack>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Forget the registered Back; the settings overlay calls it before drawing a frame.
+pub fn clear_detail_back() {
+    DETAIL_BACK.with(|slot| slot.borrow_mut().take());
+}
+
+/// The Back of the drill-in page on screen, if one is.
+pub fn detail_back() -> Option<DetailBack> {
+    DETAIL_BACK.with(|slot| slot.borrow().clone())
+}
+
 pub fn heading(title: &str, note: &str) -> AnyElement {
     div()
         .flex()
@@ -403,6 +420,17 @@ pub fn detail_page(
     body: Vec<AnyElement>,
     footer: AnyElement,
 ) -> AnyElement {
+    // The same handler answers Escape (`AppState::escape`), whichever page this is.
+    let on_back = std::rc::Rc::new(on_back);
+    let for_escape = on_back.clone();
+    DETAIL_BACK.with(|slot| {
+        *slot.borrow_mut() = Some(std::rc::Rc::new(move |window, cx| {
+            for_escape(&ClickEvent::default(), window, cx)
+        }));
+    });
+    let on_back = move |event: &ClickEvent, window: &mut gpui::Window, cx: &mut gpui::App| {
+        on_back(event, window, cx)
+    };
     let last = crumbs.len().saturating_sub(1);
     let trail = crumbs.iter().enumerate().flat_map(|(ix, crumb)| {
         let text = div()

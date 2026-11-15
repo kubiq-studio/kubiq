@@ -32,8 +32,8 @@
 //! that outgrows [`CAPTURE_MAX`]; `text/event-stream` is never held.
 //!
 //! Every window-side tunnel goes through this one path: [`crate::TunnelManager`] runs it for each
-//! HTTP connection whichever carrier feeds the mux (a socket's `/tunnel`, SSH, the Studio RDP
-//! channel). The drone's half ([`crate::serve`]) only dials and splices.
+//! HTTP connection whichever carrier feeds the mux (a socket's `/tunnel`, SSH, a channel an
+//! edition contributes). The drone's half ([`crate::serve`]) only dials and splices.
 //!
 //! **Refusals.** A request the guard refuses (`403`) or whose framing is ambiguous — a
 //! `Transfer-Encoding` other than `chunked`, two `Content-Length`s that disagree (`400`) — forwards

@@ -163,15 +163,22 @@ page zoom (0.5×–3.0×, per tab; *Reset zoom* shows the level), the page **wid
 proxy (`TunnelKind::Proxy`) that rides whichever link carries that host's tunnels
 (`AppState::browser_proxy_port`, `kubiq_tunnel::Registry::follow`), so it browses as the far
 machine — its `localhost` included (`--proxy-bypass-list=<-loopback>`) — within the far side's
-tunnel allow list. Per tab and never saved; WebView2 fixes a proxy per data directory, so a
-proxied tab keeps its own cookie jar per proxy port, and the last tab off a remote's proxy stops
-it. A proxy that fails to start raises a warning notification naming the remote and the error; the
-tab keeps the setting (`ViaRemote.port` is `None`, the page loads direct) and the titlebar Remote
-menu's *Restart remote proxy* row — shown while a tab is set to browse via the project's remote —
-stops and starts the follower, repoints every tab riding that remote and rebuilds their webviews,
-which is the retry. On macOS it rides wry's `mac-proxy` — macOS 14 symbols, so the bundle's floor
-(`LSMinimumSystemVersion`) is 14.0 — and, since WebKit proxies a whole data store, a proxied tab gets a
-store of its own per port. Anywhere in the tab — the bar or the page holding the keyboard — `secondary-r`
+tunnel allow list. Per tab and never saved. WebView2 fixes a proxy per data directory and WebKit
+proxies a whole data store, so proxied tabs keep a cookie jar of their own per profile and remote
+(`web_view::proxied_store`: a `via-remote-<save id>` directory under the profile's on Windows, a
+store id derived from the profile's and a stable hash of the save id on macOS), which survives
+restarts. The proxy rebinds the port it last had in the window where it can; a store first seen on
+another port in this process cannot take the new one, so that rare case gets a store of its own
+for the run. The last tab off a remote's proxy — turned off, closed, or its project leaving the
+window — stops it and re-runs `link_tunnels`, releasing a link kept up only for it; the window
+that adopts the project starts its own proxy for each such remote and repoints the tabs. A proxy that
+fails to start raises a warning notification naming the remote and the error; the tab keeps the
+setting (`ViaRemote.port` is `None`) but gets no webview — an inline notice instead, so nothing
+silently leaves from this machine — and the titlebar Remote menu's *Restart remote proxy* row —
+shown while a tab is set to browse via the project's remote — replaces the follower (same port
+first), repoints every tab riding that remote and rebuilds their webviews, which is the retry. On
+macOS it rides wry's `mac-proxy` — macOS 14 symbols, so the bundle's floor
+(`LSMinimumSystemVersion`, and `MACOSX_DEPLOYMENT_TARGET` in `.cargo/config.toml`) is 14.0. Anywhere in the tab — the bar or the page holding the keyboard — `secondary-r`
 reloads, `secondary-shift-r` reloads past the cache (`reloadFromOrigin` on macOS; WebView2 has no
 such call, so Windows reloads plainly), and `secondary-shift-=`/`-`/`0` zoom the page in, out and
 back to 100% (`ui::browser::tab_bindings`, context `BrowserTab`; ⌘ on macOS, Ctrl elsewhere; the
@@ -672,7 +679,7 @@ pick sends and what a tool is are the panes-and-terminals document's.
 `⌃⇧-`, and two controls at the left of the titlebar, past a rule from the project menu's controls — project settings, the web link, the run controls, then, past a rule, the
 `+`/chevron pair, the remote-host pair, and whatever the titlebar-item container
 (`ext::titlebar`, `Contributions::titlebar_items`, empty in the base) contributes, each item asked
-on every draw and drawn behind its own rule only when it answers `Some` — Studio's remote-desktop
+on every draw and drawn behind its own rule only when it answers `Some` — an edition's
 buttons; `ui::titlebar::live_dot` is the remote button's green serving pulse, shared with them: they walk that project's places, so they sit beside it
 rather than beside the field — each drawn
 faint and taking neither pointer nor click when its end of the stack is empty, and each carrying
@@ -1336,7 +1343,8 @@ Remote section is built on, with its furniture in `ui/kit/settings.rs`:
   values are snapshotted when it opens (`AppState::detail_begin`) and compared on Back
   (`detail_may_leave`). Delete lives in the editor, not on the row, wherever the row has one.
 - **Extending it.** A Remote block declares `detail` beside `render` (`ext::remote`); while one
-  answers `Some`, the section draws that alone. Studio's RDP targets use exactly this seam.
+  answers `Some`, the section draws that alone. An edition's targets use exactly this seam. Escape on any drill-in runs the page's own Back
+  (`kit::detail_back`): a changed editor raises the discard question, a second Escape keeps editing.
 
 **The theme editor is a modal over that page, not more rows in it.** Appearance is a fixed panel
 with a nav down its left, so a token list beside a colour picker above a live specimen does not fit

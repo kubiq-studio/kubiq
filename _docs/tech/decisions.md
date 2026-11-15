@@ -5934,16 +5934,16 @@ missing user folder is created on disk even when the run then fails for another 
 The application settings' Hosts, SSH profiles and Drones sections are one **Remote** section with
 three tabs (Remotes, Host mode, Settings), each the column of blocks a new container holds
 (`ext::remote`, `Contributions::remote_blocks`); an edition's connection type is one more block
-(Studio's RDP targets). A page that manages records is a **list page** — `list_header` with the
+(an edition's targets). A page that manages records is a **list page** — `list_header` with the
 count and an icon+label Add, one-line `list_row`s with icon-only `row_action` verbs — and Add or
 Edit **drills in**: a `detail_page` replaces the tab (the strip hides), with a breadcrumb back,
 `form_group`s, and a pinned footer whose Delete and whose Back-with-changes are answered inline. A
 block declares that editor as `detail`; a `Some` takes the whole tab. A second container,
-`ext::titlebar`, lets an edition add controls to the titlebar's left group (Studio's remote-desktop
+`ext::titlebar`, lets an edition add controls to the titlebar's left group (an edition's
 buttons).
 
-**Why:** three sections for one subject made a person hunt between them, and a fourth (Studio's
-RDP page) was on its way. A modal over the settings overlay stacks two dialogs, and an editor
+**Why:** three sections for one subject made a person hunt between them, and a fourth (an
+edition's page) was on its way. A modal over the settings overlay stacks two dialogs, and an editor
 inline in a list shifts every row under it; a drill-in keeps the list stable and the editor at full
 width. Hiding the strip while editing means a tab switch cannot strand unsaved changes.
 

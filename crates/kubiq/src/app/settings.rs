@@ -3096,14 +3096,16 @@ impl AppState {
         };
     }
 
-    /// Back on a drill-in editor holding `current`: `true` when it may close — nothing changed, or
-    /// the discard question is already up and this is its answer. Otherwise raises the question.
+    /// Back (or Escape) on a drill-in editor holding `current`: `true` when it may close, which
+    /// is only when nothing changed. A changed editor raises the discard question; with the
+    /// question already up, Back is "keep editing" and puts it away. The question's own Discard
+    /// button closes the page directly.
     pub fn detail_may_leave(&mut self, current: Vec<String>, cx: &mut Context<Self>) -> bool {
         let detail = &mut self.workbench.settings.detail;
         if current == detail.snapshot {
             return true;
         }
-        detail.confirm_back = true;
+        detail.confirm_back = !detail.confirm_back;
         cx.notify();
         false
     }
