@@ -229,6 +229,9 @@ impl ViewerKind {
     /// draws it instead (`D204`) — asked with the path alone, because nothing has been read yet.
     /// The head of the text gets its say when the bytes arrive (`AppState::attach_file`).
     pub fn of(path: &str) -> Self {
+        if let Some(id) = crate::ext::viewer::specific_for(path, None) {
+            return ViewerKind::Contributed(id);
+        }
         match Self::builtin(path) {
             ViewerKind::Editor => crate::ext::viewer::default_for(path, None)
                 .map(ViewerKind::Contributed)

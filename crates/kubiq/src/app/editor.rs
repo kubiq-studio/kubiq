@@ -1066,6 +1066,13 @@ impl AppState {
         let Some(file) = open.editor.open.get(at) else {
             return;
         };
+        // A notebook is the host's document, not this tab's buffer (the buffer may be a capped,
+        // stale read): the host writes it.
+        if file.viewer == crate::state::editor::ViewerKind::Contributed(crate::ext::ids::NOTEBOOK_VIEWER) {
+            let key = (project, file.path.clone());
+            self.save_notebook(&key, window, cx);
+            return;
+        }
         // A plan or a mission document is the host's, saved through the open surface.
         if file.doc.is_some() {
             let key = file.key();
@@ -1986,6 +1993,12 @@ impl AppState {
         let Some(file) = open.editor.active_file() else {
             return;
         };
+        // A notebook is the host's document: `save_file`'s own branch says why.
+        if file.viewer == crate::state::editor::ViewerKind::Contributed(crate::ext::ids::NOTEBOOK_VIEWER) {
+            let key = file.key();
+            self.save_file(&key, window, cx);
+            return;
+        }
         // An untitled buffer names nothing on disk, so the save is a question first.
         if file.untitled {
             let key = file.key();

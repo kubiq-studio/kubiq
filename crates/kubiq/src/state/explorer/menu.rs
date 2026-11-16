@@ -32,6 +32,7 @@ impl ExplorerState {
             can_paste: self.copied.is_some(),
             is_excluded,
             open_with: false,
+            new_menu: false,
             x,
             y,
         });
@@ -47,6 +48,37 @@ impl ExplorerState {
             self.menu = None;
         }
     }
+}
+
+/// Every *New* entry: an empty file or folder, the drawings, then each typed template.
+pub(super) fn new_entries() -> Vec<ExplorerEntry> {
+    let mut actions = vec![
+        ExplorerAction::NewFile,
+        ExplorerAction::NewFolder,
+        ExplorerAction::NewExcalidraw,
+        ExplorerAction::NewDrawio,
+    ];
+    actions.extend((0..super::templates::templates().len()).map(ExplorerAction::NewTemplate));
+    actions
+        .into_iter()
+        .map(|action| ExplorerEntry {
+            action,
+            enabled: true,
+        })
+        .collect()
+}
+
+/// The *New* group as the menu shows it: flat while there are at most
+/// [`super::templates::FLAT_LIMIT`] entries, one "New ▸" row beyond that.
+fn new_group() -> Vec<ExplorerEntry> {
+    let all = new_entries();
+    if all.len() <= super::templates::FLAT_LIMIT {
+        return all;
+    }
+    vec![ExplorerEntry {
+        action: ExplorerAction::NewMenu,
+        enabled: true,
+    }]
 }
 
 /// What a right-click offers for this row — or for the empty panel, when `path` is absent.
@@ -74,12 +106,7 @@ pub fn menu_entries(
     // Whole groups, so one that has nothing in it takes its separator with it.
     let groups: Vec<Vec<ExplorerEntry>> = match path {
         None => vec![
-            vec![
-                entry(ExplorerAction::NewFile),
-                entry(ExplorerAction::NewFolder),
-                entry(ExplorerAction::NewExcalidraw),
-                entry(ExplorerAction::NewDrawio),
-            ],
+            new_group(),
             vec![paste],
             vec![entry(ExplorerAction::CollapseAll)],
         ],
@@ -109,12 +136,7 @@ pub fn menu_entries(
             // `ExplorerState::target_dir` answers — so a file row offers them too rather than
             // making the user find its folder first.
             match readable {
-                true => vec![
-                    entry(ExplorerAction::NewFile),
-                    entry(ExplorerAction::NewFolder),
-                    entry(ExplorerAction::NewExcalidraw),
-                    entry(ExplorerAction::NewDrawio),
-                ],
+                true => new_group(),
                 false => Vec::new(),
             },
             match readable {

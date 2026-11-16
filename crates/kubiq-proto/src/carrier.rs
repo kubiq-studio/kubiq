@@ -51,6 +51,11 @@ pub const CAP_TOOLS: &str = "tools";
 /// its side for a socket the window accepted on this one.
 pub const CAP_TUNNEL: &str = "tunnel";
 
+/// The capability a drone advertises when it runs the runbooks of the projects it serves
+/// ([`Message::Runbook`]). A drone without it is too old: the window refuses rather than waiting
+/// for an answer that will not come.
+pub const CAP_RUNBOOK: &str = "runbook";
+
 /// What a pump should do with one frame it has just read.
 #[derive(Debug)]
 pub enum Beat {

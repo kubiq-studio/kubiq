@@ -913,6 +913,53 @@ every window, and both carry `project_id`, so a window that does not have the pr
 `ArchifyToolCall` is what the viewer's tab draws as a tool chip and a notice; `rel` is absent for a
 call that touched no diagram. The coordinator never receives either.
 
+## The notebook family
+
+A `.ipynb` the host holds, addressed by `project_id` and the project-relative `path`: one document
+and at most one kernel per path, shared by every window and every agent (`D239`). One variant each
+way carries an enum; the records are in `kubiq-proto/src/notebook.rs`, the model re-exported from
+`kubiq-notebook` and `kubiq-cells`.
+
+| Message | Direction | Payload | Responds with |
+|---|---|---|---|
+| `Notebook` | UI → host | `project_id`, `path`, `request: NotebookRequest` | `NotebookEvent` |
+| `NotebookEvent` | host → UI | `project_id`, `path`, `event: Box<NotebookEvent>` | — |
+
+`NotebookRequest` is `Open { default_policy }`, `Close`, `Edit { rev, ops }`, `Undo`,
+`Save { strip_outputs }`, `ResolveKernels { run_project }` (consent to run the project's own
+interpreters to probe them),
+`StartKernel`, `Execute { run, cell }`, `Interrupt`, `Restart { run_all }`, `Shutdown`,
+`InputReply`, `SetPolicy`, `DecideRun`, `Env`, `Bind`, `Ask`. The `Snapshot` (to `Open`) and
+`Kernels` (to `ResolveKernels`) go to the asker; every other event — `Changed` (cell views by id,
+order, stale ids, origin), `Saved`, `Conflict`, `Kernel`, `Running`, `Done`, `InputRequest`,
+`RunRequested`, `RunDecided`, `Policy`, `Bound`, `EnvDone` — goes to every window. `Failed` answers
+the asker. A project served by a drone is refused: kernels run on the host's own machine.
+`NotebookRunId` is minted by whoever asks for a run.
+
+`QueueDocEvent { project_id, agent_id, event: DocEvent }` (UI → host, and posted by the host's own
+document workers into its inbox) queues a cell document's event for its bound agent on the doc
+queue, delivered with that agent's comment threads (`D207`, `D240`).
+
+## The runbook family
+
+A `*.runbook.md` in a project, addressed by `project_id` and the project-relative `rel`; the file is
+the editor tab's, the host owns its evidence, its runs and its gate (`D241`). One variant each way
+carries an enum; the records are in `kubiq-proto/src/runbook.rs`, the model re-exported from
+`kubiq-runbook`.
+
+| Message | Direction | Payload | Responds with |
+|---|---|---|---|
+| `Runbook` | UI → host | `project_id`, `rel`, `request: RunbookRequest` | `RunbookEvent` |
+| `RunbookEvent` | host → UI | `project_id`, `rel`, `event: Box<RunbookEvent>` | — |
+
+`RunbookRequest` is `Open`, `Run { approvals, options }` (each approval a cell and the command hash
+the person saw), `Stop`, `Skip`, `Override`, `Verdict`, `Dismiss`, `AcceptReadonly`, `Bind`,
+`ReadOutput { cell, attempt, query }` and `Action { action, fields }` (a provider's, `D242`).
+`State { snapshot, bound }`, `Tail` (at most 15 lines a frame) and `Finished` go to every window;
+`Ran` (started and refused cells), `Output`, `ActionDone` and `Refused` answer the asker. A project
+served by a drone is answered by that drone, which advertises `CAP_RUNBOOK` (`D243`). The host's worker posts `QueueDocEvent` for the bound agent when a
+run finishes, a verdict or decision is recorded, a request is resolved or the file changes.
+
 ## The browser family
 
 What the internal browser tab and the `kubiq-browser` MCP server say across the bus. Six variants,

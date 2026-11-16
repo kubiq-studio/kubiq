@@ -1518,6 +1518,8 @@ mod mark;
 mod mission;
 pub use mission::OpenMissionRow;
 mod nav;
+mod notebook;
+mod runbook;
 mod new_agent;
 mod new_mission;
 mod notifications;
@@ -1799,6 +1801,7 @@ pub fn install_key_bindings(cx: &mut App) {
     cx.bind_keys(crate::ui::mdview::search::key_bindings());
     cx.bind_keys(crate::ui::mdview::blockedit::key_bindings());
     cx.bind_keys(crate::ui::archify::paint::key_bindings());
+    cx.bind_keys(crate::ui::cells::keys::key_bindings());
     gpui_terminal::install_key_bindings(cx);
 }
 

@@ -382,6 +382,9 @@ pub struct UiSettings {
     /// The diagram viewer's preferences (quality override, palette, motion, chart theme).
     #[serde(default)]
     pub archify: crate::state::archify::ArchifySettings,
+    /// The cell documents' preferences: notebooks and runbooks (`state::cells`).
+    #[serde(default)]
+    pub cells: crate::state::cells::CellsSettings,
     /// Whether the Tools dialog reads the clipboard when it opens and offers the section the text
     /// on it looks like (`state/devtools.rs`). On by default; the dialog's own Smart section is
     /// where it is switched off.
@@ -446,6 +449,7 @@ impl Default for UiSettings {
             excalidraw_theme: Default::default(),
             drawio_theme: Default::default(),
             archify: Default::default(),
+            cells: Default::default(),
             devtools_clipboard: true,
             experimental: false,
             dev_settings: false,

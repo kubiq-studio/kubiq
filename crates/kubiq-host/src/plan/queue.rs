@@ -67,6 +67,10 @@ pub struct DocQueue {
     /// when every thread is on this same document. Cleared by a delivery spanning several, by the
     /// document being unbound from the agent, and by the agent's conversation ending.
     last_doc: HashMap<AgentId, DocumentHandle>,
+    /// Document events (`kubiq_cells::DocEvent`: a notebook's run finished, a runbook's attempt
+    /// recorded) waiting beside the threads, with the project of the first. Composed when they
+    /// happen, so held as text; delivered in the same one prompt.
+    events: HashMap<AgentId, (ProjectId, Vec<kubiq_cells::DocEvent>)>,
 }
 
 impl DocQueue {
@@ -89,6 +93,11 @@ impl DocQueue {
         }
     }
 
+    /// Add a document event to the agent's single pending entry.
+    pub fn push_event(&mut self, agent: AgentId, project: ProjectId, event: kubiq_cells::DocEvent) {
+        self.events.entry(agent).or_insert_with(|| (project, Vec::new())).1.push(event);
+    }
+
     /// The refs waiting for `agent`, in the order they were queued.
     pub fn pending(&self, agent: AgentId) -> Vec<DocThreadRef> {
         self.pending
@@ -107,11 +116,17 @@ impl DocQueue {
 
     /// Every agent with something waiting.
     pub fn waiting(&self) -> Vec<AgentId> {
-        self.pending.keys().copied().collect()
+        let mut agents: Vec<AgentId> = self.pending.keys().copied().collect();
+        for agent in self.events.keys() {
+            if !agents.contains(agent) {
+                agents.push(*agent);
+            }
+        }
+        agents
     }
 
     pub fn has(&self, agent: AgentId) -> bool {
-        self.pending.contains_key(&agent)
+        self.pending.contains_key(&agent) || self.events.contains_key(&agent)
     }
 
     /// The project of the agent's first waiting thread.
@@ -120,6 +135,7 @@ impl DocQueue {
             .get(&agent)
             .and_then(|threads| threads.first())
             .map(|thread| thread.doc.project_id())
+            .or_else(|| self.events.get(&agent).map(|(project, _)| *project))
     }
 
     /// Drop every thread of `doc` from every agent's entry but `keep`'s, and forget it as their
@@ -159,26 +175,36 @@ impl DocQueue {
         mut view: impl FnMut(&QueuedRef) -> Option<ThreadView>,
         send: impl FnOnce(&str) -> Result<(), E>,
     ) -> Delivery<E> {
-        let Some(refs) = self.pending.get_mut(&agent) else {
-            return Delivery::Nothing;
-        };
         let mut views = Vec::new();
-        refs.retain(|queued| match view(queued) {
-            Some(seen) => {
-                views.push(seen);
-                true
-            }
-            None => false,
-        });
-        if views.is_empty() {
+        if let Some(refs) = self.pending.get_mut(&agent) {
+            refs.retain(|queued| match view(queued) {
+                Some(seen) => {
+                    views.push(seen);
+                    true
+                }
+                None => false,
+            });
+        }
+        let events = self.events.get(&agent).map(|(_, e)| e.as_slice()).unwrap_or(&[]);
+        if views.is_empty() && events.is_empty() {
             self.pending.remove(&agent);
+            self.events.remove(&agent);
             return Delivery::Nothing;
         }
-        let text = compose(&views, self.last_doc.get(&agent));
+        let mut text = if views.is_empty() {
+            String::new()
+        } else {
+            compose(&views, self.last_doc.get(&agent))
+        };
+        text.push_str(&kubiq_cells::compose_events(events));
         if let Err(error) = send(&text) {
             return Delivery::Failed(error);
         }
         self.pending.remove(&agent);
+        self.events.remove(&agent);
+        if views.is_empty() {
+            return Delivery::Sent(text);
+        }
         match single_doc(&views) {
             Some(doc) => {
                 self.last_doc.insert(agent, doc.clone());

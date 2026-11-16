@@ -569,6 +569,12 @@ impl AppState {
         let Some(message) = self.receive_archify(host, message, cx) else {
             return;
         };
+        let Some(message) = self.receive_notebook(message, cx) else {
+            return;
+        };
+        let Some(message) = self.receive_runbook(message, cx) else {
+            return;
+        };
         let Some(message) = self.receive_work(host, message, cx) else {
             return;
         };

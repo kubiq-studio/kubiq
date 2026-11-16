@@ -208,6 +208,12 @@ pub struct Contributions {
     /// registers `rdp`. Handed to the coordinator's `DroneModes` with the hub, before it starts.
     /// `register` substitutes by kind. Unconditional, for the reason `task_providers` is.
     pub drone_endpoints: kubiq_host::drone_modes::Registry,
+    /// The runbook providers (`kubiq_host::runbook::Provider`): an edition's templating and
+    /// history — parameter binding, master/instance, run history, the actions the runbook viewer
+    /// draws. Empty in the base, where a runbook is a scratch run. Handed to the coordinator with
+    /// the other host services. `register` substitutes by id. Unconditional, for the reason
+    /// `task_providers` is.
+    pub runbook_providers: kubiq_host::runbook::Registry,
     /// The settings container, both instances — the application overlay and the project dialog
     /// (`D180`). Seeded with the base's own 15 + 8.
     #[cfg(feature = "ui")]
@@ -264,6 +270,7 @@ impl Default for Contributions {
             task_providers: kubiq_host::tasksrc::Registry::with_defaults(),
             runner_sources: kubiq_host::runners::Registry::with_defaults(),
             drone_endpoints: kubiq_host::drone_modes::Registry::new(),
+            runbook_providers: kubiq_host::runbook::Registry::new(),
             #[cfg(feature = "ui")]
             settings_sections: kubiq::ext::settings::base_registry(),
             #[cfg(feature = "ui")]
@@ -434,7 +441,7 @@ pub fn run(boot: Boot) {
         Some(hub.clone()),
         boot.contributions.drone_endpoints,
     );
-    coordinator::start(
+    coordinator::start_with(
         host,
         root,
         projects,
@@ -444,6 +451,7 @@ pub fn run(boot: Boot) {
         boot.contributions.runner_sources,
         pending,
         drones,
+        boot.contributions.runbook_providers,
     );
 
     // After the coordinator, so a client that attaches in the same breath has something to talk to,

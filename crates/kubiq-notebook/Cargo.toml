@@ -1,0 +1,13 @@
+[package]
+name = "kubiq-notebook"
+version = "0.1.0"
+edition = "2024"
+description = "The notebook engine: the .ipynb model and its Jupyter-style writer, cell operations with undo and staleness, the Python environment resolver's rules, and the Jupyter wire format. A leaf — no Kubiq crate, no GPUI, no I/O."
+publish = false
+
+[dependencies]
+kubiq-cells = { path = "../kubiq-cells" }
+serde = { version = "1.0", features = ["derive"] }
+# The message signature (HMAC-SHA256, written over the digest in `wire.rs`); the version the rest of
+# the workspace already names.
+sha2 = "0.11"

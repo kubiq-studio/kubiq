@@ -5952,6 +5952,96 @@ editor snapshots and compares its own values to know it is dirty. The menu's *Co
 mode…* dialog and other sections' modal editors are not converted yet (`G476`). The two
 containers are new published API: `ext::titlebar` has no base item.
 
+### D239 — A notebook's kernel is spoken to by Kubiq's own Jupyter client, not a library
+
+The host launches a Jupyter kernel from a kernelspec (synthesised for a project interpreter,
+never installed globally) and speaks the messaging protocol 5.3 itself: `kubiq-notebook::wire`
+signs and frames messages (HMAC-SHA256, ZMTP 3.0, NULL mechanism, Kubiq greeting as 3.0 so a
+subscription is a message), and `kubiq-host/src/notebook/` runs one blocking loopback socket per
+channel with a reader thread each. The host owns the `.ipynb` too: read with no size cap, written
+the way its writer wrote it, edited by id-addressed cell operations from windows and agents alike.
+
+**Why:** nteract's `runtimelib`/`jupyter-zmq-client` need `tokio` ≥ 1.54 and `bytes` ≥ 1.12.1,
+newer than the lock pins, and bring an async runtime into a host whose workers are threads; the
+client a notebook needs (DEALER, SUB, REQ; no server side, no CURVE) is a few hundred lines with
+no dependency beyond `sha2`. The IDE's buffer is capped at 2 MiB and a notebook with plots is
+larger, so the document cannot be the tab's.
+
+**Cost:** Kubiq maintains a protocol client: ZMTP 3.1 commands, CURVE and IPC transport are not
+spoken (a kernel needing them does not start). Windows' `JPY_INTERRUPT_EVENT` and Job-object kill
+are not done (`G477`). The viewer is a contributed viewer whose tab still reads the file into a
+buffer it never uses (`G478`).
+
+### D240 — Notebooks and runbooks share one cell layer, not one document type
+
+What both kinds of cell document decide the same way lives once: the `kubiq-cells` leaf (origin,
+run status and state, staleness marks, `CellDocument`, the `RunGate` decision, `DocEvent`), the
+host's `cells.rs` executor shape, the doc queue carrying `DocEvent`s for a document's bound agent
+(`QueueDocEvent`, beside `D207`'s comments), both MCP servers in `ALWAYS_MCPS` (binding decides
+who is told, never who may act), and `ui/cells/` (zoom dialog, output blocks, bound-agent control,
+the `CellsView` keymap). Each kind keeps its own document model, worker, message pair and viewer.
+
+**Why:** the user's requirement that the two features share one code path; and the two
+proposals' own analysis that their state models must stay opposite (a kernel's hidden state, a
+runbook's evidence log). A shared document type or executor would have to erase that difference —
+the runbook runs cells as parallel processes with no session, and declined `CellExecutor` — so
+only what is genuinely the same is shared.
+
+**Cost:** two message pairs and two workers where one family could have carried the common
+traffic; a third kind will copy their shape. The shared traits are small and may grow a second
+caller's needs.
+
+### D241 — A runbook's evidence is the truth, its output blocks a projection, and a run binds the command's hash
+
+A runbook (`*.runbook.md`, `kubiq-runbook`) records every attempt, verdict, skip and override as
+append-only JSON lines with its redacted log in the host's local project data
+(`ProjectData::runbooks()`); the `output` blocks in the document are regenerated from that record by
+the host, idempotently, whoever else touched them. Step states are derived on every read from the
+text, the bindings and the record, never stored. A run carries the hash of the command a person
+saw; a changed command or an unsaved buffer refuses it. Each cell runs as a fresh process in its
+own process group under the interpreter its fence names for the host's OS; secrets are masked
+before any byte is written, streamed or kept.
+
+**Why:** the proposal's audit trail must survive any edit an agent or a person makes to the file,
+and an approval must mean exactly the text approved. Deriving states keeps one source of truth.
+
+**Cost:** the document can lag its evidence while the editor holds unsaved changes (the next
+projection restores it); evidence is per machine, so a clone elsewhere keeps the excerpts but not
+the logs.
+
+### D242 — Runbook templating and history are a provider an edition registers; `*.runbook.md` is claimed by suffix
+
+The base runs a runbook as a scratch run bound to its literal defaults. Binding parameters
+(defaults that name other parameters, secrets by reference), locking a document, being told every
+record, and offering actions (Start run, Runs, Close run, Compare, Promote) are a
+`kubiq_host::runbook::Provider` on `Contributions::runbook_providers` — a host-service registry like
+`task_providers` — and the viewer draws a provider's actions and forms from the snapshot, so an
+edition needs no interface code. `ext::viewer::Claim::Specific` lets a contributed viewer claim a
+compound suffix over the built-in viewer of its extension. Built-in MCP servers answered by a host
+service are `mcp::ServiceReach` entries handed to the listener, each call on its own thread.
+
+**Why:** the user's placement — the base owns the document and its execution, Studio its templating
+and history — with no base code naming Studio.
+
+**Cost:** an action's form is limited to choice and text fields; a provider's report is markdown.
+
+### D243 — A drone runs the runbooks of the projects it serves; a cell reaches another machine over the host's ssh
+
+A runbook runs where its project is served. A drone answers the runbook family with the same
+worker the coordinator uses (its lean `kubiq-host` carries `runbook` ungated), so cells are spawned,
+captured, masked and logged on the drone and only messages cross the carrier; the drone advertises
+`CAP_RUNBOOK` and a window says a drone without it is too old. Within any project, a cell's
+`target=ssh:<alias>[@windows]` wraps the host's `ssh` with the script on stdin and the interpreter
+chosen for the far OS; `drone:<id>` on a cell is refused in favour of opening the project from the
+drone. No new exec message was needed.
+
+**Why:** execution must happen where the target is, never assumed local to the window, and the
+window's routing already sends a drone-served project's messages to its drone (`D132`).
+
+**Cost:** a drone keeps its evidence under its scratch root (a restarted drone forgets it), runs no
+edition provider (no templating or history for a drone's runbooks) and queues no bound-agent
+events; an ssh target's cwd is the far home directory.
+
 ## Related docs
 
 - [`architecture.md`](./architecture.md) — the rules D3 to D6 produce

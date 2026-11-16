@@ -313,6 +313,11 @@ pub enum ExplorerAction {
     /// A new file seeded as `diagram.drawio` and locked to that extension, under the same rule
     /// as [`ExplorerAction::NewExcalidraw`].
     NewDrawio,
+    /// A typed document from [`templates::templates`], by its index there.
+    NewTemplate(usize),
+    /// "New ▸": the menu's second stage listing every *New* entry, when there are more than
+    /// [`templates::FLAT_LIMIT`] of them.
+    NewMenu,
     /// Remember the row, so a later Paste knows what to copy. Nothing crosses the bus for it; on
     /// a local host the file goes on the platform's clipboard too, to paste into its file manager.
     Copy,
@@ -367,6 +372,8 @@ impl ExplorerAction {
             ExplorerAction::NewFolder => "New folder",
             ExplorerAction::NewExcalidraw => "New Excalidraw",
             ExplorerAction::NewDrawio => "New draw.io",
+            ExplorerAction::NewTemplate(n) => templates::templates().get(n).map_or("New", |t| t.label),
+            ExplorerAction::NewMenu => "New \u{25b8}",
             ExplorerAction::Copy => "Copy",
             ExplorerAction::Cut => "Cut",
             ExplorerAction::Paste => "Paste",
@@ -442,6 +449,9 @@ pub struct ExplorerMenu {
     /// instead of its gestures — a second stage of the same menu, at the same spot, rather than a
     /// cascade.
     pub open_with: bool,
+    /// Whether "New ▸" was picked: the menu then lists every *New* entry, the same second-stage
+    /// shape as [`Self::open_with`].
+    pub new_menu: bool,
     pub x: f32,
     pub y: f32,
 }
@@ -449,6 +459,9 @@ pub struct ExplorerMenu {
 impl ExplorerMenu {
     /// What this click offers, in the order the menu draws it.
     pub fn entries(&self) -> Vec<ExplorerEntry> {
+        if self.new_menu {
+            return menu::new_entries();
+        }
         if self.open_with
             && let Some(path) = self.path.as_deref()
         {
@@ -686,6 +699,7 @@ pub struct FilterSnap {
 mod filter;
 mod keys;
 mod menu;
+pub mod templates;
 mod rows;
 mod tree;
 

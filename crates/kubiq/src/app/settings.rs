@@ -587,6 +587,22 @@ impl AppState {
         cx.notify();
     }
 
+    /// Change the cell documents' preferences (the *Cells* section) and keep them.
+    pub fn update_cells_settings(
+        &mut self,
+        change: impl FnOnce(&mut crate::state::cells::CellsSettings),
+        cx: &mut Context<Self>,
+    ) {
+        change(&mut self.workbench.settings.ui.cells);
+        self.remember_settings();
+        cx.notify();
+    }
+
+    /// The cell documents' preferences as they stand.
+    pub fn cells_settings(&self) -> &crate::state::cells::CellsSettings {
+        &self.workbench.settings.ui.cells
+    }
+
     pub fn toggle_vim_mode(&mut self, cx: &mut Context<Self>) {
         self.workbench.settings.ui.vim_mode = !self.workbench.settings.ui.vim_mode;
         // Leaving a half-typed command or a Normal-mode caret behind would mean the next time vim

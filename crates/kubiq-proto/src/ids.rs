@@ -407,3 +407,11 @@ ulid_id! {
     /// stream names it, and a frame naming a stream the far end does not hold is dropped.
     TunnelStreamId
 }
+
+ulid_id! {
+    /// One run of one notebook cell, from the `Execute` (or the agent's `run_cells`) that asked
+    /// for it to the `ExecuteDone` that ends it; also names an agent's run waiting for a person's
+    /// yes. Minted by whoever asked — the **interface** for a click, the **host** for an agent —
+    /// [`SearchId`]'s discipline: an answer for a run nobody holds is dropped.
+    NotebookRunId
+}

@@ -596,6 +596,13 @@ impl ProjectData {
     pub fn remote_scratch(&self) -> PathBuf {
         self.local().join("remote")
     }
+
+    /// The runbooks' evidence and logs, one directory per document (`crate::runbook`). This
+    /// machine's record of what it ran; never committed, because a log is a redacted capture of a
+    /// production system, not a project file.
+    pub fn runbooks(&self) -> PathBuf {
+        self.local().join("runbooks")
+    }
 }
 
 /// What [`migrate`] moves, and where: the flat shape that came before, to the grouped one.

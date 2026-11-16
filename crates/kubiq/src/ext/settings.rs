@@ -201,6 +201,8 @@ pub fn base_registry() -> Registry<SettingsSectionSpec> {
     crate::ui::browser_settings::settings_sections(&mut reg);
     // Archify's "Diagrams" page, registered the same way.
     crate::ui::archify::settings::register(&mut reg);
+    // The cell documents' "Cells" page (notebooks, runbooks).
+    crate::ui::cells::settings::register(&mut reg);
     reg
 }
 

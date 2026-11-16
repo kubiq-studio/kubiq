@@ -827,6 +827,18 @@ impl Bus {
         Ok(conn.id)
     }
 
+    /// Whether the drone serving `project_id` does not advertise `cap` — a drone too old for a
+    /// family. This machine and a full remote host never lack one (a drone always names `files`).
+    pub fn serving_drone_lacks(&self, project_id: ProjectId, cap: &str) -> bool {
+        let HostRef::Remote(id) = self.project_host(project_id) else {
+            return false;
+        };
+        self.remotes
+            .iter()
+            .find(|remote| remote.id == id)
+            .is_some_and(|remote| !remote.caps.is_empty() && !remote.caps.iter().any(|c| c == cap))
+    }
+
     /// The saved id of the remote serving `project_id` right now, for a project whose row is
     /// this machine's — a `runs_on` project a drone serves. `None` for one served here, or by a
     /// connection dialled from no saved entry.
