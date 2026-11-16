@@ -168,8 +168,19 @@ pub fn render(
             )
             .into_any_element(),
     });
+    // Set to browse via a remote whose proxy did not start: no webview at all, so nothing leaves
+    // from this machine instead ([`AppState::settle_browser`]).
+    let stalled = tab
+        .via_remote
+        .as_ref()
+        .is_some_and(|via| via.port.is_none());
     let body = page.unwrap_or_else(|| {
         let notice = match web_view::SUPPORTED {
+            true if stalled => {
+                "Browse via remote: the proxy is not running, so this tab loads nothing. \
+                 Use \u{201c}Restart remote proxy\u{201d} in the Remote menu, or turn \
+                 \u{201c}Browse via remote\u{201d} off."
+            }
             true => "Starting the browser\u{2026}",
             false => "The internal browser is not available on this platform.",
         };
@@ -276,6 +287,8 @@ enum More {
     /// Lay the page out this wide; `None` fills the tab.
     Viewport(Option<u32>),
     CustomWidth,
+    /// Route the tab through the current project's remote, or back.
+    ViaRemote,
 }
 
 /// The bar's `⋯`, in the viewer header's idiom: an icon button that puts a context menu down where
@@ -364,6 +377,17 @@ fn more(app: &AppState, tab: &BrowserTab, cx: &mut Context<AppState>) -> AnyElem
             custom_row = custom_row.detail(format!("{width}px \u{2713}"));
         }
         rows.push((custom_row, Some(More::CustomWidth)));
+        // A tab already proxied keeps the row, so it can be turned off after a project switch.
+        if tab.via_remote.is_some() || app.browser_remote(cx).is_some() {
+            rows.push((ContextItem::separator(), None));
+            rows.push((
+                mark(
+                    ContextItem::new("Browse via remote"),
+                    tab.via_remote.is_some(),
+                ),
+                Some(More::ViaRemote),
+            ));
+        }
 
         let (items, actions): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
         let view = cx.entity();
@@ -391,6 +415,7 @@ fn more(app: &AppState, tab: &BrowserTab, cx: &mut Context<AppState>) -> AnyElem
                         this.set_browser_viewport(&target, width, cx);
                     }
                     Some(More::CustomWidth) => this.ask_browser_width(&target, window, cx),
+                    Some(More::ViaRemote) => this.toggle_browser_via_remote(&target, cx),
                     None => {}
                 }
             }),

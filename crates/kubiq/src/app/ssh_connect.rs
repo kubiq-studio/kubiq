@@ -1080,6 +1080,7 @@ mod tests {
             auth,
             initial_command: None,
             terminal_enabled: false,
+            features: Default::default(),
         }
     }
 

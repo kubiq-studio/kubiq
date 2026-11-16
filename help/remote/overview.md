@@ -38,7 +38,7 @@ hosts**.
   project** chevron beside **Add a project**, or **Open remote project…** when none is saved. See
   [The title bar](workbench-titlebar).
 - Choose which host new panes and projects go to by default, manage SSH profiles and stop drones
-  that outlive a connection: [Hosts, SSH and drones](settings-hosts).
+  that outlive a connection: [Remote settings](settings-hosts).
 
 ## When something goes wrong
 

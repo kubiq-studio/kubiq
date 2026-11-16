@@ -14,8 +14,10 @@ pub mod menu;
 pub mod origin;
 pub mod rail;
 mod registry;
+pub mod remote;
 pub mod runner;
 pub mod settings;
+pub mod titlebar;
 pub mod viewer;
 
 pub use id::{SlotId, current_prefix};

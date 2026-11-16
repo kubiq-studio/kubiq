@@ -65,10 +65,36 @@ message in `crates/kubiq-proto/src/messages.rs`. `just ui` enforces it.
   exactly one rail mode stays out of it — brought inline by that mode's own render function instead
   of given a `PanelKind`, so it can never be dragged loose or left on screen after the mode
   changes. `PanelKind::Browser` is the one editor tab that is a raw webview (`ui/browser.rs`); a webview is a native view over the window, so an overlay that must cover it goes through `ui::shell::overlaid`.
-- **A list row's verbs are `kit::row_action`, never text buttons.** `RowAction::{Test, StopTest, Terminal,
-  Edit, Rename, Clone, Delete}` fixes icon and tooltip; `.tip("Forget")` rewords a `Delete`,
-  `.enabled(false)` greys one out. Order: Test/StopTest · Terminal · Edit · Rename · Clone · Delete. A
-  section's `Add …` and a one-off page action stay `ghost_button`/`primary_button`.
+- **A list row's verbs are `kit::row_action`, never text buttons.** `RowAction` fixes icon and
+  tooltip — `Connect`, `Disconnect`, `Show`, `Hide`, `Start`, `Stop`, `Refresh`, `Check`, `Test`,
+  `StopTest`, `Terminal`, `Copy`, `Forget`, `Edit`, `Rename`, `Clone`, `Delete`; `.tip(..)` rewords
+  one, `.enabled(false)` greys one out. Order: lifecycle (Connect/Disconnect · Show/Hide ·
+  Start/Stop · Refresh · Check) · Test/StopTest · Terminal · Copy · Forget · Edit · Rename · Clone ·
+  Delete. A list's Add is an icon+label `primary_button` at the right of its `list_header`.
+- **A settings page that manages records is a list page with a drill-in editor** (see below). Never
+  an editor inline in a list, never a modal over the settings overlay.
+
+## Settings pages: tabs, lists, drill-in editors
+
+Furniture in `ui/kit/settings.rs`; the owning description is `_docs/features/workbench.md`
+("A settings page that manages records…"); the reference implementation is the Remote section
+(`ui::settings::remote_section`, `ext::remote`).
+
+| Use | When |
+|---|---|
+| `tab_strip` under the section, tab on the settings state | the section splits into peers visited one at a time (Remote: Remotes / Host mode / Settings) |
+| `heading` + `setting_row`s | plain settings read together — one column, no tabs |
+| `list_header` + `list_row`s | records: title, count, Add at the right; rows one line, `SETTINGS_LIST_ROW` high, verbs icon-only |
+| `check_label` on/under a row | a one-click switch needing no other input (a feature flag) |
+| `detail_page` + `form_group`s + `detail_footer` | anything that needs typing: Add or Edit drills in, replacing the tab content (strip hidden) |
+| `delete_control`, `inline_confirm` | Delete (footer, left) and Back-with-changes — answered in place, never a modal |
+
+Recipe for an editor: on open call `AppState::detail_begin(values)` with the form's flattened
+values; Back (and Escape) calls `detail_may_leave(values)` and closes only on `true` (otherwise the
+`settings.detail.confirm_back` banner is up — draw `inline_confirm` with Discard → close, Keep →
+`detail_keep`); the footer's Delete uses `detail_ask_delete` / `settings.detail.confirm_delete`.
+Delete belongs in the editor, not on the row, wherever a row has one. In the Remote section a block
+declares `detail` beside `render`; a `Some` replaces the whole tab.
 
 ## GPUI gotchas that bite
 

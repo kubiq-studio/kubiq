@@ -152,6 +152,8 @@ pub fn apply_fields(specs: &mut [TunnelSpec], fields: &[TunnelFields]) -> Result
                     .map(String::from)
                     .collect();
             }
+            // Each request names its own destination.
+            TunnelKind::Proxy | TunnelKind::Unknown => {}
         }
     }
     Ok(())
@@ -162,10 +164,11 @@ pub fn check_tunnels(tunnels: &[TunnelSpec]) -> Result<(), String> {
     let mut ports = std::collections::HashSet::new();
     for (n, t) in tunnels.iter().enumerate() {
         let n = n + 1;
-        if t.local_port == 0 || t.port == 0 {
+        let proxy = t.kind == TunnelKind::Proxy;
+        if t.local_port == 0 || (t.port == 0 && !proxy) {
             return Err(format!("Tunnel {n}: a port is outside 1-65535"));
         }
-        if t.host.trim().is_empty() {
+        if t.host.trim().is_empty() && !proxy {
             return Err(format!("Tunnel {n} needs a remote host"));
         }
         if t.enabled && !ports.insert(t.local_port) {
@@ -191,7 +194,8 @@ pub fn new_spec() -> TunnelSpec {
         enabled: true,
         rewrite_host: true,
         host_rewrite: None,
-        rewrite_content: false,
+        // On for a fresh spec: it only acts once the kind is HTTP, and then on textual types.
+        rewrite_content: true,
         content_types: TunnelSpec::default_content_types(),
     }
 }
@@ -284,10 +288,15 @@ pub fn tunnel_row(
         .gap_2()
         .child(kind("TCP", TunnelKind::Tcp))
         .child(kind("HTTP", TunnelKind::Http))
+        .child(kind("Proxy", TunnelKind::Proxy))
         .child(sized_field(&inputs.local_port, 80., window, cx))
         .child(small("\u{2192}"));
     first = if http {
         first.child(sized_field(&inputs.url, 260., window, cx))
+    } else if spec.kind == TunnelKind::Proxy {
+        first.child(small(
+            "any host the drone may dial (HTTP/HTTPS proxy) \u{2014} no auth: any local program can use it",
+        ))
     } else {
         first
             .child(sized_field(&inputs.host, 160., window, cx))
@@ -327,7 +336,7 @@ pub fn tunnel_row(
         second = second.child(toggle(
             "content",
             spec.rewrite_content,
-            "Rewrite host in contents (experimental)",
+            "Rewrite host in text contents",
             TunnelEdit::RewriteContent,
         ));
         if https {
@@ -366,6 +375,8 @@ pub fn status_lines(specs: &[TunnelSpec], live: &Live) -> Vec<AnyElement> {
             .map(|spec| match spec.kind {
                 TunnelKind::Tcp => format!("{}:{}", spec.host, spec.port),
                 TunnelKind::Http => spec.remote_url(),
+                TunnelKind::Proxy => "proxy".to_string(),
+                TunnelKind::Unknown => "unknown kind".to_string(),
             })
             .unwrap_or_default();
         let state = match (s.listening, live.linked) {

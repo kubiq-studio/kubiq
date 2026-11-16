@@ -2418,6 +2418,7 @@ fn a_cloned_ssh_profile_gets_a_new_id_and_no_secret() {
         },
         initial_command: Some("tmux a".into()),
         terminal_enabled: true,
+        features: Default::default(),
     };
     let copy = original.cloned();
     assert_ne!(copy.id, original.id);

@@ -223,15 +223,24 @@ fn ssh_body(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> 
         .read(cx)
         .focus_handle(cx)
         .is_focused(window);
-    let profiles = &app.workbench.settings.host.ssh_profiles;
+    // Only the profiles whose Remote drone switch is on carry a drone.
+    let profiles: Vec<_> = app
+        .workbench
+        .settings
+        .host
+        .ssh_profiles
+        .iter()
+        .filter(|profile| profile.features.drone)
+        .collect();
 
     let mut rows = div().flex().flex_col().gap_1();
     if profiles.is_empty() {
         rows = rows.child(modal_note(
-            "No SSH profiles yet. Add one in Settings \u{203a} SSH profiles, then come back here.",
+            "No SSH profile offers a remote drone. Add one, or tick its Remote drone, in \
+             Settings \u{203a} Remote, then come back here.",
         ));
     }
-    for profile in profiles {
+    for profile in profiles.iter().copied() {
         let id = profile.id;
         let method = match &profile.auth {
             SshAuth::Agent => "agent".to_string(),
@@ -320,7 +329,7 @@ fn ssh_body(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> 
                     "Lifetime",
                     "Attached ends with this session. Session survives a dropped link, not \
                      Kubiq quitting. Managed survives both, until stopped from Settings \u{203a} \
-                     Drones.",
+                     Remote.",
                 ))
                 .child(
                     div()

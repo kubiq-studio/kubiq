@@ -2206,6 +2206,7 @@ fn an_ssh_secret_is_refused_for_a_profile_that_holds_none() {
             auth: SshAuth::Agent,
             initial_command: None,
             terminal_enabled: false,
+            features: Default::default(),
         }],
         ..HostSettings::default()
     };

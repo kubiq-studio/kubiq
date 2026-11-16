@@ -120,6 +120,9 @@ pub struct RemoteConnectState {
     /// carrier's `linger_secs`. `None` is the preset's own. Only meaningful for
     /// [`DronePreset::Session`], the one preset whose linger is a finite wait.
     pub linger_secs: Option<u64>,
+    /// The preset and linger before picking a Persistent profile moved them, so picking a
+    /// non-persistent profile next puts them back. Cleared once the user sets either by hand.
+    pub before_persistent: Option<(DronePreset, Option<u64>)>,
     /// The socket path, in [`ConnectMode::Unix`]. Shown, never edited.
     pub unix_path: String,
     /// The last dial was refused because the host presented another key than the one it is
@@ -148,6 +151,7 @@ impl Default for RemoteConnectState {
             profile: None,
             preset: DronePreset::Attached,
             linger_secs: None,
+            before_persistent: None,
             unix_path: String::new(),
             pin_offer: None,
         }

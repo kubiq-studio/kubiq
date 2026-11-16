@@ -1342,7 +1342,14 @@ impl AppState {
             // settings page's modals, so Escape takes them first.
             self.close_remove_ssh_profile(cx);
         } else if settings.ssh_form.is_some() {
-            self.close_ssh_form(window, cx);
+            // The drill-in editor's Back: asks inline first when something was typed.
+            self.ssh_detail_back(window, cx);
+        } else if settings.open && crate::ui::kit::detail_back().is_some() {
+            // Any other drill-in page on screen (tunnels, drone-mode endpoint, an edition's
+            // editor): its own Back, so a dirty editor asks before the page closes.
+            if let Some(back) = crate::ui::kit::detail_back() {
+                back(window, cx);
+            }
         } else if settings.ai_remove.is_some() {
             // The three provider layers, in reverse paint order — `ui::shell` draws the form,
             // then the test, then the removal question, so Escape takes them the other way up.

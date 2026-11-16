@@ -1,0 +1,4 @@
+[env]
+# The macOS floor, matching `LSMinimumSystemVersion` in the bundle's Info.plist: wry's `mac-proxy`
+# links macOS 14 symbols. Set for every target; only Apple toolchains read it.
+MACOSX_DEPLOYMENT_TARGET = "14.0"

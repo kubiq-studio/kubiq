@@ -199,6 +199,8 @@ impl AppState {
             body,
             error: None,
         });
+        let values = self.drone_edit_values(cx);
+        self.detail_begin(values);
         cx.notify();
     }
 
@@ -272,7 +274,38 @@ impl AppState {
             body,
             error: None,
         });
+        let values = self.drone_edit_values(cx);
+        self.detail_begin(values);
         cx.notify();
+    }
+
+    /// Everything the open form holds, flattened — what the settings drill-in compares on Back.
+    pub fn drone_edit_values(&self, cx: &gpui::App) -> Vec<String> {
+        let Some(edit) = &self.workbench.drone_modes.edit else {
+            return Vec::new();
+        };
+        let mut values = vec![edit.name.read(cx).value().to_string()];
+        match &edit.body {
+            EditBody::Http {
+                bind,
+                bind_custom,
+                port,
+                tls_cert,
+                tls_key,
+                tunnel_allow,
+                ..
+            } => {
+                values.push(format!("{bind:?}"));
+                for input in [bind_custom, port, tls_cert, tls_key, tunnel_allow] {
+                    values.push(input.read(cx).value().to_string());
+                }
+            }
+            EditBody::Ext { config, inputs, .. } => {
+                values.push(Value::Object(config.clone()).to_string());
+                values.extend(inputs.iter().map(|(_, input)| input.value(cx)));
+            }
+        }
+        values
     }
 
     /// Back to the list, dropping the form.

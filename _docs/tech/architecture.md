@@ -202,7 +202,7 @@ losing one run it: the socket ending under `route_host`, which also marks the ad
 attempt, and the Disconnect button, which does not. The surface *around* a live remote — that
 button, a saved-hosts list and a dropdown to tell two attached hosts apart, and switching
 `Bus::active` without moving a pane or a project the window has routed to a different host — is
-application settings' Hosts section, which the workbench document describes; what it still
+the saved-hosts block of the application settings' Remote section, which the workbench document describes; what it still
 leaves undone is named in `../backlog.md` (`G169`).
 
 **Remote harnesses.** A harness running on another host or in a container is structurally the same

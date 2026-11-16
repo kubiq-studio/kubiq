@@ -784,6 +784,7 @@ impl AppState {
             profile,
             preset,
             linger_secs,
+            before_persistent: None,
             unix_path,
             pin_offer: None,
         });
@@ -804,6 +805,7 @@ impl AppState {
     pub fn set_remote_preset(&mut self, preset: DronePreset, cx: &mut Context<Self>) {
         if let Some(state) = &mut self.workbench.remote_connect {
             state.preset = preset;
+            state.before_persistent = None;
         }
         cx.notify();
     }
@@ -813,15 +815,39 @@ impl AppState {
     pub fn set_remote_linger(&mut self, linger_secs: Option<u64>, cx: &mut Context<Self>) {
         if let Some(state) = &mut self.workbench.remote_connect {
             state.linger_secs = linger_secs;
+            state.before_persistent = None;
         }
         cx.notify();
     }
 
     /// Pick which SSH profile the drone is reached with. Only meaningful in
     /// [`ConnectMode::Ssh`]; kept on the state regardless, like the trust flag above.
+    ///
+    /// A profile marked Persistent moves the lifetime from Attached to Session with the profile's
+    /// own idle timeout — a starting point the pills below still change. Picking a
+    /// non-persistent profile after that restores what the lifetime was before the switch.
     pub fn set_remote_profile(&mut self, profile: SshProfileId, cx: &mut Context<Self>) {
+        let features = self
+            .workbench
+            .settings
+            .ssh_profile(profile)
+            .map(|held| held.features.clone())
+            .unwrap_or_default();
         if let Some(state) = &mut self.workbench.remote_connect {
             state.profile = Some(profile);
+            if features.persistent {
+                if state.preset == DronePreset::Attached {
+                    state.before_persistent = Some((state.preset, state.linger_secs));
+                    state.preset = DronePreset::Session;
+                    state.linger_secs = features.linger_secs;
+                } else if state.before_persistent.is_some() {
+                    // Still the auto-switch: a second persistent profile only moves the linger.
+                    state.linger_secs = features.linger_secs;
+                }
+            } else if let Some((preset, linger_secs)) = state.before_persistent.take() {
+                state.preset = preset;
+                state.linger_secs = linger_secs;
+            }
         }
         cx.notify();
     }

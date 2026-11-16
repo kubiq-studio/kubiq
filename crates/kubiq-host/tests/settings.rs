@@ -457,5 +457,6 @@ fn key_profile(name: &str) -> SshProfile {
         },
         initial_command: None,
         terminal_enabled: false,
+        features: Default::default(),
     }
 }

@@ -86,6 +86,13 @@ pub fn global() -> &'static Registry {
     &GLOBAL
 }
 
+/// The key a carrier that dials a saved remote host's tunnels itself (an embedder's, not the
+/// window's own SSH or socket dial) links them under, so a window can find that link by the
+/// host's save id alone — the embedded browser's proxy does.
+pub fn saved_key(save_id: &str) -> String {
+    format!("saved:{save_id}")
+}
+
 /// Stop a manager off the caller's thread: [`TunnelManager::stop`] joins its accept loops.
 fn drop_later(entries: Vec<Entry>) {
     if entries.is_empty() {
@@ -257,6 +264,40 @@ impl Registry {
             inner.entries.remove(key)
         };
         drop_later(old.into_iter().collect());
+    }
+
+    /// `key`'s link, while it is attached and alive.
+    pub fn mux(&self, key: &str) -> Option<Mux> {
+        self.inner.lock().entries.get(key).and_then(|e| e.manager.mux())
+    }
+
+    /// Listen for `specs` under `key` without a link of their own: each connection rides the
+    /// first of `parents` whose link is up then ([`TunnelManager::follow`]). The embedded
+    /// browser's proxy uses it to ride whatever carrier links a saved host. The same specs again
+    /// keep the listeners; others replace them. Dropped, a follower leaves its parent's link up.
+    pub fn follow(&'static self, key: String, specs: Vec<TunnelSpec>, parents: Vec<String>) {
+        let old = {
+            let mut inner = self.inner.lock();
+            if inner.entries.get(&key).is_some_and(|e| e.specs == specs) {
+                return;
+            }
+            inner.bump(&key);
+            inner.errors.remove(&key);
+            inner.entries.remove(&key)
+        };
+        // Stopped here, not later: the new listeners may want the same port.
+        drop(old);
+        let source: crate::local::Source =
+            Arc::new(move || parents.iter().find_map(|parent| self.mux(parent)));
+        let manager = TunnelManager::follow(&specs, source);
+        self.inner.lock().entries.insert(
+            key,
+            Entry {
+                specs,
+                rate: None,
+                manager,
+            },
+        );
     }
 
     /// The carrier's link went down: the listeners stay, refusing, until the next link, and a

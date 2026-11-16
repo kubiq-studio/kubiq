@@ -18,7 +18,7 @@ You can sign in to the machine with SSH, from this machine, with a key, an agent
 
 ## Steps
 
-1. Tell Kubiq how to reach the machine. Open **Settings** in the [title bar](workbench-titlebar), pick **SSH profiles**, and press **Add profile…**. Give it a **Name** such as `build box`, pick a **Method** (**Agent**, **Key file**, **Password** or **ssh config alias**), and fill in **Host**, **Port** and **User**. A port left empty means 22. Press **Save**.
+1. Tell Kubiq how to reach the machine. Open **Settings** in the [title bar](workbench-titlebar), pick **Remote**, and press **Add** beside **SSH profiles**. Give it a **Name** such as `build box`, pick a **Method** (**Agent**, **Key file**, **Password** or **ssh config alias**), and fill in **Host**, **Port** and **User**. A port left empty means 22. Press **Save**.
 
 ![The Add SSH profile form with the name, the four sign-in methods, and the host, port and user fields](../img/guides/remote-machine-2.png)
 
@@ -37,5 +37,5 @@ For a machine already running Kubiq's own server, choose **Kubiq host** in step 
 ## What next
 
 - [Connecting to a host](remote-connect), for the **Kubiq host** form, https and certificates.
-- [Hosts, SSH and drones](settings-hosts), for saved hosts, SSH secrets and stopping drones.
+- [Remote settings](settings-hosts), for saved hosts, SSH secrets and stopping drones.
 - [Remote hosts](remote-overview), for the chips and what each button does.

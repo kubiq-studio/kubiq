@@ -247,6 +247,15 @@ pub struct Contributions {
     /// the file stays the IDE's to read, watch and save. See `kubiq::ext::viewer`.
     #[cfg(feature = "ui")]
     pub viewers: kubiq::ext::Registry<kubiq::ext::viewer::ViewerSpec>,
+    /// The application settings' Remote section, per tab — Remotes, Host mode, Settings. Seeded
+    /// with the base's own blocks (saved hosts, SSH profiles, drones, drone modes, drone list); an
+    /// edition adds its own connection types. See `kubiq::ext::remote`.
+    #[cfg(feature = "ui")]
+    pub remote_blocks: kubiq::ext::Registry<kubiq::ext::remote::RemoteBlockSpec>,
+    /// Controls an edition adds to the titlebar's left group, after the remote-host button. Empty
+    /// in the base. See `kubiq::ext::titlebar`.
+    #[cfg(feature = "ui")]
+    pub titlebar_items: kubiq::ext::Registry<kubiq::ext::titlebar::TitlebarItemSpec>,
 }
 
 impl Default for Contributions {
@@ -269,6 +278,10 @@ impl Default for Contributions {
             origin_carriers: kubiq::ext::origin::base_registry(),
             #[cfg(feature = "ui")]
             viewers: kubiq::ext::viewer::base_registry(),
+            #[cfg(feature = "ui")]
+            remote_blocks: kubiq::ext::remote::base_registry(),
+            #[cfg(feature = "ui")]
+            titlebar_items: kubiq::ext::titlebar::base_registry(),
         }
     }
 }
@@ -511,6 +524,8 @@ pub fn run(boot: Boot) {
         kubiq::ext::drone::install(boot.contributions.drone_kinds);
         kubiq::ext::origin::install(boot.contributions.origin_carriers);
         kubiq::ext::viewer::install(boot.contributions.viewers);
+        kubiq::ext::remote::install(boot.contributions.remote_blocks);
+        kubiq::ext::titlebar::install(boot.contributions.titlebar_items);
         window(hub, paths, listener);
     }
 }

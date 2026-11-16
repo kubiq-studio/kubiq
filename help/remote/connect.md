@@ -31,7 +31,7 @@ running as a host, or **Drone over ssh** for any machine you can sign in to with
 
 ## What you can do here
 
-- Add the SSH profile the dialog asks for: [Hosts, SSH and drones](settings-hosts).
+- Add the SSH profile the dialog asks for: [Remote settings](settings-hosts).
 - See and manage the hosts you have reached: [Remote hosts](remote-overview).
 - Work end to end on another machine: [Work on a remote machine](guides-remote-machine).
 
@@ -39,7 +39,7 @@ running as a host, or **Drone over ssh** for any machine you can sign in to with
 
 - **The dialog says Not connected.** Read the reason it gives, correct the field and press **Try
   again**; **Close** abandons it.
-- **No SSH profiles listed.** Add one in **Settings**, then **SSH profiles**, then come back.
+- **No SSH profiles listed.** Add one in **Settings**, then **Remote**, then come back; a profile whose **Remote drone** box is unticked is not listed.
 - **A drone keeps running after you quit.** That is what **Managed** does; stop it under
   **Settings**, then **Drones**.
 - **https refuses a certificate.** Tick **Trust certificate** only for a host you control.

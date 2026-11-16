@@ -210,7 +210,10 @@ default, at least one required — and `channel` (default `nightly`); a tag push
 `stable` and `beta` must run on a matching tag ref or the `meta` job fails. The version reaches the build as
 `KUBIQ_VERSION`, with `KUBIQ_CHANNEL` and `KUBIQ_UPDATE_PUBKEY` (the `UPDATE_PUBLIC_KEY` variable) read by
 the app through `option_env!`; `just bundle` stamps `CFBundleShortVersionString` (the `X.Y.Z` core) and
-`CFBundleVersion` (the full string) into the `Info.plist` copy.
+`CFBundleVersion` (the full string) into the `Info.plist` copy. The macOS floor is 14.0 in two
+places that must agree: `LSMinimumSystemVersion` in `_tools/Info.plist`, and
+`MACOSX_DEPLOYMENT_TARGET` under `[env]` in `.cargo/config.toml` (here and at the Studio root), so
+the compiled code targets what the bundle declares — wry's `mac-proxy` needs macOS 14 symbols.
 
 | Platform | Artifacts | Built by |
 |---|---|---|

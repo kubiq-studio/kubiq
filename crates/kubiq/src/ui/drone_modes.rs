@@ -18,8 +18,9 @@ use crate::ext::drone::{DroneField, DroneFieldInput, DroneKindSpec};
 use crate::state::drone::{BindChoice, DroneEdit, EditBody, ExtBox};
 use crate::theme::{self, Family, Role};
 use crate::ui::kit::{
-    RowAction, badge, check_box, elided, field, ghost_button, label_block, modal_note,
-    modal_sized_pinned, mono, primary_button, row_action, toggle_pill,
+    RowAction, badge, check_box, delete_control, detail_footer, detail_page, elided, field,
+    ghost_button, inline_confirm, label_block, list_header, modal_note, modal_sized_pinned,
+    primary_button, row_action, toggle_pill,
 };
 
 pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -> AnyElement {
@@ -52,6 +53,94 @@ pub fn render(app: &AppState, window: &mut Window, cx: &mut Context<AppState>) -
         ),
         window,
     )
+}
+
+/// The same list, as the settings Remote section's **Host mode** list page: a header with the
+/// count and one Add per kind, then the rows. Editing drills in ([`detail`]).
+pub fn list_page(app: &AppState, cx: &mut Context<AppState>) -> AnyElement {
+    let modes = &app.workbench.settings.host.drone_modes;
+    let mut rows = vec![list_header(
+        "Host mode",
+        Some(modes.len()),
+        "Serve this desktop to other Kubiq instances while it runs. Each endpoint is a drone \
+         mode: HTTP, with TLS when both PEM paths are set and its own tunnel allow-list, or a \
+         kind this edition adds. Whoever holds a mode\u{2019}s connect string has this workbench.",
+        Some(add_row(cx).into_any_element()),
+    )];
+    if modes.is_empty() {
+        rows.push(note("No endpoints yet.").into_any_element());
+    }
+    rows.extend(modes.iter().map(|mode| mode_row(app, mode, cx)));
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(rows)
+        .into_any_element()
+}
+
+/// The form as a drill-in page, while it is open from settings (the modal draws it otherwise).
+pub fn detail(app: &AppState, window: &Window, cx: &mut Context<AppState>) -> Option<AnyElement> {
+    let drone = &app.workbench.drone_modes;
+    if drone.open {
+        return None;
+    }
+    let edit = drone.edit.as_ref()?;
+    let name = edit.name.read(cx).value().trim().to_string();
+    let crumb = if edit.is_new {
+        "New endpoint".to_string()
+    } else {
+        name.clone()
+    };
+    let detail = &app.workbench.settings.detail;
+    let view = cx.entity();
+    let banner = detail.confirm_back.then(|| {
+        inline_confirm(
+            "drone-detail-discard",
+            "Discard unsaved changes?",
+            "Discard",
+            "Keep editing",
+            false,
+            cx.listener(|this, _, _, cx| this.cancel_drone_edit(cx)),
+            cx.listener(|this, _, _, cx| this.detail_keep(cx)),
+        )
+    });
+    let delete = (!edit.is_new).then(|| {
+        let id = edit.id.clone();
+        delete_control(
+            "drone-detail",
+            "this endpoint",
+            detail.confirm_delete,
+            cx.listener(|this, _, _, cx| this.detail_ask_delete(cx)),
+            cx.listener(move |this, _, _, cx| {
+                this.remove_drone_mode(&id, cx);
+                this.cancel_drone_edit(cx);
+            }),
+            cx.listener(|this, _, _, cx| this.detail_keep(cx)),
+        )
+    });
+    let footer = detail_footer(
+        "drone-detail",
+        !name.is_empty(),
+        delete,
+        cx.listener(|this, _, _, cx| this.cancel_drone_edit(cx)),
+        cx.listener(|this, _, _, cx| this.save_drone_edit(cx)),
+    );
+    Some(detail_page(
+        "drone-detail",
+        &["Host mode", &crumb],
+        move |_, _, cx| {
+            view.update(cx, |this, cx| {
+                let values = this.drone_edit_values(cx);
+                if this.detail_may_leave(values, cx) {
+                    this.cancel_drone_edit(cx);
+                }
+            })
+        },
+        banner,
+        vec![form_body(app, edit, window, cx)],
+        footer,
+    ))
 }
 
 fn name(prefix: &str, id: &str, what: &str) -> ElementId {
@@ -175,23 +264,27 @@ fn mode_row(app: &AppState, mode: &DroneMode, cx: &mut Context<AppState>) -> Any
                                     theme::font(Family::Chrome, Role::Meta),
                                 )),
                         )
-                        .child(ghost_button(
-                            name("drone-mode", &mode.id, "copy"),
-                            None,
-                            "Copy",
-                            cx.listener(move |this, _, _, cx| {
-                                this.copy_drone_connect_string(&copy_id, cx)
-                            }),
-                        ))
-                        .when(is_http, |this| {
-                            this.child(ghost_button(
-                                name("drone-mode", &mode.id, "regenerate"),
-                                None,
-                                "Regenerate token",
-                                cx.listener(move |this, _, _, _| {
-                                    this.regenerate_drone_token(&regen_id)
+                        .child(
+                            row_action(
+                                name("drone-mode", &mode.id, "copy"),
+                                RowAction::Copy,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.copy_drone_connect_string(&copy_id, cx)
                                 }),
-                            ))
+                            )
+                            .tip("Copy connect string"),
+                        )
+                        .when(is_http, |this| {
+                            this.child(
+                                row_action(
+                                    name("drone-mode", &mode.id, "regenerate"),
+                                    RowAction::Refresh,
+                                    cx.listener(move |this, _, _, _| {
+                                        this.regenerate_drone_token(&regen_id)
+                                    }),
+                                )
+                                .tip("Regenerate token"),
+                            )
                         }),
                 );
         }
@@ -210,12 +303,14 @@ fn mode_row(app: &AppState, mode: &DroneMode, cx: &mut Context<AppState>) -> Any
                             .text_color(theme::danger())
                             .child(SharedString::from(reason.clone())),
                     )
-                    .child(ghost_button(
-                        name("drone-mode", &mode.id, "restart"),
-                        None,
-                        "Restart",
-                        cx.listener(move |this, _, _, _| this.restart_drone_mode(&restart_id)),
-                    )),
+                    .child(
+                        row_action(
+                            name("drone-mode", &mode.id, "restart"),
+                            RowAction::Start,
+                            cx.listener(move |this, _, _, _| this.restart_drone_mode(&restart_id)),
+                        )
+                        .tip("Restart"),
+                    ),
             );
         }
         _ => {}
@@ -231,29 +326,7 @@ fn note(text: &str) -> impl IntoElement {
 }
 
 fn list_footer(cx: &mut Context<AppState>) -> AnyElement {
-    let mut footer = div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(mono("Add", theme::text_faint()))
-        .child(ghost_button(
-            "drone-add-http",
-            None,
-            "HTTP",
-            cx.listener(|this, _, window, cx| this.begin_add_drone_mode(None, window, cx)),
-        ));
-    for spec in crate::ext::drone::kinds() {
-        let kind = spec.kind;
-        footer = footer.child(ghost_button(
-            ElementId::Name(format!("drone-add-{kind}").into()),
-            None,
-            spec.label,
-            cx.listener(move |this, _, window, cx| {
-                this.begin_add_drone_mode(Some(kind), window, cx)
-            }),
-        ));
-    }
-    footer
+    add_row(cx)
         .child(div().flex_1())
         .child(primary_button(
             "drone-modes-close",
@@ -262,6 +335,28 @@ fn list_footer(cx: &mut Context<AppState>) -> AnyElement {
             cx.listener(|this, _, _, cx| this.close_drone_modes(cx)),
         ))
         .into_any_element()
+}
+
+/// "Add" and one button per kind: `http`, then every registered one.
+fn add_row(cx: &mut Context<AppState>) -> gpui::Div {
+    let mut footer = div().flex().items_center().gap_2().child(primary_button(
+        "drone-add-http",
+        Some(gpui_component::IconName::Plus),
+        "HTTP",
+        cx.listener(|this, _, window, cx| this.begin_add_drone_mode(None, window, cx)),
+    ));
+    for spec in crate::ext::drone::kinds() {
+        let kind = spec.kind;
+        footer = footer.child(primary_button(
+            ElementId::Name(format!("drone-add-{kind}").into()),
+            Some(gpui_component::IconName::Plus),
+            spec.label,
+            cx.listener(move |this, _, window, cx| {
+                this.begin_add_drone_mode(Some(kind), window, cx)
+            }),
+        ));
+    }
+    footer
 }
 
 // ── the form ────────────────────────────────────────────────────────
@@ -337,7 +432,7 @@ fn area_field(
 fn form_body(
     app: &AppState,
     edit: &DroneEdit,
-    window: &mut Window,
+    window: &Window,
     cx: &mut Context<AppState>,
 ) -> AnyElement {
     let mut body = div().flex().flex_col().gap_3().pt_3().child(input_field(

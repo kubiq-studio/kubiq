@@ -29,7 +29,7 @@ pub const SETTINGS_PROJECT: SlotId = SlotId::new("settings/project");
 pub const SETTINGS_APP_INTERFACE: SlotId = SlotId::new("settings/app/interface");
 /// Harnesses, Agent definitions, Isolation, Policies, Assistance.
 pub const SETTINGS_APP_AGENTS: SlotId = SlotId::new("settings/app/agents");
-/// Connectors, Hosts, SSH profiles, Drones.
+/// Connectors, Remote.
 pub const SETTINGS_APP_CONNECTIVITY: SlotId = SlotId::new("settings/app/connectivity");
 /// Tools, Command line, and Shell integration on Windows.
 pub const SETTINGS_APP_SYSTEM: SlotId = SlotId::new("settings/app/system");
@@ -56,9 +56,8 @@ pub const ISOLATION: SlotId = SlotId::new("kubiq.settings.isolation");
 pub const POLICIES: SlotId = SlotId::new("kubiq.settings.policies");
 pub const ASSIST: SlotId = SlotId::new("kubiq.settings.assist");
 pub const CONNECTORS: SlotId = SlotId::new("kubiq.settings.connectors");
-pub const HOSTS: SlotId = SlotId::new("kubiq.settings.hosts");
-pub const SSH: SlotId = SlotId::new("kubiq.settings.ssh");
-pub const DRONES: SlotId = SlotId::new("kubiq.settings.drones");
+/// Remote: what used to be Hosts, SSH profiles and Drones, as three tabs (`ext::remote`).
+pub const REMOTE: SlotId = SlotId::new("kubiq.settings.remote");
 pub const TOOLS: SlotId = SlotId::new("kubiq.settings.tools");
 /// Where a feedback report goes: the compiled default and the user's override of it.
 pub const FEEDBACK: SlotId = SlotId::new("kubiq.settings.feedback");
@@ -192,3 +191,27 @@ pub const EXT_DEMO_RAIL: SlotId = SlotId::new("kubiq.rail.ext-demo");
 /// The kinds of drone mode an edition adds to the base's `http` one — one group, since a kind has
 /// nothing to be ordered against.
 pub const DRONE_KIND: SlotId = SlotId::new("drone-kind");
+
+// ── The remote-block container (`ext::remote`) ──────────────────────
+
+/// The blocks the application settings' Remote section draws. One container; its groups are the
+/// section's three tabs, in strip order.
+pub const REMOTE_BLOCK: SlotId = SlotId::new("remote-block");
+/// Remotes: every connection this machine dials.
+pub const REMOTE_REMOTES: SlotId = SlotId::new("remote-block/remotes");
+/// Host mode: this instance serving others.
+pub const REMOTE_HOST_MODE: SlotId = SlotId::new("remote-block/host-mode");
+/// Settings: section-wide settings.
+pub const REMOTE_SETTINGS: SlotId = SlotId::new("remote-block/settings");
+
+pub const REMOTE_HOSTS: SlotId = SlotId::new("kubiq.remote.hosts");
+pub const REMOTE_SSH: SlotId = SlotId::new("kubiq.remote.ssh");
+pub const REMOTE_DRONES: SlotId = SlotId::new("kubiq.remote.drones");
+pub const REMOTE_DRONE_MODES: SlotId = SlotId::new("kubiq.remote.drone-modes");
+pub const REMOTE_DRONE_LIST: SlotId = SlotId::new("kubiq.remote.drone-list");
+
+// ── The titlebar-item container (`ext::titlebar`) ───────────────────
+
+/// Controls an edition adds to the titlebar's left group, after the remote-host split button —
+/// one group, and empty in the base.
+pub const TITLEBAR_ITEM: SlotId = SlotId::new("titlebar-item");

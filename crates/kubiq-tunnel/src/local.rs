@@ -4,7 +4,8 @@
 //! accepted with no live mux under them is refused with a sentence — a `502` for the HTTP kind, a
 //! close for TCP — and recorded as the spec's last error, until [`TunnelManager::attach`] gives
 //! them a new one. The HTTP kind answers `403` to a request whose `Host` is not the loopback — the
-//! DNS-rebinding guard in [`crate::http`].
+//! DNS-rebinding guard in [`crate::http`]. The proxy kind reads each connection's first request
+//! head before it opens anything, since that head names the destination ([`crate::proxy`]).
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
@@ -13,17 +14,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use kubiq_proto::settings::{TunnelKind, TunnelSpec};
 use parking_lot::Mutex;
 use rustls::pki_types::ServerName;
-use kubiq_proto::settings::{TunnelKind, TunnelSpec};
 
 use crate::http::{self, Rewrite};
 use crate::mux::Mux;
 use crate::pipe::{self, Counters};
-use crate::tls;
+use crate::{proxy, tls};
 
 /// How often an idle listener looks at the stop flag.
 const ACCEPT_POLL: Duration = Duration::from_millis(50);
+/// How long a proxy client may take to send its whole first request head — a deadline, not a
+/// per-read timeout.
+const PROXY_HEAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// One spec's state, as the settings page or a status line would draw it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -53,8 +57,16 @@ struct Tunnel {
     listening: AtomicBool,
 }
 
+/// Where a following manager finds its link, asked once per accepted connection.
+pub type Source = Arc<dyn Fn() -> Option<Mux> + Send + Sync>;
+
 struct Shared {
     mux: Mutex<Option<Mux>>,
+    /// A following manager's link, borrowed per connection from whoever owns it — never closed
+    /// from here.
+    source: Option<Source>,
+    /// Whether the source answered with a live link at the last connection.
+    followed: AtomicBool,
     stop: AtomicBool,
 }
 
@@ -71,8 +83,20 @@ impl TunnelManager {
     /// in that spec's status and does not stop the others. `mux` may come later, by
     /// [`Self::attach`].
     pub fn start(specs: &[TunnelSpec], mux: Option<Mux>) -> TunnelManager {
+        Self::bind(specs, mux, None)
+    }
+
+    /// Bind like [`Self::start`], but own no link: every accepted connection asks `source` for
+    /// one — another manager's ([`crate::Registry::follow`]) — and a stop leaves it open.
+    pub fn follow(specs: &[TunnelSpec], source: Source) -> TunnelManager {
+        Self::bind(specs, None, Some(source))
+    }
+
+    fn bind(specs: &[TunnelSpec], mux: Option<Mux>, source: Option<Source>) -> TunnelManager {
         let shared = Arc::new(Shared {
             mux: Mutex::new(mux),
+            source,
+            followed: AtomicBool::new(false),
             stop: AtomicBool::new(false),
         });
         let mut tunnels = Vec::new();
@@ -130,7 +154,12 @@ impl TunnelManager {
 
     /// Whether a live link is attached.
     pub fn linked(&self) -> bool {
-        self.shared.mux.lock().as_ref().is_some_and(Mux::is_alive)
+        self.mux().is_some() || self.shared.followed.load(Ordering::Relaxed)
+    }
+
+    /// The attached link, while it is alive — for a [`Self::follow`]er to borrow.
+    pub fn mux(&self) -> Option<Mux> {
+        self.shared.mux.lock().clone().filter(Mux::is_alive)
     }
 
     /// Every enabled spec's state, in the order given to [`Self::start`].
@@ -222,7 +251,11 @@ fn connection(shared: &Shared, tunnel: &Tunnel, socket: TcpStream) {
     counters.active.fetch_add(1, Ordering::Relaxed);
     let _active = Active(counters);
 
-    let mux = shared.mux.lock().clone().filter(Mux::is_alive);
+    let mut mux = shared.mux.lock().clone().filter(Mux::is_alive);
+    if let Some(source) = &shared.source {
+        mux = source().filter(Mux::is_alive);
+        shared.followed.store(mux.is_some(), Ordering::Relaxed);
+    }
     let Some(mux) = mux else {
         refuse(
             socket,
@@ -232,6 +265,19 @@ fn connection(shared: &Shared, tunnel: &Tunnel, socket: TcpStream) {
         );
         return;
     };
+    if spec.kind == TunnelKind::Proxy {
+        proxy_connection(&mux, socket, counters);
+        return;
+    }
+    if spec.kind == TunnelKind::Unknown {
+        refuse(
+            socket,
+            spec.kind,
+            "this tunnel's kind is not known to this build".into(),
+            counters,
+        );
+        return;
+    }
     let stream = match mux.open(&spec.host, spec.port) {
         Ok(stream) => stream,
         Err(e) => {
@@ -245,7 +291,9 @@ fn connection(shared: &Shared, tunnel: &Tunnel, socket: TcpStream) {
         }
     };
     match spec.kind {
-        TunnelKind::Tcp => pipe::pipe(&mux, socket, stream, None, None, Some(counters.clone())),
+        TunnelKind::Tcp | TunnelKind::Proxy | TunnelKind::Unknown => {
+            pipe::pipe(&mux, socket, stream, None, None, Some(counters.clone()))
+        }
         TunnelKind::Http => {
             let (mut requests, responses) = http::rewriters(Rewrite::new(spec));
             if spec.upstream_tls {
@@ -287,18 +335,75 @@ fn connection(shared: &Shared, tunnel: &Tunnel, socket: TcpStream) {
     }
 }
 
-/// Turn a local connection away, saying why: a `502` for HTTP, a plain close for TCP.
-fn refuse(mut socket: TcpStream, kind: TunnelKind, error: String, counters: &Counters) {
+/// The proxy kind: read the first request head, open what it names, then splice. A `CONNECT` is
+/// answered `200` here and piped raw; a forwarded request goes out rewritten to origin form.
+fn proxy_connection(mux: &Mux, mut socket: TcpStream, counters: &Arc<Counters>) {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    // One deadline for the whole head, not per read: a client trickling a byte at a time must not
+    // hold the connection open indefinitely.
+    let deadline = std::time::Instant::now() + PROXY_HEAD_TIMEOUT;
+    let parsed = loop {
+        match proxy::parse(&buf) {
+            Ok(Some(parsed)) => break Ok(parsed),
+            Ok(None) => {}
+            Err(e) => break Err(e.to_string()),
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() || socket.set_read_timeout(Some(left)).is_err() {
+            return;
+        }
+        match socket.read(&mut chunk) {
+            // Closed, or silent past the timeout, before a whole head: nothing to answer.
+            Ok(0) => return,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return,
+        }
+    };
+    let _ = socket.set_read_timeout(None);
+    let (request, used) = match parsed {
+        Ok(parsed) => parsed,
+        Err(e) => return refuse_with(socket, Some("400 Bad Request"), e, counters),
+    };
+    let stream = match mux.open(&request.host, request.port) {
+        Ok(stream) => stream,
+        Err(e) => {
+            let error = format!("{}:{} was refused: {e}", request.host, request.port);
+            return refuse_with(socket, Some("502 Bad Gateway"), error, counters);
+        }
+    };
+    if request.connect
+        && socket
+            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            .is_err()
+    {
+        stream.reset(None);
+        return;
+    }
+    let mut first = request.head;
+    first.extend_from_slice(&buf[used..]);
+    if !first.is_empty() {
+        counters.up.fetch_add(first.len() as u64, Ordering::Relaxed);
+        if stream.send(&first).is_err() {
+            return;
+        }
+    }
+    pipe::pipe(mux, socket, stream, None, None, Some(counters.clone()));
+}
+
+/// Turn a local connection away, saying why: a `502` for HTTP and the proxy, a plain close for
+/// TCP.
+fn refuse(socket: TcpStream, kind: TunnelKind, error: String, counters: &Counters) {
+    let status = (kind != TunnelKind::Tcp).then_some("502 Bad Gateway");
+    refuse_with(socket, status, error, counters);
+}
+
+/// Turn a local connection away with `status` (an HTTP answer) or, without one, a plain close.
+fn refuse_with(mut socket: TcpStream, status: Option<&str>, error: String, counters: &Counters) {
     counters.error(error.clone());
-    if kind == TunnelKind::Http {
-        let body = format!("kubiq tunnel: {error}\n");
-        let head = format!(
-            "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\
-             Content-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        let _ = socket.write_all(head.as_bytes());
-        let _ = socket.write_all(body.as_bytes());
+    if let Some(status) = status {
+        let _ = socket.write_all(&proxy::answer(status, &error));
     }
     let _ = socket.shutdown(Shutdown::Write);
     // Drain what the client already sent, so the close is a FIN and not a reset that eats the

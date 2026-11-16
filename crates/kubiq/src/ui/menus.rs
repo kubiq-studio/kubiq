@@ -477,6 +477,14 @@ pub fn remote(app: &AppState, cx: &App) -> Vec<MenuEntry> {
             .icon(IconName::Network)
             .on(|this, _, cx| this.open_drone_modes(cx)),
     ];
+    // The embedded browser's proxy over this project's remote — running or failed — restarts here.
+    if let Some(save_id) = app.browser_proxy_remote(cx) {
+        entries.push(
+            MenuEntry::new("Restart remote proxy")
+                .icon(IconName::Network)
+                .on(move |this, _, cx| this.restart_browser_proxy(&save_id, cx)),
+        );
+    }
     // Saved ssh profiles open an interactive `ssh` terminal, the same rows the new-pane menu
     // offers; none saved, no section.
     if app.project(cx).is_some() {

@@ -1312,6 +1312,15 @@ impl AppState {
             ),
             (self.agent_home_input.clone(), home),
             (
+                self.drone_list_url_input.clone(),
+                self.workbench
+                    .settings
+                    .host
+                    .drone_list_url
+                    .clone()
+                    .unwrap_or_default(),
+            ),
+            (
                 self.mission_term_input.clone(),
                 self.workbench.settings.host.mission_term.clone(),
             ),
@@ -2873,7 +2882,38 @@ impl AppState {
                 .is_some_and(|profile| profile.terminal_enabled),
         });
         self.workbench.settings.error = None;
+        let values = self.ssh_form_values(cx);
+        self.detail_begin(values);
         cx.notify();
+    }
+
+    /// Everything the open SSH form holds, flattened — what Back compares against.
+    pub fn ssh_form_values(&self, cx: &App) -> Vec<String> {
+        let Some(form) = self.workbench.settings.ssh_form else {
+            return Vec::new();
+        };
+        let mut values = vec![form.method.code().to_string(), form.terminal.to_string()];
+        for input in [
+            &self.ssh_name_input,
+            &self.ssh_host_input,
+            &self.ssh_port_input,
+            &self.ssh_user_input,
+            &self.ssh_key_path_input,
+            &self.ssh_initial_command_input,
+            &self.ssh_secret_input,
+        ] {
+            values.push(input.read(cx).value().to_string());
+        }
+        values
+    }
+
+    /// The SSH drill-in's Back (and Escape): closes it, or asks inline first when something
+    /// changed since it opened.
+    pub fn ssh_detail_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let values = self.ssh_form_values(cx);
+        if self.detail_may_leave(values, cx) {
+            self.close_ssh_form(window, cx);
+        }
     }
 
     pub fn toggle_ssh_terminal(&mut self, cx: &mut Context<Self>) {
@@ -2974,6 +3014,12 @@ impl AppState {
             auth,
             initial_command,
             terminal_enabled: form.terminal,
+            // Set from the Remote section's row, not the form: an edit keeps them.
+            features: form
+                .id
+                .and_then(|id| self.workbench.settings.ssh_profile(id))
+                .map(|profile| profile.features.clone())
+                .unwrap_or_default(),
         };
         let profiles = &mut self.workbench.settings.host.ssh_profiles;
         match profiles.iter_mut().find(|held| held.id == id) {
@@ -3005,6 +3051,96 @@ impl AppState {
             return;
         };
         self.workbench.settings.host.ssh_profiles.push(copy);
+        self.remember_host_settings();
+        cx.notify();
+    }
+
+    /// Flip one of a profile's feature switches from its Remote-section row, and write it.
+    pub fn set_ssh_feature(
+        &mut self,
+        id: SshProfileId,
+        what: crate::state::settings::SshFeature,
+        on: bool,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::state::settings::SshFeature;
+        let profiles = &mut self.workbench.settings.host.ssh_profiles;
+        let Some(profile) = profiles.iter_mut().find(|profile| profile.id == id) else {
+            return;
+        };
+        match what {
+            SshFeature::Terminal => profile.terminal_enabled = on,
+            SshFeature::Drone => profile.features.drone = on,
+            SshFeature::Persistent => profile.features.persistent = on,
+        }
+        self.remember_host_settings();
+        cx.notify();
+    }
+
+    /// A persistent profile's drone idle timeout — `None` for the lifetime's own ten minutes.
+    pub fn set_ssh_linger(&mut self, id: SshProfileId, secs: Option<u64>, cx: &mut Context<Self>) {
+        let profiles = &mut self.workbench.settings.host.ssh_profiles;
+        let Some(profile) = profiles.iter_mut().find(|profile| profile.id == id) else {
+            return;
+        };
+        profile.features.linger_secs = secs;
+        self.remember_host_settings();
+        cx.notify();
+    }
+
+    /// A drill-in editor opened: remember its values, clear any question.
+    pub fn detail_begin(&mut self, snapshot: Vec<String>) {
+        self.workbench.settings.detail = crate::state::settings::DetailState {
+            snapshot,
+            ..Default::default()
+        };
+    }
+
+    /// Back (or Escape) on a drill-in editor holding `current`: `true` when it may close, which
+    /// is only when nothing changed. A changed editor raises the discard question; with the
+    /// question already up, Back is "keep editing" and puts it away. The question's own Discard
+    /// button closes the page directly.
+    pub fn detail_may_leave(&mut self, current: Vec<String>, cx: &mut Context<Self>) -> bool {
+        let detail = &mut self.workbench.settings.detail;
+        if current == detail.snapshot {
+            return true;
+        }
+        detail.confirm_back = !detail.confirm_back;
+        cx.notify();
+        false
+    }
+
+    /// Answer either inline question with "keep editing".
+    pub fn detail_keep(&mut self, cx: &mut Context<Self>) {
+        let detail = &mut self.workbench.settings.detail;
+        detail.confirm_back = false;
+        detail.confirm_delete = false;
+        cx.notify();
+    }
+
+    /// The footer's Delete was pressed: ask in place.
+    pub fn detail_ask_delete(&mut self, cx: &mut Context<Self>) {
+        self.workbench.settings.detail.confirm_delete = true;
+        cx.notify();
+    }
+
+    /// Which tab the Remote section shows.
+    pub fn set_remote_tab(
+        &mut self,
+        tab: crate::state::settings::RemoteTab,
+        cx: &mut Context<Self>,
+    ) {
+        self.workbench.settings.remote_tab = tab;
+        cx.notify();
+    }
+
+    /// The Remote section's drone list URL. Blank is stored as `None`.
+    pub fn set_drone_list_url(&mut self, url: String, cx: &mut Context<Self>) {
+        let value = (!url.trim().is_empty()).then(|| url.trim().to_string());
+        if self.workbench.settings.host.drone_list_url == value {
+            return;
+        }
+        self.workbench.settings.host.drone_list_url = value;
         self.remember_host_settings();
         cx.notify();
     }

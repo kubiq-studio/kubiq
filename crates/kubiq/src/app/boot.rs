@@ -177,6 +177,8 @@ impl AppState {
         });
         let search_fallbacks_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("grep, ag\u{2026}"));
+        let drone_list_url_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("https://example.com/drones.json"));
 
         // Seeded from the host's answer too — see `sync_settings_fields`.
         let agent_home_input =
@@ -1150,6 +1152,17 @@ impl AppState {
             },
         ));
 
+        subscriptions.push(cx.subscribe_in(
+            &drone_list_url_input,
+            window,
+            |this, input, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                    let url = input.read(cx).value().to_string();
+                    this.set_drone_list_url(url, cx);
+                }
+            },
+        ));
+
         // The kept home's name, and a grant's path, on the same rule as the two lists above.
         subscriptions.push(cx.subscribe_in(
             &agent_home_input,
@@ -1960,6 +1973,7 @@ impl AppState {
             search_query,
             search_excludes_input,
             search_fallbacks_input,
+            drone_list_url_input,
             agent_home_input,
             grant_path_input,
             mission_term_input,

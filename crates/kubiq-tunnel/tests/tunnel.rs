@@ -459,3 +459,101 @@ fn the_rate_ceiling_holds_both_ways() {
         started.elapsed()
     );
 }
+
+#[test]
+fn the_proxy_kind_connects_forwards_and_refuses_what_the_drone_does_not_allow() {
+    let echo = echo_server();
+    let (target, recorded) = answering_server(|_| {
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".into()
+    });
+    let (window, _drone) = served(
+        None,
+        AllowList::parse([format!("127.0.0.1:{echo}"), format!("localhost:{target}")]).unwrap(),
+    );
+    let spec = spec(TunnelKind::Proxy, 0);
+    let manager = TunnelManager::start(std::slice::from_ref(&spec), Some(window));
+    let local = spec.local_port;
+
+    // CONNECT: a 200, then a raw pipe — bytes sent with the head included.
+    let mut s = connect(local);
+    s.write_all(format!("CONNECT 127.0.0.1:{echo} HTTP/1.1\r\n\r\nhello").as_bytes())
+        .unwrap();
+    let want = b"HTTP/1.1 200 Connection Established\r\n\r\nhello";
+    let mut got = vec![0u8; want.len()];
+    s.read_exact(&mut got).unwrap();
+    assert_eq!(String::from_utf8_lossy(&got), String::from_utf8_lossy(want));
+    drop(s);
+
+    // An absolute URI: origin form upstream, the answer as it came.
+    let answer = round_trip(
+        local,
+        format!(
+            "GET http://localhost:{target}/p?q HTTP/1.1\r\nHost: localhost:{target}\r\n\
+             Proxy-Connection: keep-alive\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&answer),
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+    );
+    let head = recorded.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&head),
+        format!("GET /p?q HTTP/1.1\r\nHost: localhost:{target}\r\nConnection: close\r\n\r\n")
+    );
+
+    // Not on the allow list: a 502 naming why. Not a proxy request: a 400.
+    let answer = round_trip(local, b"CONNECT example.com:443 HTTP/1.1\r\n\r\n");
+    let answer = String::from_utf8_lossy(&answer);
+    assert!(answer.starts_with("HTTP/1.1 502"), "{answer}");
+    assert!(answer.contains("allow list"), "{answer}");
+    let answer = round_trip(local, b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    assert!(
+        String::from_utf8_lossy(&answer).starts_with("HTTP/1.1 400"),
+        "{}",
+        String::from_utf8_lossy(&answer)
+    );
+    assert!(manager.status()[0].last_error.is_some());
+}
+
+#[test]
+fn a_follower_rides_its_parents_link_and_leaves_it_up() {
+    let registry: &'static kubiq_tunnel::Registry = Box::leak(Box::default());
+    let (window, _drone) = served(None, AllowList::any());
+    let link = std::sync::Mutex::new(Some(window));
+    registry.link(
+        "parent".into(),
+        Vec::new(),
+        None,
+        std::sync::Arc::new(move || link.lock().unwrap().take().ok_or("dialled twice".into())),
+        false,
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while registry.mux("parent").is_none() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    let proxy = spec(TunnelKind::Proxy, 0);
+    registry.follow(
+        "proxy".into(),
+        vec![proxy.clone()],
+        vec!["absent".into(), "parent".into()],
+    );
+    let echo = echo_server();
+    let mut s = connect(proxy.local_port);
+    s.write_all(format!("CONNECT 127.0.0.1:{echo} HTTP/1.1\r\n\r\nping").as_bytes())
+        .unwrap();
+    let want = b"HTTP/1.1 200 Connection Established\r\n\r\nping";
+    let mut got = vec![0u8; want.len()];
+    s.read_exact(&mut got).unwrap();
+    assert_eq!(&got, want);
+    drop(s);
+    assert!(registry.live("proxy").unwrap().linked);
+
+    registry.forget("proxy");
+    thread::sleep(Duration::from_millis(200));
+    assert!(
+        registry.mux("parent").is_some(),
+        "the parent's link stays up"
+    );
+}

@@ -23,7 +23,7 @@
 use super::*;
 use gpui_component::input::InputState;
 use kubiq_proto::carrier::CAP_TUNNEL;
-use kubiq_proto::settings::{RemoteCarrier, TunnelSpec};
+use kubiq_proto::settings::{RemoteCarrier, TunnelKind, TunnelSpec};
 use kubiq_tunnel::Live;
 
 use crate::ui::tunnels::{TunnelEdit, TunnelInputs};
@@ -47,6 +47,15 @@ fn dial_pins() -> std::sync::MutexGuard<'static, HashMap<String, Option<String>>
     static PINS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Option<String>>>> =
         std::sync::LazyLock::new(Default::default);
     PINS.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The port each browser proxy (by registry key) last listened on, so a restart rebinds it.
+fn proxy_ports() -> std::sync::MutexGuard<'static, HashMap<String, u16>> {
+    static PORTS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, u16>>> =
+        std::sync::LazyLock::new(Default::default);
+    PORTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn set_dial_pin(key: &str, pin: Option<String>) {
@@ -76,6 +85,131 @@ impl AppState {
     /// The tunnels' state for a saved host, read as the page draws.
     pub fn tunnel_live(&self, save_id: &str) -> Option<Live> {
         kubiq_tunnel::global().live(&self.tunnel_key(save_id))
+    }
+
+    /// The registry key of the embedded browser's proxy for a saved host, in this window.
+    fn browser_proxy_key(&self, save_id: &str) -> String {
+        format!("{}proxy:{save_id}", window_prefix(self.window_id))
+    }
+
+    /// A loopback forward proxy ([`TunnelKind::Proxy`]) that browses as saved host `save_id`, for
+    /// the embedded browser's "Browse via remote". Started on first use as a follower
+    /// ([`kubiq_tunnel::Registry::follow`]) of whichever link carries that host's tunnels — this
+    /// window's own SSH or socket dial, or an embedder's ([`kubiq_tunnel::saved_key`]) — and
+    /// kept until no tab rides it or the window closes. Answers its port. `restart` replaces a
+    /// running proxy instead of answering it.
+    pub fn browser_proxy_port(&mut self, save_id: &str, restart: bool) -> Result<u16, String> {
+        let registry = kubiq_tunnel::global();
+        let key = self.browser_proxy_key(save_id);
+        let listening = |key: &str| {
+            registry
+                .live(key)
+                .and_then(|live| live.status.into_iter().next())
+                .filter(|status| status.listening)
+        };
+        if !restart && let Some(status) = listening(&key) {
+            return Ok(status.local_port);
+        }
+        let parent = self.tunnel_key(save_id);
+        // The port this proxy last had in this window comes first: the tabs' stores are keyed by
+        // remote, and WebView2 keeps a store's first `--proxy-server` for the life of its browser
+        // process (`web_view::proxied_store`), so a proxy back on the same port keeps the cookies.
+        // `follow` stops the listener it replaces before binding, so a restart frees the port in
+        // time; one dropped by `forget` stops on another thread, hence a short wait between tries.
+        // Then a few fresh ports: probing `:0` and binding again races another process for it.
+        let last = proxy_ports().get(&key).copied();
+        let mut error = None;
+        for attempt in 0..6 {
+            let port = match (attempt, last) {
+                (0..3, Some(port)) => {
+                    if attempt > 0 {
+                        std::thread::sleep(std::time::Duration::from_millis(60));
+                    }
+                    port
+                }
+                _ => match std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                    .and_then(|listener| listener.local_addr())
+                {
+                    Ok(addr) => addr.port(),
+                    Err(e) => {
+                        error = Some(format!("no free loopback port for the proxy: {e}"));
+                        continue;
+                    }
+                },
+            };
+            let mut spec = crate::ui::tunnels::new_spec();
+            spec.kind = TunnelKind::Proxy;
+            spec.local_port = port;
+            spec.host.clear();
+            registry.follow(
+                key.clone(),
+                vec![spec],
+                vec![parent.clone(), kubiq_tunnel::saved_key(save_id)],
+            );
+            if listening(&key).is_some() {
+                proxy_ports().insert(key.clone(), port);
+                break;
+            }
+            error = registry
+                .live(&key)
+                .and_then(|live| live.status.into_iter().next())
+                .and_then(|status| status.last_error);
+        }
+        if listening(&key).is_none() {
+            return Err(error.unwrap_or_else(|| "the proxy did not start".to_string()));
+        }
+        // The window's own dial links only while something rides it: now something does.
+        if !registry.live(&parent).is_some_and(|live| live.linked)
+            && let Some(host) = self
+                .bus
+                .remote_conns()
+                .iter()
+                .find(|conn| conn.save_id == save_id)
+                .map(|conn| conn.id)
+        {
+            self.link_tunnels(host);
+        }
+        listening(&key)
+            .map(|status| status.local_port)
+            .ok_or_else(|| {
+                registry
+                    .live(&key)
+                    .and_then(|live| live.status.into_iter().next())
+                    .and_then(|status| status.last_error)
+                    .unwrap_or_else(|| "the proxy did not start".to_string())
+            })
+    }
+
+    /// Stop the browser's proxy for `save_id`: no tab rides it any more.
+    pub fn drop_browser_proxy(&self, save_id: &str) {
+        kubiq_tunnel::global().forget(&self.browser_proxy_key(save_id));
+    }
+
+    /// A tab left `save_id`'s proxy (turned off, or closed): when it was the last rider, stop the
+    /// proxy and re-run [`Self::link_tunnels`], so a link kept up only for it is released.
+    pub(super) fn release_browser_proxy(&mut self, save_id: &str) {
+        let ridden = self
+            .projects
+            .values()
+            .flat_map(|open| open.browser.tabs.iter())
+            .any(|tab| {
+                tab.via_remote
+                    .as_ref()
+                    .is_some_and(|via| via.save_id == save_id)
+            });
+        if ridden {
+            return;
+        }
+        self.drop_browser_proxy(save_id);
+        let host = self
+            .bus
+            .remote_conns()
+            .iter()
+            .find(|conn| conn.save_id == save_id)
+            .map(|conn| conn.id);
+        if let Some(host) = host {
+            self.link_tunnels(host);
+        }
     }
 
     /// Stop listening for a saved host: it was disconnected or forgotten.
@@ -133,7 +267,9 @@ impl AppState {
             RemoteCarrier::Socket => true,
             _ => return,
         };
-        if !saved.tunnels.iter().any(|spec| spec.enabled) {
+        // The embedded browser's proxy rides this link too ([`Self::browser_proxy_port`]).
+        let proxied = registry.live(&self.browser_proxy_key(&save_id)).is_some();
+        if !saved.tunnels.iter().any(|spec| spec.enabled) && !proxied {
             registry.forget(&key);
             return;
         }

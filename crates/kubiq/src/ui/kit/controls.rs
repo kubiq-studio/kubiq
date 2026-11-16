@@ -286,6 +286,26 @@ pub enum RowAction {
     Rename,
     Clone,
     Delete,
+    /// Dial a saved connection.
+    Connect,
+    /// Drop a live connection; the record stays.
+    Disconnect,
+    /// Bring a hidden window (a remote desktop) forward.
+    Show,
+    /// Put that window away without ending it.
+    Hide,
+    /// Start what the row runs (a drone).
+    Start,
+    /// Stop what the row runs.
+    Stop,
+    /// Ask again for what the row shows.
+    Refresh,
+    /// A reachability check that changes nothing.
+    Check,
+    /// Clear a filed secret.
+    Forget,
+    /// Copy what the row shows (a connect string).
+    Copy,
 }
 
 impl RowAction {
@@ -299,6 +319,16 @@ impl RowAction {
             RowAction::Rename => super::KubiqIcon::ActionRename.into(),
             RowAction::Clone => super::KubiqIcon::ActionClone.into(),
             RowAction::Delete => super::KubiqIcon::ActionDelete.into(),
+            RowAction::Connect => super::KubiqIcon::HostRemote.into(),
+            RowAction::Disconnect => IconName::CircleX.into(),
+            RowAction::Show => IconName::Eye.into(),
+            RowAction::Hide => IconName::EyeOff.into(),
+            RowAction::Start => IconName::Bot.into(),
+            RowAction::Stop => super::KubiqIcon::ActionStop.into(),
+            RowAction::Refresh => IconName::RotateCw.into(),
+            RowAction::Check => IconName::CircleCheck.into(),
+            RowAction::Forget => IconName::Ban.into(),
+            RowAction::Copy => IconName::Copy.into(),
         }
     }
 
@@ -313,6 +343,16 @@ impl RowAction {
             RowAction::Rename => "Rename",
             RowAction::Clone => "Clone",
             RowAction::Delete => "Delete",
+            RowAction::Connect => "Connect",
+            RowAction::Disconnect => "Disconnect",
+            RowAction::Show => "Show",
+            RowAction::Hide => "Hide",
+            RowAction::Start => "Start",
+            RowAction::Stop => "Stop",
+            RowAction::Refresh => "Refresh",
+            RowAction::Check => "Check",
+            RowAction::Forget => "Forget secret",
+            RowAction::Copy => "Copy",
         }
     }
 }
@@ -808,6 +848,38 @@ pub fn check_box(
             )
         })
         .on_click(on_click)
+}
+
+/// A [`check_box`] with its label beside it, the whole of it clickable — a feature switch on a
+/// list row. `enabled: false` draws it dimmed and inert: a feature that is always on for this
+/// kind of row is shown ticked and disabled rather than left out.
+pub fn check_label(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    checked: bool,
+    enabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let id: ElementId = id.into();
+    let row = div()
+        .id(id.clone())
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap_1p5()
+        .text_size(theme::font(Family::Chrome, Role::Meta))
+        .text_color(theme::text_muted())
+        .child(check_box(
+            ElementId::Name(format!("{id}-box").into()),
+            checked,
+            |_, _, _| {},
+        ))
+        .child(label.into());
+    if enabled {
+        row.cursor_pointer().on_click(on_click)
+    } else {
+        row.opacity(0.5)
+    }
 }
 
 /// A run of text that gives up rather than wrapping, and says the whole of itself on hover.

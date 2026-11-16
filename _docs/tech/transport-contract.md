@@ -7,7 +7,7 @@ summary: The complete message set the UI and the coordinator exchange — the pa
 read_when: you are adding, changing or removing a message, or wiring either half to the bus
 updated: 2026-11-14
 verified: 2026-11-10
-code_anchors: [crates/kubiq-proto/src/messages.rs, crates/kubiq-proto/src/policy.rs, crates/kubiq-proto/src/ask.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/armed.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/quota.rs, crates/kubiq-host/src/quota.rs, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/ids.rs, crates/kubiq-proto/src/browser.rs, crates/kubiq-proto/src/remote_tools.rs, crates/kubiq-proto/src/tunnel.rs, crates/kubiq-tunnel/src/mux.rs, crates/kubiq-tunnel/src/registry.rs, crates/kubiq-tunnel/src/pin.rs, crates/kubiq-tunnel/src/tls.rs, crates/kubiq-tunnel/src/duplex.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/src/mcp/remote.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/feedback.rs, crates/kubiq-host/src/feedback/mod.rs, crates/kubiq-host/src/feedback/api.rs, crates/kubiq-host/src/feedback/issues.rs, crates/kubiq-host/src/feedback/keychain.rs, crates/kubiq-proto/src/update.rs, crates/kubiq-host/src/updates/mod.rs, crates/kubiq-host/src/updates/feed.rs, crates/kubiq-host/src/updates/apply.rs, crates/kubiq-proto/src/files.rs, crates/kubiq-proto/src/git.rs, crates/kubiq-proto/src/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-proto/src/conversation.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-proto/src/tasksrc.rs, crates/kubiq-proto/src/stats.rs, crates/kubiq-proto/src/assist.rs, crates/kubiq-proto/src/notifications.rs, crates/kubiq-proto/src/tools.rs, crates/kubiq-host/src/notifications/mod.rs, crates/kubiq-host/src/assist/mod.rs, crates/kubiq-host/src/assist/api.rs, crates/kubiq-host/src/assist/providers.rs, crates/kubiq-host/src/assist/subject.rs, crates/kubiq-host/src/assist/stub.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-proto/src/mcp.rs, crates/kubiq-proto/src/catalog.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-proto/src/mission.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/drone_modes.rs]
+code_anchors: [crates/kubiq-proto/src/messages.rs, crates/kubiq-proto/src/policy.rs, crates/kubiq-proto/src/ask.rs, crates/kubiq-host/src/ask.rs, crates/kubiq-host/src/armed.rs, crates/kubiq-host/src/mcp/ask.rs, crates/kubiq-proto/src/quota.rs, crates/kubiq-host/src/quota.rs, crates/kubiq-host/src/web_assets/mod.rs, crates/kubiq-proto/src/connectors.rs, crates/kubiq-proto/src/ids.rs, crates/kubiq-proto/src/browser.rs, crates/kubiq-proto/src/remote_tools.rs, crates/kubiq-proto/src/tunnel.rs, crates/kubiq-tunnel/src/mux.rs, crates/kubiq-tunnel/src/registry.rs, crates/kubiq-tunnel/src/pin.rs, crates/kubiq-tunnel/src/tls.rs, crates/kubiq-tunnel/src/duplex.rs, crates/kubiq-tunnel/src/proxy.rs, crates/kubiq-drone/src/tunnel.rs, crates/kubiq/src/app/tunnels.rs, crates/kubiq-host/src/browser.rs, crates/kubiq-host/src/mcp/browser.rs, crates/kubiq-host/src/mcp/remote.rs, crates/kubiq-proto/src/db.rs, crates/kubiq-proto/src/projects.rs, crates/kubiq-proto/src/settings.rs, crates/kubiq-proto/src/feedback.rs, crates/kubiq-host/src/feedback/mod.rs, crates/kubiq-host/src/feedback/api.rs, crates/kubiq-host/src/feedback/issues.rs, crates/kubiq-host/src/feedback/keychain.rs, crates/kubiq-proto/src/update.rs, crates/kubiq-host/src/updates/mod.rs, crates/kubiq-host/src/updates/feed.rs, crates/kubiq-host/src/updates/apply.rs, crates/kubiq-proto/src/files.rs, crates/kubiq-proto/src/git.rs, crates/kubiq-proto/src/work.rs, crates/kubiq-host/src/work/mod.rs, crates/kubiq-proto/src/conversation.rs, crates/kubiq-proto/src/repos.rs, crates/kubiq-proto/src/tasksrc.rs, crates/kubiq-proto/src/stats.rs, crates/kubiq-proto/src/assist.rs, crates/kubiq-proto/src/notifications.rs, crates/kubiq-proto/src/tools.rs, crates/kubiq-host/src/notifications/mod.rs, crates/kubiq-host/src/assist/mod.rs, crates/kubiq-host/src/assist/api.rs, crates/kubiq-host/src/assist/providers.rs, crates/kubiq-host/src/assist/subject.rs, crates/kubiq-host/src/assist/stub.rs, crates/kubiq-host/src/conversation.rs, crates/kubiq-host/src/conversation_record.rs, crates/kubiq-host/src/coordinator.rs, crates/kubiq-proto/src/bus.rs, crates/kubiq-proto/src/wire.rs, crates/kubiq-proto/src/mcp.rs, crates/kubiq-proto/src/catalog.rs, crates/kubiq-proto/src/carrier.rs, crates/kubiq-host/src/carrier.rs, crates/kubiq/src/app/remote_connect.rs, crates/kubiq-drone/src/search.rs, crates/kubiq-proto/src/plan.rs, crates/kubiq-host/src/plan/mod.rs, crates/kubiq-host/src/store/plan.rs, crates/kubiq-host/src/mcp/plan.rs, crates/kubiq-proto/src/mission.rs, crates/kubiq-host/src/mission/mod.rs, crates/kubiq-host/src/mission/runner.rs, crates/kubiq-host/src/mcp/tasks.rs, crates/kubiq-host/src/mcp/mission.rs, crates/kubiq-host/src/mcp/catalogue.rs, crates/kubiq-host/src/mcp/registry.rs, crates/kubiq-host/src/drone_modes.rs]
 depends_on: [tech-architecture]
 review_cycle: monthly
 ---
@@ -2941,18 +2941,25 @@ one that is gone.
 
 **A saved host carries the ports its link forwards.** `SavedRemoteHost.tunnels` is a list of
 `TunnelSpec { id, kind, local_port, host, port, upstream_tls, insecure, enabled, rewrite_host,
-host_rewrite?, rewrite_content, content_types }` — `kind` `tcp` (bytes untouched) or `http`. For `http`, `host`,
+host_rewrite?, rewrite_content, content_types }` — `kind` `tcp` (bytes untouched), `http`, or
+`proxy` (a forward proxy whose every connection names its own destination; `host` and `port`
+unused). For `http`, `host`,
 `port` and `upstream_tls` are the parts of one remote URL (`TunnelSpec::remote_url` /
 `set_remote_url`: `http[s]://host[:port][/]`, no port meaning the scheme's, no path), `insecure`
 skips the upstream's certificate check, `rewrite_host` (default on) sends the upstream's own `Host`
 (or `host_rewrite`, when set — a virtual host behind an address) and renames a local `Origin` /
-`Referer`, and `rewrite_content` (default off, experimental) rewrites
+`Referer`, and `rewrite_content` rewrites
 the upstream's origin in response bodies whose `Content-Type` matches a `content_types` glob
-(default: HTML, CSS, JavaScript, JSON). `tunnel_rate_bps?` caps the link's tunnel traffic, `None`
+(default: the textual types — `text/*`, JavaScript, JSON and `+json`, XML and `+xml`, SVG). It
+reads back off for a record that never set it; a spec the form creates starts with it on. `tunnel_rate_bps?` caps the link's tunnel traffic, `None`
 unlimited. All are `#[serde(default)]`, addresses and flags with nothing a credential could land in.
 `HOST_SETTINGS_SCHEMA` is 24 for them: an older build drops every forwarded port on its next write.
 The three new rewrite fields need no bump: an older build drops them and the spec reads back as a
-Host-rewriting tunnel with no content rewrite.
+Host-rewriting tunnel with no content rewrite. Neither does `proxy`, a new `kind` value: an older
+build cannot read the spec and drops the host's tunnels on its next write — the cost every
+additive enum value carries here. From `proxy` on, `TunnelKind` ends in an inert `Unknown`
+(`#[serde(other)]`): a kind a newer build wrote still loads, is never forwarded (the listener
+refuses it) and is never offered in the form, so later kinds are forward-compatible.
 
 **A trust-any `https` host carries the key it is pinned to** (`D228`). `SavedRemoteHost.tls_pin?` is
 the lowercase hex SHA-256 of the leaf certificate's DER `SubjectPublicKeyInfo`, recorded on the
@@ -3573,6 +3580,12 @@ the on-disk token for a mode id it holds (`HostSettings::keep_drone_tokens`), so
 settings page cannot roll a rotation back. A mode id it has never seen keeps what the blob carries.
 `RegenerateDroneToken` mints a fresh one and restarts the mode on it.
 
+**Two more remote fields ride `SetSettings` whole and change no message.** `HostSettings.drone_list_url:
+Option<String>` (skipped when `None`) is stored for a fetch nothing does yet (`G474`).
+`SshProfile.features: SshFeatures { drone, persistent, linger_secs? }` (skipped while default:
+`drone: true`, `persistent: false`) is read by the interface alone — the connect modal's profile
+list and lifetime default, and `kubiq_proto::ssh::terminal_args`' `tmux`/`screen` wrapping.
+
 **`DroneModeState`** is `Stopped`, `Starting`, `Serving { addr, connect_string, clients }` or
 `Failed { reason }`. `connect_string` is what the connect modal takes — for `http`,
 `http[s]://<ip>:<port>?token=<token>` with an unspecified bind replaced by the address the routing
@@ -3631,7 +3644,8 @@ ends. The mux's closer kills the child; a tunnel exec that dies while the host s
 dialled again with a backoff doubling from 2 s to 60 s. Every carrier's manager sits in one
 process-wide registry (`kubiq_tunnel::global()`), keyed by a prefixed id
 (`remote:<window>:<save id>` for a saved SSH or socket host, so two windows on one host link their
-own; `rdp:<target id>`): the first
+own; `saved:<save id>` — `kubiq_tunnel::saved_key` — for a saved host an embedder dials itself;
+`<window prefix>proxy:<save id>` for the browser's follower): the first
 link binds the listeners, a later one with the same specs and rate is attached under them, and a
 save that changes either drops the manager. A lost link detaches and keeps the listeners, refusing,
 for the reconnect; the user's Disconnect, a Forget, or closing the window stops listening. Every
@@ -3676,10 +3690,27 @@ the stream reset, without a byte of the request crossing the channel. It parses 
 (`http.rs`): requests get the upstream's `Host`, `Origin` and `Referer`; responses get the local
 origin — the request's own `Host` — in `Location`, `Content-Location`, `Refresh`, `Link` and
 `Access-Control-Allow-Origin`, and lose a `Set-Cookie`'s `Domain`. With `rewrite_content`, requests
-ask for `Accept-Encoding: identity` and a matching, unencoded response body is held whole (decoded
-from `chunked`, at most 2 MiB, larger passing unrewritten; `text/event-stream` never held), has
-the origin replaced (the JSON-escaped `\/` spelling too) and goes out with a fresh
-`Content-Length`. A `101`, a `CONNECT`'s `2xx` or anything unparseable turns the response raw. A
+drop the browser's `Accept-Encoding` for `identity` — compression is avoided, not decoded, and a
+response compressed anyway passes untouched — and a matching, unencoded response body is held
+whole (decoded from `chunked`, at most 2 MiB, larger passing unrewritten; `text/event-stream`
+never held), has the origin replaced (the JSON-escaped `\/` spelling too) and goes out with a
+fresh `Content-Length` and no `Transfer-Encoding`; any other type streams as it came. This is the
+one rewriting path: every carrier (SSH, a served host's `/tunnel`, an embedder's) feeds the
+window's `TunnelManager`, and the far half only dials. A `proxy`-kind listener (`proxy.rs`) reads
+each connection's first head, within one 30 s deadline for the whole head (not per read):
+`CONNECT host:port` opens it, answers `200 Connection Established`
+and pipes raw (HTTPS stays end-to-end TLS); an absolute `http://` URI opens its authority and goes
+out in origin form with the URI's `Host`, no `Proxy-*` / `Connection` / `Keep-Alive`, and
+`Connection: close` (one request per connection); anything else is a `400`, and an open the far
+allow list refuses a `502`. `Registry::follow` starts listeners that own no link and borrow, per
+connection, the first live one among named keys — the embedded browser's proxy rides a saved
+host's link that way, found by `tunnel_key` or by `kubiq_tunnel::saved_key(save_id)`, the key an
+embedder that dials a saved host itself links under. **The proxy takes no credentials**: a
+browser given `--proxy-server` cannot answer a `407`, so any program on this machine that finds
+the loopback port can dial whatever the far allow list admits, as the far host — a local pivot,
+bounded only by the loopback bind and that allow list. The browser's follower binds the port it
+last had in the window first, then up to three fresh ones (`AppState::browser_proxy_port`), since
+probing `:0` and binding again races. A `101`, a `CONNECT`'s `2xx` or anything unparseable turns the response raw. A
 request with a `Transfer-Encoding` not ending in `chunked` or with conflicting `Content-Length`s is
 answered `400`; that answer, like the `403`, is sent by the response side once every response owed
 before it is out, so it never lands inside one. A Unix-socket drone has no channel yet (`G462`).

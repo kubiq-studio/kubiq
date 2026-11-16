@@ -343,6 +343,19 @@ pub fn settings_nav_width() -> f32 {
     scaled(SETTINGS_NAV_WIDTH)
 }
 
+/// What a settings detail page leaves of the panel's height: the overlay's 52px header and the
+/// body's vertical padding. The page takes exactly the rest, so its footer stays pinned while its
+/// own body scrolls (`ui::kit::detail_page`).
+pub const SETTINGS_DETAIL_INSET: f32 = 40.0;
+pub const SETTINGS_HEADER_HEIGHT: f32 = 52.0;
+
+pub fn settings_detail_height() -> f32 {
+    settings_height() - scaled(SETTINGS_HEADER_HEIGHT) - scaled(SETTINGS_DETAIL_INSET)
+}
+
+/// One row of a settings list page (`ui::kit::list_row`): every row the same height.
+pub const SETTINGS_LIST_ROW: f32 = 44.0;
+
 /// The theme editor: a modal, not a settings row. It carries a token list, a colour picker and a
 /// specimen of every token beside each other, none of which fits in the 820×560 settings panel's
 /// right-hand column — so it is its own fixed-size surface, narrower than the page it is raised
