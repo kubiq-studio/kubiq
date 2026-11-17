@@ -61,6 +61,7 @@ fn a_blob_survives_the_round_trip() {
         excalidraw_theme: kubiq::state::web_panel::WebTheme::Light,
         drawio_theme: kubiq::state::web_panel::WebTheme::Dark,
         archify: Default::default(),
+        cells: Default::default(),
         devtools_clipboard: false,
         experimental: true,
         dev_settings: true,
