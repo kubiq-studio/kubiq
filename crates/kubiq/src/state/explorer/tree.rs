@@ -461,6 +461,12 @@ impl ExplorerState {
         }
     }
 
+    /// Whether the listed tree holds `path` — what a *New* entry's seeded name avoids. A folder
+    /// not listed yet answers no; the host's create-only write is the real guard.
+    pub fn contains(&self, path: &str) -> bool {
+        node_of(&self.root, path).is_some()
+    }
+
     /// The folder an action on this row lands in: the row itself when it is a folder, otherwise
     /// the folder holding it. Empty is the project's root.
     pub fn target_dir(&self, path: &str) -> String {

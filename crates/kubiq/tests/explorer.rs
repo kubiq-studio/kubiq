@@ -748,10 +748,7 @@ fn a_right_click_offers_every_gesture_in_groups_and_disables_paste_with_no_clipb
             A::Open,
             A::OpenDiff,
             A::Separator,
-            A::NewFile,
-            A::NewFolder,
-            A::NewExcalidraw,
-            A::NewDrawio,
+            A::NewMenu,
             A::Separator,
             A::Copy,
             A::Cut,
@@ -781,10 +778,7 @@ fn a_right_click_offers_every_gesture_in_groups_and_disables_paste_with_no_clipb
     assert_eq!(
         folder.iter().map(|e| e.action).collect::<Vec<_>>(),
         [
-            A::NewFile,
-            A::NewFolder,
-            A::NewExcalidraw,
-            A::NewDrawio,
+            A::NewMenu,
             A::Separator,
             A::Copy,
             A::Cut,
@@ -830,10 +824,7 @@ fn a_right_click_offers_every_gesture_in_groups_and_disables_paste_with_no_clipb
     assert_eq!(
         empty.iter().map(|e| e.action).collect::<Vec<_>>(),
         [
-            A::NewFile,
-            A::NewFolder,
-            A::NewExcalidraw,
-            A::NewDrawio,
+            A::NewMenu,
             A::Separator,
             A::Paste,
             A::Separator,
@@ -841,6 +832,10 @@ fn a_right_click_offers_every_gesture_in_groups_and_disables_paste_with_no_clipb
         ]
     );
     assert!(empty.last().expect("Collapse all is last").enabled);
+
+    // More than `FLAT_LIMIT` *New* entries fold into "New ▸", whose stage lists them all.
+    let all = kubiq::state::explorer::templates::templates().len() + 4;
+    assert!(all > kubiq::state::explorer::templates::FLAT_LIMIT);
 
     // No menu ever starts or ends with a line, and no two lines meet.
     for menu in [file, folder, filled, unreadable, empty] {

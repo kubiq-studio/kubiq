@@ -60,6 +60,7 @@ pub fn capabilities() -> Vec<&'static str> {
         "files",
         kubiq_proto::carrier::CAP_TOOLS,
         kubiq_proto::carrier::CAP_TUNNEL,
+        kubiq_proto::carrier::CAP_RUNBOOK,
     ];
     if search::probe().is_some() {
         names.push("search");

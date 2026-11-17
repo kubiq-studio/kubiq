@@ -94,6 +94,7 @@ pub mod assist;
 pub mod atomic;
 pub mod browser;
 pub mod carrier;
+pub mod cells;
 #[cfg(feature = "harness")]
 pub mod catalog;
 #[cfg(feature = "harness")]
@@ -113,6 +114,7 @@ pub mod db;
 pub mod drone;
 #[cfg(feature = "listener")]
 pub mod drone_modes;
+pub mod env_resolver;
 pub mod environment;
 pub mod feedback;
 pub mod files;
@@ -148,6 +150,8 @@ pub mod remote;
 pub mod reply;
 #[cfg(feature = "git")]
 pub mod repos;
+pub mod notebook;
+pub mod runbook;
 pub mod runners;
 pub mod search;
 pub mod settings;

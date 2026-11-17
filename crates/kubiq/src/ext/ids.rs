@@ -171,8 +171,15 @@ pub const VIEWER: SlotId = SlotId::new("viewer");
 /// The Archify diagram viewer (`ui::archify::viewer`): what a tab's `ViewerKind::Contributed`
 /// names.
 pub const ARCHIFY_VIEWER: SlotId = SlotId::new("viewer.archify");
+/// The notebook viewer (`ui::notebook`): a `.ipynb` drawn from the host's document, not the tab's
+/// buffer.
+pub const NOTEBOOK_VIEWER: SlotId = SlotId::new("viewer.notebook");
+/// The runbook viewer (`ui::runbook`): `*.runbook.md`, claimed over the Markdown view.
+pub const RUNBOOK_VIEWER: SlotId = SlotId::new("viewer.runbook");
 /// The Archify "Diagrams" section of the app settings (`ui::archify::settings`).
 pub const ARCHIFY_SETTINGS: SlotId = SlotId::new("kubiq.app.archify");
+/// The "Cells" section of the app settings: notebooks and runbooks (`ui::cells::settings`).
+pub const CELLS_SETTINGS: SlotId = SlotId::new("kubiq.app.cells");
 
 // ── The kitchen sink's own demo registrations (`X11`, invariant 9, M4) ──────
 //

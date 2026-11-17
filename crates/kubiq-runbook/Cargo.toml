@@ -1,0 +1,23 @@
+[package]
+name = "kubiq-runbook"
+version = "0.1.0"
+edition = "2024"
+description = "The runbook engine: the `*.runbook.md` format, lints, the step graph and its derived states, staleness, excerpts, redaction, and (feature `service`) the captured-command worker. A leaf: no GPUI, no Kubiq crate."
+publish = false
+
+[features]
+default = []
+# The stateful worker: files, processes, logs, the gate. The host turns it on; the interface and the
+# contract build without it, so neither can start a process through here.
+service = ["kubiq-cells/process"]
+
+[dependencies]
+# What every cell document shares with the notebook: the read side, the run gate, the doc event.
+kubiq-cells = { path = "../kubiq-cells" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+# Frontmatter. Already in the lock through agent-manager.
+serde_yaml = "0.9"
+sha2 = "0.11"
+regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

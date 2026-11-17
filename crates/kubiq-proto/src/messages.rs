@@ -2226,6 +2226,47 @@ pub enum Message {
         ok: bool,
     },
 
+    // ── Notebook family: UI → host ──────────────────────────────────
+    // A `.ipynb` the host holds, by project and project-relative path: one document and at most one
+    // kernel per path, shared by every window and agent. The requests are one enum
+    // (`notebook::NotebookRequest`) carried by one variant, so the family stays in its own file.
+    /// Ask something of a notebook. See [`crate::notebook::NotebookRequest`] for what answers each.
+    Notebook {
+        project_id: ProjectId,
+        path: String,
+        request: crate::notebook::NotebookRequest,
+    },
+
+    // ── Notebook family: host → UI ──────────────────────────────────
+    /// What happened to a notebook: its snapshot and kernel list to the asker, everything else to
+    /// every window (a window not showing `path` ignores it).
+    NotebookEvent {
+        project_id: ProjectId,
+        path: String,
+        event: Box<crate::notebook::NotebookEvent>,
+    },
+
+    // ── Runbook family: UI → host ───────────────────────────────────
+    // A `*.runbook.md` in a project, by project-relative path. The file is the editor tab's; the
+    // host owns its evidence, its runs and its gate. One variant carries the request enum
+    // (`runbook::RunbookRequest`), so the family stays in its own file.
+    /// Ask something of a runbook. See [`crate::runbook::RunbookRequest`] for what answers each.
+    Runbook {
+        project_id: ProjectId,
+        rel: String,
+        request: crate::runbook::RunbookRequest,
+    },
+
+    // ── Runbook family: host → UI ───────────────────────────────────
+    /// What happened to a runbook: its state, a live tail frame and a finished attempt to every
+    /// window (a window not showing `rel` ignores it); a run report, a log slice, an action's
+    /// result and a refusal to the asker.
+    RunbookEvent {
+        project_id: ProjectId,
+        rel: String,
+        event: Box<crate::runbook::RunbookEvent>,
+    },
+
     // ── Browser family: UI → host ───────────────────────────────────
     // The internal browser. Project-scoped like the knowledge-base family: every variant carries
     // `project_id` and none a pane — a browser tab is an editor tab, named by the opaque `tab`
@@ -2925,6 +2966,31 @@ pub enum Message {
         doc: DocumentHandle,
         #[serde(default)]
         annotation_ids: Vec<AnnotationId>,
+    },
+    /// Something happened on a cell document (a notebook, a runbook) that the agent bound to it
+    /// should hear: queued on that agent's doc queue beside its comment threads and delivered at
+    /// its next turn boundary (`D207`'s one-prompt rule). Sent by a window (a question on a cell)
+    /// and by the host's own document workers into its inbox (a run finished, a run approved).
+    QueueDocEvent {
+        project_id: ProjectId,
+        agent_id: AgentId,
+        event: kubiq_cells::DocEvent,
+    },
+    /// A cell document's run gate asks a person about an agent's run: armed as that agent's
+    /// `ask_user_question` dialog, raised when its turn ends (`D210`). The answer goes back to the
+    /// document's worker as its decision for `run` — *Allow*, *Allow for this session* or
+    /// *Deny*, the question's three options — and to the agent as its next turn. Posted by the
+    /// host's own document workers into its inbox, never by a window.
+    ArmCellGate {
+        project_id: ProjectId,
+        agent_id: AgentId,
+        /// The document, project-relative.
+        doc: String,
+        /// The server whose gate this is (`kubiq-notebook`, `kubiq-runbook`).
+        server: String,
+        /// The kind's own handle on the waiting run.
+        run: String,
+        question: crate::ask::AskQuestion,
     },
 
     // ── Plan family: host → UI ──────────────────────────────────────
@@ -3962,6 +4028,10 @@ impl Message {
             | Message::KbPath { project_id, .. }
             | Message::ArchifyShow { project_id, .. }
             | Message::ArchifyToolCall { project_id, .. }
+            | Message::Notebook { project_id, .. }
+            | Message::NotebookEvent { project_id, .. }
+            | Message::Runbook { project_id, .. }
+            | Message::RunbookEvent { project_id, .. }
             | Message::BrowserHistoryGet { project_id }
             | Message::BrowserHistoryAdd { project_id, .. }
             | Message::BrowserHistoryClear { project_id }
@@ -4041,6 +4111,8 @@ impl Message {
             | Message::WorkError { project_id, .. }
             | Message::PlanError { project_id, .. }
             | Message::DocAgentQueue { project_id, .. }
+            | Message::QueueDocEvent { project_id, .. }
+            | Message::ArmCellGate { project_id, .. }
             | Message::StartConversation { project_id, .. }
             | Message::ReviveConversation { project_id, .. }
             | Message::ConversationStarted { project_id, .. }

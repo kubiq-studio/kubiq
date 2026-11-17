@@ -43,6 +43,7 @@ use super::catalogue::{self, ServerSpec};
 use super::registry::{AgentFacts, Registry};
 use super::{
     ArchifyReach, AskReach, BrowserReach, HelpReach, KbReach, MissionReach, PlanReach, RemoteReach,
+    ServiceReach,
     SqlReach, WorkAccess,
 };
 
@@ -115,6 +116,7 @@ pub fn start(
     archify: Option<ArchifyReach>,
     browser: Option<BrowserReach>,
     remote: Option<RemoteReach>,
+    services: Vec<ServiceReach>,
 ) -> anyhow::Result<Serving> {
     let http = tiny_http::Server::http("127.0.0.1:0")
         .map_err(|error| anyhow::anyhow!("binding the MCP listener: {error}"))?;
@@ -143,6 +145,7 @@ pub fn start(
                 archify,
                 browser,
                 remote,
+                services,
                 stop_thread,
             )
         })
@@ -177,6 +180,7 @@ fn serve(
     archify: Option<ArchifyReach>,
     browser: Option<BrowserReach>,
     remote: Option<RemoteReach>,
+    services: Vec<ServiceReach>,
     stop: Arc<AtomicBool>,
 ) {
     while !stop.load(Ordering::SeqCst) {
@@ -195,6 +199,7 @@ fn serve(
                 archify.as_ref(),
                 browser.as_ref(),
                 remote.as_ref(),
+                &services,
             ),
             Ok(None) => continue,
             Err(_) => break,
@@ -219,6 +224,7 @@ fn handle(
     archify: Option<&ArchifyReach>,
     browser: Option<&BrowserReach>,
     remote: Option<&RemoteReach>,
+    services: &[ServiceReach],
 ) {
     let Some((key, server)) = route(request.url()) else {
         let _ = request.respond(not_found());
@@ -306,6 +312,33 @@ fn handle(
             // went into the closure and is dropped with it, which closes the connection — the
             // harness sees a dead call rather than one that never answers.
             tracing::error!("an ask could not be served on a thread of its own: {error}");
+        }
+        return;
+    }
+
+    // A service's call (`ServiceReach`: the runbooks, …) is answered by the service, on a thread of
+    // its own: it may read a log or take the service's lock, and the listener must stay free.
+    if method == "tools/call"
+        && let Some(service) = services.iter().find(|s| s.slug == spec.name)
+    {
+        let service = service.clone();
+        let name = params
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let spawned = std::thread::Builder::new()
+            .name(format!("{}-call", service.slug))
+            .spawn(move || {
+                let result = (service.call)(&name, &arguments, &facts);
+                let _ = request.respond(json_response(&envelope(&id, tool_result(result))));
+            });
+        if let Err(error) = spawned {
+            tracing::error!("a service call could not be served on a thread of its own: {error}");
         }
         return;
     }
@@ -884,6 +917,7 @@ mod tests {
             None,
             None,
             None,
+            Vec::new(),
         )
         .expect("the listener binds");
         (serving, hub, host)
@@ -914,6 +948,7 @@ mod tests {
             None,
             None,
             None,
+            Vec::new(),
         )
         .expect("the listener binds");
         (serving, hub, host)
@@ -976,6 +1011,7 @@ mod tests {
             None,
             None,
             None,
+            Vec::new(),
         )
         .expect("the listener binds");
         (serving, hub, host, task, plans, dir)
@@ -1669,6 +1705,7 @@ mod tests {
             None,
             None,
             None,
+            Vec::new(),
         )
         .expect("the listener binds");
         let _keep = (&hub, &host);
@@ -1793,6 +1830,7 @@ mod tests {
             None,
             None,
             None,
+            Vec::new(),
         )
         .expect("the listener binds");
         let _keep = (&hub, &host);
@@ -2109,6 +2147,7 @@ mod tests {
             None,
             None,
             None,
+            Vec::new(),
         )
         .expect("the listener binds");
         (
@@ -2444,6 +2483,7 @@ mod tests {
             None,
             None,
             None,
+            Vec::new(),
         )
         .expect("the listener binds");
 

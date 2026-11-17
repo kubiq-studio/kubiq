@@ -1966,6 +1966,12 @@ impl Agents {
         } else {
             Some(union(catalog_mcps.unwrap_or_default(), picked_catalog))
         };
+        // The servers every hosted agent gets whatever its definition says (`ALWAYS_MCPS`).
+        for name in crate::mcp::catalogue::ALWAYS_MCPS {
+            if !injected.iter().any(|held| held == name) {
+                injected.push(name.to_string());
+            }
+        }
         // Skills have no built-ins to split off. A run that picked none leaves the definition's
         // list to `resolve` (which also follows its `extends` chain); one that picked some hands
         // down the definition's own row with them added, since `flags.skills` outranks it.

@@ -996,6 +996,10 @@ impl AppState {
         if let Some(doc) = self.new_agent_for_doc.take() {
             self.workbench.doc_binds.insert(agent_id, doc);
         }
+        // A cell document's *New agent…*: bound to the notebook or runbook that asked.
+        if let Some(bind) = crate::ui::cells::agent::take_pending(cx) {
+            bind(self, Some(agent_id), cx);
+        }
         if let Some(task_id) = form.for_task {
             self.workbench
                 .agent_assignments

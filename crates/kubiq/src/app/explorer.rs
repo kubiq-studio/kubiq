@@ -576,6 +576,14 @@ impl AppState {
                 cx.notify();
                 return;
             }
+            // "New ▸" the same way: the second stage lists every *New* entry.
+            if entry.action == ExplorerAction::NewMenu {
+                if let Some(menu) = open.explorer.menu.as_mut() {
+                    menu.new_menu = true;
+                }
+                cx.notify();
+                return;
+            }
             open.explorer.menu = None;
             self.workbench.open_menu = None;
             (entry, menu.path)
@@ -656,6 +664,34 @@ impl AppState {
                 cx.notify();
             }
             ExplorerAction::CollapseAll => self.collapse_explorer(cx),
+            ExplorerAction::NewTemplate(n) => {
+                let Some(template) = crate::state::explorer::templates::templates().get(n) else {
+                    return;
+                };
+                let parent = self
+                    .explorer(cx)
+                    .map(|explorer| explorer.target_dir(path.as_deref().unwrap_or_default()))
+                    .unwrap_or_default();
+                let seed = crate::state::explorer::templates::unique_name(
+                    template.stem,
+                    template.extension,
+                    |name| {
+                        self.explorer(cx)
+                            .is_some_and(|explorer| explorer.contains(&child_path(&parent, name)))
+                    },
+                );
+                self.open_file_dialog(
+                    FileDialog::New {
+                        parent,
+                        dir: false,
+                        ext: Some(template.extension.to_string()),
+                    },
+                    &seed,
+                    window,
+                    cx,
+                );
+            }
+            ExplorerAction::NewMenu => {}
             ExplorerAction::NewFile
             | ExplorerAction::NewFolder
             | ExplorerAction::NewExcalidraw
@@ -1217,9 +1253,27 @@ impl AppState {
                     }
                     _ => typed,
                 };
+                let rel_path = child_path(&parent, &typed);
+                // A typed document is written with its template's body (create-only: a name
+                // already taken is refused by the host), then opened in its viewer — the file
+                // worker answers in order, so the read follows the write.
+                if let Some(template) = ext
+                    .as_deref()
+                    .and_then(crate::state::explorer::templates::by_extension)
+                {
+                    self.bus.send(Message::WriteProjectFile {
+                        project_id: project,
+                        rel_path: rel_path.clone(),
+                        bytes: (template.bytes)(),
+                        expected: None,
+                        overwrite: false,
+                    });
+                    self.select_file(rel_path, cx);
+                    return;
+                }
                 self.bus.send(Message::EditProjectPath {
                     project_id: project,
-                    rel_path: child_path(&parent, &typed),
+                    rel_path,
                     to: None,
                     op: PathOp::Create { dir },
                     carry_related: false,

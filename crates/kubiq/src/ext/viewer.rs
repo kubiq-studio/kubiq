@@ -18,7 +18,8 @@
 //!
 //! **A claim is a ranking, not a boolean** — the question `extension-plan.md` §4 said would test
 //! `X16`. [`Claim::Default`] opens the path in this viewer when no built-in has an opinion,
-//! [`Claim::Offer`] lists it under "Open with" and nothing else, [`Claim::No`] does neither.
+//! [`Claim::Offer`] lists it under "Open with" and nothing else, [`Claim::No`] does neither, and
+//! [`Claim::Specific`] opens it even over a built-in viewer — a compound suffix's claim.
 //!
 //! The order is resolved **once** and cached for the process, never walked in a draw path.
 
@@ -45,6 +46,10 @@ pub enum Claim {
     Default,
     /// Offer this viewer under "Open with", and never open the path in it unasked.
     Offer,
+    /// Open the path in this viewer **even over the built-in viewer of its extension** — for a
+    /// claim narrower than the extension, a compound suffix like `.runbook.md`, which would
+    /// otherwise always open in the Markdown view. The first such spec wins; it is also a default.
+    Specific,
     /// Not for this path.
     No,
 }
@@ -146,6 +151,8 @@ pub fn register(reg: &mut Registry<ViewerSpec>, spec: ViewerSpec) {
 pub fn base_registry() -> Registry<ViewerSpec> {
     let mut reg = Registry::new();
     crate::ui::archify::viewer::register(&mut reg);
+    crate::ui::notebook::register(&mut reg);
+    crate::ui::runbook::register(&mut reg);
     reg
 }
 
@@ -193,7 +200,16 @@ pub fn spec(id: SlotId) -> Option<&'static ViewerSpec> {
 pub fn default_for(path: &str, head: Option<&str>) -> Option<SlotId> {
     viewers()
         .iter()
-        .find(|spec| (spec.claims)(path, head) == Claim::Default)
+        .find(|spec| matches!((spec.claims)(path, head), Claim::Default | Claim::Specific))
+        .map(|spec| spec.id)
+}
+
+/// The first viewer whose claim on `path` outranks the built-in viewer of its extension
+/// ([`Claim::Specific`]).
+pub fn specific_for(path: &str, head: Option<&str>) -> Option<SlotId> {
+    viewers()
+        .iter()
+        .find(|spec| (spec.claims)(path, head) == Claim::Specific)
         .map(|spec| spec.id)
 }
 

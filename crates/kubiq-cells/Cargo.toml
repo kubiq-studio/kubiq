@@ -1,0 +1,23 @@
+[package]
+name = "kubiq-cells"
+version = "0.1.0"
+edition = "2024"
+description = "What every cell document shares — the notebook and the runbook: who made a change, how a run ended, staleness, the run gate, a document event for the bound agent. A pure leaf: no Kubiq crate, no GPUI, no I/O."
+publish = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[features]
+# `process`: start a cell's process as a group and interrupt or kill it as one, per OS. I/O.
+process = ["dep:libc", "dep:windows-sys"]

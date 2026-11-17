@@ -119,6 +119,15 @@ ring = { version = "0.17", optional = true }
 # The diagram engine behind the `kubiq-archify` MCP server and its git evidence verifier. Pure: the
 # process half lives here. Behind `harness`.
 kubiq-archify = { path = "../kubiq-archify", optional = true }
+# The notebook engine behind `notebook/` (the document, the kernel's wire format) and the
+# environment resolver's rules (`env_resolver`). Pure and small, so not behind a feature: the
+# process and socket half lives here.
+kubiq-notebook = { path = "../kubiq-notebook" }
+# What every cell document shares (`cells.rs`, the doc event the queue carries). Pure.
+kubiq-cells = { path = "../kubiq-cells", features = ["process"] }
+# The runbook engine and its worker (`runbook`): the format, the graph, the captured-command runs.
+# Not behind a feature: std processes and threads, and `libc` for process groups.
+kubiq-runbook = { path = "../kubiq-runbook", features = ["service"] }
 # The sealed password and the key that opens it are TOML strings, so they are base64. Behind `db`.
 base64 = { version = "0.23", optional = true }
 # A password-protected wiki (`kb/vault.rs`, `D206`): Argon2id turns the password into a key, every

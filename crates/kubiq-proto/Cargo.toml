@@ -12,6 +12,14 @@ publish = false
 # The database model the contract's records are made of (`db.rs` re-exports it). Default features
 # only: no driver and no async runtime enter the interface's graph through here.
 kubiq-db = { path = "../kubiq-db" }
+# What every cell document shares (origin, run status, the doc event `QueueDocEvent` carries). Pure.
+kubiq-cells = { path = "../kubiq-cells" }
+# The notebook model the notebook family's records are made of (`notebook.rs` re-exports it). A pure
+# leaf: serde and sha2, nothing else.
+kubiq-notebook = { path = "../kubiq-notebook" }
+# The runbook model the runbook family's records are made of (`runbook.rs` re-exports it). Default
+# features only: the worker (`service`) is the host's, so no process code enters the interface.
+kubiq-runbook = { path = "../kubiq-runbook" }
 serde ={ version = "1.0", features = ["derive"] }
 # ULID behind the contract's id newtypes: sorts by creation time, 26 characters
 ulid = { version = "3", features = ["serde"] }

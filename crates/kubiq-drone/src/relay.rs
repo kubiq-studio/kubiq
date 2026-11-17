@@ -127,6 +127,10 @@ pub struct Relay {
     holding: Option<Holding>,
     /// When this relay was built, for the uptime a stats reading reports.
     started: Instant,
+    /// The runbooks of the projects this drone serves: their cells run here, on this machine, and
+    /// their evidence and logs live under the scratch root. Started on the first request, when the
+    /// bus is at hand. No provider: an edition's templating and history are the window's host's.
+    runbooks: Option<kubiq_host::runbook::Handle>,
 }
 
 impl Relay {
@@ -180,6 +184,7 @@ impl Relay {
             // Only a drone that outlives its link has anything to replay.
             screens: Scrollback::start(holding.is_some()),
             holding,
+            runbooks: None,
         }
     }
 
@@ -744,6 +749,42 @@ impl Relay {
 
             // A stop or a close of something that never started: nothing to answer.
             Message::DbCancel { .. } | Message::DbCloseSession { .. } => {}
+
+            // A runbook in a project this drone serves: its cells run here (`D243`).
+            Message::Runbook {
+                project_id,
+                rel,
+                request,
+            } => {
+                let asker = host.mailbox(To::Client(client));
+                let scratch = self.scratch.clone();
+                let runbooks = self.runbooks.get_or_insert_with(|| {
+                    kubiq_host::runbook::Runbooks::start(
+                        scratch,
+                        host.mailbox(To::Everyone),
+                        None,
+                        kubiq_host::runbook::Registry::new(),
+                    )
+                });
+                match self.records.iter().find(|record| record.id == project_id) {
+                    Some(record) => runbooks.submit(
+                        asker,
+                        project_id,
+                        &PathBuf::from(&record.path),
+                        &rel,
+                        request,
+                    ),
+                    None => {
+                        asker.send(Message::RunbookEvent {
+                            project_id,
+                            rel,
+                            event: Box::new(kubiq_proto::runbook::RunbookEvent::Refused {
+                                reason: "no such project on this drone".to_string(),
+                            }),
+                        });
+                    }
+                }
+            }
 
             // Everything else. A refusal the asker can act on, or — where the family has no error
             // variant to carry one — a log line, which is the only honest alternative.

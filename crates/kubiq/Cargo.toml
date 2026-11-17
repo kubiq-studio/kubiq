@@ -28,6 +28,13 @@ kubiq-tunnel = { path = "../kubiq-tunnel" }
 # The markdown engine — a source-ranged block table — behind the block-list document view in
 # `ui/mdview/`. A leaf with no GPUI and no Kubiq crate in it.
 kubiq-md = { path = "../kubiq-md" }
+# The notebook engine (`ui::notebook`): cell views, output rendering rules. Pure.
+kubiq-notebook = { path = "../kubiq-notebook" }
+# The shared cell layer (`ui::cells`). Pure.
+kubiq-cells = { path = "../kubiq-cells" }
+# The runbook engine (`ui::runbook`): the format and its pure functions, default features only — the
+# worker that runs cells is the host's.
+kubiq-runbook = { path = "../kubiq-runbook" }
 
 # The drawing engine — one diagram model, and the Excalidraw and draw.io converters onto it —
 # behind the scene painter in `ui/viewer/scene.rs`. A leaf with no GPUI and no Kubiq crate in it.

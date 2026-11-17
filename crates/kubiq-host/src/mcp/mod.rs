@@ -62,9 +62,11 @@ pub mod catalogue;
 mod help;
 mod kb;
 mod mission;
+mod notebook;
 mod plan;
 pub mod registry;
 pub mod remote;
+mod runbook;
 pub mod server;
 #[cfg(feature = "db")]
 pub mod sql;
@@ -89,6 +91,8 @@ pub enum SqlReach {}
 pub use catalogue::{canonical, catalogue, knows};
 pub use registry::{AgentFacts, ProjectFacts, Registry};
 pub use remote::RemoteCalls;
+pub use notebook::reach as notebook_reach;
+pub use runbook::reach as runbook_reach;
 pub use server::{Serving, start};
 
 /// How the task tools reach the board, and how they tell every window what they changed.
@@ -173,6 +177,18 @@ pub struct HelpReach {
 #[derive(Clone)]
 pub struct ArchifyReach {
     pub everyone: Mailbox,
+}
+
+/// A built-in server whose tools a host service answers: `call(tool, arguments, facts)`, run on a
+/// thread of its own per call ([`server::start`]'s `services`). The generic shape of a server that
+/// needs nothing from the listener but the caller's [`AgentFacts`] — the service closes over its own
+/// handle. The server's tools are still a row in [`catalogue`], which `tools/list` reads.
+#[derive(Clone)]
+pub struct ServiceReach {
+    /// The catalogue slug it answers (`kubiq-runbook`).
+    pub slug: &'static str,
+    #[allow(clippy::type_complexity)]
+    pub call: Arc<dyn Fn(&str, &serde_json::Value, &AgentFacts) -> Result<serde_json::Value, String> + Send + Sync>,
 }
 
 /// How the browser tools reach a window: the table a call waits in until the window's

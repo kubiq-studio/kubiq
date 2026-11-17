@@ -168,11 +168,41 @@ pub fn start(
     pending: Vec<Reply>,
     drones: crate::drone_modes::DroneModes,
 ) {
+    start_with(
+        host,
+        root,
+        projects,
+        work,
+        settings,
+        providers,
+        runners,
+        pending,
+        drones,
+        crate::runbook::Registry::new(),
+    )
+}
+
+/// [`start`], with the runbook providers an edition registered (templating and history,
+/// `crate::runbook`). The base binary hands in an empty registry.
+#[allow(clippy::too_many_arguments)]
+pub fn start_with(
+    host: HostEnd,
+    root: ConfigRoot,
+    projects: Projects,
+    work: Work,
+    settings: Settings,
+    providers: crate::tasksrc::Registry,
+    runners: crate::runners::Registry,
+    pending: Vec<Reply>,
+    drones: crate::drone_modes::DroneModes,
+    runbooks: crate::runbook::Registry,
+) {
     thread::Builder::new()
         .name("kubiq-coordinator".to_string())
         .spawn(move || {
             let mut coordinator = Coordinator::new(
                 host, root, projects, work, settings, providers, runners, pending, drones,
+                runbooks,
             );
             coordinator.sync_drone_modes();
             coordinator.run()
@@ -231,6 +261,12 @@ struct Coordinator {
     /// MCP listener's `kubiq-help` server holds the same instance on its own thread, on
     /// [`Self::kb`]'s own footing.
     help: Arc<Help>,
+    /// The runbooks: their worker, the queue window requests are served from, the providers an
+    /// edition registered. Shared with the MCP listener's `kubiq-runbook` server.
+    runbooks: crate::runbook::Handle,
+    /// The notebooks: one document and at most one kernel per open `.ipynb`, shared by every
+    /// window and by the `kubiq-notebook` server.
+    notebooks: crate::notebook::Notebooks,
     /// The directory the host reserves for the interface, told to each window as it attaches and
     /// never composed by it. Reserved once here, because it belongs to no project and outlives
     /// every window.
@@ -377,6 +413,9 @@ struct Coordinator {
     /// a row, the conversation's pump raises it at the turn boundary, and this thread turns the
     /// answer into the next turn's prompt (`D175`, [`crate::armed`]).
     armed: Arc<crate::armed::Armed>,
+    /// Armed dialogs that are a cell document's run gate: the answer is also that document's
+    /// decision (`Message::ArmCellGate`).
+    cell_gates: HashMap<kubiq_proto::ids::AskId, (ProjectId, AgentId, String, String, String)>,
     /// Every `kubiq-browser` command an agent is waiting on a window for. `Arc` for [`Self::asks`]'s
     /// reason: the listener's call thread waits in it, this thread addresses and releases.
     browser_commands: Arc<crate::browser::Commands>,
@@ -960,6 +999,7 @@ impl Coordinator {
         runners: crate::runners::Registry,
         pending: Vec<Reply>,
         mut drones: crate::drone_modes::DroneModes,
+        runbook_providers: crate::runbook::Registry,
     ) -> Self {
         drones.bind(host.mailbox(To::Everyone));
         let runners = Arc::new(runners);
@@ -1037,6 +1077,19 @@ impl Coordinator {
                     .find(|profile| profile.id == id)
             }),
         );
+        // The runbooks, built before the listener so `kubiq-runbook` reaches the same worker a
+        // window does.
+        let runbooks = crate::runbook::Runbooks::start(
+            root.path.clone(),
+            host.mailbox(To::Everyone),
+            Some(host.voice()),
+            runbook_providers,
+        );
+        let notebooks = crate::notebook::Notebooks::start(
+            root.path.clone(),
+            host.mailbox(To::Everyone),
+            host.voice(),
+        );
         let mcp = crate::mcp::start(
             mcp_agents.clone(),
             host.voice(),
@@ -1073,6 +1126,10 @@ impl Coordinator {
             }),
             Some(crate::mcp::BrowserReach::new(browser_commands.clone())),
             Some(crate::mcp::RemoteReach::new(remote_calls.clone())),
+            vec![
+                crate::mcp::runbook_reach(runbooks.clone()),
+                crate::mcp::notebook_reach(notebooks.clone()),
+            ],
         )
         .inspect_err(|error| {
             tracing::warn!("Kubiq's own MCP servers are not available: {error:#}");
@@ -1278,6 +1335,8 @@ impl Coordinator {
             tasksrc_service,
             web_assets,
             help,
+            runbooks,
+            notebooks,
             shared_workarea,
             agents,
             catalogue,
@@ -1318,6 +1377,7 @@ impl Coordinator {
             held_answers: HashMap::new(),
             asks,
             armed,
+            cell_gates: HashMap::new(),
             browser_commands,
             remote_calls,
             browser_history,
@@ -1538,6 +1598,7 @@ impl Coordinator {
     /// drops now and the reaping has to be deliberate — without this, every closed window leaves a
     /// live harness behind.
     fn client_gone(&mut self, client: ClientId) {
+        self.notebooks.submit(crate::notebook::Job::ClientGone(client));
         self.focused.remove(&client);
         // Its mission launches will never be answered, and it can be addressed no more.
         self.missions.lock().client_gone(client);
@@ -4038,6 +4099,9 @@ impl Coordinator {
                 // row and submits nothing — the prompt is opened once, by whichever answer
                 // completes the set, and carries all of them (`G362`). A set nobody said anything
                 // to opens no turn at all.
+                if let Some(gate) = self.cell_gates.remove(&ask_id) {
+                    self.decide_cell_gate(gate, &outcome);
+                }
                 match self.armed.answer(ask_id, &outcome) {
                     crate::armed::Answering::Settled(settled) => {
                         if let Some(text) = crate::armed::prose(&settled) {
@@ -4269,6 +4333,103 @@ impl Coordinator {
             }
 
             // ── the browser family ──────────────────────────────────
+            // A runbook request is the runbook thread's: resolved against the project's local folder
+            // here, served there, in order. A drone-served project has no local folder to run in.
+            Message::Runbook {
+                project_id,
+                rel,
+                request,
+            } => {
+                let asker = self.host.mailbox(To::Client(client));
+                match self.projects.record(project_id) {
+                    Some(record) if record.runs_on.is_none() => {
+                        self.runbooks.submit(
+                            asker,
+                            project_id,
+                            &PathBuf::from(&record.path),
+                            &rel,
+                            request,
+                        );
+                    }
+                    found => {
+                        let reason = if found.is_some() {
+                            "this project's runbooks run on the drone that serves it, which is not attached"
+                        } else {
+                            "no such project"
+                        };
+                        asker.send(Message::RunbookEvent {
+                            project_id,
+                            rel,
+                            event: Box::new(kubiq_proto::runbook::RunbookEvent::Refused {
+                                reason: reason.to_string(),
+                            }),
+                        });
+                    }
+                }
+            }
+            Message::RunbookEvent { .. } => {
+                tracing::warn!("the host was sent a runbook event, which only it may send");
+            }
+
+            // ── the notebook family ─────────────────────────────────
+            // The notebook worker's: resolved against the project's folder here, served there.
+            Message::Notebook {
+                project_id,
+                path,
+                request,
+            } => {
+                let asker = self.host.mailbox(To::Client(client));
+                match self.projects.record(project_id) {
+                    Some(record) if record.runs_on.is_none() => {
+                        self.notebooks.submit(crate::notebook::Job::Request {
+                            client,
+                            asker,
+                            project_id,
+                            root: PathBuf::from(&record.path),
+                            path,
+                            request,
+                        });
+                    }
+                    found => {
+                        let error = if found.is_some() {
+                            "Notebook not opened: kernels run on this machine only, and this project is served by a drone"
+                        } else {
+                            "Notebook not opened: no such project"
+                        };
+                        asker.send(Message::NotebookEvent {
+                            project_id,
+                            path,
+                            event: Box::new(kubiq_proto::notebook::NotebookEvent::Failed {
+                                error: error.to_string(),
+                            }),
+                        });
+                    }
+                }
+            }
+            Message::NotebookEvent { .. } => {
+                tracing::warn!("the host was sent a notebook event, which only it may send");
+            }
+            // A cell document's event for its bound agent: the doc queue's, beside its comments.
+            Message::QueueDocEvent {
+                project_id,
+                agent_id,
+                event,
+            } => {
+                self.doc_queue.push_event(agent_id, project_id, event);
+                self.deliver_doc_queue(agent_id, project_id);
+            }
+            // A cell document's run gate, as the agent's armed dialog (`D210`).
+            Message::ArmCellGate {
+                project_id,
+                agent_id,
+                doc,
+                server,
+                run,
+                question,
+            } => {
+                let ask_id = self.armed.arm(agent_id, vec![question]);
+                self.cell_gates.insert(ask_id, (project_id, agent_id, doc, server, run));
+            }
             // History is the worker's: this thread hands a job over and returns. A project the
             // catalogue does not hold gets nothing — no directory is resolved, nothing written
             // for an id a window made up or one that was just forgotten (`board_job`'s check).
@@ -6882,6 +7043,82 @@ impl Coordinator {
 
     /// The conversation is going: its next one has been sent no document yet, and a refused send
     /// against this one says nothing about the next.
+    /// A cell document's armed run gate was answered: hand the decision to that document's worker.
+    /// For a runbook, Allow runs only commands whose hash is still the one asked about
+    /// (`Service::decide_gate`); the agent hears what happened through its doc queue.
+    /// The options are the gate's own three; anything else (an "Other" note, Chat) declines.
+    fn decide_cell_gate(
+        &mut self,
+        (project_id, agent_id, doc, server, run): (ProjectId, AgentId, String, String, String),
+        outcome: &kubiq_proto::ask::AskOutcome,
+    ) {
+        let chosen = match outcome {
+            kubiq_proto::ask::AskOutcome::Answered(answers) => answers
+                .first()
+                .and_then(|a| a.chosen.first().cloned())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let (allow, session) = match chosen.as_str() {
+            crate::notebook::GATE_SESSION => (true, true),
+            crate::notebook::GATE_ALLOW => (true, false),
+            _ => (false, false),
+        };
+        if server == crate::mcp::catalogue::KUBIQ_NOTEBOOK
+            && let Ok(run) = run.parse()
+            && let Some(record) = self.projects.record(project_id)
+        {
+            self.notebooks.submit(crate::notebook::Job::Decide {
+                project_id,
+                root: PathBuf::from(&record.path),
+                path: doc.clone(),
+                run,
+                allow,
+                session,
+            });
+        }
+        if server == crate::runbook::SERVER
+            && let Ok(request) = run.parse::<u64>()
+            && let Some(record) = self.projects.record(project_id)
+            && let Ok(doc_ref) =
+                self.runbooks
+                    .doc(project_id, &PathBuf::from(&record.path), &doc)
+        {
+            use kubiq_runbook::service::GateDecided;
+            let said = match self.runbooks.service().decide_gate(&doc_ref, request, allow, "local-user") {
+                Ok(GateDecided::Ran(report)) if report.refused.is_empty() => {
+                    format!("the user allowed request {request}; the cells are running")
+                }
+                Ok(GateDecided::Ran(report)) => format!(
+                    "the user allowed request {request}; refused: {}",
+                    report
+                        .refused
+                        .iter()
+                        .map(|(cell, why)| format!("{cell} ({why})"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                Ok(GateDecided::Changed(cells)) => format!(
+                    "the user allowed request {request}, but nothing ran: {} changed since you asked; ask again",
+                    cells.join(", ")
+                ),
+                Ok(GateDecided::Skipped) => format!("the user skipped request {request}"),
+                Ok(GateDecided::Gone) => return,
+                Err(error) => format!("request {request} could not be decided: {error}"),
+            };
+            self.doc_queue.push_event(
+                agent_id,
+                project_id,
+                kubiq_cells::DocEvent {
+                    doc,
+                    server: server.clone(),
+                    text: said,
+                },
+            );
+            self.deliver_doc_queue(agent_id, project_id);
+        }
+    }
+
     fn forget_doc_delivery(&mut self, agent: AgentId) {
         self.doc_queue.forget(agent);
         self.doc_backoff.remove(&agent);
@@ -9345,6 +9582,7 @@ mod tests {
             crate::runners::Registry::with_defaults(),
             pending,
             crate::drone_modes::DroneModes::new(None, Default::default()),
+            crate::runbook::Registry::new(),
         );
         let client = hub.connect();
         (coordinator, client)

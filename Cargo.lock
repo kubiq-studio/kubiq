@@ -5408,10 +5408,13 @@ dependencies = [
  "image",
  "keyring",
  "kubiq-archify",
+ "kubiq-cells",
  "kubiq-db",
  "kubiq-draw",
  "kubiq-md",
+ "kubiq-notebook",
  "kubiq-proto",
+ "kubiq-runbook",
  "kubiq-tunnel",
  "lb-wry",
  "lsp-types",
@@ -5495,6 +5498,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kubiq-cells"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "kubiq-db"
 version = "0.1.0"
 dependencies = [
@@ -5561,8 +5573,11 @@ dependencies = [
  "ignore",
  "keyring",
  "kubiq-archify",
+ "kubiq-cells",
  "kubiq-db",
+ "kubiq-notebook",
  "kubiq-proto",
+ "kubiq-runbook",
  "kubiq-tunnel",
  "memory-stats",
  "minisign-verify",
@@ -5606,12 +5621,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "kubiq-notebook"
+version = "0.1.0"
+dependencies = [
+ "kubiq-cells",
+ "serde",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "kubiq-proto"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "flume 0.12.0",
+ "kubiq-cells",
  "kubiq-db",
+ "kubiq-notebook",
+ "kubiq-runbook",
  "markdown",
  "parking_lot",
  "regex",
@@ -5626,6 +5653,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ulid",
+]
+
+[[package]]
+name = "kubiq-runbook"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "kubiq-cells",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.11.0",
 ]
 
 [[package]]
